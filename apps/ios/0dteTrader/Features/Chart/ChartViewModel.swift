@@ -1,0 +1,200 @@
+import Combine
+import Foundation
+
+enum ChartInterval: String, CaseIterable, Sendable {
+    case m1 = "1m"
+    case m5 = "5m"
+    case m15 = "15m"
+    case h1 = "1h"
+    case d1 = "1d"
+
+    var seconds: TimeInterval {
+        switch self {
+        case .m1: return 60
+        case .m5: return 300
+        case .m15: return 900
+        case .h1: return 3_600
+        case .d1: return 86_400
+        }
+    }
+}
+
+/// One computed indicator line, aligned with the candle array (nil = warm-up gap).
+struct IndicatorSeries: Equatable, Sendable {
+    let id: String
+    let name: String
+    let values: [Double?]
+}
+
+/// Owns the chart: candle history via REST, live quotes via QuoteSocketClient,
+/// indicator computation, symbol/interval switching.
+@MainActor
+final class ChartViewModel: ObservableObject {
+    @Published private(set) var symbol: String
+    @Published private(set) var interval: ChartInterval = .m1
+    @Published private(set) var candles: [Candle] = []
+    @Published private(set) var quote: Quote?
+    @Published private(set) var isLoading = false
+    @Published var errorMessage: String?
+
+    @Published var indicatorSettings: IndicatorSettings {
+        didSet { settingsStore.indicatorSettings = indicatorSettings }
+    }
+
+    private let apiClient: APIClient
+    private let socket: QuoteSocketClient
+    private let settingsStore: SettingsStore
+    private var cancellables: Set<AnyCancellable> = []
+
+    /// Upper bound on rendered candles so live appends stay cheap.
+    private let maxCandles = 600
+
+    init(apiClient: APIClient, socket: QuoteSocketClient, settingsStore: SettingsStore) {
+        self.apiClient = apiClient
+        self.socket = socket
+        self.settingsStore = settingsStore
+        self.symbol = settingsStore.lastSymbol ?? "SPY"
+        self.indicatorSettings = settingsStore.indicatorSettings
+
+        socket.$lastQuote
+            .compactMap { $0 }
+            .sink { [weak self] quote in
+                self?.handleLiveQuote(quote)
+            }
+            .store(in: &cancellables)
+    }
+
+    // MARK: - Loading
+
+    /// Initial load + subscription. Called when the trade screen appears.
+    func start() async {
+        socket.subscribe(symbols: [symbol])
+        await loadCandles()
+    }
+
+    func loadCandles() async {
+        isLoading = true
+        errorMessage = nil
+        defer { isLoading = false }
+        do {
+            let from = Date().addingTimeInterval(-interval.seconds * 400)
+            let dtos = try await apiClient.candles(symbol: symbol, interval: interval.rawValue, from: from)
+            candles = dtos.map(Candle.init(dto:))
+        } catch let error as APIError {
+            errorMessage = error.userMessage
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func selectSymbol(_ newSymbol: String) {
+        let normalized = newSymbol.uppercased().trimmingCharacters(in: .whitespaces)
+        guard !normalized.isEmpty, normalized != symbol else { return }
+        socket.unsubscribe(symbols: [symbol])
+        symbol = normalized
+        settingsStore.lastSymbol = normalized
+        quote = nil
+        candles = []
+        socket.subscribe(symbols: [normalized])
+        Task { await loadCandles() }
+    }
+
+    func selectInterval(_ newInterval: ChartInterval) {
+        guard newInterval != interval else { return }
+        interval = newInterval
+        Task { await loadCandles() }
+    }
+
+    // MARK: - Live updates (FR-8)
+
+    private func handleLiveQuote(_ quote: Quote) {
+        guard quote.symbol == symbol else { return }
+        self.quote = quote
+        guard !candles.isEmpty else { return }
+
+        let bucketSeconds = (quote.timestamp.timeIntervalSince1970 / interval.seconds).rounded(.down) * interval.seconds
+        let bucketStart = Date(timeIntervalSince1970: bucketSeconds)
+        var last = candles[candles.count - 1]
+
+        if bucketStart.timeIntervalSince1970 == last.time.timeIntervalSince1970 {
+            last.close = quote.last
+            last.high = max(last.high, quote.last)
+            last.low = min(last.low, quote.last)
+            candles[candles.count - 1] = last
+        } else if bucketStart > last.time {
+            candles.append(
+                Candle(
+                    time: bucketStart,
+                    open: last.close,
+                    high: max(last.close, quote.last),
+                    low: min(last.close, quote.last),
+                    close: quote.last,
+                    volume: 0
+                )
+            )
+            if candles.count > maxCandles {
+                candles.removeFirst(candles.count - maxCandles)
+            }
+        }
+    }
+
+    // MARK: - Indicator series for rendering
+
+    /// Overlays drawn on top of the candles (SMA, EMA, VWAP, Bollinger).
+    var priceOverlays: [IndicatorSeries] {
+        var series: [IndicatorSeries] = []
+        if indicatorSettings.smaEnabled {
+            series.append(
+                IndicatorSeries(
+                    id: "sma",
+                    name: "SMA \(indicatorSettings.smaPeriod)",
+                    values: IndicatorEngine.sma(candles: candles, period: indicatorSettings.smaPeriod)
+                )
+            )
+        }
+        if indicatorSettings.emaEnabled {
+            series.append(
+                IndicatorSeries(
+                    id: "ema",
+                    name: "EMA \(indicatorSettings.emaPeriod)",
+                    values: IndicatorEngine.ema(candles: candles, period: indicatorSettings.emaPeriod)
+                )
+            )
+        }
+        if indicatorSettings.vwapEnabled {
+            series.append(
+                IndicatorSeries(id: "vwap", name: "VWAP", values: IndicatorEngine.vwap(candles: candles))
+            )
+        }
+        if indicatorSettings.bollingerEnabled {
+            let bands = IndicatorEngine.bollingerBands(
+                candles: candles,
+                period: indicatorSettings.bollingerPeriod,
+                multiplier: indicatorSettings.bollingerMultiplier
+            )
+            series.append(IndicatorSeries(id: "bollingerUpper", name: "BB Upper", values: bands.upper))
+            series.append(IndicatorSeries(id: "bollingerMiddle", name: "BB Mid", values: bands.middle))
+            series.append(IndicatorSeries(id: "bollingerLower", name: "BB Lower", values: bands.lower))
+        }
+        return series
+    }
+
+    var rsiSeries: IndicatorSeries? {
+        guard indicatorSettings.rsiEnabled else { return nil }
+        return IndicatorSeries(
+            id: "rsi",
+            name: "RSI \(indicatorSettings.rsiPeriod)",
+            values: IndicatorEngine.rsi(candles: candles, period: indicatorSettings.rsiPeriod)
+        )
+    }
+
+    var macdSeries: (macd: IndicatorSeries, signal: IndicatorSeries, histogram: IndicatorSeries)? {
+        guard indicatorSettings.macdEnabled else { return nil }
+        let values = IndicatorEngine.macd(candles: candles)
+        return (
+            IndicatorSeries(id: "macd", name: "MACD", values: values.macdLine),
+            IndicatorSeries(id: "macdSignal", name: "Signal", values: values.signalLine),
+            IndicatorSeries(id: "macdHistogram", name: "Histogram", values: values.histogram)
+        )
+    }
+}

@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  api:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: odtetrader
+          POSTGRES_PASSWORD: odtetrader
+          POSTGRES_DB: odtetrader
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U odtetrader"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+    env:
+      DATABASE_URL: postgresql://odtetrader:odtetrader@localhost:5432/odtetrader
+      REDIS_URL: redis://localhost:6379
+      JWT_ACCESS_SECRET: ci-access-secret-min-32-characters
+      JWT_REFRESH_SECRET: ci-refresh-secret-min-32-characters
+      CRED_ENCRYPTION_KEY: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
+      BROKER_GATEWAY: mock
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 18
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run build
+      - run: npm run test
+
+  ios:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Generate Xcode project
+        run: |
+          brew install xcodegen
+          cd apps/ios && xcodegen
+      - name: Build & test
+        run: |
+          cd apps/ios && xcodebuild test \
+            -scheme 0dteTrader \
+            -destination 'platform=iOS Simulator,name=iPhone 15,OS=17.5' \
+            -quiet

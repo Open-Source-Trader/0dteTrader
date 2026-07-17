@@ -1,0 +1,94 @@
+// 0dteTrader data model — see docs/ARCHITECTURE.md §5.
+//
+// Notes:
+// - `User.email` is a plain String with a unique index; case-insensitivity is
+//   enforced at the application layer (emails are lowercased before any
+//   read/write) instead of the citext extension so no extension is required.
+// - `WebullCredential` stores AES-256-GCM encrypted fields. Each enc_* column
+//   holds a self-contained blob: iv (12 bytes) || authTag (16 bytes) ||
+//   ciphertext. A single shared iv/auth_tag column pair cannot safely hold
+//   per-field GCM parameters without reusing nonces, so each field carries its
+//   own parameters (random 12-byte IV per field per write — IVs are never
+//   reused).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id             String             @id @default(uuid()) @db.Uuid
+  email          String             @unique
+  passwordHash   String
+  tradingDisabled Boolean           @default(false)
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+  credential     WebullCredential?
+  refreshTokens  RefreshToken[]
+  orderAudits    OrderAudit[]
+  webullApiToken WebullApiToken?
+
+  @@map("users")
+}
+
+model WebullCredential {
+  id           String   @id @default(uuid()) @db.Uuid
+  userId       String   @unique @db.Uuid
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  encAppKey    Bytes
+  encAppSecret Bytes
+  encAccountId Bytes
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@map("webull_credentials")
+}
+
+// Cached Webull OpenAPI access token per user (~15-day rolling validity).
+// Persisted so restarts do not force token re-creation, which in production
+// triggers SMS re-verification in the user's Webull app. encToken is an
+// AES-256-GCM blob like the WebullCredential fields.
+model WebullApiToken {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @unique @db.Uuid
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  encToken  Bytes
+  expiresAt DateTime
+  status    String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("webull_api_tokens")
+}
+
+model RefreshToken {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @db.Uuid
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+  @@map("refresh_tokens")
+}
+
+model OrderAudit {
+  id             String   @id @default(uuid()) @db.Uuid
+  userId          String   @db.Uuid
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  idempotencyKey  String?
+  request         Json
+  response        Json?
+  status          String
+  createdAt       DateTime @default(now())
+
+  @@unique([userId, idempotencyKey])
+  @@index([userId])
+  @@map("order_audits")
+}

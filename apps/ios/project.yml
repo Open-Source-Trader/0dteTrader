@@ -1,0 +1,73 @@
+name: 0dteTrader
+
+options:
+  bundleIdPrefix: com.0dtetrader
+  deploymentTarget:
+    iOS: "17.0"
+  createIntermediateGroups: true
+
+packages:
+  Charts:
+    url: https://github.com/danielgindi/Charts.git
+    majorVersion: 4.1.0
+
+targets:
+  0dteTrader:
+    type: application
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: 0dteTrader
+    dependencies:
+      - package: Charts
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.0dtetrader.app
+        # Swift module names may not start with a digit; the target/scheme keep
+        # the "0dteTrader" name while the module is ZeroDTETrader (tests do
+        # `@testable import ZeroDTETrader`).
+        PRODUCT_MODULE_NAME: ZeroDTETrader
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        TARGETED_DEVICE_FAMILY: "1"
+    info:
+      path: 0dteTrader/Info.plist
+      properties:
+        CFBundleDisplayName: 0dteTrader
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        NSFaceIDUsageDescription: 0dteTrader uses Face ID to unlock the app.
+        ITSAppUsesNonExemptEncryption: false
+        # Debug builds target http://localhost:3000 (and optionally a LAN IP).
+        # ATS stays on otherwise — no arbitrary loads (docs/SECURITY.md §5).
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+
+  0dteTraderTests:
+    type: bundle.unit-test
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: 0dteTraderTests
+    dependencies:
+      - target: 0dteTrader
+    settings:
+      base:
+        PRODUCT_MODULE_NAME: ZeroDTETraderTests
+
+schemes:
+  0dteTrader:
+    build:
+      targets:
+        0dteTrader: all
+        0dteTraderTests:
+          - test
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - 0dteTraderTests

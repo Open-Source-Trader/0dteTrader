@@ -1,0 +1,29 @@
+# Node
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+
+# Env / secrets
+.env
+.env.local
+.env.*.local
+
+# iOS
+apps/ios/build/
+apps/ios/DerivedData/
+apps/ios/*.xcodeproj/
+!apps/ios/project.yml
+*.xcworkspace/
+xcuserdata/
+*.ipa
+*.dSYM.zip
+
+# Prisma
+apps/api/prisma/*.db
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+*.swp

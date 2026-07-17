@@ -1,0 +1,22 @@
+{
+  "name": "0dtetrader",
+  "private": true,
+  "version": "0.1.0",
+  "description": "0dteTrader — rapid futures/options trading app for Webull OpenAPI",
+  "workspaces": [
+    "apps/api",
+    "packages/shared-types"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace apps/api",
+    "build": "npm run build --workspace packages/shared-types && npm run build --workspace apps/api",
+    "test": "npm run test --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "db:up": "docker compose up -d",
+    "db:down": "docker compose down",
+    "db:migrate": "npm run db:migrate --workspace apps/api"
+  },
+  "engines": {
+    "node": ">=18.17"
+  }
+}

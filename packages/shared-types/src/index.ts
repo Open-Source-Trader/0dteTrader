@@ -1,0 +1,223 @@
+/**
+ * Shared DTO/domain types for 0dteTrader.
+ * Mirrors docs/openapi.yaml — the single source of truth for the API contract.
+ * Consumed by apps/api (and later apps/ios codegen).
+ */
+
+// ---------------------------------------------------------------------------
+// Enums / string unions
+// ---------------------------------------------------------------------------
+
+export type AssetClass = 'option' | 'future';
+export type OrderSide = 'buy' | 'sell';
+export type OrderType = 'mid' | 'market';
+export type OptionType = 'call' | 'put';
+export type SelectionMode = 'auto_otm' | 'explicit';
+export type OrderStatus =
+  | 'submitted'
+  | 'filled'
+  | 'partially_filled'
+  | 'cancelled'
+  | 'rejected';
+export type CandleInterval = '1m' | '5m' | '15m' | '1h' | '1d';
+
+// ---------------------------------------------------------------------------
+// Auth
+// ---------------------------------------------------------------------------
+
+export interface Credentials {
+  email: string;
+  password: string;
+}
+
+export interface AuthTokens {
+  accessToken: string;
+  refreshToken: string;
+  /** Access-token lifetime in seconds. */
+  expiresIn: number;
+}
+
+export interface RefreshRequest {
+  refreshToken: string;
+}
+
+// ---------------------------------------------------------------------------
+// Profile & credentials
+// ---------------------------------------------------------------------------
+
+export interface Me {
+  id: string;
+  email: string;
+  tradingDisabled: boolean;
+  webullConfigured: boolean;
+}
+
+export interface WebullCredentialsInput {
+  appKey: string;
+  appSecret: string;
+  accountId: string;
+}
+
+export interface WebullCredentialsSaved {
+  webullConfigured: true;
+}
+
+// ---------------------------------------------------------------------------
+// Market data
+// ---------------------------------------------------------------------------
+
+export interface Quote {
+  symbol: string;
+  bid: number;
+  ask: number;
+  last: number;
+  bidSize: number;
+  askSize: number;
+  volume: number;
+  /** ISO-8601 date-time. */
+  timestamp: string;
+}
+
+export interface Candle {
+  /** ISO-8601 date-time of bucket start. */
+  time: string;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+}
+
+export interface CandleRequest {
+  interval: CandleInterval;
+  /** ISO-8601 date-time; optional range start. */
+  from?: string;
+  /** ISO-8601 date-time; optional range end. */
+  to?: string;
+}
+
+export interface OptionContract {
+  symbol: string;
+  underlying: string;
+  /** YYYY-MM-DD. */
+  expiration: string;
+  strike: number;
+  optionType: OptionType;
+  bid: number;
+  ask: number;
+  last: number;
+}
+
+export interface OptionsChain {
+  underlying: string;
+  underlyingPrice: number;
+  /** YYYY-MM-DD list, ascending (nearest first). */
+  expirations: string[];
+  contracts: OptionContract[];
+}
+
+export interface FuturesContract {
+  symbol: string;
+  root: string;
+  /** YYYY-MM-DD. */
+  expiration: string;
+  frontMonth: boolean;
+  bid: number;
+  ask: number;
+  last: number;
+}
+
+// ---------------------------------------------------------------------------
+// Trading
+// ---------------------------------------------------------------------------
+
+export interface OrderSelection {
+  mode: SelectionMode;
+  /** Required for auto_otm and for explicit option orders. */
+  optionType?: OptionType;
+  /** YYYY-MM-DD; defaults to the nearest expiration. */
+  expiration?: string;
+  /** Explicit option orders only. */
+  strike?: number;
+  /** Explicit futures orders only. */
+  contractSymbol?: string;
+}
+
+export interface OrderRequest {
+  underlying: string;
+  assetClass: AssetClass;
+  side: OrderSide;
+  quantity: number;
+  orderType: OrderType;
+  selection: OrderSelection;
+}
+
+export interface OrderPreview {
+  resolved: {
+    contractSymbol: string;
+    price: number;
+    estBuyingPower: number;
+  };
+  warnings: string[];
+}
+
+export interface OrderResult {
+  orderId: string;
+  status: OrderStatus;
+  contractSymbol: string;
+  side: OrderSide;
+  quantity: number;
+  orderType: OrderType;
+  limitPrice?: number;
+  filledPrice?: number;
+  /** ISO-8601 date-time. */
+  timestamp: string;
+}
+
+export interface Position {
+  symbol: string;
+  assetClass: AssetClass;
+  quantity: number;
+  avgPrice: number;
+  markPrice: number;
+  unrealizedPnl: number;
+}
+
+// ---------------------------------------------------------------------------
+// Errors & WebSocket protocol
+// ---------------------------------------------------------------------------
+
+export interface ApiError {
+  error: {
+    code: string;
+    message: string;
+  };
+}
+
+export interface StreamSubscribeMessage {
+  type: 'subscribe' | 'unsubscribe';
+  symbols: string[];
+}
+
+export interface StreamQuoteMessage {
+  type: 'quote';
+  data: Quote;
+}
+
+export interface StreamOrderUpdateMessage {
+  type: 'orderUpdate';
+  data: OrderResult;
+}
+
+export interface StreamErrorMessage {
+  type: 'error';
+  error: {
+    code: string;
+    message: string;
+  };
+}
+
+export type StreamServerMessage =
+  | StreamQuoteMessage
+  | StreamOrderUpdateMessage
+  | StreamErrorMessage;

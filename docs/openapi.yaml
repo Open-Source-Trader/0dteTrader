@@ -1,0 +1,285 @@
+openapi: 3.0.3
+info:
+  title: 0dteTrader API
+  version: 0.1.0
+servers:
+  - url: /v1
+paths:
+  /auth/register:
+    post:
+      tags: [auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Credentials' }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/AuthTokens' } } } }
+        '409': { description: Email already registered }
+  /auth/login:
+    post:
+      tags: [auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Credentials' }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/AuthTokens' } } } }
+        '401': { description: Invalid credentials }
+  /auth/refresh:
+    post:
+      tags: [auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refreshToken]
+              properties: { refreshToken: { type: string } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/AuthTokens' } } } }
+        '401': { description: Invalid or expired refresh token }
+  /auth/logout:
+    post:
+      tags: [auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refreshToken]
+              properties: { refreshToken: { type: string } }
+      responses:
+        '204': { description: Logged out }
+  /me:
+    get:
+      tags: [user]
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Me' } } } }
+  /me/webull-credentials:
+    put:
+      tags: [user]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/WebullCredentialsInput' }
+      responses:
+        '200': { description: Saved }
+    delete:
+      tags: [user]
+      security: [{ bearerAuth: [] }]
+      responses:
+        '204': { description: Deleted }
+  /market/quote:
+    get:
+      tags: [market]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: symbol, in: query, required: true, schema: { type: string } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Quote' } } } }
+  /market/candles:
+    get:
+      tags: [market]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: symbol, in: query, required: true, schema: { type: string } }
+        - { name: interval, in: query, required: true, schema: { type: string, enum: [1m, 5m, 15m, 1h, 1d] } }
+        - { name: from, in: query, schema: { type: string, format: date-time } }
+        - { name: to, in: query, schema: { type: string, format: date-time } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Candle' } } } } }
+  /market/options-chain:
+    get:
+      tags: [market]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: symbol, in: query, required: true, schema: { type: string } }
+        - { name: expiration, in: query, schema: { type: string, format: date } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/OptionsChain' } } } }
+  /market/futures:
+    get:
+      tags: [market]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: root, in: query, required: true, schema: { type: string } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/FuturesContract' } } } } }
+  /orders/preview:
+    post:
+      tags: [trading]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/OrderRequest' }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/OrderPreview' } } } }
+  /orders:
+    post:
+      tags: [trading]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/OrderRequest' }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/OrderResult' } } } }
+        '403': { description: Trading disabled (kill switch) }
+    get:
+      tags: [trading]
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/OrderResult' } } } } }
+  /orders/{orderId}:
+    delete:
+      tags: [trading]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: orderId, in: path, required: true, schema: { type: string } }
+      responses:
+        '204': { description: Cancelled }
+  /positions:
+    get:
+      tags: [trading]
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Position' } } } } }
+components:
+  securitySchemes:
+    bearerAuth: { type: http, scheme: bearer, bearerFormat: JWT }
+  schemas:
+    Credentials:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string, minLength: 8 }
+    AuthTokens:
+      type: object
+      properties:
+        accessToken: { type: string }
+        refreshToken: { type: string }
+        expiresIn: { type: integer }
+    Me:
+      type: object
+      properties:
+        id: { type: string }
+        email: { type: string }
+        tradingDisabled: { type: boolean }
+        webullConfigured: { type: boolean }
+    WebullCredentialsInput:
+      type: object
+      required: [appKey, appSecret, accountId]
+      properties:
+        appKey: { type: string }
+        appSecret: { type: string }
+        accountId: { type: string }
+    Quote:
+      type: object
+      properties:
+        symbol: { type: string }
+        bid: { type: number }
+        ask: { type: number }
+        last: { type: number }
+        bidSize: { type: integer }
+        askSize: { type: integer }
+        volume: { type: integer }
+        timestamp: { type: string, format: date-time }
+    Candle:
+      type: object
+      properties:
+        time: { type: string, format: date-time }
+        open: { type: number }
+        high: { type: number }
+        low: { type: number }
+        close: { type: number }
+        volume: { type: integer }
+    OptionContract:
+      type: object
+      properties:
+        symbol: { type: string }
+        underlying: { type: string }
+        expiration: { type: string, format: date }
+        strike: { type: number }
+        optionType: { type: string, enum: [call, put] }
+        bid: { type: number }
+        ask: { type: number }
+        last: { type: number }
+    OptionsChain:
+      type: object
+      properties:
+        underlying: { type: string }
+        underlyingPrice: { type: number }
+        expirations: { type: array, items: { type: string, format: date } }
+        contracts: { type: array, items: { $ref: '#/components/schemas/OptionContract' } }
+    FuturesContract:
+      type: object
+      properties:
+        symbol: { type: string }
+        root: { type: string }
+        expiration: { type: string, format: date }
+        frontMonth: { type: boolean }
+        bid: { type: number }
+        ask: { type: number }
+        last: { type: number }
+    OrderRequest:
+      type: object
+      required: [underlying, assetClass, side, quantity, orderType, selection]
+      properties:
+        underlying: { type: string }
+        assetClass: { type: string, enum: [option, future] }
+        side: { type: string, enum: [buy, sell] }
+        quantity: { type: integer, minimum: 1 }
+        orderType: { type: string, enum: [mid, market] }
+        selection:
+          type: object
+          required: [mode]
+          properties:
+            mode: { type: string, enum: [auto_otm, explicit] }
+            optionType: { type: string, enum: [call, put] }
+            expiration: { type: string, format: date }
+            strike: { type: number }
+            contractSymbol: { type: string }
+    OrderPreview:
+      type: object
+      properties:
+        resolved:
+          type: object
+          properties:
+            contractSymbol: { type: string }
+            price: { type: number }
+            estBuyingPower: { type: number }
+        warnings: { type: array, items: { type: string } }
+    OrderResult:
+      type: object
+      properties:
+        orderId: { type: string }
+        status: { type: string, enum: [submitted, filled, partially_filled, cancelled, rejected] }
+        contractSymbol: { type: string }
+        side: { type: string }
+        quantity: { type: integer }
+        orderType: { type: string }
+        limitPrice: { type: number }
+        filledPrice: { type: number }
+        timestamp: { type: string, format: date-time }
+    Position:
+      type: object
+      properties:
+        symbol: { type: string }
+        assetClass: { type: string }
+        quantity: { type: integer }
+        avgPrice: { type: number }
+        markPrice: { type: number }
+        unrealizedPnl: { type: number }

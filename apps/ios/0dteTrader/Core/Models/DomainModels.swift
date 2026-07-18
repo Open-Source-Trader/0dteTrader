@@ -118,18 +118,21 @@ struct OptionContract: Equatable, Sendable, Identifiable {
     let ask: Double
     let last: Double
 
-    /// Indicative mid price from the current quote pair.
-    var mid: Double { PriceMath.midPrice(bid: bid, ask: ask) }
+    /// Indicative mid price from the current quote pair; nil when the quote is unusable.
+    var mid: Double? { PriceMath.midPrice(bid: bid, ask: ask) }
 }
 
 extension OptionContract {
-    init(dto: OptionContractDTO) {
+    /// Nil for an unknown optionType: silently treating it as a call would
+    /// misprice and mis-trade the contract.
+    init?(dto: OptionContractDTO) {
+        guard let optionType = OptionType(rawValue: dto.optionType) else { return nil }
         self.init(
             symbol: dto.symbol,
             underlying: dto.underlying,
             expiration: dto.expiration,
             strike: dto.strike,
-            optionType: OptionType(rawValue: dto.optionType) ?? .call,
+            optionType: optionType,
             bid: dto.bid,
             ask: dto.ask,
             last: dto.last
@@ -151,7 +154,7 @@ extension OptionsChain {
             underlying: dto.underlying,
             underlyingPrice: dto.underlyingPrice,
             expirations: dto.expirations,
-            contracts: dto.contracts.map(OptionContract.init(dto:))
+            contracts: dto.contracts.compactMap(OptionContract.init(dto:))
         )
     }
 }
@@ -166,7 +169,7 @@ struct FuturesContract: Equatable, Sendable, Identifiable {
     let ask: Double
     let last: Double
 
-    var mid: Double { PriceMath.midPrice(bid: bid, ask: ask) }
+    var mid: Double? { PriceMath.midPrice(bid: bid, ask: ask) }
 }
 
 extension FuturesContract {
@@ -236,19 +239,25 @@ struct Position: Equatable, Sendable, Identifiable {
     let assetClass: AssetClass
     let quantity: Int
     let avgPrice: Double
-    let markPrice: Double
-    let unrealizedPnl: Double
+    var markPrice: Double
+    var unrealizedPnl: Double
+    /// Contract multiplier (options: 100; futures: per spec) for live P/L math.
+    let multiplier: Double
 }
 
 extension Position {
-    init(dto: PositionDTO) {
+    /// Nil for an unknown assetClass: defaulting to .option would route a
+    /// flatten through the options path and build a wrong close order.
+    init?(dto: PositionDTO) {
+        guard let assetClass = AssetClass(rawValue: dto.assetClass) else { return nil }
         self.init(
             symbol: dto.symbol,
-            assetClass: AssetClass(rawValue: dto.assetClass) ?? .option,
+            assetClass: assetClass,
             quantity: dto.quantity,
             avgPrice: dto.avgPrice,
             markPrice: dto.markPrice,
-            unrealizedPnl: dto.unrealizedPnl
+            unrealizedPnl: dto.unrealizedPnl,
+            multiplier: dto.multiplier
         )
     }
 }

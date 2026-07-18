@@ -19,6 +19,7 @@ struct TradeScreenView: View {
     @State private var showSymbolSearch = false
     @State private var showIndicatorSettings = false
     @State private var showProfile = false
+    @State private var showHistory = false
 
     private let settingsStore: SettingsStore
 
@@ -45,6 +46,14 @@ struct TradeScreenView: View {
                         } label: {
                             Image(systemName: "person.circle")
                         }
+                    }
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button {
+                            showHistory = true
+                        } label: {
+                            Image(systemName: "clock.arrow.circlepath")
+                        }
+                        .accessibilityLabel("Trade history")
                     }
                     ToolbarItem(placement: .topBarTrailing) {
                         Button {
@@ -79,11 +88,27 @@ struct TradeScreenView: View {
         .sheet(isPresented: $showProfile) {
             ProfileView(viewModel: container.makeProfileViewModel(onLogout: onLogout))
         }
+        .sheet(isPresented: $showHistory) {
+            HistoryView(apiClient: container.apiClient)
+        }
         .task {
             await chartViewModel.start()
         }
         .task {
             await tradeViewModel.refreshTradingData()
+        }
+        .task {
+            // Keep indicative chain/futures quotes fresh; paused while the
+            // confirm sheet is open so the armed ticket's context doesn't
+            // shift underneath it.
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 30_000_000_000)
+                guard !Task.isCancelled else { break }
+                if tradeViewModel.armedTicket == nil {
+                    await chainViewModel.refresh()
+                    await tradeViewModel.loadFuturesContracts(silent: true)
+                }
+            }
         }
         .onAppear {
             tradeViewModel.optionContractResolver = { symbol in
@@ -91,6 +116,7 @@ struct TradeScreenView: View {
             }
             Task { await chainViewModel.load(underlying: chartViewModel.symbol) }
             syncFuturesRoot(with: chartViewModel.symbol)
+            container.quoteSocket.subscribe(symbols: watchedContractSymbols)
         }
         .onChange(of: chartViewModel.symbol) { _, newSymbol in
             Task { await chainViewModel.load(underlying: newSymbol) }
@@ -106,6 +132,25 @@ struct TradeScreenView: View {
                 tradeViewModel.showToast(notice.message, style: .info)
             }
         }
+        .onChange(of: chartViewModel.quote) { _, quote in
+            // Keep AUTO's reference price live instead of the chain-load snapshot.
+            if let quote, quote.symbol == chainViewModel.underlying {
+                chainViewModel.underlyingLast = quote.last
+            }
+        }
+        .onChange(of: container.quoteSocket.lastQuote) { _, quote in
+            // Contract-symbol ticks: live option/futures quotes and position P/L.
+            if let quote {
+                chainViewModel.applyContractQuote(quote)
+                tradeViewModel.applyContractQuote(quote)
+            }
+        }
+        .onChange(of: watchedContractSymbols) { old, new in
+            let removed = Set(old).subtracting(new)
+            let added = Set(new).subtracting(old)
+            if !removed.isEmpty { container.quoteSocket.unsubscribe(symbols: Array(removed)) }
+            if !added.isEmpty { container.quoteSocket.subscribe(symbols: Array(added)) }
+        }
     }
 
     // MARK: - Layouts
@@ -119,7 +164,7 @@ struct TradeScreenView: View {
                 chartView
                 VStack(spacing: 10) {
                     positionsStrip
-                    FloatingTradeButtons(isEnabled: true) { side in
+                    FloatingTradeButtons(isEnabled: canTrade) { side in
                         tradeViewModel.arm(side: side, underlying: chartViewModel.symbol, chainViewModel: chainViewModel)
                     }
                 }
@@ -205,6 +250,28 @@ struct TradeScreenView: View {
     }
 
     // MARK: - Helpers
+
+    /// Contract symbols whose live quotes the screen needs: the selected
+    /// option/futures contract and every open position. The chart's own
+    /// symbol is excluded — its subscription is owned by ChartViewModel.
+    private var watchedContractSymbols: [String] {
+        var symbols = Set<String>()
+        if let symbol = chainViewModel.selectedContract?.symbol { symbols.insert(symbol) }
+        if let symbol = tradeViewModel.selectedFutureSymbol { symbols.insert(symbol) }
+        for position in tradeViewModel.positions { symbols.insert(position.symbol) }
+        symbols.remove(chartViewModel.symbol)
+        return symbols.sorted()
+    }
+
+    /// Same gate as the split-layout TradePanelView's Buy/Sell buttons.
+    private var canTrade: Bool {
+        switch tradeViewModel.assetClass {
+        case .option:
+            return chainViewModel.selectedContract != nil
+        case .future:
+            return tradeViewModel.selectedFuture != nil
+        }
+    }
 
     private func toggleLayout() {
         Haptics.selection()

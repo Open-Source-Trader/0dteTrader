@@ -165,6 +165,10 @@ struct APIClient: @unchecked Sendable {
         return try await request(endpoint)
     }
 
+    func orderHistory() async throws -> TradeHistoryDTO {
+        try await request(Endpoint(method: .get, path: "v1/orders/history"))
+    }
+
     func previewOrder(_ order: OrderRequestDTO) async throws -> OrderPreviewDTO {
         let endpoint = Endpoint(method: .post, path: "v1/orders/preview")
         return try await request(endpoint, body: encode(order))

@@ -147,6 +147,26 @@ struct PositionDTO: Decodable, Equatable, Sendable {
     let avgPrice: Double
     let markPrice: Double
     let unrealizedPnl: Double
+    /// Contract multiplier (options: 100; futures: per spec) for client-side live P/L.
+    let multiplier: Double
+}
+
+struct TradeHistoryEntryDTO: Decodable, Equatable, Sendable {
+    let orderId: String
+    let status: String
+    let contractSymbol: String
+    let side: String
+    let quantity: Int
+    let orderType: String
+    let limitPrice: Double?
+    let filledPrice: Double?
+    let timestamp: String
+    let realizedPnl: Double?
+}
+
+struct TradeHistoryDTO: Decodable, Equatable, Sendable {
+    let entries: [TradeHistoryEntryDTO]
+    let totalRealizedPnl: Double
 }
 
 // MARK: - WebSocket wire messages

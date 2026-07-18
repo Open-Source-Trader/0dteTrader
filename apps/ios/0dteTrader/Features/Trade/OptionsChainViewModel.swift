@@ -13,10 +13,16 @@ final class OptionsChainViewModel: ObservableObject {
     @Published var isAutoMode = true
     @Published private(set) var selectedExpiration: String?
     @Published var selectedStrike: Double?
+    /// Live last price of the underlying (wired from the quote stream);
+    /// AUTO uses it over the chain-load snapshot.
+    @Published var underlyingLast: Double?
 
     private let apiClient: APIClient
     /// Expirations whose contracts are already present locally.
     private var loadedExpirations: Set<String> = []
+    /// Bumped by every load(); in-flight fetches bail after each await when a
+    /// newer load has started, so a slow response can't clobber a newer symbol.
+    private var loadGeneration = 0
 
     init(apiClient: APIClient) {
         self.apiClient = apiClient
@@ -41,7 +47,8 @@ final class OptionsChainViewModel: ObservableObject {
         return AutoContractSelector.selectAutoOTM(
             chain: chain,
             optionType: optionType,
-            expiration: selectedExpiration
+            expiration: selectedExpiration,
+            last: underlyingLast
         )
     }
 
@@ -62,31 +69,39 @@ final class OptionsChainViewModel: ObservableObject {
     // MARK: - Loading
 
     func load(underlying: String) async {
-        guard !isLoading else { return }
+        loadGeneration += 1
+        let gen = loadGeneration
         if self.underlying != underlying {
             // New underlying: reset selection state.
             chain = nil
             selectedExpiration = nil
             selectedStrike = nil
+            underlyingLast = nil
             loadedExpirations = []
         }
         self.underlying = underlying
         isLoading = true
         errorMessage = nil
-        defer { isLoading = false }
+        defer {
+            if gen == loadGeneration { isLoading = false }
+        }
         do {
             let dto = try await apiClient.optionsChain(symbol: underlying, expiration: nil)
+            guard gen == loadGeneration else { return }
             var chain = OptionsChain(dto: dto)
             // If the server returns all expirations but only one expiration's
             // contracts, fetch the rest lazily via selectExpiration().
-            loadedExpirations = Set(chain.contracts.map(\.expiration))
+            var loaded = Set(chain.contracts.map(\.expiration))
             let nearest = AutoContractSelector.nearestExpiration(chain.expirations)
-            if let nearest, !loadedExpirations.contains(nearest) {
+            if let nearest, !loaded.contains(nearest) {
                 if let extra = try await fetchContracts(underlying: underlying, expiration: nearest) {
+                    guard gen == loadGeneration else { return }
                     chain.contracts.append(contentsOf: extra)
-                    loadedExpirations.insert(nearest)
+                    loaded.insert(nearest)
                 }
+                guard gen == loadGeneration else { return }
             }
+            loadedExpirations = loaded
             self.chain = chain
             if selectedExpiration == nil || !chain.expirations.contains(selectedExpiration ?? "") {
                 selectedExpiration = nearest ?? chain.expirations.first
@@ -95,9 +110,56 @@ final class OptionsChainViewModel: ObservableObject {
                 selectedStrike = auto.strike
             }
         } catch let error as APIError {
+            guard gen == loadGeneration else { return }
             errorMessage = error.userMessage
         } catch {
+            guard gen == loadGeneration else { return }
             errorMessage = error.localizedDescription
+        }
+    }
+
+    /// Live tick for a subscribed option contract: updates its bid/ask/last in place.
+    func applyContractQuote(_ quote: Quote) {
+        guard var chain,
+              let index = chain.contracts.firstIndex(where: { $0.symbol == quote.symbol })
+        else { return }
+        let old = chain.contracts[index]
+        chain.contracts[index] = OptionContract(
+            symbol: old.symbol,
+            underlying: old.underlying,
+            expiration: old.expiration,
+            strike: old.strike,
+            optionType: old.optionType,
+            bid: quote.bid,
+            ask: quote.ask,
+            last: quote.last
+        )
+        self.chain = chain
+    }
+
+    /// Background re-fetch of the loaded chain's quotes (bid/ask/underlyingPrice)
+    /// without touching selections. Errors are swallowed: the last good chain
+    /// stays up rather than toasting every failed 30s tick.
+    func refresh() async {
+        guard !underlying.isEmpty, chain != nil, !isLoading else { return }
+        let underlying = self.underlying
+        let gen = loadGeneration
+        do {
+            let dto = try await apiClient.optionsChain(symbol: underlying, expiration: selectedExpiration)
+            guard gen == loadGeneration, let current = chain else { return }
+            let fresh = OptionsChain(dto: dto)
+            let updated = Dictionary(fresh.contracts.map { ($0.symbol, $0) }, uniquingKeysWith: { _, new in new })
+            let known = Set(current.contracts.map(\.symbol))
+            var merged = current.contracts.map { updated[$0.symbol] ?? $0 }
+            merged.append(contentsOf: fresh.contracts.filter { !known.contains($0.symbol) })
+            chain = OptionsChain(
+                underlying: current.underlying,
+                underlyingPrice: fresh.underlyingPrice,
+                expirations: current.expirations,
+                contracts: merged
+            )
+        } catch {
+            // Keep the last good chain.
         }
     }
 
@@ -111,9 +173,13 @@ final class OptionsChainViewModel: ObservableObject {
     }
 
     func ensureContracts(for expiration: String) async {
+        let underlying = self.underlying
+        let gen = loadGeneration
         guard !underlying.isEmpty, !loadedExpirations.contains(expiration) else { return }
         do {
             if let contracts = try await fetchContracts(underlying: underlying, expiration: expiration) {
+                // A load() that started meanwhile owns the chain now.
+                guard gen == loadGeneration else { return }
                 chain?.contracts.append(contentsOf: contracts)
                 loadedExpirations.insert(expiration)
                 if selectedStrike == nil, let auto = autoContract {
@@ -121,8 +187,10 @@ final class OptionsChainViewModel: ObservableObject {
                 }
             }
         } catch let error as APIError {
+            guard gen == loadGeneration else { return }
             errorMessage = error.userMessage
         } catch {
+            guard gen == loadGeneration else { return }
             errorMessage = error.localizedDescription
         }
     }

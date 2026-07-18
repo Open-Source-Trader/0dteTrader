@@ -134,7 +134,7 @@ struct TradePanelView: View {
             } else if let contract = chainViewModel.autoContract {
                 Text("\(Format.strike(contract.strike))\(contract.optionType.shortName)")
                     .font(.priceMedium)
-                Text("≈ \(Format.price(contract.mid))")
+                Text(contract.mid.map { "≈ \(Format.price($0))" } ?? "—")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } else {
@@ -188,7 +188,7 @@ struct TradePanelView: View {
             }
 
             if let future = tradeViewModel.selectedFuture {
-                Text("≈ \(Format.price(future.mid))")
+                Text(future.mid.map { "≈ \(Format.price($0))" } ?? "—")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -243,11 +243,30 @@ struct TradePanelView: View {
             }
             .pickerStyle(.segmented)
 
-            if tradeViewModel.orderType == .mid, let mid = indicativeMid {
-                Text("≈ \(Format.price(mid))")
+            if let line = quoteLine {
+                Text(line)
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+        }
+    }
+
+    /// Live `bid × ask` (and mid when a mid order is armed) for the selected contract.
+    private var quoteLine: String? {
+        guard let pair = selectedQuotePair else { return nil }
+        var line = "\(Format.price(pair.bid)) × \(Format.price(pair.ask))"
+        if tradeViewModel.orderType == .mid {
+            line += " · ≈ \(indicativeMid.map(Format.price) ?? "—")"
+        }
+        return line
+    }
+
+    private var selectedQuotePair: (bid: Double, ask: Double)? {
+        switch tradeViewModel.assetClass {
+        case .option:
+            return chainViewModel.selectedContract.map { ($0.bid, $0.ask) }
+        case .future:
+            return tradeViewModel.selectedFuture.map { ($0.bid, $0.ask) }
         }
     }
 

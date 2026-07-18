@@ -71,7 +71,8 @@ final class TradeViewModel: ObservableObject {
     // MARK: - Quantity (FR-18)
 
     func setQuantity(_ value: Int) {
-        quantity = max(1, value)
+        // Upper bound mirrors the server's @Max(1000) on OrderRequestDto.
+        quantity = min(1000, max(1, value))
     }
 
     func addQuantity(_ amount: Int) {
@@ -86,7 +87,8 @@ final class TradeViewModel: ObservableObject {
         await loadFuturesContracts()
     }
 
-    func loadFuturesContracts() async {
+    /// `silent` suppresses the error toast for background 30s refreshes.
+    func loadFuturesContracts(silent: Bool = false) async {
         do {
             let contracts = try await apiClient.futures(root: futuresRoot).map(FuturesContract.init(dto:))
             futuresContracts = contracts
@@ -95,15 +97,47 @@ final class TradeViewModel: ObservableObject {
                 selectedFutureSymbol = contracts.first(where: \.frontMonth)?.symbol ?? contracts.first?.symbol
             }
         } catch let error as APIError {
-            showToast(error.userMessage, style: .error)
+            if !silent { showToast(error.userMessage, style: .error) }
         } catch {
-            showToast(error.localizedDescription, style: .error)
+            if !silent { showToast(error.localizedDescription, style: .error) }
         }
     }
 
     var selectedFuture: FuturesContract? {
         futuresContracts.first { $0.symbol == selectedFutureSymbol }
     }
+
+    /// Live tick for a subscribed contract symbol: updates the matching futures
+    /// contract's quote and recomputes any matching position's mark and P/L
+    /// (server-provided multiplier keeps the math consistent with the broker).
+    func applyContractQuote(_ quote: Quote) {
+        if let index = futuresContracts.firstIndex(where: { $0.symbol == quote.symbol }) {
+            let old = futuresContracts[index]
+            futuresContracts[index] = FuturesContract(
+                symbol: old.symbol,
+                root: old.root,
+                expiration: old.expiration,
+                frontMonth: old.frontMonth,
+                bid: quote.bid,
+                ask: quote.ask,
+                last: quote.last
+            )
+        }
+        if let index = positions.firstIndex(where: { $0.symbol == quote.symbol }) {
+            var position = positions[index]
+            position.markPrice = quote.last
+            let pnl = (quote.last - position.avgPrice) * Double(position.quantity) * position.multiplier
+            position.unrealizedPnl = (pnl * 100).rounded() / 100
+            positions[index] = position
+        }
+    }
+
+    #if DEBUG
+    /// Test hook: futuresContracts is private(set).
+    func setFuturesContractsForTesting(_ contracts: [FuturesContract]) {
+        futuresContracts = contracts
+    }
+    #endif
 
     // MARK: - Arm (step 1 of FR-19)
 
@@ -112,6 +146,7 @@ final class TradeViewModel: ObservableObject {
     func arm(side: OrderSide, underlying: String, chainViewModel: OptionsChainViewModel) {
         let selection: OrderSelectionDTO
         let summary: String
+        var requestUnderlying = underlying
 
         switch assetClass {
         case .option:
@@ -156,10 +191,13 @@ final class TradeViewModel: ObservableObject {
                 contractSymbol: contract.symbol
             )
             summary = contract.symbol
+            // The charted symbol may be a specific contract ("MESU26"); the
+            // server expects the root as the order's underlying.
+            requestUnderlying = contract.root
         }
 
         let request = OrderRequestDTO(
-            underlying: underlying,
+            underlying: requestUnderlying,
             assetClass: assetClass.rawValue,
             side: side.rawValue,
             quantity: quantity,
@@ -229,7 +267,7 @@ final class TradeViewModel: ObservableObject {
 
     func refreshTradingData() async {
         do {
-            positions = try await apiClient.positions().map(Position.init(dto:))
+            positions = try await apiClient.positions().compactMap(Position.init(dto:))
         } catch let error as APIError {
             showToast(error.userMessage, style: .error)
         } catch {

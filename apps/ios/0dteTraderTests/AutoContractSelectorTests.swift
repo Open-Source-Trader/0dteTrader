@@ -55,6 +55,19 @@ final class AutoContractSelectorTests: XCTestCase {
         XCTAssertEqual(selected?.expiration, expiration0DTE)
     }
 
+    /// A live `last` overrides the chain-load snapshot price: as the underlying
+    /// crosses a strike, the AUTO pick moves with it.
+    func testAutoCall_liveLastOverridesSnapshotPrice() {
+        let chain = makeChain(price: 502.13)
+        let selected = AutoContractSelector.selectAutoOTM(
+            chain: chain,
+            optionType: .call,
+            last: 503.4,
+            today: today
+        )
+        XCTAssertEqual(selected?.strike, 504)
+    }
+
     func testAutoPut_lastBetweenStrikes_picksHighestStrictlyBelow() {
         let chain = makeChain(price: 502.13)
         let selected = AutoContractSelector.selectAutoOTM(chain: chain, optionType: .put, today: today)

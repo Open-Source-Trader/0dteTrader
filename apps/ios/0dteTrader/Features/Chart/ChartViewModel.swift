@@ -132,6 +132,9 @@ final class ChartViewModel: ObservableObject {
             }
         }
         guard !candles.isEmpty else { return }
+        // Unparseable timestamps map to epoch 0 (Quote.init(dto:)); keep the
+        // quote display, skip candle bucketing.
+        guard quote.timestamp.timeIntervalSince1970 > 0 else { return }
 
         let bucketSeconds = (quote.timestamp.timeIntervalSince1970 / interval.seconds).rounded(.down) * interval.seconds
         let bucketStart = Date(timeIntervalSince1970: bucketSeconds)

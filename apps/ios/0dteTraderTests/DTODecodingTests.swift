@@ -140,12 +140,39 @@ final class DTODecodingTests: XCTestCase {
 
     func testPosition_decodesNegativeQuantity() throws {
         let dto = try decode(PositionDTO.self, """
-        {"symbol":"MESU26","assetClass":"future","quantity":-2,"avgPrice":6010.5,"markPrice":6012.0,"unrealizedPnl":-15.0}
+        {"symbol":"MESU26","assetClass":"future","quantity":-2,"avgPrice":6010.5,"markPrice":6012.0,"unrealizedPnl":-15.0,"multiplier":5}
         """)
-        let position = Position(dto: dto)
+        let position = try XCTUnwrap(Position(dto: dto))
         XCTAssertEqual(position.quantity, -2)
         XCTAssertEqual(position.assetClass, .future)
         XCTAssertEqual(position.unrealizedPnl, -15.0, accuracy: 1e-9)
+    }
+
+    /// An unknown asset class must drop the position, not fall back to .option
+    /// (which would route a flatten through the options path).
+    func testPosition_unknownAssetClass_isDropped() throws {
+        let dto = try decode(PositionDTO.self, """
+        {"symbol":"AAPL","assetClass":"equity","quantity":10,"avgPrice":210.0,"markPrice":211.0,"unrealizedPnl":10.0,"multiplier":1}
+        """)
+        XCTAssertNil(Position(dto: dto))
+    }
+
+    /// An unknown option type must drop the contract, not fall back to .call.
+    func testOptionsChain_unknownOptionType_contractIsDropped() throws {
+        let dto = try decode(OptionsChainDTO.self, """
+        {
+          "underlying": "SPY",
+          "underlyingPrice": 502.13,
+          "expirations": ["2026-07-17"],
+          "contracts": [
+            {"symbol":"SPY260717C00503000","underlying":"SPY","expiration":"2026-07-17","strike":503,"optionType":"call","bid":1.20,"ask":1.28,"last":1.24},
+            {"symbol":"SPY260717X00502000","underlying":"SPY","expiration":"2026-07-17","strike":502,"optionType":"straddle","bid":1.10,"ask":1.18,"last":1.14}
+          ]
+        }
+        """)
+        let chain = OptionsChain(dto: dto)
+        XCTAssertEqual(chain.contracts.count, 1)
+        XCTAssertEqual(chain.contracts[0].optionType, .call)
     }
 
     func testOrderRequest_encodesExactContractShape() throws {

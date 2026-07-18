@@ -74,7 +74,7 @@ export class QuoteSocket extends Store<QuoteSocketState> {
 
   // MARK: - Subscriptions
 
-  subscribe(symbols: string[]): void {
+  subscribeSymbols(symbols: string[]): void {
     const newSymbols = symbols.filter((symbol) => !this.subscribedSymbols.has(symbol));
     symbols.forEach((symbol) => this.subscribedSymbols.add(symbol));
     if (this.getState().connectionState === 'connected' && newSymbols.length > 0) {
@@ -82,7 +82,7 @@ export class QuoteSocket extends Store<QuoteSocketState> {
     }
   }
 
-  unsubscribe(symbols: string[]): void {
+  unsubscribeSymbols(symbols: string[]): void {
     const removed = symbols.filter((symbol) => this.subscribedSymbols.has(symbol));
     symbols.forEach((symbol) => this.subscribedSymbols.delete(symbol));
     if (removed.length > 0) {

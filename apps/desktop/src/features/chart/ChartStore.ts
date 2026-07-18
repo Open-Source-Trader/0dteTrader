@@ -71,7 +71,7 @@ export class ChartStore extends Store<ChartStoreState> {
 
   /** Initial load + subscription. Called when the trade screen appears. */
   async start(): Promise<void> {
-    this.socket.subscribe([this.getState().symbol]);
+    this.socket.subscribeSymbols([this.getState().symbol]);
     await this.loadCandles();
   }
 
@@ -101,10 +101,10 @@ export class ChartStore extends Store<ChartStoreState> {
     const normalized = newSymbol.toUpperCase().trim();
     const { symbol } = this.getState();
     if (!normalized || normalized === symbol) return;
-    this.socket.unsubscribe([symbol]);
+    this.socket.unsubscribeSymbols([symbol]);
     this.settingsStore.lastSymbol = normalized;
     this.set({ symbol: normalized, quote: null, candles: [] });
-    this.socket.subscribe([normalized]);
+    this.socket.subscribeSymbols([normalized]);
     void this.loadCandles();
   }
 

@@ -6,5 +6,7 @@ export default defineConfig({
   server: {
     port: 5173,
     strictPort: true,
+    // This machine's inotify watcher limit is exhausted (ENOSPC); poll instead.
+    watch: { usePolling: true, interval: 700 },
   },
 });

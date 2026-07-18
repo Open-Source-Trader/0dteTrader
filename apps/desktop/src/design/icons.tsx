@@ -30,6 +30,15 @@ export function PersonCircleIcon({ size = 22, style }: IconProps) {
   );
 }
 
+export function ClockIcon({ size = 20, style }: IconProps) {
+  return (
+    <svg {...svgProps(size, style)}>
+      <circle cx="12" cy="12" r="10" />
+      <path d="M12 6v6l4 2" />
+    </svg>
+  );
+}
+
 export function LayoutSplitIcon({ size = 20, style }: IconProps) {
   // rectangle.split.1x2
   return (

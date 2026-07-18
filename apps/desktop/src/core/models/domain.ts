@@ -1,7 +1,12 @@
 import type { OptionType, OrderSide, OrderStatus, OrderType } from '@0dtetrader/shared-types';
 
-/** `(bid + ask) / 2` rounded to pennies (PriceMath.swift). Advisory only. */
-export function midPrice(bid: number, ask: number, precision = 2): number {
+/**
+ * `(bid + ask) / 2` rounded to pennies (PriceMath.swift). Advisory only.
+ * Null when the quote is unusable (zero/negative side, crossed spread, NaN),
+ * mirroring the server's computeMid validation; a locked market is allowed.
+ */
+export function midPrice(bid: number, ask: number, precision = 2): number | null {
+  if (!(bid > 0) || !(ask > 0) || bid > ask) return null;
   const factor = Math.pow(10, precision);
   return Math.round(((bid + ask) / 2) * factor) / factor;
 }

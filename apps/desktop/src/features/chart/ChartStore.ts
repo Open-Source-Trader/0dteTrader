@@ -127,7 +127,11 @@ export class ChartStore extends Store<ChartStoreState> {
     this.set({ quote });
     if (candles.length === 0) return;
 
-    const timestampSeconds = (parseDateTime(quote.timestamp) ?? 0) / 1000;
+    const timestampMs = parseDateTime(quote.timestamp);
+    // Unparseable timestamp: keep the quote display, skip candle bucketing
+    // (an epoch-0 fallback would silently corrupt the bucket math).
+    if (timestampMs === null) return;
+    const timestampSeconds = timestampMs / 1000;
     const seconds = intervalSeconds(interval);
     const bucketStart = Math.floor(timestampSeconds / seconds) * seconds;
     const last = candles[candles.length - 1];

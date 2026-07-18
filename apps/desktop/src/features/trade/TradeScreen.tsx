@@ -3,13 +3,14 @@ import type { OrderSide } from '@0dtetrader/shared-types';
 import { useContainer } from '../../app/container';
 import { useStore } from '../../core/observable';
 import { NavBar } from '../../design/components/NavBar';
-import { LayoutFullIcon, LayoutSplitIcon, PersonCircleIcon } from '../../design/icons';
+import { ClockIcon, LayoutFullIcon, LayoutSplitIcon, PersonCircleIcon } from '../../design/icons';
 import type { TradeLayout } from '../../core/storage/SettingsStore';
 import { ChartView } from '../chart/ChartView';
 import { IndicatorSettingsView } from '../chart/IndicatorSettingsView';
 import { SymbolSearchView } from '../chart/SymbolSearchView';
 import { ProfileView } from '../profile/ProfileView';
 import { FloatingTradeButtons } from './FloatingTradeButtons';
+import { HistoryView } from './HistoryView';
 import { OrderConfirmSheet } from './OrderConfirmSheet';
 import { PositionsStrip } from './PositionsStrip';
 import { ToastView } from './ToastView';
@@ -30,12 +31,14 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
 
   const chart = useStore(chartStore);
   const trade = useStore(tradeStore);
+  useStore(chainStore); // re-render when the chain selection changes (canTrade below)
 
   const [layout, setLayout] = useState<TradeLayout>(() => settingsStore.layoutMode);
   const [splitFraction, setSplitFraction] = useState(() => settingsStore.splitFraction);
   const [showSymbolSearch, setShowSymbolSearch] = useState(false);
   const [showIndicatorSettings, setShowIndicatorSettings] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
 
   const contentRef = useRef<HTMLDivElement>(null);
   const [contentHeight, setContentHeight] = useState(0);
@@ -57,6 +60,47 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
     if (root) void tradeStore.setFuturesRoot(root);
   }, [chart.symbol, chainStore, tradeStore, drawingsStore]);
 
+  // Stream live quotes for the selected contracts and all open positions.
+  // The chart's own symbol is excluded: its subscription is owned by ChartStore.
+  const watchedKey = [
+    ...new Set(
+      [
+        chainStore.selectedContract?.symbol,
+        trade.selectedFutureSymbol,
+        ...trade.positions.map((position) => position.symbol),
+      ].filter((symbol): symbol is string => Boolean(symbol) && symbol !== chart.symbol),
+    ),
+  ]
+    .sort()
+    .join(',');
+  useEffect(() => {
+    if (!watchedKey) return;
+    const symbols = watchedKey.split(',');
+    quoteSocket.subscribeSymbols(symbols);
+    return () => quoteSocket.unsubscribeSymbols(symbols);
+  }, [watchedKey, quoteSocket]);
+
+  useEffect(
+    () =>
+      quoteSocket.onQuote((quote) => {
+        // No-ops for symbols that aren't a known contract or position.
+        chainStore.applyContractQuote(quote);
+        tradeStore.applyContractQuote(quote);
+      }),
+    [quoteSocket, chainStore, tradeStore],
+  );
+
+  // Keep indicative chain/futures quotes fresh; paused while the confirm
+  // sheet is open so the armed ticket's context doesn't shift underneath it.
+  useEffect(() => {
+    const timer = setInterval(() => {
+      if (tradeStore.getState().armedTicket) return;
+      void chainStore.refresh();
+      void tradeStore.loadFuturesContracts(true);
+    }, 30_000);
+    return () => clearInterval(timer);
+  }, [chainStore, tradeStore]);
+
   // Price alerts: toast when the live price crosses an alert line.
   useEffect(() => {
     let prevLast: number | null = null;
@@ -64,6 +108,10 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
     return quoteSocket.onQuote((quote) => {
       const symbol = chartStore.getState().symbol;
       if (quote.symbol !== symbol) return;
+      // Keep AUTO's reference price live instead of the chain-load snapshot.
+      if (chainStore.getState().underlying === symbol) {
+        chainStore.setUnderlyingLast(quote.last);
+      }
       if (prevSymbol !== symbol) {
         prevSymbol = symbol;
         prevLast = null;
@@ -75,7 +123,7 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
       }
       prevLast = quote.last;
     });
-  }, [quoteSocket, chartStore, drawingsStore, tradeStore]);
+  }, [quoteSocket, chartStore, chainStore, drawingsStore, tradeStore]);
 
   // Track the content area height for the split layout math.
   useLayoutEffect(() => {
@@ -97,6 +145,12 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
     tradeStore.arm(side, chartStore.getState().symbol, chainStore);
   };
 
+  // Same gate as the split-layout TradePanel's Buy/Sell buttons.
+  const canTrade =
+    trade.assetClass === 'option'
+      ? chainStore.selectedContract !== null
+      : tradeStore.selectedFuture !== null;
+
   const panelHeight = Math.max(Math.round(contentHeight * splitFraction), 120);
   const chartHeight = Math.max(contentHeight - panelHeight - DIVIDER_HEIGHT, 100);
 
@@ -114,9 +168,14 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
     <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', position: 'relative' }}>
       <NavBar
         leading={
-          <button className="navbar-icon-button" onClick={() => setShowProfile(true)} aria-label="Profile">
-            <PersonCircleIcon size={22} />
-          </button>
+          <>
+            <button className="navbar-icon-button" onClick={() => setShowProfile(true)} aria-label="Profile">
+              <PersonCircleIcon size={22} />
+            </button>
+            <button className="navbar-icon-button" onClick={() => setShowHistory(true)} aria-label="Trade history">
+              <ClockIcon size={20} />
+            </button>
+          </>
         }
         trailing={
           <button className="navbar-icon-button" onClick={toggleLayout} aria-label="Toggle layout">
@@ -146,7 +205,7 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
               }}
             >
               {positionsStrip}
-              <FloatingTradeButtons isEnabled onSide={arm} />
+              <FloatingTradeButtons isEnabled={canTrade} onSide={arm} />
             </div>
           </div>
         ) : (
@@ -229,6 +288,7 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
       {showProfile ? (
         <ProfileView onLogout={onLogout} onDismiss={() => setShowProfile(false)} />
       ) : null}
+      {showHistory ? <HistoryView onDismiss={() => setShowHistory(false)} /> : null}
     </div>
   );
 }

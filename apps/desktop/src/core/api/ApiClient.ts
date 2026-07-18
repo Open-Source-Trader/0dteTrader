@@ -10,6 +10,7 @@ import type {
   OrderResult,
   Position,
   Quote,
+  TradeHistory,
   WebullCredentialsInput,
 } from '@0dtetrader/shared-types';
 import { ApiError, parseErrorEnvelope } from './ApiError';
@@ -174,5 +175,9 @@ export class ApiClient {
 
   positions(): Promise<Position[]> {
     return this.request({ method: 'GET', path: 'v1/positions' });
+  }
+
+  orderHistory(): Promise<TradeHistory> {
+    return this.request({ method: 'GET', path: 'v1/orders/history' });
   }
 }

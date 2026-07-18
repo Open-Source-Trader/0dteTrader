@@ -47,17 +47,12 @@ export function TradePanel({ tradeStore, chainStore, onArm }: TradePanelProps) {
   const autoContract = chainStore.autoContract;
   const selectedContract = chainStore.selectedContract;
   const selectedFuture = tradeStore.selectedFuture;
+  const autoMid = autoContract ? midPrice(autoContract.bid, autoContract.ask) : null;
 
   const canTrade = trade.assetClass === 'option' ? selectedContract !== null : selectedFuture !== null;
 
-  const indicativeMid =
-    trade.assetClass === 'option'
-      ? selectedContract
-        ? midPrice(selectedContract.bid, selectedContract.ask)
-        : null
-      : selectedFuture
-        ? midPrice(selectedFuture.bid, selectedFuture.ask)
-        : null;
+  const selectedQuote = trade.assetClass === 'option' ? selectedContract : selectedFuture;
+  const indicativeMid = selectedQuote ? midPrice(selectedQuote.bid, selectedQuote.ask) : null;
 
   return (
     <div
@@ -167,7 +162,7 @@ export function TradePanel({ tradeStore, chainStore, onArm }: TradePanelProps) {
                       {autoContract.optionType === 'call' ? 'C' : 'P'}
                     </span>
                     <span className="text-secondary" style={{ fontSize: 'var(--fs-caption)' }}>
-                      ≈ {Format.price(midPrice(autoContract.bid, autoContract.ask))}
+                      ≈ {autoMid !== null ? Format.price(autoMid) : '—'}
                     </span>
                   </>
                 ) : (
@@ -240,7 +235,7 @@ export function TradePanel({ tradeStore, chainStore, onArm }: TradePanelProps) {
           />
           {selectedFuture ? (
             <span className="text-secondary" style={{ fontSize: 'var(--fs-caption)', flex: 'none' }}>
-              ≈ {Format.price(midPrice(selectedFuture.bid, selectedFuture.ask))}
+              ≈ {indicativeMid !== null ? Format.price(indicativeMid) : '—'}
             </span>
           ) : null}
         </div>
@@ -308,9 +303,12 @@ export function TradePanel({ tradeStore, chainStore, onArm }: TradePanelProps) {
           value={trade.orderType}
           onChange={(value) => tradeStore.setOrderType(value)}
         />
-        {trade.orderType === 'mid' && indicativeMid !== null ? (
+        {selectedQuote ? (
           <span className="text-secondary" style={{ fontSize: 'var(--fs-caption)', flex: 'none' }}>
-            ≈ {Format.price(indicativeMid)}
+            {Format.price(selectedQuote.bid)} × {Format.price(selectedQuote.ask)}
+            {trade.orderType === 'mid'
+              ? ` · ≈ ${indicativeMid !== null ? Format.price(indicativeMid) : '—'}`
+              : ''}
           </span>
         ) : null}
       </div>

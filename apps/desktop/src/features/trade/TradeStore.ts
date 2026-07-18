@@ -9,6 +9,7 @@ import type {
   OrderSide,
   OrderType,
   Position,
+  Quote,
 } from '@0dtetrader/shared-types';
 import type { ApiClient } from '../../core/api/ApiClient';
 import { errorMessage } from '../../core/api/ApiError';
@@ -104,7 +105,8 @@ export class TradeStore extends Store<TradeStoreState> {
   // MARK: - Quantity
 
   setQuantity(value: number): void {
-    this.set({ quantity: Math.max(1, value) });
+    // Upper bound mirrors the server's @Max(1000) on OrderRequestDto.
+    this.set({ quantity: Math.min(1000, Math.max(1, value)) });
   }
 
   addQuantity(amount: number): void {
@@ -120,7 +122,8 @@ export class TradeStore extends Store<TradeStoreState> {
     await this.loadFuturesContracts();
   }
 
-  async loadFuturesContracts(): Promise<void> {
+  /** `silent` suppresses the error toast for background 30s refreshes. */
+  async loadFuturesContracts(silent = false): Promise<void> {
     try {
       const contracts = await this.apiClient.futures(this.getState().futuresRoot);
       this.set({ futuresContracts: contracts });
@@ -134,12 +137,49 @@ export class TradeStore extends Store<TradeStoreState> {
         this.set({ selectedFutureSymbol: front?.symbol ?? null });
       }
     } catch (error) {
-      this.showToast(errorMessage(error), 'error');
+      if (!silent) this.showToast(errorMessage(error), 'error');
     }
   }
 
   selectFuture(symbol: string): void {
     this.set({ selectedFutureSymbol: symbol });
+  }
+
+  /**
+   * Live tick for a subscribed contract symbol: updates the matching futures
+   * contract's quote and recomputes any matching position's mark and P/L
+   * (server-provided multiplier keeps the math consistent with the broker).
+   */
+  applyContractQuote(quote: Quote): void {
+    const { futuresContracts, positions } = this.getState();
+    if (futuresContracts.some((contract) => contract.symbol === quote.symbol)) {
+      this.set({
+        futuresContracts: futuresContracts.map((contract) =>
+          contract.symbol === quote.symbol
+            ? { ...contract, bid: quote.bid, ask: quote.ask, last: quote.last }
+            : contract,
+        ),
+      });
+    }
+    if (positions.some((position) => position.symbol === quote.symbol)) {
+      this.set({
+        positions: positions.map((position) =>
+          position.symbol === quote.symbol
+            ? {
+                ...position,
+                markPrice: quote.last,
+                unrealizedPnl:
+                  Math.round(
+                    (quote.last - position.avgPrice) *
+                      position.quantity *
+                      position.multiplier *
+                      100,
+                  ) / 100,
+              }
+            : position,
+        ),
+      });
+    }
   }
 
   get selectedFuture(): FuturesContract | null {
@@ -154,6 +194,7 @@ export class TradeStore extends Store<TradeStoreState> {
     const { assetClass, quantity, orderType } = this.getState();
     let selection: OrderSelection;
     let summary: string;
+    let requestUnderlying = underlying;
 
     if (assetClass === 'option') {
       const chainState = chainStore.getState();
@@ -186,10 +227,13 @@ export class TradeStore extends Store<TradeStoreState> {
       }
       selection = { mode: 'explicit', contractSymbol: contract.symbol };
       summary = contract.symbol;
+      // The charted symbol may be a specific contract ("MESU26"); the server
+      // expects the root as the order's underlying.
+      requestUnderlying = contract.root;
     }
 
     const request: OrderRequest = {
-      underlying,
+      underlying: requestUnderlying,
       assetClass,
       side,
       quantity,

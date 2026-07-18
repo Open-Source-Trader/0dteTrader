@@ -6,6 +6,7 @@ import { NavBar } from '../../design/components/NavBar';
 import { Sheet } from '../../design/components/Sheet';
 import { Spinner } from '../../design/components/Spinner';
 import { Format } from '../../design/format';
+import { ClockIcon } from '../../design/icons';
 import { orderStatusDisplayName, orderTypeDisplayName } from '../../core/models/domain';
 
 function statusColor(status: TradeHistoryEntry['status']): string {
@@ -35,9 +36,11 @@ export function HistoryView({ onDismiss }: { onDismiss: () => void }) {
   const { apiClient } = useContainer();
   const [history, setHistory] = useState<TradeHistory | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [loadKey, setLoadKey] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
+    setError(null);
     apiClient
       .orderHistory()
       .then((result) => {
@@ -49,7 +52,7 @@ export function HistoryView({ onDismiss }: { onDismiss: () => void }) {
     return () => {
       cancelled = true;
     };
-  }, [apiClient]);
+  }, [apiClient, loadKey]);
 
   return (
     <Sheet detent="large" onDismiss={onDismiss}>
@@ -65,21 +68,57 @@ export function HistoryView({ onDismiss }: { onDismiss: () => void }) {
         <NavBar
           title="History"
           trailing={
-            <button className="navbar-text-button" onClick={onDismiss}>
+            <button
+              className="navbar-text-button"
+              style={{
+                minHeight: 44,
+                minWidth: 44,
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                padding: '0 12px',
+                margin: '0 -12px 0 0',
+              }}
+              onClick={onDismiss}
+            >
               Done
             </button>
           }
         />
         <div className="sheet-body hide-scrollbar" style={{ overflowY: 'auto', padding: '0 16px 16px' }}>
           {history === null && error === null ? (
-            <div style={{ display: 'flex', justifyContent: 'center', padding: 24 }}>
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                minHeight: 320,
+              }}
+            >
               <Spinner size={18} />
             </div>
           ) : null}
 
           {error !== null ? (
-            <div className="text-secondary" style={{ padding: 24, textAlign: 'center' }}>
-              {error}
+            <div
+              className="text-secondary"
+              style={{
+                padding: 24,
+                textAlign: 'center',
+                fontSize: 'var(--fs-subheadline)',
+              }}
+            >
+              <div>{error}</div>
+              <button
+                className="navbar-text-button"
+                style={{ marginTop: 12, fontWeight: 600 }}
+                onClick={() => {
+                  setHistory(null);
+                  setLoadKey((k) => k + 1);
+                }}
+              >
+                Try Again
+              </button>
             </div>
           ) : null}
 
@@ -92,6 +131,11 @@ export function HistoryView({ onDismiss }: { onDismiss: () => void }) {
                   alignItems: 'baseline',
                   padding: '12px 0',
                   borderBottom: '1px solid var(--app-border)',
+                  // Pin the running total above the scrolling list.
+                  position: 'sticky',
+                  top: 0,
+                  background: 'var(--app-background)',
+                  zIndex: 1,
                 }}
               >
                 <span className="text-secondary" style={{ fontSize: 'var(--fs-subheadline)' }}>
@@ -103,9 +147,11 @@ export function HistoryView({ onDismiss }: { onDismiss: () => void }) {
                     fontSize: 'var(--fs-title3)',
                     fontWeight: 600,
                     color:
-                      history.totalRealizedPnl >= 0
-                        ? 'var(--pnl-positive)'
-                        : 'var(--pnl-negative)',
+                      history.totalRealizedPnl === 0
+                        ? 'var(--label-primary)'
+                        : history.totalRealizedPnl > 0
+                          ? 'var(--pnl-positive)'
+                          : 'var(--pnl-negative)',
                   }}
                 >
                   {Format.signedPrice(history.totalRealizedPnl)}
@@ -113,19 +159,43 @@ export function HistoryView({ onDismiss }: { onDismiss: () => void }) {
               </div>
 
               {history.entries.length === 0 ? (
-                <div className="text-secondary" style={{ padding: 24, textAlign: 'center' }}>
-                  No orders yet.
+                <div
+                  style={{
+                    flex: 1,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: 8,
+                    minHeight: 320,
+                  }}
+                >
+                  <span className="text-secondary" style={{ display: 'flex' }} aria-hidden>
+                    <ClockIcon size={34} />
+                  </span>
+                  <span style={{ fontSize: 'var(--fs-headline)', fontWeight: 600 }}>
+                    No orders yet
+                  </span>
+                  <span
+                    className="text-secondary"
+                    style={{ fontSize: 'var(--fs-subheadline)', textAlign: 'center' }}
+                  >
+                    Filled, working, and rejected orders will appear here.
+                  </span>
                 </div>
               ) : (
-                history.entries.map((entry) => (
+                history.entries.map((entry, index) => (
                   <div
                     key={entry.orderId}
                     style={{
                       display: 'flex',
                       flexDirection: 'column',
-                      gap: 2,
-                      padding: '10px 0',
-                      borderBottom: '1px solid var(--app-border)',
+                      gap: 4,
+                      padding: '12px 0',
+                      borderBottom:
+                        index === history.entries.length - 1
+                          ? 'none'
+                          : '1px solid var(--app-border)',
                     }}
                   >
                     <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
@@ -139,7 +209,14 @@ export function HistoryView({ onDismiss }: { onDismiss: () => void }) {
                           whiteSpace: 'nowrap',
                         }}
                       >
-                        {entry.side.toUpperCase()} {entry.quantity} {entry.contractSymbol}
+                        <span
+                          style={{
+                            color: entry.side === 'buy' ? 'var(--buy-green)' : 'var(--sell-red)',
+                          }}
+                        >
+                          {entry.side.toUpperCase()}
+                        </span>{' '}
+                        {entry.quantity} {entry.contractSymbol}
                       </span>
                       <span
                         style={{

@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { useStore } from '../../core/observable';
 import { sideDisplayName } from '../../core/models/domain';
 import { Sheet } from '../../design/components/Sheet';
@@ -15,7 +16,7 @@ function DetailRow({ label, value }: { label: string; value: string }) {
   return (
     <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
       <span>{label}</span>
-      <span className="text-secondary">{value}</span>
+      <span className="text-secondary numeric">{value}</span>
     </div>
   );
 }
@@ -23,11 +24,33 @@ function DetailRow({ label, value }: { label: string; value: string }) {
 /** Arm-then-confirm sheet: server-resolved preview, then submit. */
 export function OrderConfirmSheet({ tradeStore, ticket }: OrderConfirmSheetProps) {
   const { preview, isPreviewLoading, previewError, isSubmitting } = useStore(tradeStore);
-  const sideColor = ticket.side === 'buy' ? 'var(--buy-green)' : 'var(--sell-red)';
+  const sideColor = ticket.side === 'buy' ? 'var(--buy-green-fill)' : 'var(--sell-red-fill)';
   const confirmEnabled = preview !== null && !isSubmitting && !isPreviewLoading;
 
+  // Desktop: Enter confirms (unless focus is on a button, which handles its
+  // own Enter); Sheet itself owns Escape.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (
+        event.key === 'Enter' &&
+        confirmEnabled &&
+        !(event.target instanceof HTMLButtonElement)
+      ) {
+        void tradeStore.confirmArmedOrder();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [confirmEnabled, tradeStore]);
+
   return (
-    <Sheet detent="medium" onDismiss={() => tradeStore.cancelArmedOrder()}>
+    <Sheet
+      detent="medium"
+      // Never dismiss mid-submission: the order may still fill.
+      onDismiss={() => {
+        if (!isSubmitting) tradeStore.cancelArmedOrder();
+      }}
+    >
       <div
         style={{
           flex: 1,
@@ -65,11 +88,12 @@ export function OrderConfirmSheet({ tradeStore, ticket }: OrderConfirmSheetProps
         </span>
 
         <div
+          aria-live="polite"
           style={{
             width: '100%',
             display: 'flex',
             flexDirection: 'column',
-            gap: 10,
+            gap: 12,
             padding: 16,
             background: 'var(--app-surface)',
             borderRadius: 'var(--radius-button)',
@@ -82,24 +106,37 @@ export function OrderConfirmSheet({ tradeStore, ticket }: OrderConfirmSheetProps
           />
 
           {isPreviewLoading ? (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <Spinner size={14} />
-              <span className="text-secondary" style={{ fontSize: 'var(--fs-footnote)' }}>
-                Resolving contract…
-              </span>
-            </div>
+            // Skeleton rows mirror the resolved layout: no jump when the
+            // preview lands.
+            <>
+              {[0, 1, 2].map((i) => (
+                <div key={i} style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span
+                    style={{
+                      width: 88 + i * 12,
+                      height: 14,
+                      borderRadius: 4,
+                      background: 'var(--app-surface-elevated)',
+                      animation: 'spinner-pulse 1200ms ease-in-out infinite',
+                    }}
+                  />
+                  <span
+                    style={{
+                      width: 64,
+                      height: 14,
+                      borderRadius: 4,
+                      background: 'var(--app-surface-elevated)',
+                      animation: 'spinner-pulse 1200ms ease-in-out infinite',
+                    }}
+                  />
+                </div>
+              ))}
+            </>
           ) : preview ? (
             <>
-              <div
-                style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  gap: 12,
-                  fontSize: 'var(--fs-subheadline)',
-                }}
-              >
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
                 <span>Contract</span>
-                <span className="text-secondary">{preview.resolved.contractSymbol}</span>
+                <span className="text-secondary numeric">{preview.resolved.contractSymbol}</span>
               </div>
               <DetailRow label="Est. price" value={Format.price(preview.resolved.price)} />
               <DetailRow
@@ -111,13 +148,13 @@ export function OrderConfirmSheet({ tradeStore, ticket }: OrderConfirmSheetProps
                   key={warning}
                   style={{
                     display: 'flex',
-                    alignItems: 'center',
+                    alignItems: 'flex-start',
                     gap: 6,
                     fontSize: 'var(--fs-footnote)',
                     color: 'var(--warning-orange)',
                   }}
                 >
-                  <WarningIcon size={13} />
+                  <WarningIcon size={13} style={{ marginTop: 2 }} />
                   <span>{warning}</span>
                 </div>
               ))}
@@ -127,6 +164,7 @@ export function OrderConfirmSheet({ tradeStore, ticket }: OrderConfirmSheetProps
           {previewError ? (
             <>
               <span
+                role="alert"
                 style={{
                   fontSize: 'var(--fs-footnote)',
                   color: 'var(--pnl-negative)',
@@ -141,9 +179,13 @@ export function OrderConfirmSheet({ tradeStore, ticket }: OrderConfirmSheetProps
                   color: 'var(--app-accent)',
                   alignSelf: 'center',
                 }}
-                onClick={() => void tradeStore.loadPreview()}
+                // Retry the action that actually failed: a submit failure
+                // resubmits, a preview failure re-fetches the preview.
+                onClick={() =>
+                  void (preview ? tradeStore.confirmArmedOrder() : tradeStore.loadPreview())
+                }
               >
-                Retry
+                {preview ? 'Retry order' : 'Retry'}
               </button>
             </>
           ) : null}
@@ -158,29 +200,29 @@ export function OrderConfirmSheet({ tradeStore, ticket }: OrderConfirmSheetProps
               border: '1px solid color-mix(in srgb, var(--app-accent) 45%, transparent)',
               color: 'var(--app-accent)',
               fontSize: 'var(--fs-body)',
+              opacity: isSubmitting ? 'var(--disabled-opacity)' : 1,
             }}
+            disabled={isSubmitting}
             onClick={() => tradeStore.cancelArmedOrder()}
           >
             Cancel
           </button>
           <button
+            className="trade-action-button"
             style={{
-              flex: 1,
-              minHeight: 'var(--h-trade-button)',
-              borderRadius: 'var(--radius-button)',
               background: sideColor,
-              opacity: confirmEnabled ? 1 : 0.35,
-              color: '#fff',
-              fontSize: 'var(--fs-headline)',
-              fontWeight: 600,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
+              opacity: confirmEnabled || isSubmitting ? 1 : 'var(--disabled-opacity)',
             }}
             disabled={!confirmEnabled}
             onClick={() => void tradeStore.confirmArmedOrder()}
           >
-            {isSubmitting ? <Spinner white /> : `Confirm ${sideDisplayName(ticket.side)}`}
+            {isSubmitting ? (
+              <Spinner white />
+            ) : (
+              `${sideDisplayName(ticket.side)} ${ticket.request.quantity} · ~${
+                preview ? Format.price(preview.resolved.price) : '—'
+              }`
+            )}
           </button>
         </div>
       </div>

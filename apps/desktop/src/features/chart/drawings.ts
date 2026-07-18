@@ -32,12 +32,17 @@ interface DrawingsState {
 }
 
 const STORAGE_PREFIX = 'chart.drawings.';
+const MAX_HISTORY = 50;
 
 /**
  * TradingView-style chart annotations: trend lines, rays, horizontal lines,
- * boxes, and price alerts. Persisted per symbol in localStorage.
+ * boxes, and price alerts. Persisted per symbol in localStorage. Tools stay
+ * armed after a placement (Escape/cursor disarms); destructive removes are
+ * undoable via `undo` (Cmd/Ctrl+Z).
  */
 export class DrawingsStore extends Store<DrawingsState> {
+  private history: { drawings: Drawing[]; alerts: PriceAlert[] }[] = [];
+
   constructor() {
     super({
       symbol: '',
@@ -63,6 +68,7 @@ export class DrawingsStore extends Store<DrawingsState> {
     } catch {
       // Corrupt entry: start clean.
     }
+    this.history = [];
     this.set({ symbol, drawings, alerts, selectedId: null, draft: null, tool: 'cursor' });
   }
 
@@ -92,10 +98,11 @@ export class DrawingsStore extends Store<DrawingsState> {
   commitDraft(): void {
     const { draft, drawings } = this.getState();
     if (!draft) return;
+    // The tool stays armed so repeated placements don't reopen the menu;
+    // Escape / cursor disarm it.
     this.set({
       drawings: [...drawings, draft],
       draft: null,
-      tool: 'cursor',
       selectedId: draft.id,
     });
     this.persist();
@@ -115,7 +122,6 @@ export class DrawingsStore extends Store<DrawingsState> {
     };
     this.set({
       drawings: [...this.getState().drawings, drawing],
-      tool: 'cursor',
       selectedId: drawing.id,
     });
     this.persist();
@@ -131,23 +137,60 @@ export class DrawingsStore extends Store<DrawingsState> {
 
   // MARK: - Editing
 
+  /** Drag-move edits: in-memory only; the pointer-up path calls persistNow. */
   updateDrawing(id: string, p1: DrawingPoint, p2: DrawingPoint | null): void {
     this.set({
       drawings: this.getState().drawings.map((d) => (d.id === id ? { ...d, p1, p2 } : d)),
     });
-    this.persist();
   }
 
   updateAlertPrice(id: string, price: number): void {
     this.set({
       alerts: this.getState().alerts.map((a) => (a.id === id ? { ...a, price } : a)),
     });
+  }
+
+  /** Arrow-key nudge of the selection (1 or 10 ticks / buckets per press). */
+  nudgeSelected(key: string, steps: number): void {
+    const { selectedId, drawings, alerts } = this.getState();
+    if (!selectedId) return;
+    const dPrice = (key === 'ArrowUp' ? 1 : key === 'ArrowDown' ? -1 : 0) * steps * 0.25; // tick
+    const dTime = (key === 'ArrowRight' ? 1 : key === 'ArrowLeft' ? -1 : 0) * steps * 60; // 1m bucket
+    this.set({
+      drawings: drawings.map((d) =>
+        d.id === selectedId
+          ? {
+              ...d,
+              p1: { time: d.p1.time + dTime, price: d.p1.price + dPrice },
+              p2: d.p2 ? { time: d.p2.time + dTime, price: d.p2.price + dPrice } : null,
+            }
+          : d,
+      ),
+      alerts: alerts.map((a) => (a.id === selectedId ? { ...a, price: a.price + dPrice } : a)),
+    });
+    this.persist();
+  }
+
+  // MARK: - Undo
+
+  private snapshot(): void {
+    const { drawings, alerts } = this.getState();
+    this.history.push({ drawings, alerts });
+    if (this.history.length > MAX_HISTORY) this.history.shift();
+  }
+
+  /** Restores the state before the last destructive remove (Cmd/Ctrl+Z). */
+  undo(): void {
+    const prev = this.history.pop();
+    if (!prev) return;
+    this.set({ drawings: prev.drawings, alerts: prev.alerts, selectedId: null });
     this.persist();
   }
 
   /** Removes the selection if any, else clears every annotation for the symbol. */
   removeSelectedOrClear(): void {
     const { selectedId, drawings, alerts } = this.getState();
+    if (drawings.length > 0 || alerts.length > 0) this.snapshot();
     if (selectedId) {
       this.set({
         drawings: drawings.filter((d) => d.id !== selectedId),
@@ -181,9 +224,18 @@ export class DrawingsStore extends Store<DrawingsState> {
     return crossed;
   }
 
+  /** Public persist wrapper for the pointer-up path after a drag edit. */
+  persistNow(): void {
+    this.persist();
+  }
+
   private persist(): void {
     const { symbol, drawings, alerts } = this.getState();
     if (!symbol) return;
-    localStorage.setItem(STORAGE_PREFIX + symbol, JSON.stringify({ drawings, alerts }));
+    try {
+      localStorage.setItem(STORAGE_PREFIX + symbol, JSON.stringify({ drawings, alerts }));
+    } catch {
+      // Quota full or storage denied: keep in-memory state for the session.
+    }
   }
 }

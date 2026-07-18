@@ -41,6 +41,8 @@ interface ChartStoreState {
   quote: Quote | null;
   isLoading: boolean;
   errorMessage: string | null;
+  /** Quote socket is not connected: displayed prices may be frozen. */
+  isStale: boolean;
   indicatorSettings: IndicatorSettings;
 }
 
@@ -64,9 +66,16 @@ export class ChartStore extends Store<ChartStoreState> {
       quote: null,
       isLoading: false,
       errorMessage: null,
+      isStale: socket.getState().connectionState !== 'connected',
       indicatorSettings: settingsStore.indicatorSettings,
     });
     socket.onQuote((quote) => this.handleLiveQuote(quote));
+    // Mirror the socket's connection state so the header can flag frozen
+    // prices (reconnect + re-subscribe are owned by QuoteSocket itself).
+    socket.subscribe(() => {
+      const stale = socket.getState().connectionState !== 'connected';
+      if (stale !== this.getState().isStale) this.set({ isStale: stale });
+    });
   }
 
   /** Initial load + subscription. Called when the trade screen appears. */

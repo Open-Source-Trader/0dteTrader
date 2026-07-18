@@ -11,13 +11,13 @@ import {
 } from '../../design/icons';
 import type { DrawingTool, DrawingsStore } from './drawings';
 
-const TOOLS: { tool: DrawingTool; label: string; Icon: typeof CursorIcon }[] = [
-  { tool: 'cursor', label: 'Select / pan', Icon: CursorIcon },
-  { tool: 'trend', label: 'Trend line', Icon: TrendToolIcon },
-  { tool: 'ray', label: 'Ray', Icon: RayToolIcon },
-  { tool: 'hline', label: 'Horizontal line', Icon: HLineToolIcon },
-  { tool: 'rect', label: 'Box', Icon: RectToolIcon },
-  { tool: 'alert', label: 'Price alert', Icon: BellIcon },
+const TOOLS: { tool: DrawingTool; label: string; shortcut: string; Icon: typeof CursorIcon }[] = [
+  { tool: 'cursor', label: 'Select / pan', shortcut: 'V', Icon: CursorIcon },
+  { tool: 'trend', label: 'Trend line', shortcut: 'T', Icon: TrendToolIcon },
+  { tool: 'ray', label: 'Ray', shortcut: 'R', Icon: RayToolIcon },
+  { tool: 'hline', label: 'Horizontal line', shortcut: 'H', Icon: HLineToolIcon },
+  { tool: 'rect', label: 'Box', shortcut: 'B', Icon: RectToolIcon },
+  { tool: 'alert', label: 'Price alert', shortcut: 'A', Icon: BellIcon },
 ];
 
 /** Drawing-tool dropdown for the chart header (TradingView-style tools). */
@@ -25,32 +25,34 @@ export function DrawToolsMenu({ store }: { store: DrawingsStore }) {
   const { tool, selectedId, drawings, alerts } = useStore(store);
   const hasAnnotations = drawings.length > 0 || alerts.length > 0;
   const ActiveIcon = TOOLS.find((t) => t.tool === tool)?.Icon ?? CursorIcon;
-  const toolActive = tool !== 'cursor';
 
   return (
     <Menu
       trigger={
         <button
-          style={{
-            padding: 8,
-            background: toolActive ? 'var(--app-accent)' : 'var(--app-surface-elevated)',
-            color: toolActive ? '#fff' : 'var(--label-primary)',
-            borderRadius: '50%',
-            display: 'flex',
-          }}
+          className={`chart-icon-button${tool !== 'cursor' ? ' active' : ''}`}
           aria-label="Drawing tools"
           title="Drawing tools"
         >
-          <ActiveIcon size={15} />
+          <ActiveIcon size={16} />
         </button>
       }
       items={[
-        ...TOOLS.map(({ tool: t, label, Icon }) => ({
+        ...TOOLS.map(({ tool: t, label, shortcut, Icon }) => ({
           key: t,
           label: (
             <>
               <Icon size={14} />
               {label}
+              <span
+                style={{
+                  marginLeft: 12,
+                  fontSize: 'var(--fs-caption)',
+                  color: 'var(--label-secondary)',
+                }}
+              >
+                {shortcut}
+              </span>
             </>
           ),
           checked: tool === t,
@@ -69,7 +71,15 @@ export function DrawToolsMenu({ store }: { store: DrawingsStore }) {
                   </span>
                 ),
                 checked: false,
-                onSelect: () => store.removeSelectedOrClear(),
+                onSelect: () => {
+                  if (selectedId) {
+                    store.removeSelectedOrClear();
+                  } else if (
+                    window.confirm('Clear all drawings and alerts for this symbol? (Cmd+Z to undo)')
+                  ) {
+                    store.removeSelectedOrClear();
+                  }
+                },
               },
             ]
           : []),

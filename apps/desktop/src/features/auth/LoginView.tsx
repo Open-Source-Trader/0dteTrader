@@ -23,23 +23,24 @@ export function LoginView({ store }: { store: AuthStore }) {
   };
 
   return (
-    <form
-      style={{
-        flex: 1,
-        minHeight: 0,
-        display: 'flex',
-        flexDirection: 'column',
-        justifyContent: 'center',
-        gap: 'var(--space-6)',
-        padding: 'var(--pad-screen)',
-        position: 'relative',
-      }}
-      onSubmit={(event) => {
-        event.preventDefault();
-        submit();
-      }}
-      noValidate
-    >
+    <>
+      <form
+        style={{
+          flex: 1,
+          minHeight: 0,
+          display: 'flex',
+          flexDirection: 'column',
+          justifyContent: 'center',
+          gap: 'var(--space-6)',
+          padding: 'var(--pad-screen)',
+          position: 'relative',
+        }}
+        onSubmit={(event) => {
+          event.preventDefault();
+          submit();
+        }}
+        noValidate
+      >
       <div
         style={{
           display: 'flex',
@@ -141,8 +142,10 @@ export function LoginView({ store }: { store: AuthStore }) {
       >
         Create an account
       </button>
+      </form>
 
+      {/* Rendered outside the <form>: RegisterView has its own form, and nested forms are invalid HTML. */}
       {showRegister ? <RegisterView store={store} onDismiss={() => setShowRegister(false)} /> : null}
-    </form>
+    </>
   );
 }

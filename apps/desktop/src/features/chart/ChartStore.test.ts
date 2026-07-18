@@ -23,6 +23,8 @@ function quote(timestamp: string, last = 501.5): Quote {
 function makeStore(): ChartStore {
   const socket = {
     onQuote: () => () => undefined,
+    subscribe: () => () => undefined,
+    getState: () => ({ connectionState: 'connected' }),
     subscribeSymbols: () => undefined,
     unsubscribeSymbols: () => undefined,
   } as unknown as QuoteSocket;

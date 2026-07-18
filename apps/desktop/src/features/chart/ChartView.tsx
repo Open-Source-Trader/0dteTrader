@@ -1,4 +1,5 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import type { CandleInterval } from '@0dtetrader/shared-types';
 import { useStore } from '../../core/observable';
 import { Menu } from '../../design/components/Menu';
 import { Spinner } from '../../design/components/Spinner';
@@ -6,21 +7,13 @@ import { Format } from '../../design/format';
 import { ChevronDownIcon, SlidersIcon } from '../../design/icons';
 import type { ChartStore } from './ChartStore';
 import { CHART_INTERVALS } from './ChartStore';
-import { CandleChart, type OverlaySeries } from './CandleChart';
+import { CandleChart, type OverlaySeries, type VisibleRange } from './CandleChart';
+import { overlayPalette, panePalette } from './chartColors';
 import { DrawToolsMenu } from './DrawingToolbar';
 import type { DrawingsStore } from './drawings';
 import { IndicatorPane, type PaneSeries } from './IndicatorPane';
 import * as engine from './indicatorEngine';
-
-// Mirrors ChartView.overlayColors (iOS dark system colors, see tokens.css).
-const OVERLAY_COLORS: Record<string, string> = {
-  sma: '#ff9f0a',
-  ema: '#64d2ff',
-  vwap: '#bf5af2',
-  bollingerUpper: '#8e8e93',
-  bollingerMiddle: '#40cbe0',
-  bollingerLower: '#8e8e93',
-};
+import './chart.css';
 
 interface ChartViewProps {
   store: ChartStore;
@@ -29,31 +22,58 @@ interface ChartViewProps {
   onIndicatorSettings: () => void;
 }
 
+// Interval hotkeys. 'H'/'D' are uppercase (shift held) so they don't collide
+// with the drawing-tool hotkeys (plain v/t/r/h/b/a in DrawingLayer).
+const INTERVAL_SHORTCUTS: Record<string, CandleInterval> = {
+  '1': '1m',
+  '5': '5m',
+  '3': '15m',
+  H: '1h',
+  D: '1d',
+};
+
+const INTERVAL_HINTS: Record<CandleInterval, string> = {
+  '1m': '1',
+  '5m': '5',
+  '15m': '3',
+  '1h': '⇧H',
+  '1d': '⇧D',
+};
+
+// Seeded pseudo-random bar heights for the empty-chart loading skeleton.
+const SKELETON_BARS = [
+  42, 65, 58, 71, 49, 80, 63, 55, 74, 60, 45, 68, 77, 52, 66, 58, 70, 48, 62, 75, 56, 67, 50, 72,
+];
+
 /** Chart surface: header, candle chart with overlays and drawing tools, sub-panes. */
 export function ChartView({ store, drawingsStore, onSymbolSearch, onIndicatorSettings }: ChartViewProps) {
-  const { symbol, interval, candles, quote, isLoading, errorMessage, indicatorSettings } =
+  const { symbol, interval, candles, quote, isLoading, errorMessage, isStale, indicatorSettings } =
     useStore(store);
+
+  // Main chart's visible x-range, mirrored into every sub-pane.
+  const [visibleRange, setVisibleRange] = useState<VisibleRange | null>(null);
 
   const closes = useMemo(() => candles.map((c) => c.close), [candles]);
 
   const overlays = useMemo<OverlaySeries[]>(() => {
+    const colors = overlayPalette();
     const result: OverlaySeries[] = [];
     if (indicatorSettings.smaEnabled) {
       result.push({
         id: 'sma',
-        color: OVERLAY_COLORS.sma,
+        color: colors.sma,
         values: engine.sma(closes, indicatorSettings.smaPeriod),
       });
     }
     if (indicatorSettings.emaEnabled) {
       result.push({
         id: 'ema',
-        color: OVERLAY_COLORS.ema,
+        color: colors.ema,
         values: engine.ema(closes, indicatorSettings.emaPeriod),
       });
     }
     if (indicatorSettings.vwapEnabled) {
-      result.push({ id: 'vwap', color: OVERLAY_COLORS.vwap, values: engine.vwap(candles) });
+      result.push({ id: 'vwap', color: colors.vwap, values: engine.vwap(candles) });
     }
     if (indicatorSettings.bollingerEnabled) {
       const bands = engine.bollingerBands(
@@ -61,13 +81,13 @@ export function ChartView({ store, drawingsStore, onSymbolSearch, onIndicatorSet
         indicatorSettings.bollingerPeriod,
         indicatorSettings.bollingerMultiplier,
       );
-      result.push({ id: 'bollingerUpper', color: OVERLAY_COLORS.bollingerUpper, values: bands.upper });
+      result.push({ id: 'bollingerUpper', color: colors.bollingerUpper, values: bands.upper });
       result.push({
         id: 'bollingerMiddle',
-        color: OVERLAY_COLORS.bollingerMiddle,
+        color: colors.bollingerMiddle,
         values: bands.middle,
       });
-      result.push({ id: 'bollingerLower', color: OVERLAY_COLORS.bollingerLower, values: bands.lower });
+      result.push({ id: 'bollingerLower', color: colors.bollingerLower, values: bands.lower });
     }
     return result;
   }, [candles, closes, indicatorSettings]);
@@ -78,7 +98,7 @@ export function ChartView({ store, drawingsStore, onSymbolSearch, onIndicatorSet
       {
         id: 'rsi',
         kind: 'line',
-        color: '#ffd60a',
+        color: panePalette().rsi,
         values: engine.rsi(candles, indicatorSettings.rsiPeriod),
       },
     ];
@@ -86,19 +106,31 @@ export function ChartView({ store, drawingsStore, onSymbolSearch, onIndicatorSet
 
   const macdSeries = useMemo<PaneSeries[] | null>(() => {
     if (!indicatorSettings.macdEnabled) return null;
-    const values = engine.macd(candles);
+    const values = engine.macd(
+      candles,
+      indicatorSettings.macdFastPeriod,
+      indicatorSettings.macdSlowPeriod,
+      indicatorSettings.macdSignalPeriod,
+    );
+    const colors = panePalette();
     return [
       {
         id: 'macdHistogram',
         kind: 'histogram',
-        positiveColor: '#30d158',
-        negativeColor: '#ff453a',
+        positiveColor: colors.macdPositive,
+        negativeColor: colors.macdNegative,
         values: values.histogram,
       },
-      { id: 'macd', kind: 'line', color: '#0a84ff', values: values.macdLine },
-      { id: 'macdSignal', kind: 'line', color: '#ff9f0a', values: values.signalLine },
+      { id: 'macd', kind: 'line', color: colors.macd, values: values.macdLine },
+      { id: 'macdSignal', kind: 'line', color: colors.macdSignal, values: values.signalLine },
     ];
-  }, [candles, indicatorSettings.macdEnabled]);
+  }, [
+    candles,
+    indicatorSettings.macdEnabled,
+    indicatorSettings.macdFastPeriod,
+    indicatorSettings.macdSlowPeriod,
+    indicatorSettings.macdSignalPeriod,
+  ]);
 
   const stochSeries = useMemo<PaneSeries[] | null>(() => {
     if (!indicatorSettings.stochEnabled) return null;
@@ -108,9 +140,10 @@ export function ChartView({ store, drawingsStore, onSymbolSearch, onIndicatorSet
       indicatorSettings.stochKSmooth,
       indicatorSettings.stochDPeriod,
     );
+    const colors = panePalette();
     return [
-      { id: 'stochK', kind: 'line', color: '#0a84ff', values: values.k },
-      { id: 'stochD', kind: 'line', color: '#ff9f0a', values: values.d },
+      { id: 'stochK', kind: 'line', color: colors.stochK, values: values.k },
+      { id: 'stochD', kind: 'line', color: colors.stochD, values: values.d },
     ];
   }, [
     candles,
@@ -126,11 +159,24 @@ export function ChartView({ store, drawingsStore, onSymbolSearch, onIndicatorSet
       {
         id: 'atr',
         kind: 'line',
-        color: '#40cbe0',
+        color: panePalette().atr,
         values: engine.atr(candles, indicatorSettings.atrPeriod),
       },
     ];
   }, [candles, indicatorSettings.atrEnabled, indicatorSettings.atrPeriod]);
+
+  // Interval hotkeys (1/5/3/⇧H/⇧D); ignored while typing in a field.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      const tag = (event.target as HTMLElement | null)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      const shortcut = INTERVAL_SHORTCUTS[event.key];
+      if (shortcut) store.selectInterval(shortcut);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [store]);
 
   return (
     <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
@@ -140,29 +186,45 @@ export function ChartView({ store, drawingsStore, onSymbolSearch, onIndicatorSet
           display: 'flex',
           alignItems: 'center',
           gap: 12,
-          padding: '8px 12px',
+          padding: '8px 16px',
           flex: 'none',
         }}
       >
         <button
-          style={{ display: 'flex', alignItems: 'center', gap: 4 }}
+          style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '10px 8px' }}
           onClick={onSymbolSearch}
+          aria-label={`Symbol ${symbol}. Change symbol`}
         >
           <span style={{ fontSize: 'var(--fs-headline)', fontWeight: 600 }}>{symbol}</span>
-          <ChevronDownIcon size={11} />
+          <span aria-hidden="true" style={{ display: 'flex' }}>
+            <ChevronDownIcon size={12} />
+          </span>
         </button>
 
         {quote ? (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-            <span
-              style={{
-                fontFamily: 'var(--font-mono)',
-                fontSize: 'var(--fs-body)',
-                fontWeight: 500,
-                fontVariantNumeric: 'tabular-nums',
-              }}
-            >
-              {Format.price(quote.last)}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span
+                style={{
+                  fontFamily: 'var(--font-mono)',
+                  fontSize: 'var(--fs-body)',
+                  fontWeight: 500,
+                  fontVariantNumeric: 'tabular-nums',
+                }}
+              >
+                {Format.price(quote.last)}
+              </span>
+              {isStale ? (
+                <span
+                  style={{
+                    fontSize: 'var(--fs-caption2)',
+                    color: 'var(--warning-orange)',
+                    fontWeight: 600,
+                  }}
+                >
+                  ● STALE
+                </span>
+              ) : null}
             </span>
             <span
               className="text-secondary"
@@ -182,35 +244,40 @@ export function ChartView({ store, drawingsStore, onSymbolSearch, onIndicatorSet
           <Menu
             trigger={
               <button
-                style={{
-                  fontSize: 'var(--fs-caption)',
-                  fontWeight: 600,
-                  padding: '6px 10px',
-                  background: 'var(--app-surface-elevated)',
-                  borderRadius: 999,
-                }}
+                className="quick-chip"
+                style={{ minHeight: 36 }}
+                aria-label={`Chart interval ${interval}`}
+                aria-haspopup="menu"
               >
                 {interval}
               </button>
             }
             items={CHART_INTERVALS.map((option) => ({
               key: option,
-              label: option,
+              label: (
+                <>
+                  {option}
+                  <span
+                    style={{
+                      marginLeft: 12,
+                      fontSize: 'var(--fs-caption)',
+                      color: 'var(--label-secondary)',
+                    }}
+                  >
+                    {INTERVAL_HINTS[option]}
+                  </span>
+                </>
+              ),
               checked: option === interval,
               onSelect: () => store.selectInterval(option),
             }))}
           />
           <button
-            style={{
-              padding: 8,
-              background: 'var(--app-surface-elevated)',
-              borderRadius: '50%',
-              display: 'flex',
-            }}
+            className="chart-icon-button"
             onClick={onIndicatorSettings}
             aria-label="Indicator settings"
           >
-            <SlidersIcon size={15} />
+            <SlidersIcon size={16} />
           </button>
         </div>
       </div>
@@ -220,11 +287,19 @@ export function ChartView({ store, drawingsStore, onSymbolSearch, onIndicatorSet
         <CandleChart
           candles={candles}
           overlays={overlays}
+          symbol={symbol}
           interval={interval}
           showVolume={indicatorSettings.volumeEnabled}
           drawingsStore={drawingsStore}
+          onVisibleRangeChange={setVisibleRange}
         />
-        {isLoading ? (
+        {isLoading && candles.length === 0 ? (
+          <div className="chart-skeleton" aria-hidden="true">
+            {SKELETON_BARS.map((height, index) => (
+              <div className="bar" key={index} style={{ height: `${height}%` }} />
+            ))}
+          </div>
+        ) : isLoading ? (
           <div
             style={{
               position: 'absolute',
@@ -240,19 +315,45 @@ export function ChartView({ store, drawingsStore, onSymbolSearch, onIndicatorSet
         ) : null}
         {errorMessage && candles.length === 0 ? (
           <div
-            className="text-secondary"
+            role="alert"
             style={{
               position: 'absolute',
               inset: 0,
               display: 'flex',
+              flexDirection: 'column',
               alignItems: 'center',
               justifyContent: 'center',
-              fontSize: 'var(--fs-footnote)',
+              gap: 12,
               padding: 16,
               textAlign: 'center',
             }}
           >
-            {errorMessage}
+            <span className="text-secondary" style={{ fontSize: 'var(--fs-footnote)' }}>
+              {errorMessage}
+            </span>
+            <button
+              onClick={() => void store.loadCandles()}
+              style={{
+                color: 'var(--app-accent-text)',
+                fontSize: 'var(--fs-footnote)',
+                fontWeight: 600,
+                minHeight: 44,
+                padding: '0 16px',
+              }}
+            >
+              Retry
+            </button>
+          </div>
+        ) : null}
+        {errorMessage && candles.length > 0 ? (
+          // Refresh failed over live candles: surface it without blocking.
+          <div className="toast" role="alert">
+            <div
+              className="toast-capsule"
+              style={{ borderColor: 'color-mix(in srgb, var(--pnl-negative) 60%, transparent)' }}
+            >
+              {errorMessage}
+            </div>
           </div>
         ) : null}
       </div>
@@ -264,9 +365,12 @@ export function ChartView({ store, drawingsStore, onSymbolSearch, onIndicatorSet
           series={rsiSeries}
           guideLines={[30, 70]}
           yRange={[0, 100]}
+          visibleRange={visibleRange}
         />
       ) : null}
-      {macdSeries ? <IndicatorPane height={84} candles={candles} series={macdSeries} /> : null}
+      {macdSeries ? (
+        <IndicatorPane height={80} candles={candles} series={macdSeries} visibleRange={visibleRange} />
+      ) : null}
       {stochSeries ? (
         <IndicatorPane
           height={72}
@@ -274,9 +378,12 @@ export function ChartView({ store, drawingsStore, onSymbolSearch, onIndicatorSet
           series={stochSeries}
           guideLines={[20, 80]}
           yRange={[0, 100]}
+          visibleRange={visibleRange}
         />
       ) : null}
-      {atrSeries ? <IndicatorPane height={72} candles={candles} series={atrSeries} /> : null}
+      {atrSeries ? (
+        <IndicatorPane height={72} candles={candles} series={atrSeries} visibleRange={visibleRange} />
+      ) : null}
     </div>
   );
 }

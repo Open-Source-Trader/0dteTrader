@@ -25,6 +25,8 @@ export interface Toast {
   id: number;
   message: string;
   style: ToastStyle;
+  /** Set during the exit animation, just before the toast unmounts. */
+  leaving?: boolean;
 }
 
 /**
@@ -64,12 +66,28 @@ interface TradeStoreState {
 let nextId = 1;
 
 /**
+ * crypto.randomUUID is unavailable under Node 18 vitest (no global crypto);
+ * fall back to a random RFC4122 v4-shaped id there.
+ */
+function newIdempotencyKey(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = Math.floor(Math.random() * 16);
+    return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16);
+  });
+}
+
+/**
  * Trade state (TradeViewModel.swift analog): ticket configuration,
  * arm-then-confirm flow, positions and open orders, futures selection,
  * flatten/cancel actions, toasts.
  */
 export class TradeStore extends Store<TradeStoreState> {
+  private toastQueue: Toast[] = [];
   private toastDismissTimer: ReturnType<typeof setTimeout> | null = null;
+  private toastRemoveTimer: ReturnType<typeof setTimeout> | null = null;
 
   /** Resolves an option position's symbol to chain data for flattening. */
   optionContractResolver: ((symbol: string) => OptionContract | undefined) | null = null;
@@ -244,7 +262,7 @@ export class TradeStore extends Store<TradeStoreState> {
       armedTicket: {
         id: nextId++,
         request,
-        idempotencyKey: crypto.randomUUID(),
+        idempotencyKey: newIdempotencyKey(),
         side,
         summary,
       },
@@ -286,7 +304,9 @@ export class TradeStore extends Store<TradeStoreState> {
       await this.refreshTradingData();
     } catch (error) {
       // Keep the ticket armed so the user can retry with the same key.
-      this.set({ previewError: errorMessage(error) });
+      // Drop the stale preview: Retry now resubmits instead of confirming
+      // a possibly repriced quote.
+      this.set({ previewError: errorMessage(error), preview: null });
     } finally {
       this.set({ isSubmitting: false });
     }
@@ -349,7 +369,7 @@ export class TradeStore extends Store<TradeStoreState> {
         selection,
       };
       try {
-        const result = await this.apiClient.placeOrder(request, crypto.randomUUID());
+        const result = await this.apiClient.placeOrder(request, newIdempotencyKey());
         this.showToast(
           `Flatten ${position.symbol} — ${orderStatusDisplayName(result.status)}`,
           result.status === 'rejected' ? 'error' : 'success',
@@ -387,14 +407,40 @@ export class TradeStore extends Store<TradeStoreState> {
 
   // MARK: - Toast
 
+  /** FIFO queue: a new toast never clobbers one that's on screen. */
   showToast(message: string, style: ToastStyle): void {
-    const toast: Toast = { id: nextId++, message, style };
-    this.set({ toast });
+    this.toastQueue.push({ id: nextId++, message, style });
+    if (this.getState().toast !== null) return; // one is already showing
+    this.advanceToastQueue();
+  }
+
+  /** Manual dismiss (tap on the toast capsule); shows the next queued toast. */
+  dismissToast(): void {
     if (this.toastDismissTimer !== null) clearTimeout(this.toastDismissTimer);
-    this.toastDismissTimer = setTimeout(() => {
-      if (this.getState().toast?.id === toast.id) {
-        this.set({ toast: null });
-      }
-    }, 3000);
+    if (this.toastRemoveTimer !== null) clearTimeout(this.toastRemoveTimer);
+    this.toastDismissTimer = null;
+    this.toastRemoveTimer = null;
+    if (this.getState().toast === null) return;
+    this.set({ toast: null });
+    this.advanceToastQueue();
+  }
+
+  private advanceToastQueue(): void {
+    const next = this.toastQueue.shift();
+    if (!next) return;
+    this.set({ toast: next });
+    // Errors stay up longer; everything animates out over 200ms first.
+    this.toastDismissTimer = setTimeout(
+      () => {
+        if (this.getState().toast?.id !== next.id) return;
+        this.set({ toast: { ...next, leaving: true } });
+        this.toastRemoveTimer = setTimeout(() => {
+          if (this.getState().toast?.id !== next.id) return;
+          this.set({ toast: null });
+          this.advanceToastQueue();
+        }, 200);
+      },
+      next.style === 'error' ? 5000 : 3000,
+    );
   }
 }

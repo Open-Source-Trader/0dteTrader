@@ -7,15 +7,15 @@ import { Menu } from '../../design/components/Menu';
 import { QuickChip } from '../../design/components/QuickChip';
 import { SegmentedControl } from '../../design/components/SegmentedControl';
 import { Spinner } from '../../design/components/Spinner';
+import { Stepper } from '../../design/components/Stepper';
 import { TradeActionButton } from '../../design/components/TradeActionButton';
 import { Format } from '../../design/format';
 import {
   BoxIcon,
   CalendarIcon,
   ChartLineIcon,
+  CheckmarkIcon,
   DocIcon,
-  MinusIcon,
-  PlusIcon,
 } from '../../design/icons';
 import type { ChainStore } from './ChainStore';
 import type { TradeStore } from './TradeStore';
@@ -60,10 +60,12 @@ export function TradePanel({ tradeStore, chainStore, onArm }: TradePanelProps) {
         display: 'flex',
         flexDirection: 'column',
         gap: 8,
-        padding: '4px 12px 0',
+        padding: '8px 16px 12px',
         background: 'var(--app-background)',
         height: '100%',
-        overflow: 'hidden',
+        // Safety net: the SELL/BUY row must never be clipped away at small
+        // split heights; scroll instead of hiding content.
+        overflowY: 'auto',
       }}
     >
       <PositionsStrip
@@ -72,6 +74,7 @@ export function TradePanel({ tradeStore, chainStore, onArm }: TradePanelProps) {
         workingSymbols={trade.workingSymbols}
         onFlatten={(position) => void tradeStore.flatten(position)}
         onCancelOrder={(order) => void tradeStore.cancel(order)}
+        rowPadding="0"
       />
 
       <SegmentedControl
@@ -98,14 +101,19 @@ export function TradePanel({ tradeStore, chainStore, onArm }: TradePanelProps) {
               style={{
                 fontSize: 'var(--fs-caption)',
                 fontWeight: 600,
-                padding: '8px 12px',
+                padding: '10px 14px',
                 borderRadius: 999,
                 background: chain.isAutoMode ? 'var(--app-accent)' : 'var(--app-surface-elevated)',
-                color: chain.isAutoMode ? '#fff' : 'var(--label-primary)',
+                color: chain.isAutoMode ? '#0b0c10' : 'var(--label-primary)',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 4,
               }}
               onClick={() => chainStore.setAutoMode(!chain.isAutoMode)}
               aria-label="Auto +1 OTM selection"
+              aria-pressed={chain.isAutoMode}
             >
+              {chain.isAutoMode ? <CheckmarkIcon size={11} /> : null}
               AUTO
             </button>
           </div>
@@ -137,7 +145,7 @@ export function TradePanel({ tradeStore, chainStore, onArm }: TradePanelProps) {
                 style={{
                   flex: 1,
                   minWidth: 0,
-                  minHeight: 34,
+                  minHeight: 36,
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
@@ -147,7 +155,21 @@ export function TradePanel({ tradeStore, chainStore, onArm }: TradePanelProps) {
                   borderRadius: 'var(--radius-chip)',
                 }}
               >
-                {chain.isLoading ? (
+                {chain.errorMessage ? (
+                  <button
+                    className="text-secondary"
+                    style={{
+                      fontSize: 'var(--fs-caption)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 6,
+                    }}
+                    onClick={() => void chainStore.load(chain.underlying)}
+                    aria-label={`Chain failed to load: ${chain.errorMessage}. Activate to retry`}
+                  >
+                    <span style={{ color: 'var(--pnl-negative)' }}>Chain unavailable — Retry</span>
+                  </button>
+                ) : chain.isLoading ? (
                   <Spinner size={14} />
                 ) : autoContract ? (
                   <>
@@ -161,7 +183,10 @@ export function TradePanel({ tradeStore, chainStore, onArm }: TradePanelProps) {
                       {Format.strike(autoContract.strike)}
                       {autoContract.optionType === 'call' ? 'C' : 'P'}
                     </span>
-                    <span className="text-secondary" style={{ fontSize: 'var(--fs-caption)' }}>
+                    <span
+                      className="text-secondary numeric"
+                      style={{ fontSize: 'var(--fs-caption)' }}
+                    >
                       ≈ {autoMid !== null ? Format.price(autoMid) : '—'}
                     </span>
                   </>
@@ -233,68 +258,50 @@ export function TradePanel({ tradeStore, chainStore, onArm }: TradePanelProps) {
               onSelect: () => tradeStore.selectFuture(contract.symbol),
             }))}
           />
-          {selectedFuture ? (
-            <span className="text-secondary" style={{ fontSize: 'var(--fs-caption)', flex: 'none' }}>
-              ≈ {indicativeMid !== null ? Format.price(indicativeMid) : '—'}
-            </span>
-          ) : null}
+          <span
+            className="text-secondary numeric"
+            style={{
+              fontSize: 'var(--fs-caption)',
+              flex: 'none',
+              minWidth: 96,
+              textAlign: 'right',
+              visibility: selectedFuture ? 'visible' : 'hidden',
+            }}
+          >
+            ≈ {selectedFuture && indicativeMid !== null ? Format.price(indicativeMid) : '—'}
+          </span>
         </div>
       )}
 
       {/* Quantity row */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <span className="text-secondary" style={{ fontSize: 'var(--fs-subheadline)' }}>
           Qty
         </span>
-        <button
-          style={{
-            width: 30,
-            height: 30,
-            borderRadius: '50%',
-            background: 'var(--app-surface-elevated)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}
-          onClick={() => tradeStore.addQuantity(-1)}
-          aria-label="Decrease quantity"
-        >
-          <MinusIcon size={13} />
-        </button>
+        <Stepper
+          value={trade.quantity}
+          min={1}
+          max={1000}
+          onChange={(value) => tradeStore.setQuantity(value)}
+        />
         <span
           style={{
             fontFamily: 'var(--font-mono)',
             fontSize: 'var(--fs-body)',
             fontWeight: 500,
-            minWidth: 36,
+            minWidth: 40,
             textAlign: 'center',
           }}
         >
           {trade.quantity}
         </span>
-        <button
-          style={{
-            width: 30,
-            height: 30,
-            borderRadius: '50%',
-            background: 'var(--app-surface-elevated)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}
-          onClick={() => tradeStore.addQuantity(1)}
-          aria-label="Increase quantity"
-        >
-          <PlusIcon size={13} />
-        </button>
         <span style={{ flex: 1 }} />
-        <QuickChip title="+1" onClick={() => tradeStore.addQuantity(1)} />
         <QuickChip title="+5" onClick={() => tradeStore.addQuantity(5)} />
         <QuickChip title="+10" onClick={() => tradeStore.addQuantity(10)} />
       </div>
 
       {/* Order type row */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <SegmentedControl
           options={[
             { value: 'mid', label: 'Mid' },
@@ -303,18 +310,28 @@ export function TradePanel({ tradeStore, chainStore, onArm }: TradePanelProps) {
           value={trade.orderType}
           onChange={(value) => tradeStore.setOrderType(value)}
         />
-        {selectedQuote ? (
-          <span className="text-secondary" style={{ fontSize: 'var(--fs-caption)', flex: 'none' }}>
-            {Format.price(selectedQuote.bid)} × {Format.price(selectedQuote.ask)}
-            {trade.orderType === 'mid'
-              ? ` · ≈ ${indicativeMid !== null ? Format.price(indicativeMid) : '—'}`
-              : ''}
-          </span>
-        ) : null}
+        <span
+          className="text-secondary numeric"
+          style={{
+            fontSize: 'var(--fs-caption)',
+            flex: 'none',
+            minWidth: 96,
+            textAlign: 'right',
+            visibility: selectedQuote ? 'visible' : 'hidden',
+          }}
+        >
+          {selectedQuote
+            ? `${Format.price(selectedQuote.bid)} × ${Format.price(selectedQuote.ask)}${
+                trade.orderType === 'mid'
+                  ? ` · ≈ ${indicativeMid !== null ? Format.price(indicativeMid) : '—'}`
+                  : ''
+              }`
+            : ''}
+        </span>
       </div>
 
       {/* Action row */}
-      <div style={{ display: 'flex', gap: 12 }}>
+      <div style={{ display: 'flex', gap: 8 }}>
         <TradeActionButton
           title="SELL"
           color="var(--sell-red)"

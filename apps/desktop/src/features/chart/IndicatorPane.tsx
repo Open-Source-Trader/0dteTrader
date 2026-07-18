@@ -8,6 +8,8 @@ import {
   type LineData,
   type UTCTimestamp,
 } from 'lightweight-charts';
+import { chartPalette } from './chartColors';
+import type { VisibleRange } from './CandleChart';
 import type { ChartCandle } from './ChartStore';
 
 export interface PaneSeries {
@@ -28,13 +30,23 @@ interface IndicatorPaneProps {
   guideLines?: number[];
   /** Fixed y range (RSI 0–100). */
   yRange?: [number, number];
+  /** Main chart's visible x-range; keeps the pane aligned while panning. */
+  visibleRange?: VisibleRange | null;
 }
 
 /**
- * Non-interactive sub-pane (IndicatorPaneRepresentable analog): always shows
- * the full candle range (fitContent), no pan/zoom, no time axis — matching iOS.
+ * Non-interactive sub-pane (IndicatorPaneRepresentable analog): no pan/zoom,
+ * no time axis — matching iOS. Mirrors the main chart's visible x-range when
+ * provided; otherwise shows the full candle range (fitContent).
  */
-export function IndicatorPane({ height, candles, series, guideLines, yRange }: IndicatorPaneProps) {
+export function IndicatorPane({
+  height,
+  candles,
+  series,
+  guideLines,
+  yRange,
+  visibleRange,
+}: IndicatorPaneProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<Map<string, ISeriesApi<'Line' | 'Histogram'>>>(new Map());
@@ -44,11 +56,13 @@ export function IndicatorPane({ height, candles, series, guideLines, yRange }: I
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
+    const colors = chartPalette();
     const chart = createChart(container, {
       layout: {
         background: { type: ColorType.Solid, color: 'transparent' },
-        textColor: 'rgba(235, 235, 245, 0.6)',
-        fontSize: 9,
+        attributionLogo: false,
+        textColor: colors.axisLabel,
+        fontSize: 10,
         fontFamily:
           "ui-monospace, 'SF Mono', 'Cascadia Mono', 'JetBrains Mono', 'DejaVu Sans Mono', Menlo, monospace",
       },
@@ -86,6 +100,8 @@ export function IndicatorPane({ height, candles, series, guideLines, yRange }: I
     }
 
     const fixedRange = yRangeRef.current;
+    const guideColor = chartPalette().guide;
+    let guidesDrawn = false;
     for (const spec of series) {
       let api = existing.get(spec.id);
       if (!api) {
@@ -108,18 +124,18 @@ export function IndicatorPane({ height, candles, series, guideLines, yRange }: I
               });
         existing.set(spec.id, api);
 
-        if (guideLines && spec.kind === 'line') {
+        if (!guidesDrawn && guideLines && spec.kind === 'line') {
           for (const level of guideLines) {
             api.createPriceLine({
               price: level,
-              color: 'rgba(142, 142, 147, 0.6)',
+              color: guideColor,
               lineWidth: 1,
               lineStyle: 3,
               axisLabelVisible: false,
               title: '',
             });
           }
-          guideLines = undefined; // Only once, on the first line series.
+          guidesDrawn = true;
         }
       }
 
@@ -147,8 +163,9 @@ export function IndicatorPane({ height, candles, series, guideLines, yRange }: I
         (api as ISeriesApi<'Line'>).setData(data);
       }
     }
-    chart.timeScale().fitContent();
-  }, [candles, series, guideLines]);
+    if (visibleRange) chart.timeScale().setVisibleLogicalRange(visibleRange);
+    else chart.timeScale().fitContent();
+  }, [candles, series, guideLines, visibleRange]);
 
   return <div ref={containerRef} style={{ height, flex: 'none', position: 'relative' }} />;
 }

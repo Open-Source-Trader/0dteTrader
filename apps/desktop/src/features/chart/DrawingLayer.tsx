@@ -2,17 +2,30 @@ import { useEffect, useRef } from 'react';
 import type { IChartApi, ISeriesApi, Logical } from 'lightweight-charts';
 import { useStore } from '../../core/observable';
 import { Format } from '../../design/format';
-import type { Drawing, DrawingPoint, DrawingsStore } from './drawings';
+import { chartPalette } from './chartColors';
+import type { ChartCandle } from './ChartStore';
+import type { Drawing, DrawingPoint, DrawingsStore, DrawingTool } from './drawings';
 
-const ACCENT = '#568ff7';
-const ALERT_COLOR = '#ff9f0a';
 const HANDLE_RADIUS = 5;
 const HIT_DISTANCE = 7;
+
+// Plain-letter tool hotkeys (see DrawingToolbar). Shift is excluded so the
+// chart interval hotkeys (⇧H/⇧D in ChartView) keep working.
+const TOOL_KEYS: Record<string, DrawingTool> = {
+  v: 'cursor',
+  t: 'trend',
+  r: 'ray',
+  h: 'hline',
+  b: 'rect',
+  a: 'alert',
+};
 
 interface DrawingLayerProps {
   chart: IChartApi;
   series: ISeriesApi<'Candlestick'>;
   store: DrawingsStore;
+  /** Candle data version: live updates shift price→y geometry, so repaint. */
+  candles: ChartCandle[];
   /** First candle's bucket time (epoch s) — anchor for time→logical mapping. */
   firstTime: number;
   intervalSec: number;
@@ -30,13 +43,16 @@ interface DragState {
  * TradingView-style annotation overlay: renders and edits trend lines, rays,
  * horizontal lines, boxes, and alert lines on a canvas above the chart pane.
  * Anchors are (time, price); times map to x via the uniform bucket spacing so
- * shapes stay put across pan/zoom, live appends, and reloads.
+ * shapes stay put across pan/zoom, live appends, and reloads. Repaints are
+ * event-driven (store/pan/zoom/resize/data), not a permanent rAF loop.
  */
-export function DrawingLayer({ chart, series, store, firstTime, intervalSec }: DrawingLayerProps) {
-  const { tool } = useStore(store);
+export function DrawingLayer({ chart, series, store, candles, firstTime, intervalSec }: DrawingLayerProps) {
+  const { tool, drawings, alerts } = useStore(store);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const dragRef = useRef<DragState | null>(null);
   const draftingRef = useRef(false);
+  const hoverIdRef = useRef<string | null>(null);
+  const scheduleRef = useRef<() => void>(() => {});
   const geometryRef = useRef({ firstTime, intervalSec });
   geometryRef.current = { firstTime, intervalSec };
 
@@ -70,15 +86,15 @@ export function DrawingLayer({ chart, series, store, firstTime, intervalSec }: D
     };
   };
 
-  // MARK: - Render loop
+  // MARK: - Event-driven rendering
 
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
+    const colors = chartPalette();
     let raf = 0;
 
     const draw = () => {
-      raf = requestAnimationFrame(draw);
       const pane = chart.paneSize();
       const axisWidth = chart.priceScale('left').width();
       const dpr = window.devicePixelRatio || 1;
@@ -96,7 +112,12 @@ export function DrawingLayer({ chart, series, store, firstTime, intervalSec }: D
 
       const state = store.getState();
       for (const drawing of state.drawings) {
-        renderDrawing(ctx, drawing, drawing.id === state.selectedId, pane.width);
+        renderDrawing(
+          ctx,
+          drawing,
+          drawing.id === state.selectedId || drawing.id === hoverIdRef.current,
+          pane.width,
+        );
       }
       if (state.draft) renderDrawing(ctx, state.draft, false, pane.width);
       for (const alert of state.alerts) {
@@ -107,11 +128,11 @@ export function DrawingLayer({ chart, series, store, firstTime, intervalSec }: D
     const renderDrawing = (
       ctx: CanvasRenderingContext2D,
       drawing: Drawing,
-      selected: boolean,
+      highlighted: boolean,
       width: number,
     ) => {
-      ctx.strokeStyle = ACCENT;
-      ctx.lineWidth = selected ? 2 : 1.25;
+      ctx.strokeStyle = colors.accent;
+      ctx.lineWidth = highlighted ? 2 : 1.25;
       const a = toXY(drawing.p1);
       if (drawing.kind === 'hline') {
         if (a.y === null) return;
@@ -119,8 +140,8 @@ export function DrawingLayer({ chart, series, store, firstTime, intervalSec }: D
         ctx.moveTo(0, a.y);
         ctx.lineTo(width, a.y);
         ctx.stroke();
-        priceTag(ctx, drawing.p1.price, a.y, ACCENT);
-        if (selected && a.x !== null) handle(ctx, a.x, a.y);
+        priceTag(ctx, drawing.p1.price, a.y, colors.accent);
+        if (highlighted && a.x !== null) handle(ctx, a.x, a.y);
         return;
       }
       if (!drawing.p2) return;
@@ -128,7 +149,7 @@ export function DrawingLayer({ chart, series, store, firstTime, intervalSec }: D
       if (a.x === null || a.y === null || b.x === null || b.y === null) return;
 
       if (drawing.kind === 'rect') {
-        ctx.fillStyle = 'rgba(86, 143, 247, 0.12)';
+        ctx.fillStyle = colors.rectFill;
         ctx.fillRect(Math.min(a.x, b.x), Math.min(a.y, b.y), Math.abs(b.x - a.x), Math.abs(b.y - a.y));
         ctx.strokeRect(Math.min(a.x, b.x), Math.min(a.y, b.y), Math.abs(b.x - a.x), Math.abs(b.y - a.y));
       } else {
@@ -147,7 +168,7 @@ export function DrawingLayer({ chart, series, store, firstTime, intervalSec }: D
         ctx.lineTo(endX, endY);
         ctx.stroke();
       }
-      if (selected) {
+      if (highlighted) {
         handle(ctx, a.x, a.y);
         handle(ctx, b.x, b.y);
       }
@@ -161,7 +182,7 @@ export function DrawingLayer({ chart, series, store, firstTime, intervalSec }: D
     ) => {
       const y = series.priceToCoordinate(price);
       if (y === null) return;
-      ctx.strokeStyle = ALERT_COLOR;
+      ctx.strokeStyle = colors.alert;
       ctx.lineWidth = selected ? 2 : 1;
       ctx.setLineDash([5, 4]);
       ctx.beginPath();
@@ -169,7 +190,7 @@ export function DrawingLayer({ chart, series, store, firstTime, intervalSec }: D
       ctx.lineTo(width, y);
       ctx.stroke();
       ctx.setLineDash([]);
-      priceTag(ctx, price, y, ALERT_COLOR, '⏰ ');
+      priceTag(ctx, price, y, colors.alert, true);
     };
 
     const priceTag = (
@@ -177,20 +198,21 @@ export function DrawingLayer({ chart, series, store, firstTime, intervalSec }: D
       price: number,
       y: number,
       color: string,
-      prefix = '',
+      isAlert = false,
     ) => {
-      const label = `${prefix}${Format.price(price)}`;
-      ctx.font = '10px ui-monospace, monospace';
+      const label = Format.price(price);
+      ctx.font = '11px ui-monospace, "SF Mono", Menlo, monospace';
       const w = ctx.measureText(label).width + 8;
       ctx.fillStyle = color;
-      ctx.fillRect(4, y - 8, w, 16);
-      ctx.fillStyle = '#0b0c10';
-      ctx.fillText(label, 8, y + 3.5);
+      if (isAlert) ctx.fillRect(4, y - 9, 3, 18); // alert accent tab
+      ctx.fillRect(isAlert ? 7 : 4, y - 9, w, 18);
+      ctx.fillStyle = colors.tagText;
+      ctx.fillText(label, isAlert ? 11 : 8, y + 4);
     };
 
     const handle = (ctx: CanvasRenderingContext2D, x: number, y: number) => {
-      ctx.fillStyle = '#fff';
-      ctx.strokeStyle = ACCENT;
+      ctx.fillStyle = colors.handleFill;
+      ctx.strokeStyle = colors.accent;
       ctx.lineWidth = 1.5;
       ctx.beginPath();
       ctx.arc(x, y, HANDLE_RADIUS, 0, Math.PI * 2);
@@ -198,10 +220,37 @@ export function DrawingLayer({ chart, series, store, firstTime, intervalSec }: D
       ctx.stroke();
     };
 
-    raf = requestAnimationFrame(draw);
-    return () => cancelAnimationFrame(raf);
+    const schedule = () => {
+      if (raf) return;
+      raf = requestAnimationFrame(() => {
+        raf = 0;
+        draw();
+      });
+    };
+    scheduleRef.current = schedule;
+
+    const unsubStore = store.subscribe(schedule);
+    chart.timeScale().subscribeVisibleLogicalRangeChange(schedule);
+    chart.subscribeCrosshairMove(schedule);
+    const resizeObserver = new ResizeObserver(schedule);
+    resizeObserver.observe(canvas.parentElement as Element);
+    schedule();
+
+    return () => {
+      scheduleRef.current = () => {};
+      unsubStore();
+      chart.timeScale().unsubscribeVisibleLogicalRangeChange(schedule);
+      chart.unsubscribeCrosshairMove(schedule);
+      resizeObserver.disconnect();
+      if (raf) cancelAnimationFrame(raf);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chart, series, store]);
+
+  // Live candle updates shift the price→y mapping; repaint on data change.
+  useEffect(() => {
+    scheduleRef.current();
+  }, [candles]);
 
   // MARK: - Hit testing (cursor mode)
 
@@ -230,9 +279,25 @@ export function DrawingLayer({ chart, series, store, firstTime, intervalSec }: D
       }
       if (!b || a.x === null || a.y === null || b.x === null || b.y === null) continue;
       if (drawing.kind === 'rect') {
-        const inX = x >= Math.min(a.x, b.x) - 2 && x <= Math.max(a.x, b.x) + 2;
-        const inY = y >= Math.min(a.y, b.y) - 2 && y <= Math.max(a.y, b.y) + 2;
-        if (inX && inY) return { id: drawing.id, mode: 'whole' };
+        // Border (or interior when already selected) — the interior of an
+        // unselected box must not hijack chart panning.
+        const left = Math.min(a.x, b.x);
+        const right = Math.max(a.x, b.x);
+        const top = Math.min(a.y, b.y);
+        const bottom = Math.max(a.y, b.y);
+        const onBorder =
+          x >= left - HIT_DISTANCE &&
+          x <= right + HIT_DISTANCE &&
+          y >= top - HIT_DISTANCE &&
+          y <= bottom + HIT_DISTANCE &&
+          (Math.abs(x - left) <= HIT_DISTANCE ||
+            Math.abs(x - right) <= HIT_DISTANCE ||
+            Math.abs(y - top) <= HIT_DISTANCE ||
+            Math.abs(y - bottom) <= HIT_DISTANCE);
+        const alreadySelected = state.selectedId === drawing.id;
+        if (onBorder || (alreadySelected && x >= left && x <= right && y >= top && y <= bottom)) {
+          return { id: drawing.id, mode: 'whole' };
+        }
         continue;
       }
       let endX = b.x;
@@ -252,6 +317,7 @@ export function DrawingLayer({ chart, series, store, firstTime, intervalSec }: D
 
   // Cursor-mode selection/drag: intercept pointerdown on the chart container
   // in the capture phase so hits edit the shape instead of panning the chart.
+  // Also drives the hover cursor/highlight so draggability is discoverable.
   useEffect(() => {
     const canvas = canvasRef.current;
     const containerEl = canvas?.parentElement;
@@ -307,6 +373,7 @@ export function DrawingLayer({ chart, series, store, firstTime, intervalSec }: D
         }
       };
       const onUp = () => {
+        if (dragRef.current) store.persistNow(); // one write per drag, not per move
         dragRef.current = null;
         window.removeEventListener('pointermove', onMove);
         window.removeEventListener('pointerup', onUp);
@@ -315,20 +382,62 @@ export function DrawingLayer({ chart, series, store, firstTime, intervalSec }: D
       window.addEventListener('pointerup', onUp);
     };
 
+    const onHover = (event: PointerEvent) => {
+      if (store.getState().tool !== 'cursor') return;
+      const xy = canvasXY(event);
+      const hit = xy ? hitTest(xy.x, xy.y) : null;
+      const hoverId = hit?.id ?? null;
+      if (hoverId !== hoverIdRef.current) {
+        hoverIdRef.current = hoverId;
+        scheduleRef.current();
+      }
+      containerEl.style.cursor = hit
+        ? hit.mode === 'whole' || hit.mode === 'alert'
+          ? 'move'
+          : 'grab'
+        : '';
+    };
+
     containerEl.addEventListener('pointerdown', onPointerDown, true);
-    return () => containerEl.removeEventListener('pointerdown', onPointerDown, true);
+    containerEl.addEventListener('pointermove', onHover);
+    return () => {
+      containerEl.removeEventListener('pointerdown', onPointerDown, true);
+      containerEl.removeEventListener('pointermove', onHover);
+      containerEl.style.cursor = '';
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chart, series, store]);
 
-  // Delete/Backspace removes the selection; Escape cancels draft/selection.
+  // Delete/Backspace removes the selection; Escape cancels draft/selection;
+  // Cmd/Ctrl+Z undoes a destructive remove; arrows nudge the selection;
+  // plain letters arm tools (shift reserved for interval hotkeys).
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if ((event.target as HTMLElement | null)?.tagName === 'INPUT') return;
+      const tag = (event.target as HTMLElement | null)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'z') {
+        event.preventDefault();
+        store.undo();
+        return;
+      }
       if (event.key === 'Delete' || event.key === 'Backspace') {
         store.removeSelected();
       } else if (event.key === 'Escape') {
         store.cancelDraft();
         store.select(null);
+      } else if (
+        event.key === 'ArrowUp' ||
+        event.key === 'ArrowDown' ||
+        event.key === 'ArrowLeft' ||
+        event.key === 'ArrowRight'
+      ) {
+        if (store.getState().selectedId) {
+          event.preventDefault();
+          store.nudgeSelected(event.key, event.shiftKey ? 10 : 1);
+        }
+      } else if (!event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey) {
+        const toolKey = TOOL_KEYS[event.key.toLowerCase()];
+        if (toolKey) store.setTool(toolKey);
       }
     };
     window.addEventListener('keydown', onKey);
@@ -373,6 +482,8 @@ export function DrawingLayer({ chart, series, store, firstTime, intervalSec }: D
   return (
     <canvas
       ref={canvasRef}
+      role="img"
+      aria-label={`Chart drawings: ${drawings.length} shapes, ${alerts.length} alerts. Delete removes selection; arrow keys nudge it.`}
       style={{
         position: 'absolute',
         top: 0,

@@ -8,6 +8,9 @@ export interface IndicatorSettings {
   rsiEnabled: boolean;
   rsiPeriod: number;
   macdEnabled: boolean;
+  macdFastPeriod: number;
+  macdSlowPeriod: number;
+  macdSignalPeriod: number;
   bollingerEnabled: boolean;
   bollingerPeriod: number;
   bollingerMultiplier: number;
@@ -29,6 +32,9 @@ export const DEFAULT_INDICATOR_SETTINGS: IndicatorSettings = {
   rsiEnabled: false,
   rsiPeriod: 14,
   macdEnabled: false,
+  macdFastPeriod: 12,
+  macdSlowPeriod: 26,
+  macdSignalPeriod: 9,
   bollingerEnabled: false,
   bollingerPeriod: 20,
   bollingerMultiplier: 2,

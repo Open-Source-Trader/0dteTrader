@@ -141,8 +141,8 @@ export function CandleChart({
     // Crosshair → OHLC legend (latest bar when the cursor is off the chart).
     chart.subscribeCrosshairMove((param) => {
       const bar = param.seriesData.get(candleSeries) as CandlestickData | undefined;
-      const fallback = lastBarRef.current;
-      setLegend(bar ?? fallback ? legendText(bar ?? fallback!) : null);
+      const shown = bar ?? lastBarRef.current;
+      setLegend(shown ? legendText(shown) : null);
     });
 
     // Mirror the visible x-range to the sub-panes via ChartView state.

@@ -22,11 +22,11 @@ export class SettingsStore {
     localStorage.setItem(SettingsStore.keys.layoutMode, value);
   }
 
-  /** Trade panel height as a fraction of screen height, clamped to 1/4...1/2. */
+  /** Trade panel height as a fraction of screen height, clamped so the panel always fits the trade ticket (floor 0.34, ceiling 1/2). */
   get splitFraction(): number {
     const stored = Number(localStorage.getItem(SettingsStore.keys.splitFraction));
-    if (!Number.isFinite(stored) || stored <= 0) return 0.34;
-    return Math.min(0.5, Math.max(0.25, stored));
+    if (!Number.isFinite(stored) || stored <= 0) return 0.38;
+    return Math.min(0.5, Math.max(0.34, stored));
   }
 
   set splitFraction(value: number) {

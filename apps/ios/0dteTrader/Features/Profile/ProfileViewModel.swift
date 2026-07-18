@@ -1,4 +1,5 @@
 import Foundation
+import LocalAuthentication
 
 /// Backs the profile sheet: account info from GET /v1/me and the write-only
 /// Webull credential lifecycle (PUT to save/update, DELETE to remove).
@@ -32,6 +33,10 @@ final class ProfileViewModel: ObservableObject {
         self.appLockEnabled = settingsStore.appLockEnabled
     }
 
+    /// True when the last `load()` failed. Kept separate from `errorMessage`
+    /// so an account-fetch failure doesn't render as a Webull credential error.
+    @Published private(set) var loadFailed = false
+
     var canSaveCredentials: Bool {
         !appKey.trimmingCharacters(in: .whitespaces).isEmpty
             && !appSecret.isEmpty
@@ -40,15 +45,29 @@ final class ProfileViewModel: ObservableObject {
 
     func load() async {
         isLoading = true
-        errorMessage = nil
+        loadFailed = false
         defer { isLoading = false }
         do {
             me = try await apiClient.me()
-        } catch let error as APIError {
-            errorMessage = error.userMessage
         } catch {
-            errorMessage = error.localizedDescription
+            // Surfaced in the Account section with a retry affordance, not as
+            // a Webull credential error.
+            loadFailed = true
         }
+    }
+
+    /// Persists the Face ID gate, but only when biometrics are actually
+    /// available; otherwise reverts and surfaces an error.
+    func setAppLockEnabled(_ enabled: Bool) {
+        if enabled {
+            var policyError: NSError?
+            guard LAContext().canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &policyError) else {
+                appLockEnabled = false
+                errorMessage = "Face ID isn't set up on this device."
+                return
+            }
+        }
+        appLockEnabled = enabled
     }
 
     func saveCredentials() async {

@@ -2,6 +2,8 @@ import SwiftUI
 
 /// Large, high-contrast Buy/Sell action button with haptic feedback.
 /// Hit target is at least 52pt tall per quick-trade ergonomics.
+/// Pass an AA fill token (`Color.buyGreenFill` / `Color.sellRedFill`) as
+/// `color` — the bright text tokens fail contrast under a white label.
 struct TradeActionButton: View {
     let title: String
     let color: Color
@@ -17,17 +19,22 @@ struct TradeActionButton: View {
                 .font(.headline)
                 .foregroundStyle(.white)
                 .frame(maxWidth: .infinity, minHeight: 52)
-                .background(isEnabled ? color : color.opacity(0.35))
-                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .background(color)
+                .clipShape(RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous))
                 .contentShape(Rectangle())
+                .opacity(isEnabled ? 1 : AppOpacity.disabled)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(AppPressStyle())
         .disabled(!isEnabled)
         .accessibilityLabel(title)
+        .accessibilityHint(isEnabled
+            ? "Arms an order ticket with the current defaults and opens confirmation"
+            : "Unavailable. Select a contract first.")
     }
 }
 
 /// Small capsule button used for quantity quick-steppers (1 / 5 / 10).
+/// Hit target is at least 44pt per HIG.
 struct QuickChipButton: View {
     let title: String
     let action: () -> Void
@@ -40,12 +47,12 @@ struct QuickChipButton: View {
             Text(title)
                 .font(.chipLabel)
                 .foregroundStyle(.primary)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 8)
+                .padding(.horizontal, AppSpacing.md)
+                .frame(minWidth: 44, minHeight: 44)
                 .background(Color.appSurfaceElevated)
                 .clipShape(Capsule())
                 .contentShape(Capsule())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(AppPressStyle())
     }
 }

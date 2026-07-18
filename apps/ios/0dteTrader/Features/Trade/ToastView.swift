@@ -1,13 +1,15 @@
 import SwiftUI
 
 /// Result banner for order submissions and stream events.
+/// Tapping the capsule dismisses it immediately.
 struct ToastView: View {
     let toast: Toast
+    var onDismiss: (() -> Void)?
 
     private var tint: Color {
         switch toast.style {
-        case .success: return Color.pnlPositive
-        case .error: return Color.pnlNegative
+        case .success: return Color.buyGreen
+        case .error: return Color.sellRed
         case .info: return Color.appAccent
         }
     }
@@ -15,21 +17,44 @@ struct ToastView: View {
     private var icon: String {
         switch toast.style {
         case .success: return "checkmark.circle.fill"
-        case .error: return "exclamationmark.triangle.fill"
+        case .error: return "xmark.circle.fill"
         case .info: return "info.circle.fill"
         }
     }
 
     var body: some View {
-        Label(toast.message, systemImage: icon)
-            .font(.footnote.weight(.medium))
-            .foregroundStyle(.primary)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .background(Color.appSurfaceElevated)
-            .clipShape(Capsule())
-            .overlay(Capsule().stroke(tint.opacity(0.6), lineWidth: 1))
-            .shadow(radius: 6)
-            .padding(.horizontal, 16)
+        HStack(spacing: 6) {
+            Image(systemName: icon)
+                .foregroundStyle(tint)
+            Text(toast.message)
+                .foregroundStyle(.primary)
+                .lineLimit(2)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .font(.footnote.weight(.medium))
+        .padding(.horizontal, AppSpacing.lg)
+        .padding(.vertical, 14)
+        .frame(minHeight: 44)
+        .background {
+            ZStack {
+                Color.appSurfaceElevated
+                tint.opacity(0.15)
+            }
+        }
+        .clipShape(Capsule())
+        .overlay(Capsule().stroke(tint.opacity(0.9), lineWidth: 1))
+        .shadow(color: AppElevation.toast.color, radius: AppElevation.toast.radius, y: AppElevation.toast.y)
+        .padding(.horizontal, AppSpacing.lg)
+        .contentShape(Capsule())
+        .onTapGesture { onDismiss?() }
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isStaticText)
+        .onAppear {
+            // Delay lets the move transition settle so the announcement isn't clipped.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                AccessibilityNotification.Announcement(toast.message).post()
+            }
+        }
     }
 }

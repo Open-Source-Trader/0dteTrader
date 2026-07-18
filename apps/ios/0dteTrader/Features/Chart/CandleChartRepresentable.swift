@@ -2,6 +2,68 @@ import DGCharts
 import SwiftUI
 import UIKit
 
+/// Compact OHLC marker shown while tap/drag-highlighting the candle chart.
+final class ChartMarkerView: MarkerView {
+    var candles: [Candle] = []
+    var intervalSeconds: TimeInterval = 60
+
+    private let paddingH: CGFloat = 8
+    private let paddingV: CGFloat = 6
+
+    private let textLabel: UILabel = {
+        let label = UILabel()
+        label.font = .monospacedDigitSystemFont(ofSize: 10, weight: .medium)
+        label.textColor = .white
+        label.numberOfLines = 1
+        return label
+    }()
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        backgroundColor = UIColor(Color.appSurfaceElevated)
+        layer.cornerRadius = 8
+        addSubview(textLabel)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) is not supported")
+    }
+
+    override func refreshContent(entry: ChartDataEntry, highlight: Highlight) {
+        let index = Int(entry.x.rounded())
+        guard candles.indices.contains(index) else { return }
+        let candle = candles[index]
+        let time = ChartTimeFormat.string(for: candle.time, intervalSeconds: intervalSeconds)
+        textLabel.text = "\(time)  O \(Format.price(candle.open))  H \(Format.price(candle.high))  L \(Format.price(candle.low))  C \(Format.price(candle.close))"
+        textLabel.sizeToFit()
+        let contentSize = textLabel.bounds.size
+        bounds = CGRect(
+            x: 0, y: 0,
+            width: contentSize.width + paddingH * 2,
+            height: contentSize.height + paddingV * 2
+        )
+        textLabel.frame = CGRect(
+            x: paddingH, y: paddingV,
+            width: contentSize.width, height: contentSize.height
+        )
+    }
+
+    override func offset(forValueAtPoint point: CGPoint, chart: ChartViewBase) -> CGPoint {
+        var offset = CGPoint(x: -bounds.width / 2, y: -bounds.height - 12)
+        // Keep the marker fully on screen near the edges.
+        if point.x + offset.x < 0 {
+            offset.x = -point.x + 4
+        } else if point.x + offset.x + bounds.width > chart.bounds.width {
+            offset.x = chart.bounds.width - point.x - bounds.width - 4
+        }
+        if point.y + offset.y < 0 {
+            offset.y = 12
+        }
+        return offset
+    }
+}
+
 /// Candlestick chart with indicator line overlays, optional volume bars, and
 /// the drawing-annotation overlay, backed by DanielGindi/Charts
 /// `CombinedChartView` (bars behind candles, indicator lines on top).
@@ -9,10 +71,13 @@ struct CandleChartRepresentable: UIViewRepresentable {
     let candles: [Candle]
     let overlays: [IndicatorSeries]
     let overlayColors: [String: UIColor]
-    var visibleCount: Double = 120
+    var visibleCount: Double = ChartMetrics.visibleCandles
     var showVolume: Bool = false
     var intervalSeconds: TimeInterval = 60
     var drawingsModel: ChartDrawingsModel?
+    /// Called with the main chart's visible x-range whenever the user pans or
+    /// zooms, so non-interactive indicator panes can track the same window.
+    var onVisibleRangeChange: ((ClosedRange<Double>) -> Void)?
 
     /// Hosts the chart plus the annotation overlay at identical frames so the
     /// overlay can reuse the chart's pixel coordinate space directly.
@@ -39,6 +104,31 @@ struct CandleChartRepresentable: UIViewRepresentable {
         }
     }
 
+    /// Publishes the main chart's visible x-range and keeps the annotation
+    /// overlay's time/price-anchored shapes in sync on pan/zoom.
+    final class Coordinator: NSObject, ChartViewDelegate {
+        var onVisibleRange: ((ClosedRange<Double>) -> Void)?
+        var onTransform: (() -> Void)?
+
+        func chartTranslated(_ chartView: ChartViewBase, dX: CGFloat, dY: CGFloat) {
+            emit(chartView)
+            onTransform?()
+        }
+
+        func chartScaled(_ chartView: ChartViewBase, scaleX: CGFloat, scaleY: CGFloat) {
+            emit(chartView)
+            onTransform?()
+        }
+
+        func emit(_ chartView: ChartViewBase) {
+            onVisibleRange?(chartView.lowestVisibleX...chartView.highestVisibleX)
+        }
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
+
     func makeUIView(context: Context) -> ContainerView {
         let container = ContainerView()
         let chart = container.chart
@@ -49,15 +139,26 @@ struct CandleChartRepresentable: UIViewRepresentable {
             CombinedChartView.DrawOrder.line.rawValue,
         ]
         chart.legend.enabled = false
-        chart.noDataText = "No chart data"
-        chart.noDataFont = .preferredFont(forTextStyle: .footnote)
-        chart.noDataTextColor = .secondaryLabel
+        // The designed loading/empty states in ChartView own this surface.
+        chart.noDataText = ""
         chart.backgroundColor = .clear
         chart.doubleTapToZoomEnabled = false
-        chart.highlightPerTapEnabled = false
+        chart.highlightPerTapEnabled = true
+        chart.highlightPerDragEnabled = true
         chart.dragEnabled = true
         chart.pinchZoomEnabled = true
         chart.setScaleMinima(10, scaleYmin: 1)
+
+        let rangeCallback = onVisibleRangeChange
+        context.coordinator.onVisibleRange = { range in rangeCallback?(range) }
+        context.coordinator.onTransform = { [weak container] in
+            container?.overlay.setNeedsDisplay()
+        }
+        chart.delegate = context.coordinator
+
+        let marker = ChartMarkerView()
+        marker.chartView = chart
+        chart.marker = marker
 
         let xAxis = chart.xAxis
         xAxis.labelPosition = .bottom
@@ -91,10 +192,18 @@ struct CandleChartRepresentable: UIViewRepresentable {
         container.overlay.model = drawingsModel
         container.overlay.firstTime = candles.first?.time.timeIntervalSince1970 ?? 0
         container.overlay.intervalSeconds = intervalSeconds
+        container.overlay.candles = candles
+
+        if let marker = chart.marker as? ChartMarkerView {
+            marker.candles = candles
+            marker.intervalSeconds = intervalSeconds
+        }
 
         guard !candles.isEmpty else {
             chart.data = nil
             chart.notifyDataSetChanged()
+            chart.accessibilityChartDescriptor = nil
+            container.overlay.setNeedsDisplay()
             return
         }
         let previousCount = chart.data?.candleData?.entryCount ?? 0
@@ -109,16 +218,21 @@ struct CandleChartRepresentable: UIViewRepresentable {
             )
         }
         let candleSet = CandleChartDataSet(entries: candleEntries, label: "Price")
-        candleSet.increasingColor = .systemGreen
-        candleSet.decreasingColor = .systemRed
+        candleSet.increasingColor = .chartUp
+        candleSet.decreasingColor = .chartDown
         candleSet.neutralColor = .systemBlue
-        candleSet.increasingFilled = true
+        // Hollow up / solid down so direction isn't carried by color alone.
+        candleSet.increasingFilled = false
         candleSet.decreasingFilled = true
         candleSet.shadowColorSameAsCandle = true
-        candleSet.shadowWidth = 0.7
-        candleSet.barSpace = 0.2
+        candleSet.shadowWidth = ChartMetrics.shadowWidth
+        candleSet.barSpace = ChartMetrics.barSpace
         candleSet.drawValuesEnabled = false
         candleSet.axisDependency = .left
+        candleSet.highlightColor = UIColor.separator
+        candleSet.highlightLineWidth = 0.5
+        candleSet.highlightLineDashLengths = [4, 3]
+        candleSet.drawHorizontalHighlightIndicatorEnabled = true
 
         let data = CombinedChartData()
         data.candleData = CandleChartData(dataSet: candleSet)
@@ -133,8 +247,8 @@ struct CandleChartRepresentable: UIViewRepresentable {
                 volumeEntries.append(BarChartDataEntry(x: Double(index), y: volume))
                 volumeColors.append(
                     candle.close >= candle.open
-                        ? UIColor.systemGreen.withAlphaComponent(0.45)
-                        : UIColor.systemRed.withAlphaComponent(0.45)
+                        ? UIColor.chartUp.withAlphaComponent(0.45)
+                        : UIColor.chartDown.withAlphaComponent(0.45)
                 )
             }
             let volumeSet = BarChartDataSet(entries: volumeEntries, label: "Volume")
@@ -143,7 +257,7 @@ struct CandleChartRepresentable: UIViewRepresentable {
             volumeSet.axisDependency = .right
             data.barData = BarChartData(dataSet: volumeSet)
             // Bars occupy the bottom ~20% of the pane.
-            chart.rightAxis.axisMaximum = max(maxVolume, 1) * 5
+            chart.rightAxis.axisMaximum = max(maxVolume, 1) * ChartMetrics.volumeHeightRatio
         }
 
         let lineSets: [LineChartDataSet] = overlays.compactMap { series in
@@ -154,7 +268,7 @@ struct CandleChartRepresentable: UIViewRepresentable {
             guard !entries.isEmpty else { return nil }
             let set = LineChartDataSet(entries: entries, label: series.name)
             set.mode = .linear
-            set.lineWidth = 1.2
+            set.lineWidth = ChartMetrics.overlayLineWidth
             set.drawCirclesEnabled = false
             set.drawValuesEnabled = false
             set.setColor(overlayColors[series.id] ?? .systemOrange)
@@ -168,18 +282,37 @@ struct CandleChartRepresentable: UIViewRepresentable {
         chart.data = data
         chart.xAxis.valueFormatter = IndexAxisValueFormatter(values: timeLabels)
         chart.notifyDataSetChanged()
+        container.overlay.setNeedsDisplay()
+
+        if let last = candles.last {
+            chart.accessibilityChartDescriptor = AXChartDescriptor(
+                title: "Price chart",
+                summary: "\(candles.count) candles, last close \(Format.price(last.close))"
+            )
+        }
 
         // Keep the latest candle in view on first load and when a new candle
         // forms, but never fight the user's manual pan/zoom on ticks.
         if previousCount != candles.count {
             chart.setVisibleXRangeMaximum(visibleCount)
             chart.moveViewToX(Double(candles.count - 1))
+            // Publish the initial window so the indicator panes match from
+            // the first load, before any user gesture.
+            context.coordinator.emit(chart)
         }
     }
 
+    /// X-axis labels, deduped so adjacent candles in the same minute/day
+    /// don't print the same label twice.
     private var timeLabels: [String] {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "HH:mm"
-        return candles.map { formatter.string(from: $0.time) }
+        var labels: [String] = []
+        labels.reserveCapacity(candles.count)
+        var previous = ""
+        for candle in candles {
+            let label = ChartTimeFormat.string(for: candle.time, intervalSeconds: intervalSeconds)
+            labels.append(label == previous ? "" : label)
+            previous = label
+        }
+        return labels
     }
 }

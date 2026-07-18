@@ -1,10 +1,14 @@
 import LocalAuthentication
+import UIKit
 
 /// Optional FaceID gate on app foreground (PRD FR-5, SECURITY.md §5).
 /// Enabled from the profile screen; state persisted in SettingsStore.
 @MainActor
 final class AppLockManager: ObservableObject {
     @Published private(set) var isLocked = false
+    /// Set when the last biometric attempt failed or was cancelled, so the
+    /// lock screen can show feedback instead of sitting visually unchanged.
+    @Published private(set) var lastAttemptFailed = false
 
     private let settingsStore: SettingsStore
 

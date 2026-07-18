@@ -2,8 +2,22 @@ import Foundation
 
 /// Shared display formatting for prices, strikes and P&L.
 enum Format {
+    private static let priceFormatter: NumberFormatter = {
+        let f = NumberFormatter()
+        f.numberStyle = .decimal
+        f.minimumFractionDigits = 2
+        f.maximumFractionDigits = 2
+        f.groupingSeparator = ","
+        f.usesGroupingSeparator = true
+        return f
+    }()
+
+    /// Thousands-grouped so large prices stay glanceable (`6,543.25`).
     static func price(_ value: Double, fractionDigits: Int = 2) -> String {
-        String(format: "%.\(fractionDigits)f", value)
+        priceFormatter.minimumFractionDigits = fractionDigits
+        priceFormatter.maximumFractionDigits = fractionDigits
+        return priceFormatter.string(from: NSNumber(value: value))
+            ?? String(format: "%.\(fractionDigits)f", value)
     }
 
     /// `+1.24` / `-0.87` style signed values for P&L.

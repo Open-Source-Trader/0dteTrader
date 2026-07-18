@@ -6,30 +6,34 @@ Official Webull OpenAPI: https://developer.webull.com/apis/docs/ (apply for deve
 review typically 1–2 business days). Per-user credentials: app key, app secret, account ID.
 
 > **Status:** P4 is implemented — `WebullBrokerGateway` + `apps/api/src/broker/webull/` (signer,
-> HTTP client, token store, client provider, mappers). Request signing is verified against the
-> official docs test vector; response field shapes are confirmed via the sandbox smoke test
-> (`npm run smoke:webull`, see docs/RUNBOOK.md). Webull has no option-chain discovery endpoint,
-> so chains are synthesized from ATM-probed snapshot queries. Every payload mapping lives in
-> `webull-mappers.ts` so corrections are localized.
+> client, endpoints, mappers). Request signing is verified against the official docs test vector;
+> response field shapes are marked per-entry as verified (seen in official SDK source or docs) or
+> best-effort (see §8). Webull has **no option-chain discovery endpoint**, so chains are
+> synthesized from snapshot probes of a strike grid. All endpoint paths and order payloads live in
+> `webull-endpoints.ts` (single mapping file) so corrections are localized; response→DTO
+> translation lives in `webull-mappers.ts`. The sandbox smoke script
+> (`npm run smoke:webull`, see docs/RUNBOOK.md) is the live-verification vehicle.
 
 ## 2. Capability Mapping
 
-| 0dteTrader need | Webull OpenAPI capability |
-|---|---|
-| User auth to broker | App key + app secret → access token (token endpoint; cached, refreshed before expiry) |
-| Quotes | Market data quote endpoint (REST snapshot) |
-| Live streaming | Streaming quotes (WebSocket/MQTT per docs) — v1 polls REST at 1s in mock, upgrades to stream in P4 if entitlement allows |
-| Candles | Historical bars endpoint (interval mapping: 1m/5m/15m/1h/1d) |
-| Options chain | Option chain endpoint by underlying + expiration |
-| Futures contracts | Futures contract list by root symbol |
-| Place/cancel order | Trade endpoints: place, cancel, replace; order status query |
-| Positions/account | Account endpoints: positions, balances/buying power |
+| 0dteTrader need | Webull OpenAPI capability | Confidence |
+|---|---|---|
+| User auth to broker | `POST /openapi/auth/token/create` (+ `/refresh`, `/check`), app key/secret signed; token cached, refreshed before expiry | verified (SDK + docs) |
+| Quotes | Snapshot endpoints: `GET /openapi/market-data/{stock,option,futures}/snapshot` | verified (SDK); option snapshot by OCC symbol |
+| Live streaming | MQTT/gRPC per docs — v1 polls REST at 1s; streaming upgrade is future work | verified it exists, not implemented |
+| Candles | Bars endpoints: `GET /openapi/market-data/{stock,option,futures}/bars` (timespan M1/M5/M15/M60/D) | verified (SDK) |
+| Options chain | **Does not exist in the official API** — chains synthesized by probing option snapshots (§8) | best-effort |
+| Futures contracts | `GET /openapi/instrument/futures/by-code` (code + contract_type=MONTHLY) | verified path (SDK); response fields best-effort |
+| Place/cancel order | Unified endpoints: `POST /openapi/trade/order/{preview,place,replace,cancel}` + `GET /openapi/trade/order/{open,detail}` | verified (changelog + SDK + trade-api guides) |
+| Positions/account | `GET /openapi/assets/{positions,balance}`, `GET /openapi/account/list` | verified (SDK + docs); response fields per mappers |
 
 ## 3. Rate Limits & Quotas
 
 - Respect the per-app and per-account rate limits in the OpenAPI docs; the backend centralizes all
-  Webull calls behind `WebullClientProvider` so throttling/backoff (429 → exponential backoff)
-  lives in one place.
+  Webull calls behind `WebullClient` so throttling/backoff (429 → exponential backoff with jitter,
+  honoring `Retry-After`) lives in one place.
+- Published limits seen so far: `token/create` 10 req/30 s; `positions` 2 req/2 s; bars 60 req/min.
+  Others are unpublished — treat as ~60 req/min.
 - Quote fan-out: the WS gateway subscribes once per symbol per process, not once per client.
 
 ## 4. MockBrokerGateway Contract
@@ -65,9 +69,10 @@ This keeps the entire app demoable and all tests deterministic without any Webul
 | Timeout / network failure | `BROKER_UNAVAILABLE` (503) |
 
 Observed live: sandbox error bodies use `error_code` (e.g. `UNAUTHORIZED`), not `code`; the
-HTTP client accepts both. Business errors arrive as HTTP 417 with codes like
-`OPENAPI_NO_NIGHT_TRADING_TIME`; mapping is by substring match on code+message in one exported
-table (`mapWebullError` in `webull-http.client.ts`).
+client accepts both (`message`/`msg` likewise). Business errors arrive as HTTP 417 with codes like
+`OPENAPI_NO_NIGHT_TRADING_TIME`; mapping is by substring match on code+message in one place
+(`WebullClient.mapError` in `webull-client.ts`), with message passthrough sanitized
+(single line, ≤ 200 chars).
 
 ## 7. Environments
 
@@ -92,19 +97,23 @@ depends on Webull payload shapes.
 
 | File | Responsibility |
 |---|---|
-| `webull-signer.ts` | Per-request HMAC signing (ported from the official Python SDK). Verified against the official docs test vector (`kvlS6opdZDhEBo5jq40nHYXaLvM=`). Algorithm switches by host (§7). |
-| `webull-http.client.ts` | Single choke point for all Webull HTTP: signing, 10 s timeout, 429 → exponential backoff (4 retries, honors Retry-After), one 5xx retry, error mapping (§6). Never logs headers/credentials. |
-| `webull-token.store.ts` | API token lifecycle: create/refresh, cached in memory + encrypted (AES-256-GCM) in the `webull_api_tokens` table so restarts don't retrigger production SMS approval. Single-flight per user; invalidated + recreated once on 401. |
-| `webull-client.provider.ts` | Per-user endpoint facade: decrypts credentials via `CredentialsService`, chunks option snapshots (≤20 symbols), paginates open orders, micro-caches (quotes ~1 s, futures instrument lists ~5 min) to fit rate limits. |
-| `webull-mappers.ts` | All payload ↔ DTO translation: quotes, candles (`1m→M1 … 1d→D`), order status map, futures symbol format (`ESZ5`+`contract_month` ↔ app `ESZ25`), OCC symbols for option legs/positions. Field-shape corrections belong here only. |
-| `../webull-broker.gateway.ts` | Implements `BrokerGateway`. Chain synthesis (below), order construction, post-place status polling (1 s/2 s/5 s/10 s → `OrderEventsService` → WS `orderUpdate`). |
+| `webull-signer.ts` | Per-request HMAC signing (ported from the official Python SDK). Verified against the official docs test vector (`kvlS6opdZDhEBo5jq40nHYXaLvM=`). Algorithm switches by host (§7) using the SDK's upgrade-host list (`api.webull.com` → HMAC-SHA1 + MD5 body hash; everything else, incl. `data-api.*` and sandbox hosts → HMAC-SHA256 + SHA-256 body hash). |
+| `webull-endpoints.ts` | **The single mapping file**: hosts, endpoint paths + versions, query params, order payload builders (`buildOptionOrder` / `buildFuturesOrder`), `toClientOrderId` (md5 hex of the idempotency key, 32 chars), `position_intent` derivation, and the small parsers not covered by the mappers (balance, place/preview results, futures instruments, error bodies). Header comment tracks per-entry verification status — corrections belong here only. |
+| `webull-client.ts` | `WebullClient` — per-user HTTP client: request signing, 10 s timeout, 429 → exponential backoff with jitter (4 retries, honors `Retry-After`), one 5xx retry, error mapping (§6), and the API-token lifecycle (create/refresh, in-memory cache, single-flight, refresh ~2 days before the ~15-day expiry, cleared on 401). Never logs headers/credentials. |
+| `webull-mappers.ts` | All response payload → DTO translation: quotes, candles (`1m→M1 … 1d→D`), order status map, futures symbol format (`ESZ6`+`contract_month` ↔ app `ESZ26`), OCC symbols for option legs/positions. Verified against the official MCP server's field usage. |
+| `../webull-broker.gateway.ts` | Implements `BrokerGateway`. Per-user client factory keyed on a credentials fingerprint, chain synthesis (below), contract resolution, order construction, post-place status polling (1 s × up to 60 → `OrderEventsService` → WS `orderUpdate`). |
 
 Key decisions:
 
-- **Option chains are synthesized** — Webull has no chain-discovery endpoint. Candidate
-  expirations (today/+1d/weekly/monthly) are validated by probing ATM call snapshots; strikes are
-  generated ±12 around ATM ($1 under $250 underlying, $5 above) and filtered to contracts the
-  snapshot endpoint actually returns. Chains cache 45 s per underlying+expiration.
+- **Option chains are synthesized** — Webull has no chain-discovery endpoint. Expirations are the
+  standard calendar (today/+1d/weekly/monthly, same shape as the mock); strikes are generated
+  ±12 around ATM ($1 under $250 underlying, $5 above) as candidate OCC symbols and filtered to
+  contracts the option-snapshot endpoint actually returns (batched ≤ 20 symbols per call).
+  [best-effort — the only official way to discover contracts]
+- **Unified order endpoints** — place/preview/cancel go to `POST /openapi/trade/order/*` for
+  both options and futures (since 2025-12-13 "a single order place API enables trading across
+  stocks, options, futures, and crypto"; matches `scripts/webull-smoke.ts`). The asset-specific
+  `/openapi/trade/option/order/*` paths remain in `webull-endpoints.ts` as documented fallbacks.
 - **Broker-side idempotency**: `client_order_id` = md5 hex (32 chars) of the app's idempotency
   key; the same key can never double-place. The app-facing `orderId` IS the `client_order_id`
   because Webull cancels by it.
@@ -114,11 +123,18 @@ Key decisions:
   back to the local `estimateBuyingPower` when preview fails; warnings mirror the mock (0DTE,
   market-order-on-option) plus a real buying-power check from `GET /openapi/assets/balance`.
 - `mid` orders are rested as `LIMIT` at the computed mid; `market` maps to `MARKET`.
+- **Fills**: Webull streams order events over gRPC (not implemented in P4). The gateway emits
+  `submitted` immediately, then polls `GET /openapi/trade/order/detail` once per second (max 60)
+  until a terminal status and emits the final `orderUpdate` (incl. `filledPrice`).
+- **Token cache is in-memory.** A production restart re-creates tokens, which may require the user
+  to re-approve in the Webull app (SMS). Persisting tokens (encrypted) across restarts is a
+  planned follow-up — the `webull_api_tokens` table already exists in the schema for this.
 
-**Verification status:** signing, wiring, encrypted credential storage, and error mapping are
-verified (unit tests + live boot against sandbox). Response field shapes in `webull-mappers.ts`
-(futures year digits, order/position fields, balance fields) are best-effort from docs and
-pending confirmation via the sandbox smoke test once sandbox credentials exist.
+**Verification status:** request signing (official docs test vector), module wiring, encrypted
+credential storage, order payload shapes, and error mapping are verified (unit tests with a
+mocked HTTP layer + the SDK/docs sources cited in `webull-endpoints.ts`). Response field shapes
+in `webull-mappers.ts` come from the official MCP server source; futures instrument fields and
+option-snapshot fields are best-effort pending a live sandbox run of `npm run smoke:webull`.
 
 ## 9. Webull Cloud MCP (auxiliary)
 

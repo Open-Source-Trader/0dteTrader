@@ -101,6 +101,11 @@ struct TradeScreenView: View {
                 tradeViewModel.handleOrderUpdate(update)
             }
         }
+        .onChange(of: chartViewModel.alertNotice) { _, notice in
+            if let notice {
+                tradeViewModel.showToast(notice.message, style: .info)
+            }
+        }
     }
 
     // MARK: - Layouts

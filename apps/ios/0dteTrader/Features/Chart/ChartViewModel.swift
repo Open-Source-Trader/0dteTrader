@@ -26,8 +26,14 @@ struct IndicatorSeries: Equatable, Sendable {
     let values: [Double?]
 }
 
+/// A fired price alert, surfaced to the trade screen as a toast.
+struct ChartAlertNotice: Equatable, Sendable {
+    let id: UUID
+    let message: String
+}
+
 /// Owns the chart: candle history via REST, live quotes via QuoteSocketClient,
-/// indicator computation, symbol/interval switching.
+/// indicator computation, symbol/interval switching, chart annotations.
 @MainActor
 final class ChartViewModel: ObservableObject {
     @Published private(set) var symbol: String
@@ -36,6 +42,10 @@ final class ChartViewModel: ObservableObject {
     @Published private(set) var quote: Quote?
     @Published private(set) var isLoading = false
     @Published var errorMessage: String?
+    @Published private(set) var alertNotice: ChartAlertNotice?
+
+    /// Drawing tools + price alerts for the current symbol.
+    let drawings = ChartDrawingsModel()
 
     @Published var indicatorSettings: IndicatorSettings {
         didSet { settingsStore.indicatorSettings = indicatorSettings }
@@ -55,6 +65,7 @@ final class ChartViewModel: ObservableObject {
         self.settingsStore = settingsStore
         self.symbol = settingsStore.lastSymbol ?? "SPY"
         self.indicatorSettings = settingsStore.indicatorSettings
+        drawings.setSymbol(self.symbol)
 
         socket.$lastQuote
             .compactMap { $0 }
@@ -93,6 +104,7 @@ final class ChartViewModel: ObservableObject {
         socket.unsubscribe(symbols: [symbol])
         symbol = normalized
         settingsStore.lastSymbol = normalized
+        drawings.setSymbol(normalized)
         quote = nil
         candles = []
         socket.subscribe(symbols: [normalized])
@@ -109,7 +121,16 @@ final class ChartViewModel: ObservableObject {
 
     private func handleLiveQuote(_ quote: Quote) {
         guard quote.symbol == symbol else { return }
+        let previousLast = self.quote?.last
         self.quote = quote
+        if let previousLast {
+            for alert in drawings.checkAlerts(previousLast: previousLast, last: quote.last) {
+                alertNotice = ChartAlertNotice(
+                    id: UUID(),
+                    message: "Alert: \(symbol) crossed \(Format.price(alert.price))"
+                )
+            }
+        }
         guard !candles.isEmpty else { return }
 
         let bucketSeconds = (quote.timestamp.timeIntervalSince1970 / interval.seconds).rounded(.down) * interval.seconds
@@ -195,6 +216,29 @@ final class ChartViewModel: ObservableObject {
             IndicatorSeries(id: "macd", name: "MACD", values: values.macdLine),
             IndicatorSeries(id: "macdSignal", name: "Signal", values: values.signalLine),
             IndicatorSeries(id: "macdHistogram", name: "Histogram", values: values.histogram)
+        )
+    }
+
+    var stochSeries: (k: IndicatorSeries, d: IndicatorSeries)? {
+        guard indicatorSettings.stochEnabled else { return nil }
+        let values = IndicatorEngine.stochastic(
+            candles: candles,
+            kPeriod: indicatorSettings.stochKPeriod,
+            kSmooth: indicatorSettings.stochKSmooth,
+            dPeriod: indicatorSettings.stochDPeriod
+        )
+        return (
+            IndicatorSeries(id: "stochK", name: "%K", values: values.k),
+            IndicatorSeries(id: "stochD", name: "%D", values: values.d)
+        )
+    }
+
+    var atrSeries: IndicatorSeries? {
+        guard indicatorSettings.atrEnabled else { return nil }
+        return IndicatorSeries(
+            id: "atr",
+            name: "ATR \(indicatorSettings.atrPeriod)",
+            values: IndicatorEngine.atr(candles: candles, period: indicatorSettings.atrPeriod)
         )
     }
 }

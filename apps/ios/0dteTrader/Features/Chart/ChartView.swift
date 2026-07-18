@@ -5,8 +5,20 @@ import UIKit
 /// candle chart with overlays, and optional RSI / MACD sub-panes.
 struct ChartView: View {
     @ObservedObject var viewModel: ChartViewModel
+    @ObservedObject var drawings: ChartDrawingsModel
     let onSymbolSearch: () -> Void
     let onIndicatorSettings: () -> Void
+
+    init(
+        viewModel: ChartViewModel,
+        onSymbolSearch: @escaping () -> Void,
+        onIndicatorSettings: @escaping () -> Void
+    ) {
+        _viewModel = ObservedObject(wrappedValue: viewModel)
+        _drawings = ObservedObject(wrappedValue: viewModel.drawings)
+        self.onSymbolSearch = onSymbolSearch
+        self.onIndicatorSettings = onIndicatorSettings
+    }
 
     private static let overlayColors: [String: UIColor] = [
         "sma": .systemOrange,
@@ -24,7 +36,10 @@ struct ChartView: View {
                 CandleChartRepresentable(
                     candles: viewModel.candles,
                     overlays: viewModel.priceOverlays,
-                    overlayColors: Self.overlayColors
+                    overlayColors: Self.overlayColors,
+                    showVolume: viewModel.indicatorSettings.volumeEnabled,
+                    intervalSeconds: viewModel.interval.seconds,
+                    drawingsModel: drawings
                 )
                 if viewModel.isLoading {
                     ProgressView()
@@ -65,6 +80,32 @@ struct ChartView: View {
                 )
                 .frame(height: 84)
             }
+
+            if let stoch = viewModel.stochSeries {
+                IndicatorPaneRepresentable(
+                    series: [
+                        .init(id: stoch.k.id, kind: .line, values: stoch.k.values),
+                        .init(id: stoch.d.id, kind: .line, values: stoch.d.values),
+                    ],
+                    colors: [
+                        "stochK": .systemBlue,
+                        "stochD": .systemOrange,
+                    ],
+                    guideLines: [20, 80],
+                    yRange: 0...100,
+                    xValueCount: viewModel.candles.count
+                )
+                .frame(height: 72)
+            }
+
+            if let atr = viewModel.atrSeries {
+                IndicatorPaneRepresentable(
+                    series: [.init(id: atr.id, kind: .line, values: atr.values)],
+                    colors: ["atr": .systemTeal],
+                    xValueCount: viewModel.candles.count
+                )
+                .frame(height: 72)
+            }
         }
         .background(Color.appBackground)
     }
@@ -98,6 +139,8 @@ struct ChartView: View {
 
             Spacer()
 
+            drawingToolsMenu
+
             Menu {
                 ForEach(ChartInterval.allCases, id: \.self) { interval in
                     Button(interval.rawValue) {
@@ -127,5 +170,40 @@ struct ChartView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
+    }
+
+    /// Drawing tools dropdown (TradingView-style annotations).
+    private var drawingToolsMenu: some View {
+        Menu {
+            ForEach(DrawingTool.allCases) { tool in
+                Button {
+                    drawings.tool = tool
+                } label: {
+                    if drawings.tool == tool {
+                        Label(tool.title, systemImage: "checkmark")
+                    } else {
+                        Label(tool.title, systemImage: tool.systemImage)
+                    }
+                }
+            }
+            if drawings.hasAnnotations {
+                Button(role: .destructive) {
+                    drawings.removeSelectedOrClear()
+                } label: {
+                    Label(
+                        drawings.selectedId != nil ? "Delete Selection" : "Clear All Drawings",
+                        systemImage: "trash"
+                    )
+                }
+            }
+        } label: {
+            Image(systemName: drawings.tool == .cursor ? "pencil.and.outline" : drawings.tool.systemImage)
+                .font(.subheadline)
+                .foregroundStyle(drawings.tool == .cursor ? AnyShapeStyle(.primary) : AnyShapeStyle(.white))
+                .padding(8)
+                .background(drawings.tool == .cursor ? Color.appSurfaceElevated : Color.appAccent)
+                .clipShape(Circle())
+        }
+        .accessibilityLabel("Drawing tools")
     }
 }

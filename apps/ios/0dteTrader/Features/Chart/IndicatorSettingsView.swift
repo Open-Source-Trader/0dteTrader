@@ -22,6 +22,8 @@ struct IndicatorSettingsView: View {
 
                     Toggle("VWAP", isOn: $settings.vwapEnabled)
 
+                    Toggle("Volume", isOn: $settings.volumeEnabled)
+
                     Toggle("Bollinger Bands", isOn: $settings.bollingerEnabled)
                     if settings.bollingerEnabled {
                         Stepper("Period: \(settings.bollingerPeriod)", value: $settings.bollingerPeriod, in: 5...100)
@@ -41,6 +43,18 @@ struct IndicatorSettingsView: View {
                     }
 
                     Toggle("MACD (12, 26, 9)", isOn: $settings.macdEnabled)
+
+                    Toggle("Stochastic", isOn: $settings.stochEnabled)
+                    if settings.stochEnabled {
+                        Stepper("%K Period: \(settings.stochKPeriod)", value: $settings.stochKPeriod, in: 5...50)
+                        Stepper("%K Smoothing: \(settings.stochKSmooth)", value: $settings.stochKSmooth, in: 1...10)
+                        Stepper("%D Period: \(settings.stochDPeriod)", value: $settings.stochDPeriod, in: 1...10)
+                    }
+
+                    Toggle("ATR", isOn: $settings.atrEnabled)
+                    if settings.atrEnabled {
+                        Stepper("Period: \(settings.atrPeriod)", value: $settings.atrPeriod, in: 2...50)
+                    }
                 }
             }
             .navigationTitle("Indicators")

@@ -13,6 +13,13 @@ struct IndicatorSettings: Codable, Equatable, Sendable {
     var bollingerEnabled: Bool
     var bollingerPeriod: Int
     var bollingerMultiplier: Double
+    var volumeEnabled: Bool
+    var stochEnabled: Bool
+    var stochKPeriod: Int
+    var stochKSmooth: Int
+    var stochDPeriod: Int
+    var atrEnabled: Bool
+    var atrPeriod: Int
 
     static let `default` = IndicatorSettings(
         smaEnabled: false,
@@ -25,6 +32,40 @@ struct IndicatorSettings: Codable, Equatable, Sendable {
         macdEnabled: false,
         bollingerEnabled: false,
         bollingerPeriod: 20,
-        bollingerMultiplier: 2
+        bollingerMultiplier: 2,
+        volumeEnabled: true,
+        stochEnabled: false,
+        stochKPeriod: 14,
+        stochKSmooth: 3,
+        stochDPeriod: 3,
+        atrEnabled: false,
+        atrPeriod: 14
     )
+}
+
+// Decoding lives in an extension so the memberwise initializer stays available.
+// decodeIfPresent keeps settings saved by older app versions valid.
+extension IndicatorSettings {
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let defaults = IndicatorSettings.default
+        smaEnabled = try container.decodeIfPresent(Bool.self, forKey: .smaEnabled) ?? defaults.smaEnabled
+        smaPeriod = try container.decodeIfPresent(Int.self, forKey: .smaPeriod) ?? defaults.smaPeriod
+        emaEnabled = try container.decodeIfPresent(Bool.self, forKey: .emaEnabled) ?? defaults.emaEnabled
+        emaPeriod = try container.decodeIfPresent(Int.self, forKey: .emaPeriod) ?? defaults.emaPeriod
+        vwapEnabled = try container.decodeIfPresent(Bool.self, forKey: .vwapEnabled) ?? defaults.vwapEnabled
+        rsiEnabled = try container.decodeIfPresent(Bool.self, forKey: .rsiEnabled) ?? defaults.rsiEnabled
+        rsiPeriod = try container.decodeIfPresent(Int.self, forKey: .rsiPeriod) ?? defaults.rsiPeriod
+        macdEnabled = try container.decodeIfPresent(Bool.self, forKey: .macdEnabled) ?? defaults.macdEnabled
+        bollingerEnabled = try container.decodeIfPresent(Bool.self, forKey: .bollingerEnabled) ?? defaults.bollingerEnabled
+        bollingerPeriod = try container.decodeIfPresent(Int.self, forKey: .bollingerPeriod) ?? defaults.bollingerPeriod
+        bollingerMultiplier = try container.decodeIfPresent(Double.self, forKey: .bollingerMultiplier) ?? defaults.bollingerMultiplier
+        volumeEnabled = try container.decodeIfPresent(Bool.self, forKey: .volumeEnabled) ?? defaults.volumeEnabled
+        stochEnabled = try container.decodeIfPresent(Bool.self, forKey: .stochEnabled) ?? defaults.stochEnabled
+        stochKPeriod = try container.decodeIfPresent(Int.self, forKey: .stochKPeriod) ?? defaults.stochKPeriod
+        stochKSmooth = try container.decodeIfPresent(Int.self, forKey: .stochKSmooth) ?? defaults.stochKSmooth
+        stochDPeriod = try container.decodeIfPresent(Int.self, forKey: .stochDPeriod) ?? defaults.stochDPeriod
+        atrEnabled = try container.decodeIfPresent(Bool.self, forKey: .atrEnabled) ?? defaults.atrEnabled
+        atrPeriod = try container.decodeIfPresent(Int.self, forKey: .atrPeriod) ?? defaults.atrPeriod
+    }
 }

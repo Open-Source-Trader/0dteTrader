@@ -12,6 +12,11 @@ struct BollingerBands: Equatable, Sendable {
     let lower: [Double?]
 }
 
+struct StochasticValues: Equatable, Sendable {
+    let k: [Double?]
+    let d: [Double?]
+}
+
 /// Pure indicator math over `[Candle]` (ARCHITECTURE.md §4). No UI dependencies.
 ///
 /// Every function returns an array aligned 1:1 with the input candles; indices
@@ -168,6 +173,79 @@ enum IndicatorEngine {
             previous = signal
         }
         return MACDValues(macdLine: macdLine, signalLine: signalLine, histogram: histogram)
+    }
+
+    // MARK: - Stochastic (%K smoothed by SMA, %D = SMA of %K)
+
+    static func stochastic(
+        candles: [Candle],
+        kPeriod: Int = 14,
+        kSmooth: Int = 3,
+        dPeriod: Int = 3
+    ) -> StochasticValues {
+        var raw = [Double?](repeating: nil, count: candles.count)
+        if kPeriod > 0, candles.count >= kPeriod {
+            for index in (kPeriod - 1)..<candles.count {
+                let window = candles[(index - kPeriod + 1)...index]
+                let highest = window.map(\.high).max() ?? 0
+                let lowest = window.map(\.low).min() ?? 0
+                let range = highest - lowest
+                raw[index] = range == 0 ? 50 : (candles[index].close - lowest) / range * 100
+            }
+        }
+        let kLine = smaNullable(raw, period: kSmooth)
+        let dLine = smaNullable(kLine, period: dPeriod)
+        return StochasticValues(k: kLine, d: dLine)
+    }
+
+    /// SMA over a nullable series: smooths the contiguous non-nil tail.
+    private static func smaNullable(_ values: [Double?], period: Int) -> [Double?] {
+        var result = [Double?](repeating: nil, count: values.count)
+        var points: [(index: Int, value: Double)] = []
+        for (index, value) in values.enumerated() {
+            if let value {
+                points.append((index, value))
+            }
+        }
+        guard period > 0, points.count >= period else { return result }
+        var windowSum = 0.0
+        for position in 0..<points.count {
+            windowSum += points[position].value
+            if position >= period {
+                windowSum -= points[position - period].value
+            }
+            if position >= period - 1 {
+                result[points[position].index] = windowSum / Double(period)
+            }
+        }
+        return result
+    }
+
+    // MARK: - ATR (Wilder's smoothing)
+
+    static func atr(candles: [Candle], period: Int = 14) -> [Double?] {
+        var result = [Double?](repeating: nil, count: candles.count)
+        guard period > 0, candles.count > period else { return result }
+        var trueRanges = [Double](repeating: 0, count: candles.count)
+        for (index, candle) in candles.enumerated() {
+            if index == 0 {
+                trueRanges[index] = candle.high - candle.low
+            } else {
+                let previousClose = candles[index - 1].close
+                trueRanges[index] = max(
+                    candle.high - candle.low,
+                    max(abs(candle.high - previousClose), abs(candle.low - previousClose))
+                )
+            }
+        }
+        var value = trueRanges[1...period].reduce(0, +) / Double(period)
+        result[period] = value
+        guard candles.count > period + 1 else { return result }
+        for index in (period + 1)..<candles.count {
+            value = (value * Double(period - 1) + trueRanges[index]) / Double(period)
+            result[index] = value
+        }
+        return result
     }
 
     // MARK: - Bollinger Bands (20, 2 by default), population standard deviation

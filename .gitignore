@@ -27,3 +27,6 @@ apps/api/prisma/*.db
 .idea/
 .vscode/
 *.swp
+
+# Playwright MCP session artifacts
+.playwright-mcp/

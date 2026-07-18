@@ -9,7 +9,9 @@ options:
 packages:
   Charts:
     url: https://github.com/danielgindi/Charts.git
-    majorVersion: 4.1.0
+    # v5 renames the module to DGCharts and compiles under current Swift;
+    # v4.x fails to build on newer toolchains.
+    majorVersion: 5.1.0
 
 targets:
   0dteTrader:
@@ -20,6 +22,7 @@ targets:
       - path: 0dteTrader
     dependencies:
       - package: Charts
+        product: DGCharts
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.0dtetrader.app

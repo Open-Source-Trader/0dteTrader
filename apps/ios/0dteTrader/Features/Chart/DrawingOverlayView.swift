@@ -1,4 +1,4 @@
-import Charts
+import DGCharts
 import UIKit
 
 /// Annotation canvas layered above the candle chart: renders and edits trend

@@ -129,10 +129,25 @@ describe('WebullClient token lifecycle', () => {
     expect(lastBusiness.init.headers['x-access-token']).toBe('tok-new');
   });
 
-  it('maps a pending-verification token to BROKER_AUTH_FAILED with guidance', async () => {
+  it('accepts a pending-verification token (verified live: PENDING tokens serve calls)', async () => {
+    const { client, calls } = makeHarness((url) => {
+      if (url.includes('/openapi/auth/token/create')) {
+        return {
+          status: 200,
+          body: { token: 'tok-p', expires: 9999999999, status: 'PENDING' },
+        };
+      }
+      return { status: 200, body: { ok: 1 } };
+    });
+    await expect(client.request('accountList')).resolves.toEqual({ ok: 1 });
+    const lastBusiness = calls[calls.length - 1];
+    expect(lastBusiness.init.headers['x-access-token']).toBe('tok-p');
+  });
+
+  it('maps a non-normal, non-pending token to BROKER_AUTH_FAILED with guidance', async () => {
     const { client } = makeHarness(() => ({
       status: 200,
-      body: { token: 'tok-p', expires: 9999999999, status: 'PENDING' },
+      body: { token: 'tok-s', expires: 9999999999, status: 'SUSPENDED' },
     }));
     await expect(client.request('accountList')).rejects.toMatchObject({
       code: 'BROKER_AUTH_FAILED',
@@ -167,6 +182,30 @@ describe('WebullClient token lifecycle', () => {
       c.url.includes('/openapi/auth/token/create'),
     );
     expect(tokenCalls).toHaveLength(2);
+  });
+
+  it('maps quote-subscription 401s to BROKER_PERMISSION_DENIED and keeps the token', async () => {
+    const { client, calls } = makeHarness(
+      withToken(() => ({
+        status: 401,
+        body: {
+          error_code: 'Unauthorized',
+          message: 'Insufficient permission, please subscribe to stock quotes.',
+        },
+      })),
+    );
+    await expect(client.request('stockBars')).rejects.toMatchObject({
+      code: 'BROKER_PERMISSION_DENIED',
+      httpStatus: 403,
+    });
+    // Token must NOT be cleared: no second token/create on the next call.
+    await expect(client.request('stockBars')).rejects.toMatchObject({
+      code: 'BROKER_PERMISSION_DENIED',
+    });
+    const tokenCalls = calls.filter((c) =>
+      c.url.includes('/openapi/auth/token/create'),
+    );
+    expect(tokenCalls).toHaveLength(1);
   });
 });
 

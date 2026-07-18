@@ -146,6 +146,10 @@ export class WebullBrokerGateway implements BrokerGateway, OnModuleDestroy {
       this.config.get<string>('webull.apiBaseUrl') || WEBULL_SANDBOX_HOSTS.api;
     // Market data lives on a separate host family (api.* → data-api.*). An
     // explicit WEBULL_MARKET_DATA_BASE_URL always wins.
+    // [verified 2026-07-18 against live] data-api.webull.com can be
+    // unreachable (connection hangs) while api.webull.com serves the
+    // market-data paths fine — the env override is the escape hatch, and the
+    // signer keys its algorithm off the request host, so it stays correct.
     if (process.env.WEBULL_MARKET_DATA_BASE_URL) {
       return { api, data: process.env.WEBULL_MARKET_DATA_BASE_URL };
     }
@@ -207,8 +211,13 @@ export class WebullBrokerGateway implements BrokerGateway, OnModuleDestroy {
       : futures
         ? CATEGORY.futures
         : CATEGORY.stock;
+    // Verified against the live API: stock bars take `symbol` (singular), but
+    // option and futures bars require `symbols` (plural) — singular gets a
+    // 400 "Parameters not valid".
     const query: Record<string, string> = {
-      symbol: futures ? toWebullFuturesSymbol(symbol) : symbol,
+      [occ || futures ? 'symbols' : 'symbol']: futures
+        ? toWebullFuturesSymbol(symbol)
+        : symbol,
       category,
       timespan: TIMESPAN[req.interval],
       count: '200',

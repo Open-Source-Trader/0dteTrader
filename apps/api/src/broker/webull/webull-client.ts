@@ -234,11 +234,19 @@ export class WebullClient {
       );
     }
     if (token.status !== 'NORMAL') {
-      // Token starts "Pending Verification" — the user must approve it in the
-      // Webull app (SMS). Surface as an auth error with guidance.
-      throw brokerErrors.authFailed(
-        `Webull access token is ${token.status}; approve it in the Webull app (Menu → Messages → OpenAPI) and retry`,
-      );
+      // New tokens start PENDING (approval in the Webull app: Menu → Messages
+      // → OpenAPI). Verified against the live API: a PENDING token still
+      // serves account and market-data calls, so accept it and warn rather
+      // than hard-failing every request.
+      if (token.status === 'PENDING') {
+        this.logger.warn(
+          'Webull access token is PENDING approval in the Webull app (Menu → Messages → OpenAPI); using it anyway',
+        );
+      } else {
+        throw brokerErrors.authFailed(
+          `Webull access token is ${token.status}; approve it in the Webull app (Menu → Messages → OpenAPI) and retry`,
+        );
+      }
     }
     this.cachedToken = token;
     return token.token;
@@ -336,6 +344,18 @@ export class WebullClient {
     const haystack = `${code ?? ''} ${message ?? ''}`.toUpperCase();
 
     if (status === 401 || status === 403) {
+      // Quote-subscription 401s ("Insufficient permission, please subscribe to
+      // X quotes") are entitlements on the Webull app, not credential/token
+      // failures — keep the token and surface the actionable message.
+      if (
+        haystack.includes('INSUFFICIENT PERMISSION') ||
+        haystack.includes('SUBSCRIBE')
+      ) {
+        return brokerErrors.permissionDenied(
+          `Webull market-data permission missing — ${sanitize(message)} ` +
+            '(enable it for your app in the Webull OpenAPI console)',
+        );
+      }
       // A 401 may mean the cached token died — drop it so the next call
       // re-authenticates.
       this.clearToken();

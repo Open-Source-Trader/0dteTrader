@@ -49,6 +49,8 @@ export class StreamGateway
   private readonly clients = new Map<WebSocket, ClientState>();
   private readonly subscribers = new Map<string, Set<WebSocket>>();
   private readonly timers = new Map<string, NodeJS.Timeout>();
+  /** Last logged quote-tick warning per key — identical failures log once. */
+  private readonly tickWarnings = new Map<string, string>();
   private readonly orderEventsSub: Subscription;
 
   constructor(
@@ -185,8 +187,9 @@ export class StreamGateway
     if (this.crypto.isCryptoSymbol(symbol)) {
       try {
         this.broadcast(set, { type: 'quote', data: await this.crypto.getQuote(symbol) });
+        this.tickWarnings.delete(symbol);
       } catch (err) {
-        this.logger.warn(`quote tick failed for ${symbol}: ${(err as Error).message}`);
+        this.warnTickOnce(symbol, `quote tick failed for ${symbol}: ${(err as Error).message}`);
       }
       return;
     }
@@ -202,15 +205,26 @@ export class StreamGateway
       else byUser.set(state.userId, [client]);
     }
     for (const [userId, clients] of byUser) {
+      const key = `${userId}:${symbol}`;
       try {
         const quote = await this.broker.getQuote(userId, symbol);
         for (const client of clients) this.send(client, { type: 'quote', data: quote });
+        this.tickWarnings.delete(key);
       } catch (err) {
-        this.logger.warn(
+        this.warnTickOnce(
+          key,
           `quote tick failed for ${symbol} (user ${userId}): ${(err as Error).message}`,
         );
       }
     }
+  }
+
+  /** Logs a quote-tick warning only when it differs from the last one logged
+   *  for the same key — a persistent failure logs once, not every second. */
+  private warnTickOnce(key: string, message: string): void {
+    if (this.tickWarnings.get(key) === message) return;
+    this.tickWarnings.set(key, message);
+    this.logger.warn(message);
   }
 
   private pushOrderUpdate(event: OrderUpdateEvent): void {

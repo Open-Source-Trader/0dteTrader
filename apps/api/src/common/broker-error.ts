@@ -37,4 +37,8 @@ export const brokerErrors = {
     ),
   contractNotFound: (message: string) =>
     new BrokerError('CONTRACT_NOT_FOUND', message, 400),
+  /** Market-data quote subscription missing on the Webull app (not an auth
+   *  failure — 403 so clients don't treat it as session expiry). */
+  permissionDenied: (message: string) =>
+    new BrokerError('BROKER_PERMISSION_DENIED', message, 403),
 };

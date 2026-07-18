@@ -228,6 +228,26 @@ describe('TradingService', () => {
       ).rejects.toMatchObject({ status: 400, code: 'VALIDATION_ERROR' });
     });
 
+    it('normalizes a contract symbol passed as the futures underlying to its root', async () => {
+      // Charting a specific contract (e.g. "MESU26") makes clients send it as
+      // the order's underlying; the server must treat it as its root.
+      const contracts = await gateway.getFuturesContracts(userId, 'MES');
+      const contract = contracts[0];
+      const contractsSpy = jest.spyOn(gateway, 'getFuturesContracts');
+
+      const preview = await trading.preview(userId, {
+        underlying: contract.symbol,
+        assetClass: 'future',
+        side: 'buy',
+        quantity: 1,
+        orderType: 'market',
+        selection: { mode: 'explicit', contractSymbol: contract.symbol },
+      } as OrderRequestDto);
+
+      expect(preview.resolved.contractSymbol).toBe(contract.symbol);
+      expect(contractsSpy).toHaveBeenCalledWith(userId, 'MES');
+    });
+
     it('rejects an unknown futures contract symbol', async () => {
       await expect(
         trading.preview(

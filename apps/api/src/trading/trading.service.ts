@@ -11,6 +11,7 @@ import {
 } from '../broker/broker-gateway.interface';
 import {
   findExplicitOption,
+  futuresRootOf,
   pickExpiration,
   resolveAutoOtm,
 } from '../broker/contract-resolution';
@@ -215,15 +216,19 @@ export class TradingService {
     if (!selection.contractSymbol) {
       throw errors.validation('selection.contractSymbol is required for futures orders');
     }
-    const contracts = await this.gateway.getFuturesContracts(userId, dto.underlying);
+    // Clients may send a specific contract symbol (e.g. "MESU26") as the
+    // underlying when it is the charted symbol; gateways expect the root.
+    const root = futuresRootOf(dto.underlying) ?? dto.underlying;
+    const contracts = await this.gateway.getFuturesContracts(userId, root);
     const contract = contracts.find((c) => c.symbol === selection.contractSymbol);
     if (!contract) {
       throw errors.validation(
-        `No futures contract ${selection.contractSymbol} for root ${dto.underlying}`,
+        `No futures contract ${selection.contractSymbol} for root ${root}`,
       );
     }
     return {
       ...dto,
+      underlying: root,
       selection: { mode: 'explicit', contractSymbol: selection.contractSymbol },
     };
   }

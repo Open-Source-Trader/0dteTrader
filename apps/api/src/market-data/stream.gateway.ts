@@ -180,16 +180,36 @@ export class StreamGateway
   private async tickSymbol(symbol: string): Promise<void> {
     const set = this.subscribers.get(symbol);
     if (!set || set.size === 0) return;
-    const anyClient = set.values().next().value as WebSocket;
-    const state = this.clients.get(anyClient);
-    if (!state) return;
-    try {
-      const quote = this.crypto.isCryptoSymbol(symbol)
-        ? await this.crypto.getQuote(symbol)
-        : await this.broker.getQuote(state.userId, symbol);
-      this.broadcast(set, { type: 'quote', data: quote });
-    } catch (err) {
-      this.logger.warn(`quote tick failed for ${symbol}: ${(err as Error).message}`);
+
+    // Crypto quotes are public and user-independent: one fetch for everyone.
+    if (this.crypto.isCryptoSymbol(symbol)) {
+      try {
+        this.broadcast(set, { type: 'quote', data: await this.crypto.getQuote(symbol) });
+      } catch (err) {
+        this.logger.warn(`quote tick failed for ${symbol}: ${(err as Error).message}`);
+      }
+      return;
+    }
+
+    // Broker quotes are fetched per user: gateways use per-user credentials,
+    // so one subscriber's quote must never be served under another's account.
+    const byUser = new Map<string, WebSocket[]>();
+    for (const client of set) {
+      const state = this.clients.get(client);
+      if (!state) continue;
+      const list = byUser.get(state.userId);
+      if (list) list.push(client);
+      else byUser.set(state.userId, [client]);
+    }
+    for (const [userId, clients] of byUser) {
+      try {
+        const quote = await this.broker.getQuote(userId, symbol);
+        for (const client of clients) this.send(client, { type: 'quote', data: quote });
+      } catch (err) {
+        this.logger.warn(
+          `quote tick failed for ${symbol} (user ${userId}): ${(err as Error).message}`,
+        );
+      }
     }
   }
 

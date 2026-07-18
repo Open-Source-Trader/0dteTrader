@@ -11,6 +11,13 @@ export interface IndicatorSettings {
   bollingerEnabled: boolean;
   bollingerPeriod: number;
   bollingerMultiplier: number;
+  volumeEnabled: boolean;
+  stochEnabled: boolean;
+  stochKPeriod: number;
+  stochKSmooth: number;
+  stochDPeriod: number;
+  atrEnabled: boolean;
+  atrPeriod: number;
 }
 
 export const DEFAULT_INDICATOR_SETTINGS: IndicatorSettings = {
@@ -25,4 +32,11 @@ export const DEFAULT_INDICATOR_SETTINGS: IndicatorSettings = {
   bollingerEnabled: false,
   bollingerPeriod: 20,
   bollingerMultiplier: 2,
+  volumeEnabled: true,
+  stochEnabled: false,
+  stochKPeriod: 14,
+  stochKSmooth: 3,
+  stochDPeriod: 3,
+  atrEnabled: false,
+  atrPeriod: 14,
 };

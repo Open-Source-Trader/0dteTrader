@@ -7,6 +7,8 @@ import { ChevronDownIcon, SlidersIcon } from '../../design/icons';
 import type { ChartStore } from './ChartStore';
 import { CHART_INTERVALS } from './ChartStore';
 import { CandleChart, type OverlaySeries } from './CandleChart';
+import { DrawingToolbar } from './DrawingToolbar';
+import type { DrawingsStore } from './drawings';
 import { IndicatorPane, type PaneSeries } from './IndicatorPane';
 import * as engine from './indicatorEngine';
 
@@ -22,12 +24,13 @@ const OVERLAY_COLORS: Record<string, string> = {
 
 interface ChartViewProps {
   store: ChartStore;
+  drawingsStore: DrawingsStore;
   onSymbolSearch: () => void;
   onIndicatorSettings: () => void;
 }
 
-/** Chart surface: header, candle chart with overlays, RSI/MACD sub-panes. */
-export function ChartView({ store, onSymbolSearch, onIndicatorSettings }: ChartViewProps) {
+/** Chart surface: header, candle chart with overlays and drawing tools, sub-panes. */
+export function ChartView({ store, drawingsStore, onSymbolSearch, onIndicatorSettings }: ChartViewProps) {
   const { symbol, interval, candles, quote, isLoading, errorMessage, indicatorSettings } =
     useStore(store);
 
@@ -96,6 +99,38 @@ export function ChartView({ store, onSymbolSearch, onIndicatorSettings }: ChartV
       { id: 'macdSignal', kind: 'line', color: '#ff9f0a', values: values.signalLine },
     ];
   }, [candles, indicatorSettings.macdEnabled]);
+
+  const stochSeries = useMemo<PaneSeries[] | null>(() => {
+    if (!indicatorSettings.stochEnabled) return null;
+    const values = engine.stochastic(
+      candles,
+      indicatorSettings.stochKPeriod,
+      indicatorSettings.stochKSmooth,
+      indicatorSettings.stochDPeriod,
+    );
+    return [
+      { id: 'stochK', kind: 'line', color: '#0a84ff', values: values.k },
+      { id: 'stochD', kind: 'line', color: '#ff9f0a', values: values.d },
+    ];
+  }, [
+    candles,
+    indicatorSettings.stochEnabled,
+    indicatorSettings.stochKPeriod,
+    indicatorSettings.stochKSmooth,
+    indicatorSettings.stochDPeriod,
+  ]);
+
+  const atrSeries = useMemo<PaneSeries[] | null>(() => {
+    if (!indicatorSettings.atrEnabled) return null;
+    return [
+      {
+        id: 'atr',
+        kind: 'line',
+        color: '#40cbe0',
+        values: engine.atr(candles, indicatorSettings.atrPeriod),
+      },
+    ];
+  }, [candles, indicatorSettings.atrEnabled, indicatorSettings.atrPeriod]);
 
   return (
     <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
@@ -181,7 +216,14 @@ export function ChartView({ store, onSymbolSearch, onIndicatorSettings }: ChartV
 
       {/* Chart area */}
       <div style={{ flex: 1, minHeight: 100, position: 'relative' }}>
-        <CandleChart candles={candles} overlays={overlays} interval={interval} />
+        <CandleChart
+          candles={candles}
+          overlays={overlays}
+          interval={interval}
+          showVolume={indicatorSettings.volumeEnabled}
+          drawingsStore={drawingsStore}
+        />
+        <DrawingToolbar store={drawingsStore} />
         {isLoading ? (
           <div
             style={{
@@ -225,6 +267,16 @@ export function ChartView({ store, onSymbolSearch, onIndicatorSettings }: ChartV
         />
       ) : null}
       {macdSeries ? <IndicatorPane height={84} candles={candles} series={macdSeries} /> : null}
+      {stochSeries ? (
+        <IndicatorPane
+          height={72}
+          candles={candles}
+          series={stochSeries}
+          guideLines={[20, 80]}
+          yRange={[0, 100]}
+        />
+      ) : null}
+      {atrSeries ? <IndicatorPane height={72} candles={candles} series={atrSeries} /> : null}
     </div>
   );
 }

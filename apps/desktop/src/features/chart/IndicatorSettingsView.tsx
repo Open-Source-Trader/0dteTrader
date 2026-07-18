@@ -86,6 +86,16 @@ export function IndicatorSettingsView({ settings, onChange, onDismiss }: Indicat
               </div>
 
               <div className="grouped-row">
+                <span>Volume</span>
+                <span className="row-value">
+                  <Toggle
+                    on={settings.volumeEnabled}
+                    onChange={(on) => patch({ volumeEnabled: on })}
+                  />
+                </span>
+              </div>
+
+              <div className="grouped-row">
                 <span>Bollinger Bands</span>
                 <span className="row-value">
                   <Toggle
@@ -153,6 +163,73 @@ export function IndicatorSettingsView({ settings, onChange, onDismiss }: Indicat
                   <Toggle on={settings.macdEnabled} onChange={(on) => patch({ macdEnabled: on })} />
                 </span>
               </div>
+
+              <div className="grouped-row">
+                <span>Stochastic</span>
+                <span className="row-value">
+                  <Toggle
+                    on={settings.stochEnabled}
+                    onChange={(on) => patch({ stochEnabled: on })}
+                  />
+                </span>
+              </div>
+              {settings.stochEnabled ? (
+                <>
+                  <div className="grouped-row">
+                    <span>%K Period: {settings.stochKPeriod}</span>
+                    <span className="row-value">
+                      <Stepper
+                        value={settings.stochKPeriod}
+                        min={5}
+                        max={50}
+                        onChange={(value) => patch({ stochKPeriod: value })}
+                      />
+                    </span>
+                  </div>
+                  <div className="grouped-row">
+                    <span>%K Smoothing: {settings.stochKSmooth}</span>
+                    <span className="row-value">
+                      <Stepper
+                        value={settings.stochKSmooth}
+                        min={1}
+                        max={10}
+                        onChange={(value) => patch({ stochKSmooth: value })}
+                      />
+                    </span>
+                  </div>
+                  <div className="grouped-row">
+                    <span>%D Period: {settings.stochDPeriod}</span>
+                    <span className="row-value">
+                      <Stepper
+                        value={settings.stochDPeriod}
+                        min={1}
+                        max={10}
+                        onChange={(value) => patch({ stochDPeriod: value })}
+                      />
+                    </span>
+                  </div>
+                </>
+              ) : null}
+
+              <div className="grouped-row">
+                <span>ATR</span>
+                <span className="row-value">
+                  <Toggle on={settings.atrEnabled} onChange={(on) => patch({ atrEnabled: on })} />
+                </span>
+              </div>
+              {settings.atrEnabled ? (
+                <div className="grouped-row">
+                  <span>Period: {settings.atrPeriod}</span>
+                  <span className="row-value">
+                    <Stepper
+                      value={settings.atrPeriod}
+                      min={2}
+                      max={50}
+                      onChange={(value) => patch({ atrPeriod: value })}
+                    />
+                  </span>
+                </div>
+              ) : null}
             </div>
           </div>
         </div>

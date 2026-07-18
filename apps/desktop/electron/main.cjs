@@ -1,18 +1,25 @@
-// Optional desktop shell: a fixed iPhone-Pro-Max-sized window around the web
-// app. Requires `npm i -D electron` (not installed by default). Usage:
-//   ELECTRON_START_URL=http://localhost:5173 electron electron/main.cjs
-const { app, BrowserWindow } = require('electron');
+// Desktop shell: a resizable window around the 430x932 iPhone-frame web app.
+// The web layer scales its content to fit the window, so any size works.
+// Launch (Linux/Wayland needs the X11 flag, VSCode shells leak RUN_AS_NODE):
+//   env -u ELECTRON_RUN_AS_NODE ELECTRON_START_URL=http://localhost:5173 \
+//     npx electron electron/main.cjs --ozone-platform=x11 --disable-gpu
+const { app, BrowserWindow, screen } = require('electron');
 const path = require('node:path');
 
 function createWindow() {
+  const { workAreaSize } = screen.getPrimaryDisplay();
+  const scale = Math.min(1, (workAreaSize.height - 80) / 932, (workAreaSize.width - 40) / 430);
   const win = new BrowserWindow({
-    width: 430,
-    height: 932,
+    width: Math.round(430 * scale),
+    height: Math.round(932 * scale),
     useContentSize: true,
-    resizable: false,
+    resizable: true,
+    minWidth: 240,
+    minHeight: 520,
     autoHideMenuBar: true,
-    backgroundColor: '#0B0C10',
+    backgroundColor: '#000000',
   });
+  win.setAspectRatio(430 / 932);
   win.loadURL(
     process.env.ELECTRON_START_URL ?? `file://${path.join(__dirname, '../dist/index.html')}`,
   );

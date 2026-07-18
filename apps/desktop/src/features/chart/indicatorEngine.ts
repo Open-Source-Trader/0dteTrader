@@ -158,6 +158,76 @@ export function macd(
   return { macdLine, signalLine, histogram };
 }
 
+/** SMA over a nullable series: smooths the contiguous non-null tail. */
+function smaNullable(values: (number | null)[], period: number): (number | null)[] {
+  const result: (number | null)[] = values.map(() => null);
+  const points: { index: number; value: number }[] = [];
+  values.forEach((value, index) => {
+    if (value !== null) points.push({ index, value });
+  });
+  if (period <= 0 || points.length < period) return result;
+  let windowSum = 0;
+  for (let i = 0; i < points.length; i++) {
+    windowSum += points[i].value;
+    if (i >= period) windowSum -= points[i - period].value;
+    if (i >= period - 1) result[points[i].index] = windowSum / period;
+  }
+  return result;
+}
+
+export interface StochasticValues {
+  k: (number | null)[];
+  d: (number | null)[];
+}
+
+export function stochastic(
+  candles: CandleInput[],
+  kPeriod = 14,
+  kSmooth = 3,
+  dPeriod = 3,
+): StochasticValues {
+  const raw: (number | null)[] = candles.map(() => null);
+  if (kPeriod > 0 && candles.length >= kPeriod) {
+    for (let i = kPeriod - 1; i < candles.length; i++) {
+      let highest = -Infinity;
+      let lowest = Infinity;
+      for (let j = i - kPeriod + 1; j <= i; j++) {
+        highest = Math.max(highest, candles[j].high);
+        lowest = Math.min(lowest, candles[j].low);
+      }
+      const range = highest - lowest;
+      raw[i] = range === 0 ? 50 : ((candles[i].close - lowest) / range) * 100;
+    }
+  }
+  const k = smaNullable(raw, kSmooth);
+  const d = smaNullable(k, dPeriod);
+  return { k, d };
+}
+
+// Wilder's smoothing, seeded with the average true range of the first period.
+export function atr(candles: CandleInput[], period = 14): (number | null)[] {
+  const result: (number | null)[] = candles.map(() => null);
+  if (period <= 0 || candles.length <= period) return result;
+  const trueRanges: number[] = candles.map((candle, index) => {
+    if (index === 0) return candle.high - candle.low;
+    const prevClose = candles[index - 1].close;
+    return Math.max(
+      candle.high - candle.low,
+      Math.abs(candle.high - prevClose),
+      Math.abs(candle.low - prevClose),
+    );
+  });
+  let sum = 0;
+  for (let i = 1; i <= period; i++) sum += trueRanges[i];
+  let value = sum / period;
+  result[period] = value;
+  for (let i = period + 1; i < candles.length; i++) {
+    value = (value * (period - 1) + trueRanges[i]) / period;
+    result[i] = value;
+  }
+  return result;
+}
+
 // Population (÷N) standard deviation, like the iOS implementation.
 export function bollingerBands(
   candles: CandleInput[],

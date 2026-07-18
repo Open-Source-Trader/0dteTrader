@@ -202,6 +202,74 @@ export function TextCursorIcon({ size = 14, style }: IconProps) {
   );
 }
 
+/* Chart drawing-tool glyphs */
+export function CursorIcon({ size = 15, style }: IconProps) {
+  return (
+    <svg {...svgProps(size, style)} stroke="none" fill="currentColor">
+      <path d="M5 3.5a1 1 0 0 1 1.62-.78l12.3 9.9a1 1 0 0 1-.5 1.77l-5.16.74 2.9 5.6a1 1 0 0 1-.43 1.35l-1.6.83a1 1 0 0 1-1.35-.43l-2.9-5.6-3.85 3.53A1 1 0 0 1 5 19.68Z" />
+    </svg>
+  );
+}
+
+export function TrendToolIcon({ size = 15, style }: IconProps) {
+  return (
+    <svg {...svgProps(size, style)}>
+      <line x1="5" y1="19" x2="19" y2="5" />
+      <circle cx="5" cy="19" r="2.2" fill="currentColor" stroke="none" />
+      <circle cx="19" cy="5" r="2.2" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
+export function RayToolIcon({ size = 15, style }: IconProps) {
+  return (
+    <svg {...svgProps(size, style)}>
+      <line x1="4" y1="20" x2="20" y2="4" />
+      <polyline points="14 4 20 4 20 10" />
+      <circle cx="4" cy="20" r="2.2" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
+export function HLineToolIcon({ size = 15, style }: IconProps) {
+  return (
+    <svg {...svgProps(size, style)}>
+      <line x1="3" y1="12" x2="21" y2="12" />
+      <circle cx="12" cy="12" r="2.2" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
+export function RectToolIcon({ size = 15, style }: IconProps) {
+  return (
+    <svg {...svgProps(size, style)}>
+      <rect x="4" y="6" width="16" height="12" rx="1.5" />
+      <circle cx="4" cy="6" r="2" fill="currentColor" stroke="none" />
+      <circle cx="20" cy="18" r="2" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
+export function BellIcon({ size = 15, style }: IconProps) {
+  return (
+    <svg {...svgProps(size, style)}>
+      <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
+      <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+    </svg>
+  );
+}
+
+export function TrashIcon({ size = 15, style }: IconProps) {
+  return (
+    <svg {...svgProps(size, style)}>
+      <polyline points="3 6 5 6 21 6" />
+      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+      <line x1="10" y1="11" x2="10" y2="17" />
+      <line x1="14" y1="11" x2="14" y2="17" />
+    </svg>
+  );
+}
+
 /* Cosmetic status-bar glyphs */
 export function CellularIcon({ size = 17, style }: IconProps) {
   return (

@@ -25,7 +25,8 @@ const DIVIDER_HEIGHT = 18;
  */
 export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
   const container = useContainer();
-  const { chartStore, chainStore, tradeStore, settingsStore, quoteSocket } = container;
+  const { chartStore, chainStore, tradeStore, settingsStore, quoteSocket, drawingsStore } =
+    container;
 
   const chart = useStore(chartStore);
   const trade = useStore(tradeStore);
@@ -38,7 +39,7 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
 
   const contentRef = useRef<HTMLDivElement>(null);
   const [contentHeight, setContentHeight] = useState(0);
-  const dragRef = useRef<{ startY: number; startFraction: number } | null>(null);
+  const dragRef = useRef<{ startY: number; startFraction: number; scale: number } | null>(null);
 
   // Startup: candles + stream, positions/orders, chain, futures root sync.
   useEffect(() => {
@@ -51,9 +52,30 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
 
   useEffect(() => {
     void chainStore.load(chart.symbol);
+    drawingsStore.setSymbol(chart.symbol);
     const root = futuresRootFor(chart.symbol);
     if (root) void tradeStore.setFuturesRoot(root);
-  }, [chart.symbol, chainStore, tradeStore]);
+  }, [chart.symbol, chainStore, tradeStore, drawingsStore]);
+
+  // Price alerts: toast when the live price crosses an alert line.
+  useEffect(() => {
+    let prevLast: number | null = null;
+    let prevSymbol = '';
+    return quoteSocket.onQuote((quote) => {
+      const symbol = chartStore.getState().symbol;
+      if (quote.symbol !== symbol) return;
+      if (prevSymbol !== symbol) {
+        prevSymbol = symbol;
+        prevLast = null;
+      }
+      if (prevLast !== null) {
+        for (const alert of drawingsStore.checkAlerts(prevLast, quote.last)) {
+          tradeStore.showToast(`Alert: ${symbol} crossed ${alert.price.toFixed(2)}`, 'info');
+        }
+      }
+      prevLast = quote.last;
+    });
+  }, [quoteSocket, chartStore, drawingsStore, tradeStore]);
 
   // Track the content area height for the split layout math.
   useLayoutEffect(() => {
@@ -108,6 +130,7 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
           <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column' }}>
             <ChartView
               store={chartStore}
+              drawingsStore={drawingsStore}
               onSymbolSearch={() => setShowSymbolSearch(true)}
               onIndicatorSettings={() => setShowIndicatorSettings(true)}
             />
@@ -131,6 +154,7 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
             <div style={{ height: chartHeight, flex: 'none', display: 'flex', flexDirection: 'column' }}>
               <ChartView
                 store={chartStore}
+                drawingsStore={drawingsStore}
                 onSymbolSearch={() => setShowSymbolSearch(true)}
                 onIndicatorSettings={() => setShowIndicatorSettings(true)}
               />
@@ -150,13 +174,16 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
               }}
               aria-label="Resize trade panel"
               onPointerDown={(event) => {
-                dragRef.current = { startY: event.clientY, startFraction: splitFraction };
-                event.currentTarget.setPointerCapture(event.pointerId);
+                // The whole frame is scaled; convert screen px to logical px.
+                const target = event.currentTarget;
+                const scale = target.getBoundingClientRect().height / target.offsetHeight || 1;
+                dragRef.current = { startY: event.clientY, startFraction: splitFraction, scale };
+                target.setPointerCapture(event.pointerId);
               }}
               onPointerMove={(event) => {
                 const drag = dragRef.current;
                 if (!drag || contentHeight === 0) return;
-                const delta = (drag.startY - event.clientY) / contentHeight;
+                const delta = (drag.startY - event.clientY) / drag.scale / contentHeight;
                 setSplitFraction(Math.min(0.5, Math.max(0.25, drag.startFraction + delta)));
               }}
               onPointerUp={() => {

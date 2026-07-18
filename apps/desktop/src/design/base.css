@@ -20,14 +20,18 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
+  overflow: hidden;
   -webkit-font-smoothing: antialiased;
 }
 
+/* Fixed 430x932 logical layout, scaled as a whole to fit the window
+   (--app-scale is kept in sync with the window size from main.tsx). */
 #root {
   width: 430px;
   height: 932px;
-  max-height: 100vh;
   flex: none;
+  transform: scale(var(--app-scale, 1));
+  transform-origin: center center;
 }
 
 /* The phone frame. Everything (sheets, alerts, toasts) positions inside it. */

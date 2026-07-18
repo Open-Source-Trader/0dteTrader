@@ -8,6 +8,7 @@ import { Spinner } from '../../design/components/Spinner';
 import { CheckCircleFillIcon, WarningFillIcon } from '../../design/icons';
 import { ProfileStore } from './ProfileStore';
 import { WebullCredentialsForm } from './WebullCredentialsForm';
+import './profile.css';
 
 interface ProfileViewProps {
   onLogout: () => Promise<void>;
@@ -19,6 +20,8 @@ export function ProfileView({ onLogout, onDismiss }: ProfileViewProps) {
   const store = useMemo(() => new ProfileStore(container.apiClient), [container]);
   const state = useStore(store);
   const [showDeleteConfirmation, setShowDeleteConfirmation] = useState(false);
+  const [showLogoutConfirmation, setShowLogoutConfirmation] = useState(false);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
 
   useEffect(() => {
     void store.load();
@@ -28,15 +31,7 @@ export function ProfileView({ onLogout, onDismiss }: ProfileViewProps) {
 
   return (
     <Sheet detent="large" onDismiss={onDismiss}>
-      <div
-        style={{
-          background: 'var(--app-background)',
-          flex: 1,
-          minHeight: 0,
-          display: 'flex',
-          flexDirection: 'column',
-        }}
-      >
+      <div className="profile-view">
         <NavBar
           title="Profile"
           trailing={
@@ -54,24 +49,29 @@ export function ProfileView({ onLogout, onDismiss }: ProfileViewProps) {
                 <>
                   <div className="grouped-row">
                     <span>Email</span>
-                    <span className="row-value">{state.me.email}</span>
+                    <span className="row-value" title={state.me.email}>
+                      {state.me.email}
+                    </span>
                   </div>
                   {state.me.tradingDisabled ? (
-                    <div
-                      className="grouped-row"
-                      style={{ color: 'var(--pnl-negative)', fontSize: 'var(--fs-footnote)' }}
-                    >
+                    <div className="grouped-row footnote negative">
                       <WarningFillIcon size={14} />
                       <span>Trading is disabled (kill switch active)</span>
                     </div>
                   ) : null}
                 </>
               ) : state.isLoading ? (
-                <div className="grouped-row">
-                  <Spinner size={16} />
+                <div className="grouped-row" aria-busy="true">
+                  <span className="skeleton skeleton-label" />
+                  <span className="skeleton skeleton-value row-value" />
                 </div>
               ) : (
-                <div className="grouped-row text-secondary">Account details unavailable</div>
+                <>
+                  <div className="grouped-row text-secondary">Account details unavailable</div>
+                  <button className="grouped-row button-row" onClick={() => void store.load()}>
+                    Retry
+                  </button>
+                </>
               )}
             </div>
           </div>
@@ -82,14 +82,11 @@ export function ProfileView({ onLogout, onDismiss }: ProfileViewProps) {
             <div className="section-card">
               {webullConfigured && !state.isEditingCredentials ? (
                 <>
-                  <div className="grouped-row" style={{ color: 'var(--pnl-positive)' }}>
-                    <CheckCircleFillIcon size={15} />
+                  <div className="grouped-row positive">
+                    <CheckCircleFillIcon size={14} />
                     <span>Configured</span>
                   </div>
-                  <div
-                    className="grouped-row text-secondary"
-                    style={{ fontSize: 'var(--fs-footnote)' }}
-                  >
+                  <div className="grouped-row footnote text-secondary">
                     Credentials are stored encrypted on the server and are never displayed here.
                   </div>
                   <button className="grouped-row button-row" onClick={() => store.setEditing(true)}>
@@ -118,19 +115,15 @@ export function ProfileView({ onLogout, onDismiss }: ProfileViewProps) {
               )}
 
               {state.successMessage ? (
-                <div
-                  className="grouped-row"
-                  style={{ color: 'var(--pnl-positive)', fontSize: 'var(--fs-footnote)' }}
-                >
-                  {state.successMessage}
+                <div className="grouped-row footnote positive" role="status">
+                  <CheckCircleFillIcon size={14} />
+                  <span>{state.successMessage}</span>
                 </div>
               ) : null}
               {state.errorMessage ? (
-                <div
-                  className="grouped-row"
-                  style={{ color: 'var(--pnl-negative)', fontSize: 'var(--fs-footnote)' }}
-                >
-                  {state.errorMessage}
+                <div className="grouped-row footnote negative" role="alert">
+                  <WarningFillIcon size={14} />
+                  <span>{state.errorMessage}</span>
                 </div>
               ) : null}
             </div>
@@ -140,16 +133,17 @@ export function ProfileView({ onLogout, onDismiss }: ProfileViewProps) {
             </div>
           </div>
 
+          {/* Security section intentionally omitted: Face ID / AppLockManager is
+              iOS-only (ProfileView.swift securitySection). */}
           {/* Session */}
           <div className="grouped-section">
             <div className="section-card">
               <button
                 className="grouped-row destructive"
-                onClick={() => {
-                  void onLogout().then(onDismiss);
-                }}
+                disabled={isLoggingOut}
+                onClick={() => setShowLogoutConfirmation(true)}
               >
-                Log Out
+                {isLoggingOut ? <Spinner size={14} /> : 'Log Out'}
               </button>
             </div>
           </div>
@@ -168,6 +162,25 @@ export function ProfileView({ onLogout, onDismiss }: ProfileViewProps) {
               { label: 'Cancel', role: 'cancel' },
             ]}
             onDismiss={() => setShowDeleteConfirmation(false)}
+          />
+        ) : null}
+
+        {showLogoutConfirmation ? (
+          <AlertDialog
+            title="Log out of 0dteTrader?"
+            message="Open positions are unaffected; live quotes will stop."
+            actions={[
+              {
+                label: 'Log Out',
+                role: 'destructive',
+                onSelect: () => {
+                  setIsLoggingOut(true);
+                  void onLogout().then(onDismiss);
+                },
+              },
+              { label: 'Cancel', role: 'cancel' },
+            ]}
+            onDismiss={() => setShowLogoutConfirmation(false)}
           />
         ) : null}
       </div>

@@ -5,6 +5,13 @@ interface TradeActionButtonProps {
   onClick: () => void;
 }
 
+/** Swap the bright text-on-dark hues for the AA-passing button fills. */
+function fillColor(color: string): string {
+  if (color === 'var(--buy-green)') return 'var(--buy-green-fill)';
+  if (color === 'var(--sell-red)') return 'var(--sell-red-fill)';
+  return color;
+}
+
 /** Large Buy/Sell action button (TradeButtons.swift): 52px, radius 12. */
 export function TradeActionButton({
   title,
@@ -15,7 +22,7 @@ export function TradeActionButton({
   return (
     <button
       className="trade-action-button"
-      style={{ background: color, opacity: isEnabled ? 1 : 0.35 }}
+      style={{ background: fillColor(color) }}
       disabled={!isEnabled}
       onClick={onClick}
       aria-label={title}

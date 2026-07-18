@@ -1,3 +1,5 @@
+import { useEffect, useRef } from 'react';
+
 export interface AlertAction {
   label: string;
   role?: 'destructive' | 'cancel';
@@ -11,10 +13,46 @@ interface AlertDialogProps {
   onDismiss: () => void;
 }
 
-/** Centered iOS-style alert (270px card, hairline-separated buttons). */
+/**
+ * Centered iOS-style alert (270px card, hairline-separated buttons). Modal:
+ * Escape dismisses, focus starts on the first action, Tab is trapped inside,
+ * and focus is restored on close.
+ */
 export function AlertDialog({ title, message, actions, onDismiss }: AlertDialogProps) {
+  const backdropRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const backdrop = backdropRef.current;
+    const previouslyFocused = document.activeElement as HTMLElement | null;
+    backdrop?.querySelector<HTMLElement>('.alert-button')?.focus();
+
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        onDismiss();
+        return;
+      }
+      if (event.key !== 'Tab' || !backdrop) return;
+      const items = Array.from(backdrop.querySelectorAll<HTMLElement>('.alert-button'));
+      if (items.length === 0) return;
+      const firstItem = items[0];
+      const lastItem = items[items.length - 1];
+      if (event.shiftKey && document.activeElement === firstItem) {
+        lastItem.focus();
+        event.preventDefault();
+      } else if (!event.shiftKey && document.activeElement === lastItem) {
+        firstItem.focus();
+        event.preventDefault();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      previouslyFocused?.focus();
+    };
+  }, [onDismiss]);
+
   return (
-    <div className="alert-backdrop">
+    <div ref={backdropRef} className="alert-backdrop" role="alertdialog" aria-modal="true" aria-label={title}>
       <div className="alert-card">
         <div className="alert-title">{title}</div>
         {message ? <div className="alert-message">{message}</div> : null}

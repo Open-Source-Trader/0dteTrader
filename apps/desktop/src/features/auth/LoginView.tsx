@@ -2,7 +2,12 @@ import { useState } from 'react';
 import { Spinner } from '../../design/components/Spinner';
 import { useStore } from '../../core/observable';
 import type { AuthStore } from './AuthStore';
+import { PasswordField } from './PasswordField';
 import { RegisterView } from './RegisterView';
+
+// Reuses the shared toast-in keyframes (base.css) for a staggered entrance;
+// the global prefers-reduced-motion rule collapses it for motion-sensitive users.
+const ENTRANCE = 'toast-in 250ms cubic-bezier(0.32, 0.72, 0, 1) both';
 
 export function LoginView({ store }: { store: AuthStore }) {
   const { isLoading, errorMessage } = useStore(store);
@@ -18,73 +23,116 @@ export function LoginView({ store }: { store: AuthStore }) {
   };
 
   return (
-    <div
+    <form
       style={{
         flex: 1,
         minHeight: 0,
         display: 'flex',
         flexDirection: 'column',
         justifyContent: 'center',
-        gap: 24,
+        gap: 'var(--space-6)',
         padding: 'var(--pad-screen)',
         position: 'relative',
       }}
+      onSubmit={(event) => {
+        event.preventDefault();
+        submit();
+      }}
+      noValidate
     >
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
-        <h1 style={{ fontSize: 'var(--fs-large-title)', fontWeight: 700 }}>0dteTrader</h1>
+      <div
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          gap: 'var(--space-2)',
+          animation: ENTRANCE,
+        }}
+      >
+        <div
+          aria-hidden="true"
+          style={{
+            width: 56,
+            height: 56,
+            borderRadius: 14,
+            background: 'linear-gradient(135deg, var(--app-accent), var(--app-accent-fill))',
+          }}
+        />
+        <h1 style={{ fontSize: 'var(--fs-large-title)', fontWeight: 700, letterSpacing: '-0.4px' }}>
+          0dteTrader
+        </h1>
         <span className="text-secondary" style={{ fontSize: 'var(--fs-subheadline)' }}>
           Rapid options &amp; futures trading
         </span>
       </div>
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <div
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 'var(--space-4)',
+          animation: ENTRANCE,
+          animationDelay: '60ms',
+        }}
+      >
         <input
           className="field"
           type="email"
           placeholder="Email"
-          autoComplete="email"
+          aria-label="Email"
+          aria-invalid={errorMessage ? true : undefined}
+          aria-describedby={errorMessage ? 'login-error' : undefined}
+          autoComplete="username"
           autoCapitalize="off"
           spellCheck={false}
+          autoFocus
           value={email}
           onChange={(event) => setEmail(event.target.value)}
-          onKeyDown={(event) => event.key === 'Enter' && submit()}
         />
-        <input
-          className="field"
-          type="password"
+        <PasswordField
           placeholder="Password"
           autoComplete="current-password"
           value={password}
-          onChange={(event) => setPassword(event.target.value)}
-          onKeyDown={(event) => event.key === 'Enter' && submit()}
+          onChange={setPassword}
+          ariaLabel="Password"
+          ariaInvalid={!!errorMessage}
+          ariaDescribedBy={errorMessage ? 'login-error' : undefined}
         />
       </div>
 
-      {errorMessage ? (
-        <div
-          style={{
-            fontSize: 'var(--fs-footnote)',
-            color: 'var(--pnl-negative)',
-            textAlign: 'center',
-          }}
-        >
-          {errorMessage}
-        </div>
-      ) : null}
+      {/* Slot is always rendered so an error doesn't recenter the column. */}
+      <div
+        id="login-error"
+        role="alert"
+        style={{
+          fontSize: 'var(--fs-footnote)',
+          color: 'var(--pnl-negative)',
+          textAlign: 'center',
+          minHeight: 16,
+          visibility: errorMessage ? 'visible' : 'hidden',
+        }}
+      >
+        {errorMessage ?? ' '}
+      </div>
 
       <button
+        type="submit"
         className={`button-primary${!isFormValid || isLoading ? ' dimmed' : ''}`}
         disabled={!isFormValid || isLoading}
-        onClick={submit}
+        aria-busy={isLoading}
+        style={{ animation: ENTRANCE, animationDelay: '120ms' }}
       >
         {isLoading ? <Spinner white /> : 'Log In'}
       </button>
 
       <button
+        type="button"
         style={{
           fontSize: 'var(--fs-subheadline)',
           color: 'var(--app-accent)',
           alignSelf: 'center',
+          minHeight: 44,
+          padding: '0 var(--space-4)',
         }}
         onClick={() => {
           store.clearError();
@@ -95,6 +143,6 @@ export function LoginView({ store }: { store: AuthStore }) {
       </button>
 
       {showRegister ? <RegisterView store={store} onDismiss={() => setShowRegister(false)} /> : null}
-    </div>
+    </form>
   );
 }

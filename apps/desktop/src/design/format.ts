@@ -1,12 +1,22 @@
 /** Shared display formatting for prices, strikes and P&L (Formatters.swift). */
+
+/** Locale grouping with a fixed fraction: 12345.678 → "12,345.68". */
+function group(value: number, fractionDigits: number): string {
+  return new Intl.NumberFormat('en-US', {
+    minimumFractionDigits: fractionDigits,
+    maximumFractionDigits: fractionDigits,
+  }).format(value);
+}
+
 export const Format = {
   price(value: number, fractionDigits = 2): string {
-    return value.toFixed(fractionDigits);
+    return group(value, fractionDigits);
   },
 
-  /** `+1.24` / `-0.87` style signed values for P&L. */
+  /** `+1.24` / `-0.87` style signed values for P&L; zero renders unsigned. */
   signedPrice(value: number, fractionDigits = 2): string {
-    const text = Math.abs(value).toFixed(fractionDigits);
+    if (value === 0) return group(0, fractionDigits);
+    const text = group(Math.abs(value), fractionDigits);
     return value < 0 ? `-${text}` : `+${text}`;
   },
 

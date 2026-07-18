@@ -14,6 +14,16 @@
   --pnl-positive: #30d158;
   --pnl-negative: #ff453a;
 
+  /* AA-passing fills for white-text action buttons (bright hues above stay
+     for text/borders on dark backgrounds). */
+  --buy-green-fill: #0e7c3a; /* white text: 5.30:1 */
+  --sell-red-fill: #c62830; /* white text: 5.60:1 */
+  --app-accent-fill: #2f6be0; /* white text: 4.88:1 */
+
+  /* AA-passing text variants for elevated surfaces (#282b35 cards). */
+  --app-accent-text: #6b9ff8; /* 5.34:1 on elevated, 7.39:1 on bg */
+  --pnl-negative-text: #ff6961; /* 5.01:1 on elevated, 6.93:1 on bg */
+
   --label-primary: #ffffff;
   --label-secondary: rgba(235, 235, 245, 0.6);
 
@@ -51,6 +61,39 @@
   --fs-footnote: 13px;
   --fs-caption: 12px;
   --fs-caption2: 11px;
+  --fs-status-time: 16px; /* status-bar clock: between subheadline/headline */
+
+  /* Spacing scale (4px grid) */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+
+  /* Elevation */
+  --shadow-knob: 0 1px 4px rgba(0, 0, 0, 0.25);
+  --shadow-knob-lg: 0 2px 5px rgba(0, 0, 0, 0.3);
+  --shadow-overlay: 0 10px 40px rgba(0, 0, 0, 0.55);
+  --shadow-toast: 0 0 6px rgba(0, 0, 0, 0.45);
+
+  /* Stacking order (menus stay below alerts) */
+  --z-chrome: 5;
+  --z-sheet: 20;
+  --z-menu: 25;
+  --z-alert: 30;
+  --z-toast: 50;
+
+  /* Motion */
+  --dur-fast: 120ms;
+  --dur-med: 200ms;
+  --ease-out: cubic-bezier(0.2, 0, 0, 1);
+  --press-scale: 0.97;
+
+  --disabled-opacity: 0.35;
+  --border-hairline: 0.5px;
+  --chrome-background: #000; /* page chrome behind the phone frame */
 
   /* Geometry from the SwiftUI views */
   --radius-input: 10px;
@@ -62,5 +105,5 @@
   --h-navbar: 44px;
   --pad-screen: 24px;
   --sheet-anim: 300ms cubic-bezier(0.32, 0.72, 0, 1);
-  --toast-anim: 200ms ease-in-out;
+  --toast-anim: 200ms cubic-bezier(0, 0, 0.2, 1); /* decelerate on entry */
 }

@@ -11,6 +11,8 @@ import {
 } from 'lightweight-charts';
 import type { CandleInterval } from '@0dtetrader/shared-types';
 import { useStore } from '../../core/observable';
+import { Format } from '../../design/format';
+import { chartPalette } from './chartColors';
 import type { ChartCandle } from './ChartStore';
 import { intervalSeconds } from './ChartStore';
 import { DrawingLayer } from './DrawingLayer';
@@ -22,22 +24,22 @@ export interface OverlaySeries {
   values: (number | null)[];
 }
 
+/** Logical visible range, mirrored to sub-panes so x-axes stay aligned. */
+export interface VisibleRange {
+  from: number;
+  to: number;
+}
+
 interface CandleChartProps {
   candles: ChartCandle[];
   overlays: OverlaySeries[];
+  symbol: string;
   interval: CandleInterval;
   showVolume: boolean;
   drawingsStore: DrawingsStore;
+  /** Fires on pan/zoom/snap so sub-panes can mirror the x-range. */
+  onVisibleRangeChange?: (range: VisibleRange | null) => void;
 }
-
-// Mirror tokens.css (lightweight-charts needs concrete colors, not CSS vars).
-const COLORS = {
-  candleUp: '#30d158',
-  candleDown: '#ff453a',
-  axisLabel: 'rgba(235, 235, 245, 0.6)',
-  grid: 'rgba(84, 84, 88, 0.25)',
-  border: 'rgba(84, 84, 88, 0.4)',
-};
 
 const VISIBLE_CANDLES = 120;
 
@@ -51,18 +53,25 @@ function formatTick(timeSeconds: number, interval: CandleInterval): string {
   return `${h}:${m}`;
 }
 
+function legendText(bar: { open: number; high: number; low: number; close: number }): string {
+  return `O ${Format.price(bar.open)}  H ${Format.price(bar.high)}  L ${Format.price(bar.low)}  C ${Format.price(bar.close)}`;
+}
+
 /**
  * Candlestick chart with indicator overlays (CandleChartRepresentable analog).
  * Left price axis like the iOS chart; pan/zoom enabled. On data-length change
  * the view snaps to the last 120 bars; in-place tick updates leave the user's
- * pan/zoom alone.
+ * pan/zoom alone. The crosshair drives an OHLC legend overlay (falls back to
+ * the latest bar when the cursor is off the chart).
  */
 export function CandleChart({
   candles,
   overlays,
+  symbol,
   interval,
   showVolume,
   drawingsStore,
+  onVisibleRangeChange,
 }: CandleChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -71,8 +80,12 @@ export function CandleChart({
   const overlaySeriesRef = useRef<Map<string, ISeriesApi<'Line'>>>(new Map());
   const lastLengthRef = useRef(0);
   const lastFirstTimeRef = useRef<number | null>(null);
+  const lastBarRef = useRef<ChartCandle | null>(null);
   const intervalRef = useRef(interval);
   intervalRef.current = interval;
+  const onVisibleRangeChangeRef = useRef(onVisibleRangeChange);
+  onVisibleRangeChangeRef.current = onVisibleRangeChange;
+  const [legend, setLegend] = useState<string | null>(null);
   const [apis, setApis] = useState<{
     chart: IChartApi;
     series: ISeriesApi<'Candlestick'>;
@@ -82,39 +95,41 @@ export function CandleChart({
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
+    const colors = chartPalette();
     const chart = createChart(container, {
       layout: {
         background: { type: ColorType.Solid, color: 'transparent' },
-        textColor: COLORS.axisLabel,
-        fontSize: 10,
+        attributionLogo: false,
+        textColor: colors.axisLabel,
+        fontSize: 11,
         fontFamily:
           "ui-monospace, 'SF Mono', 'Cascadia Mono', 'JetBrains Mono', 'DejaVu Sans Mono', Menlo, monospace",
       },
-      leftPriceScale: { visible: true, borderColor: COLORS.border },
+      leftPriceScale: { visible: true, borderColor: colors.border },
       rightPriceScale: { visible: false },
       timeScale: {
-        borderColor: COLORS.border,
+        borderColor: colors.border,
         timeVisible: true,
         secondsVisible: false,
         tickMarkFormatter: (time: UTCTimestamp) => formatTick(time, intervalRef.current),
       },
       grid: {
-        vertLines: { color: COLORS.grid },
-        horzLines: { color: COLORS.grid },
+        vertLines: { color: colors.grid },
+        horzLines: { color: colors.grid },
       },
       crosshair: {
-        vertLine: { visible: false, labelVisible: false },
-        horzLine: { visible: false, labelVisible: false },
+        vertLine: { visible: true, labelVisible: true, color: colors.crosshair, style: 3, width: 1 },
+        horzLine: { visible: true, labelVisible: true, color: colors.crosshair, style: 3, width: 1 },
       },
       autoSize: true,
     });
     const candleSeries = chart.addCandlestickSeries({
-      upColor: COLORS.candleUp,
-      downColor: COLORS.candleDown,
-      wickUpColor: COLORS.candleUp,
-      wickDownColor: COLORS.candleDown,
-      borderUpColor: COLORS.candleUp,
-      borderDownColor: COLORS.candleDown,
+      upColor: colors.candleUp,
+      downColor: colors.candleDown,
+      wickUpColor: colors.candleUp,
+      wickDownColor: colors.candleDown,
+      borderUpColor: colors.candleUp,
+      borderDownColor: colors.candleDown,
       priceScaleId: 'left',
       priceLineVisible: false,
       lastValueVisible: true,
@@ -122,6 +137,19 @@ export function CandleChart({
     chartRef.current = chart;
     candleSeriesRef.current = candleSeries;
     setApis({ chart, series: candleSeries });
+
+    // Crosshair → OHLC legend (latest bar when the cursor is off the chart).
+    chart.subscribeCrosshairMove((param) => {
+      const bar = param.seriesData.get(candleSeries) as CandlestickData | undefined;
+      const fallback = lastBarRef.current;
+      setLegend(bar ?? fallback ? legendText(bar ?? fallback!) : null);
+    });
+
+    // Mirror the visible x-range to the sub-panes via ChartView state.
+    chart.timeScale().subscribeVisibleLogicalRangeChange((range) => {
+      onVisibleRangeChangeRef.current?.(range ? { from: range.from, to: range.to } : null);
+    });
+
     return () => {
       chart.remove();
       chartRef.current = null;
@@ -130,6 +158,8 @@ export function CandleChart({
       overlaySeriesRef.current = new Map();
       lastLengthRef.current = 0;
       lastFirstTimeRef.current = null;
+      lastBarRef.current = null;
+      setLegend(null);
       setApis(null);
     };
   }, []);
@@ -188,6 +218,7 @@ export function CandleChart({
     }
     lastLengthRef.current = candles.length;
     lastFirstTimeRef.current = firstTime;
+    lastBarRef.current = candles.length > 0 ? candles[candles.length - 1] : null;
   }, [candles]);
 
   // Overlay lines: recreate the series set when ids change, reset data otherwise.
@@ -227,13 +258,42 @@ export function CandleChart({
     }
   }, [candles, overlays]);
 
+  const lastBar = candles.length > 0 ? candles[candles.length - 1] : null;
+
   return (
-    <div ref={containerRef} style={{ position: 'absolute', inset: 0 }}>
+    <div
+      ref={containerRef}
+      style={{ position: 'absolute', inset: 0 }}
+      role="img"
+      aria-label={
+        lastBar
+          ? `${symbol} ${interval} candlestick chart, last close ${Format.price(lastBar.close)}`
+          : `${symbol} chart, no data`
+      }
+    >
+      {legend ? (
+        <div
+          style={{
+            position: 'absolute',
+            top: 4,
+            left: 52,
+            fontFamily: 'var(--font-mono)',
+            fontSize: 'var(--fs-caption2)',
+            fontVariantNumeric: 'tabular-nums',
+            color: 'var(--label-secondary)',
+            pointerEvents: 'none',
+            zIndex: 2,
+          }}
+        >
+          {legend}
+        </div>
+      ) : null}
       {apis && candles.length > 0 ? (
         <DrawingLayer
           chart={apis.chart}
           series={apis.series}
           store={drawingsStore}
+          candles={candles}
           firstTime={candles[0].time}
           intervalSec={intervalSeconds(interval)}
         />
@@ -253,9 +313,10 @@ function toCandleData(candle: ChartCandle): CandlestickData {
 }
 
 function toVolumeData(candle: ChartCandle): HistogramData {
+  const colors = chartPalette();
   return {
     time: candle.time as UTCTimestamp,
     value: candle.volume,
-    color: candle.close >= candle.open ? 'rgba(48, 209, 88, 0.45)' : 'rgba(255, 69, 58, 0.45)',
+    color: candle.close >= candle.open ? colors.volumeUp : colors.volumeDown,
   };
 }

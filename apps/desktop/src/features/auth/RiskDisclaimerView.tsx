@@ -7,6 +7,14 @@ const DISCLAIMER_PARAGRAPHS = [
   'By tapping "I Understand and Accept" you acknowledge these risks and agree that you are solely responsible for every order submitted through this app.',
 ];
 
+// Reuses the shared toast-in keyframes (base.css) for a staggered entrance;
+// the global prefers-reduced-motion rule collapses it for motion-sensitive users.
+const ENTRANCE = 'toast-in 250ms cubic-bezier(0.32, 0.72, 0, 1) both';
+
+// Fade the scrollable edges so clipped text is discoverable without a scrollbar.
+const SCROLL_FADE =
+  'linear-gradient(to bottom, transparent 0, #000 24px, #000 calc(100% - 24px), transparent 100%)';
+
 /** First-launch risk disclosure; must accept before any other screen. */
 export function RiskDisclaimerView({ store }: { store: AuthStore }) {
   return (
@@ -16,7 +24,7 @@ export function RiskDisclaimerView({ store }: { store: AuthStore }) {
         minHeight: 0,
         display: 'flex',
         flexDirection: 'column',
-        gap: 20,
+        gap: 'var(--space-6)',
         padding: 'var(--pad-screen)',
       }}
     >
@@ -24,33 +32,52 @@ export function RiskDisclaimerView({ store }: { store: AuthStore }) {
         style={{
           fontSize: 'var(--fs-title)',
           fontWeight: 700,
-          paddingTop: 32,
           textAlign: 'center',
+          animation: ENTRANCE,
         }}
       >
         Risk Disclosure
       </h1>
 
-      <div className="hide-scrollbar" style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
+      <div
+        className="hide-scrollbar"
+        tabIndex={0}
+        role="region"
+        aria-label="Risk disclosure text"
+        style={{
+          flex: 1,
+          minHeight: 0,
+          overflowY: 'auto',
+          display: 'flex',
+          maskImage: SCROLL_FADE,
+          WebkitMaskImage: SCROLL_FADE,
+          animation: ENTRANCE,
+          animationDelay: '60ms',
+        }}
+      >
+        {/* margin auto centers the block when it underflows and still scrolls
+            correctly when it overflows (unlike align-items: center). */}
         <div
-          className="text-secondary"
           style={{
-            fontSize: 'var(--fs-footnote)',
-            padding: '0 4px',
+            width: '100%',
+            margin: 'auto 0',
+            fontSize: 'var(--fs-subheadline)',
+            lineHeight: 1.47,
+            color: 'var(--label-primary)',
             display: 'flex',
             flexDirection: 'column',
-            gap: 14,
+            gap: 'var(--space-4)',
           }}
         >
-          {DISCLAIMER_PARAGRAPHS.map((paragraph) => (
-            <p key={paragraph.slice(0, 24)}>{paragraph}</p>
+          {DISCLAIMER_PARAGRAPHS.map((paragraph, index) => (
+            <p key={index}>{paragraph}</p>
           ))}
         </div>
       </div>
 
       <button
         className="button-primary"
-        style={{ marginBottom: 8 }}
+        style={{ marginBottom: 'var(--space-2)', animation: ENTRANCE, animationDelay: '120ms' }}
         onClick={() => store.acceptDisclaimer()}
       >
         I Understand and Accept

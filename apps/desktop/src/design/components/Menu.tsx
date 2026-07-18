@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import type { ReactNode } from 'react';
+import type { KeyboardEvent as ReactKeyboardEvent, ReactNode } from 'react';
 import { CheckmarkIcon } from '../icons';
 
 export interface MenuItem {
@@ -30,6 +30,7 @@ export function Menu({ trigger, items, direction = 'down', className }: MenuProp
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') setOpen(false);
     };
+    wrapRef.current?.querySelector<HTMLElement>('.menu-item')?.focus();
     window.addEventListener('pointerdown', onPointerDown);
     window.addEventListener('keydown', onKey);
     return () => {
@@ -38,17 +39,37 @@ export function Menu({ trigger, items, direction = 'down', className }: MenuProp
     };
   }, [open]);
 
+  /** ArrowUp/ArrowDown move focus between items, wrapping at the ends. */
+  const onMenuKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+    event.preventDefault();
+    const menuItems = Array.from(event.currentTarget.querySelectorAll<HTMLElement>('.menu-item'));
+    if (menuItems.length === 0) return;
+    const index = menuItems.indexOf(document.activeElement as HTMLElement);
+    const delta = event.key === 'ArrowDown' ? 1 : -1;
+    const next =
+      index === -1
+        ? menuItems[delta === 1 ? 0 : menuItems.length - 1]
+        : menuItems[(index + delta + menuItems.length) % menuItems.length];
+    next.focus();
+  };
+
   return (
     <div ref={wrapRef} className={`menu-wrap${className ? ` ${className}` : ''}`}>
       <div style={{ display: 'flex', flex: 1, minWidth: 0 }} onClick={() => setOpen((v) => !v)}>
         {trigger}
       </div>
       {open ? (
-        <div className={`menu-dropdown${direction === 'up' ? ' up' : ''}`}>
+        <div
+          className={`menu-dropdown${direction === 'up' ? ' up' : ''}`}
+          role="menu"
+          onKeyDown={onMenuKeyDown}
+        >
           {items.map((item) => (
             <button
               key={item.key}
               className="menu-item"
+              role="menuitem"
               onClick={() => {
                 setOpen(false);
                 item.onSelect();

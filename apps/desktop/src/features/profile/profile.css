@@ -1,0 +1,72 @@
+/* Profile sheet — feature-scoped styles. Shared primitives (tokens, grouped
+   list, buttons) live in src/design; everything here is local to this sheet. */
+
+.profile-view {
+  background: var(--app-background);
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* The form must not disturb the section-card row layout (separators, hit
+   areas), so it renders as if it were not there. */
+.profile-view .credentials-form {
+  display: contents;
+}
+
+/* Persistent label column next to each credential input ("Account ID" is
+   ≈88px at 17px, rounded up to the 4px grid). */
+.profile-view .credential-label {
+  width: 96px;
+  flex: none;
+}
+
+/* Revealed secrets render mono at subheadline so 0/O and l/1 stay legible. */
+.profile-view .secret-input.revealed {
+  font-family: var(--font-mono);
+  font-size: var(--fs-subheadline);
+}
+
+/* Truncate long emails at the leading edge so the domain stays visible. */
+.profile-view .grouped-row .row-value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+}
+
+/* Footnote / status-color row variants (replace per-row inline styles). */
+.profile-view .grouped-row.footnote {
+  font-size: var(--fs-footnote);
+}
+.profile-view .grouped-row.positive {
+  color: var(--pnl-positive);
+}
+.profile-view .grouped-row.negative {
+  color: var(--pnl-negative-text); /* AA-passing on the elevated card */
+}
+
+.profile-view .grouped-row:is(button) {
+  cursor: pointer;
+}
+.profile-view .grouped-row:is(button):disabled {
+  cursor: default;
+  opacity: var(--disabled-opacity);
+}
+
+/* Loading placeholder that preserves the Email row's geometry. Static on
+   purpose: global prefers-reduced-motion rules would kill any shimmer. */
+.profile-view .skeleton {
+  display: inline-block;
+  height: 17px;
+  border-radius: 4px;
+  background: rgba(235, 235, 245, 0.08);
+}
+.profile-view .skeleton.skeleton-label {
+  width: 56px;
+}
+.profile-view .skeleton.skeleton-value {
+  width: 180px;
+}

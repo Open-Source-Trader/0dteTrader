@@ -1,0 +1,457 @@
+/* Shared iOS-look components. */
+
+/* --- Status bar + home indicator (cosmetic iPhone chrome) --- */
+.status-bar {
+  height: 59px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 28px 0;
+  position: relative;
+  z-index: 5;
+}
+
+.status-bar .time {
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  min-width: 54px;
+}
+
+.status-bar .island {
+  position: absolute;
+  left: 50%;
+  top: 11px;
+  transform: translateX(-50%);
+  width: 125px;
+  height: 36px;
+  background: #000;
+  border-radius: 20px;
+}
+
+.status-bar .glyphs {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.home-indicator {
+  height: 34px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.home-indicator::after {
+  content: '';
+  width: 140px;
+  height: 5px;
+  border-radius: 3px;
+  background: var(--label-primary);
+  opacity: 0.9;
+}
+
+/* --- NavBar (44px inline-title bar) --- */
+.navbar {
+  height: var(--h-navbar);
+  flex: none;
+  display: flex;
+  align-items: center;
+  padding: 0 16px;
+  position: relative;
+}
+
+.navbar .navbar-title {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: var(--fs-headline);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.navbar .navbar-leading {
+  margin-right: auto;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.navbar .navbar-trailing {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.navbar-text-button {
+  color: var(--app-accent);
+  font-size: var(--fs-body);
+}
+
+.navbar-icon-button {
+  color: var(--app-accent);
+  display: flex;
+  align-items: center;
+}
+
+/* --- Spinner (ProgressView) --- */
+.spinner {
+  display: inline-block;
+  border-radius: 50%;
+  border: 2px solid rgba(235, 235, 245, 0.25);
+  border-top-color: var(--label-secondary);
+  animation: spinner-rotate 0.8s linear infinite;
+}
+
+.spinner.white {
+  border-color: rgba(255, 255, 255, 0.35);
+  border-top-color: #fff;
+}
+
+/* --- Sheet --- */
+.sheet-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  animation: backdrop-in var(--sheet-anim);
+  z-index: 20;
+}
+
+.sheet-panel {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: var(--app-surface);
+  border-radius: 10px 10px 0 0;
+  animation: sheet-up var(--sheet-anim);
+  z-index: 21;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.sheet-panel.large {
+  top: 10px;
+}
+
+.sheet-panel.medium {
+  height: 48%;
+}
+
+.sheet-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* --- Alert dialog (270px centered card) --- */
+.alert-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: backdrop-in 150ms ease-out;
+  z-index: 30;
+}
+
+.alert-card {
+  width: 270px;
+  background: rgba(40, 43, 53, 0.96);
+  border-radius: 14px;
+  overflow: hidden;
+  text-align: center;
+}
+
+.alert-card .alert-title {
+  font-size: var(--fs-headline);
+  font-weight: 600;
+  padding: 16px 16px 4px;
+}
+
+.alert-card .alert-message {
+  font-size: var(--fs-footnote);
+  padding: 0 16px 14px;
+}
+
+.alert-card .alert-button {
+  display: block;
+  width: 100%;
+  height: 44px;
+  font-size: var(--fs-body);
+  color: var(--app-accent);
+  border-top: 0.5px solid var(--app-border);
+}
+
+.alert-card .alert-button.destructive {
+  color: var(--pnl-negative);
+}
+
+.alert-card .alert-button.cancel {
+  font-weight: 600;
+}
+
+/* --- Menu (iOS context-menu style dropdown) --- */
+.menu-wrap {
+  position: relative;
+  display: flex;
+  min-width: 0;
+}
+
+.menu-dropdown {
+  position: absolute;
+  top: calc(100% + 6px);
+  min-width: 200px;
+  max-height: 320px;
+  overflow-y: auto;
+  background: rgba(40, 43, 53, 0.98);
+  border-radius: 13px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.55);
+  z-index: 40;
+  padding: 4px 0;
+}
+
+.menu-dropdown.up {
+  top: auto;
+  bottom: calc(100% + 6px);
+}
+
+.menu-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  padding: 11px 16px;
+  font-size: var(--fs-body);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.menu-item + .menu-item {
+  border-top: 0.5px solid var(--app-border);
+}
+
+.menu-item:active {
+  background: rgba(118, 118, 128, 0.24);
+}
+
+/* --- Segmented control --- */
+.segmented {
+  display: flex;
+  background: var(--segmented-track);
+  border-radius: 9px;
+  padding: 2px;
+  height: 32px;
+  flex: 1;
+  min-width: 0;
+}
+
+.segmented .segment {
+  flex: 1;
+  border-radius: 7px;
+  font-size: var(--fs-footnote);
+  font-weight: 500;
+  color: var(--label-primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.segmented .segment.selected {
+  background: var(--segmented-knob);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+  font-weight: 600;
+}
+
+/* --- Toggle (51x31 iOS switch) --- */
+.toggle {
+  width: 51px;
+  height: 31px;
+  border-radius: 16px;
+  background: var(--segmented-track);
+  position: relative;
+  transition: background 200ms ease;
+  flex: none;
+}
+
+.toggle.on {
+  background: var(--pnl-positive);
+}
+
+.toggle .knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 27px;
+  height: 27px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.3);
+  transition: transform 200ms ease;
+}
+
+.toggle.on .knob {
+  transform: translateX(20px);
+}
+
+/* --- Stepper (94x32 two-segment iOS control) --- */
+.stepper {
+  display: flex;
+  width: 94px;
+  height: 32px;
+  background: var(--app-surface-elevated);
+  border-radius: 8px;
+  overflow: hidden;
+  flex: none;
+}
+
+.stepper button {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--label-primary);
+}
+
+.stepper button:disabled {
+  opacity: 0.35;
+}
+
+.stepper button:first-child {
+  border-right: 1px solid rgba(84, 84, 88, 0.4);
+}
+
+/* --- Trade action buttons --- */
+.trade-action-button {
+  flex: 1;
+  min-height: var(--h-trade-button);
+  border-radius: var(--radius-button);
+  color: #fff;
+  font-size: var(--fs-headline);
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.quick-chip {
+  font-size: var(--fs-caption);
+  font-weight: 600;
+  padding: 8px 14px;
+  background: var(--app-surface-elevated);
+  border-radius: 999px;
+}
+
+/* --- Chip menus (trade panel) --- */
+.chip-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+  padding: 8px 10px;
+  background: var(--app-surface-elevated);
+  border-radius: var(--radius-chip);
+  font-size: var(--fs-caption);
+  font-weight: 600;
+}
+
+.chip-button .chip-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* --- Grouped list (iOS Form/List style used by sheets) --- */
+.grouped-list {
+  padding: 12px 16px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+
+.grouped-section .section-header {
+  font-size: var(--fs-footnote);
+  color: var(--label-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  padding: 0 16px 6px;
+}
+
+.grouped-section .section-footer {
+  font-size: var(--fs-footnote);
+  color: var(--label-secondary);
+  padding: 6px 16px 0;
+}
+
+.grouped-section .section-card {
+  background: var(--app-surface-elevated);
+  border-radius: var(--radius-card);
+  overflow: hidden;
+}
+
+.grouped-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  padding: 10px 16px;
+  font-size: var(--fs-body);
+  width: 100%;
+  text-align: left;
+}
+
+.grouped-row + .grouped-row {
+  border-top: 0.5px solid var(--app-border);
+}
+
+.grouped-row .row-value {
+  margin-left: auto;
+  color: var(--label-secondary);
+}
+
+.grouped-row.button-row {
+  color: var(--app-accent);
+}
+
+.grouped-row.destructive {
+  color: var(--pnl-negative);
+}
+
+.grouped-row input {
+  flex: 1;
+  min-width: 0;
+}
+
+/* --- Toast --- */
+.toast {
+  position: absolute;
+  top: 4px;
+  left: 16px;
+  right: 16px;
+  display: flex;
+  justify-content: center;
+  z-index: 50;
+  pointer-events: none;
+  animation: toast-in var(--toast-anim);
+}
+
+.toast .toast-capsule {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 14px;
+  background: var(--app-surface-elevated);
+  border-radius: 999px;
+  border: 1px solid;
+  box-shadow: 0 0 6px rgba(0, 0, 0, 0.45);
+  font-size: var(--fs-footnote);
+  font-weight: 500;
+}

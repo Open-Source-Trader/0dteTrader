@@ -1,0 +1,66 @@
+/* Design tokens extracted from apps/ios DesignSystem (dark variants — the app
+   is dark-first and the clone forces dark). */
+:root {
+  color-scheme: dark;
+
+  /* AppColors.swift (dark) */
+  --app-background: #0b0c10;
+  --app-surface: #1a1c24;
+  --app-surface-elevated: #282b35;
+  --buy-green: #19b85b;
+  --sell-red: #e13a43;
+  --app-accent: #568ff7;
+  --app-border: rgba(84, 84, 88, 0.65);
+  --pnl-positive: #30d158;
+  --pnl-negative: #ff453a;
+
+  --label-primary: #ffffff;
+  --label-secondary: rgba(235, 235, 245, 0.6);
+
+  /* Chart series colors (ChartView.overlayColors / panes, iOS dark values) */
+  --chart-sma: #ff9f0a;
+  --chart-ema: #64d2ff;
+  --chart-vwap: #bf5af2;
+  --chart-bb-outer: #8e8e93;
+  --chart-bb-middle: #40cbe0;
+  --chart-rsi: #ffd60a;
+  --chart-macd: #0a84ff;
+  --chart-macd-signal: #ff9f0a;
+  --chart-candle-up: #30d158;
+  --chart-candle-down: #ff453a;
+  --chart-axis-label: rgba(235, 235, 245, 0.6);
+  --chart-grid: rgba(84, 84, 88, 0.25);
+  --warning-orange: #ff9f0a;
+
+  /* iOS segmented control (dark) */
+  --segmented-track: rgba(118, 118, 128, 0.24);
+  --segmented-knob: #636366;
+
+  /* AppTypography.swift at default Dynamic Type (pt = px) */
+  --font-sans: system-ui, -apple-system, 'SF Pro Text', 'Segoe UI', Roboto, 'Helvetica Neue',
+    Arial, sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', 'Cascadia Mono', 'JetBrains Mono', 'DejaVu Sans Mono',
+    Menlo, monospace;
+
+  --fs-large-title: 34px;
+  --fs-title: 28px;
+  --fs-title3: 20px;
+  --fs-headline: 17px;
+  --fs-body: 17px;
+  --fs-subheadline: 15px;
+  --fs-footnote: 13px;
+  --fs-caption: 12px;
+  --fs-caption2: 11px;
+
+  /* Geometry from the SwiftUI views */
+  --radius-input: 10px;
+  --radius-button: 12px;
+  --radius-chip: 8px;
+  --radius-card: 10px;
+  --h-button: 50px;
+  --h-trade-button: 52px;
+  --h-navbar: 44px;
+  --pad-screen: 24px;
+  --sheet-anim: 300ms cubic-bezier(0.32, 0.72, 0, 1);
+  --toast-anim: 200ms ease-in-out;
+}

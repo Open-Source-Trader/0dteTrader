@@ -1,0 +1,26 @@
+{
+  "name": "@0dtetrader/desktop",
+  "private": true,
+  "version": "0.1.0",
+  "description": "iPhone-faithful web clone of the iOS app for testing the frontend against the backend on Linux",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -p tsconfig.json --noEmit && vite build",
+    "preview": "vite preview",
+    "electron": "ELECTRON_START_URL=${ELECTRON_START_URL:-http://localhost:5173} electron electron/main.cjs"
+  },
+  "dependencies": {
+    "@0dtetrader/shared-types": "*",
+    "lightweight-charts": "^4.2.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.4",
+    "typescript": "~5.4.5",
+    "vite": "^5.4.11"
+  }
+}

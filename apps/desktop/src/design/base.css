@@ -1,0 +1,152 @@
+/* Reset + the 430x932 iPhone-Pro-Max frame the whole app renders inside. */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  background: #000;
+  font-family: var(--font-sans);
+  font-size: var(--fs-body);
+  color: var(--label-primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  -webkit-font-smoothing: antialiased;
+}
+
+#root {
+  width: 430px;
+  height: 932px;
+  max-height: 100vh;
+  flex: none;
+}
+
+/* The phone frame. Everything (sheets, alerts, toasts) positions inside it. */
+.phone-frame {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  background: var(--app-background);
+  border: 1px solid var(--app-border);
+  border-radius: 24px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.phone-content {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+button:disabled {
+  cursor: default;
+}
+
+input {
+  font: inherit;
+  color: inherit;
+  border: none;
+  outline: none;
+  background: none;
+}
+
+input::placeholder {
+  color: var(--label-secondary);
+}
+
+/* iOS-style hidden scrollbars */
+.hide-scrollbar {
+  scrollbar-width: none;
+}
+.hide-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+.text-secondary {
+  color: var(--label-secondary);
+}
+
+/* Shared text-field style (Login/Register, 12px pad, surface bg, radius 10) */
+.field {
+  display: block;
+  width: 100%;
+  padding: 12px;
+  background: var(--app-surface);
+  border-radius: var(--radius-input);
+  font-size: var(--fs-body);
+}
+
+/* Primary 50px filled accent button (Login / Register / Accept) */
+.button-primary {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: var(--h-button);
+  background: var(--app-accent);
+  color: #fff;
+  font-size: var(--fs-headline);
+  font-weight: 600;
+  border-radius: var(--radius-button);
+}
+
+.button-primary.dimmed {
+  opacity: 0.35;
+}
+
+@keyframes spinner-rotate {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(-12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes sheet-up {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+
+@keyframes backdrop-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}

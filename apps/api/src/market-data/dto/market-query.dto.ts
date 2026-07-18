@@ -39,9 +39,3 @@ export class OptionsChainQueryDto {
   @IsDateString()
   expiration?: string;
 }
-
-export class FuturesQueryDto {
-  @IsString()
-  @Matches(/^[A-Za-z]{1,4}$/)
-  root!: string;
-}

@@ -1,7 +1,8 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import type { OrderSide } from '@0dtetrader/shared-types';
+import type { OrderSide, TradingMode } from '@0dtetrader/shared-types';
 import { useContainer } from '../../app/container';
 import { useStore } from '../../core/observable';
+import { AlertDialog } from '../../design/components/AlertDialog';
 import { NavBar } from '../../design/components/NavBar';
 import { Format } from '../../design/format';
 import { ClockIcon, LayoutFullIcon, LayoutSplitIcon, PersonCircleIcon } from '../../design/icons';
@@ -16,18 +17,19 @@ import { OrderConfirmSheet } from './OrderConfirmSheet';
 import { PositionsStrip } from './PositionsStrip';
 import { ToastView } from './ToastView';
 import { TradePanel } from './TradePanel';
-import { futuresRootFor } from './futuresRoots';
 
-const DIVIDER_HEIGHT = 20;
+const DIVIDER_HEIGHT = 1;
 
 /**
  * The main screen (TradeScreenView.swift):
  * Layout A (fullscreen) — chart fills the screen, floating Buy/Sell overlaid;
- * Layout B (split) — chart on top, trade panel below, draggable divider.
+ * Layout B (split) — chart on top, trade panel below at a fixed fraction:
+ * 1/4 of the content height when sub-pane indicators are enabled (they take
+ * chart space), 1/3 otherwise.
  */
 export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
   const container = useContainer();
-  const { chartStore, chainStore, tradeStore, settingsStore, quoteSocket, drawingsStore } =
+  const { apiClient, chartStore, chainStore, tradeStore, settingsStore, quoteSocket, drawingsStore } =
     container;
 
   const chart = useStore(chartStore);
@@ -35,21 +37,42 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
   useStore(chainStore); // re-render when the chain selection changes (canTrade below)
 
   const [layout, setLayout] = useState<TradeLayout>(() => settingsStore.layoutMode);
-  const [splitFraction, setSplitFraction] = useState(() => settingsStore.splitFraction);
   const [showSymbolSearch, setShowSymbolSearch] = useState(false);
   const [showIndicatorSettings, setShowIndicatorSettings] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
 
+  // 'practice' is only the pre-fetch placeholder; the server value wins.
+  const [tradingMode, setTradingMode] = useState<TradingMode>('practice');
+  const [showModeConfirmation, setShowModeConfirmation] = useState(false);
+  const nextMode: TradingMode = tradingMode === 'live' ? 'practice' : 'live';
+
+  useEffect(() => {
+    let cancelled = false;
+    void apiClient
+      .me()
+      .then((me) => {
+        if (!cancelled) setTradingMode(me.tradingMode);
+      })
+      .catch(() => {
+        // Keep the placeholder; profile/quote errors surface elsewhere.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [apiClient]);
+
+  const confirmModeSwitch = async () => {
+    await apiClient.updateTradingMode(nextMode);
+    // Deliberately simple: guarantees every store and the quote socket
+    // re-init against the new environment.
+    location.reload();
+  };
+
   const contentRef = useRef<HTMLDivElement>(null);
   const [contentHeight, setContentHeight] = useState(0);
-  const dragRef = useRef<{ startY: number; startFraction: number; scale: number } | null>(null);
-  const [dragging, setDragging] = useState(false);
-  const [dividerHover, setDividerHover] = useState(false);
-  const rafRef = useRef(0);
-  const lastFractionRef = useRef(splitFraction);
 
-  // Startup: candles + stream, positions/orders, chain, futures root sync.
+  // Startup: candles + stream, positions/orders, chain.
   useEffect(() => {
     void chartStore.start();
     void tradeStore.refreshTradingData();
@@ -61,9 +84,7 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
   useEffect(() => {
     void chainStore.load(chart.symbol);
     drawingsStore.setSymbol(chart.symbol);
-    const root = futuresRootFor(chart.symbol);
-    if (root) void tradeStore.setFuturesRoot(root);
-  }, [chart.symbol, chainStore, tradeStore, drawingsStore]);
+  }, [chart.symbol, chainStore, drawingsStore]);
 
   // Stream live quotes for the selected contracts and all open positions.
   // The chart's own symbol is excluded: its subscription is owned by ChartStore.
@@ -71,7 +92,6 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
     ...new Set(
       [
         chainStore.selectedContract?.symbol,
-        trade.selectedFutureSymbol,
         ...trade.positions.map((position) => position.symbol),
       ].filter((symbol): symbol is string => Boolean(symbol) && symbol !== chart.symbol),
     ),
@@ -95,13 +115,12 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
     [quoteSocket, chainStore, tradeStore],
   );
 
-  // Keep indicative chain/futures quotes fresh; paused while the confirm
+  // Keep indicative chain quotes fresh; paused while the confirm
   // sheet is open so the armed ticket's context doesn't shift underneath it.
   useEffect(() => {
     const timer = setInterval(() => {
       if (tradeStore.getState().armedTicket) return;
       void chainStore.refresh();
-      void tradeStore.loadFuturesContracts(true);
     }, 30_000);
     return () => clearInterval(timer);
   }, [chainStore, tradeStore]);
@@ -151,34 +170,27 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
   };
 
   // Same gate as the split-layout TradePanel's Buy/Sell buttons.
-  const canTrade =
-    trade.assetClass === 'option'
-      ? chainStore.selectedContract !== null
-      : tradeStore.selectedFuture !== null;
+  const canTrade = chainStore.selectedContract !== null;
 
   // Explains a disabled BUY/SELL; rendered above the floating buttons.
   const disabledReason = chart.errorMessage
     ? 'Market data unavailable — check credentials in Profile'
-    : trade.assetClass === 'option' && !chainStore.selectedContract
+    : !chainStore.selectedContract
       ? 'Select an option contract to trade'
-      : trade.assetClass === 'future' && !tradeStore.selectedFuture
-        ? 'Select a futures contract to trade'
-        : null;
+      : null;
 
-  // 300px floor keeps the whole ticket (incl. the SELL/BUY row) reachable.
-  const panelHeight = Math.max(Math.round(contentHeight * splitFraction), 300);
+  // Fixed split: sub-pane indicators (RSI/MACD/Stoch/ATR) consume chart
+  // height, so the panel shrinks to 1/4 when any are on, else 1/3.
+  // No pixel floor: at the phone frame's height the fraction lands under the
+  // old 300px floor and would never switch; the TradePanel scrolls instead.
+  const indicators = chart.indicatorSettings;
+  const hasPanes =
+    indicators.rsiEnabled ||
+    indicators.macdEnabled ||
+    indicators.stochEnabled ||
+    indicators.atrEnabled;
+  const panelHeight = Math.round(contentHeight * (hasPanes ? 0.25 : 1 / 3));
   const chartHeight = Math.max(contentHeight - panelHeight - DIVIDER_HEIGHT, 96);
-
-  const endDrag = () => {
-    if (dragRef.current) {
-      dragRef.current = null;
-      setDragging(false);
-      cancelAnimationFrame(rafRef.current);
-      const fraction = lastFractionRef.current;
-      setSplitFraction(fraction);
-      settingsStore.splitFraction = fraction;
-    }
-  };
 
   const positionsStrip = (
     <PositionsStrip
@@ -225,6 +237,8 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
               drawingsStore={drawingsStore}
               onSymbolSearch={() => setShowSymbolSearch(true)}
               onIndicatorSettings={() => setShowIndicatorSettings(true)}
+              tradingMode={tradingMode}
+              onToggleMode={() => setShowModeConfirmation(true)}
             />
             {/* Scrim so the dock never lets chart content bleed through the buttons */}
             <div
@@ -267,7 +281,7 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
                 flex: 'none',
                 display: 'flex',
                 flexDirection: 'column',
-                transition: dragging ? 'none' : 'height 200ms cubic-bezier(0.32, 0.72, 0, 1)',
+                transition: 'height 200ms cubic-bezier(0.32, 0.72, 0, 1)',
               }}
             >
               <ChartView
@@ -275,80 +289,23 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
                 drawingsStore={drawingsStore}
                 onSymbolSearch={() => setShowSymbolSearch(true)}
                 onIndicatorSettings={() => setShowIndicatorSettings(true)}
+                tradingMode={tradingMode}
+                onToggleMode={() => setShowModeConfirmation(true)}
               />
             </div>
 
-            {/* Draggable divider */}
+            {/* Static hairline between chart and panel */}
             <div
-              role="separator"
-              aria-orientation="horizontal"
-              aria-label="Resize trade panel"
-              aria-valuenow={Math.round(splitFraction * 100)}
-              aria-valuemin={34}
-              aria-valuemax={50}
-              tabIndex={0}
-              style={{
-                height: DIVIDER_HEIGHT,
-                flex: 'none',
-                background: 'var(--app-surface)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                cursor: 'ns-resize',
-                touchAction: 'none',
-              }}
-              onKeyDown={(event) => {
-                const step = event.shiftKey ? 0.05 : 0.01;
-                let next: number | null = null;
-                if (event.key === 'ArrowUp') next = Math.min(0.5, splitFraction + step);
-                if (event.key === 'ArrowDown') next = Math.max(0.34, splitFraction - step);
-                if (next !== null) {
-                  event.preventDefault();
-                  setSplitFraction(next);
-                  settingsStore.splitFraction = next;
-                }
-              }}
-              onPointerEnter={() => setDividerHover(true)}
-              onPointerLeave={() => setDividerHover(false)}
-              onPointerDown={(event) => {
-                // The whole frame is scaled; convert screen px to logical px.
-                const target = event.currentTarget;
-                const scale = target.getBoundingClientRect().height / target.offsetHeight || 1;
-                dragRef.current = { startY: event.clientY, startFraction: splitFraction, scale };
-                setDragging(true);
-                target.setPointerCapture(event.pointerId);
-              }}
-              onPointerMove={(event) => {
-                const drag = dragRef.current;
-                if (!drag || contentHeight === 0) return;
-                const delta = (drag.startY - event.clientY) / drag.scale / contentHeight;
-                const fraction = Math.min(0.5, Math.max(0.34, drag.startFraction + delta));
-                lastFractionRef.current = fraction;
-                // Throttle state updates to one per frame during the drag.
-                cancelAnimationFrame(rafRef.current);
-                rafRef.current = requestAnimationFrame(() => setSplitFraction(fraction));
-              }}
-              onPointerUp={endDrag}
-              onPointerCancel={endDrag}
-            >
-              <div
-                style={{
-                  width: 48,
-                  height: 4,
-                  borderRadius: 2,
-                  background:
-                    dragging || dividerHover ? 'var(--label-primary)' : 'var(--label-secondary)',
-                  transition: 'background 150ms ease-out',
-                }}
-              />
-            </div>
+              aria-hidden
+              style={{ height: DIVIDER_HEIGHT, flex: 'none', background: 'var(--app-surface)' }}
+            />
 
             <div
               style={{
                 height: panelHeight,
                 flex: 'none',
                 minHeight: 0,
-                transition: dragging ? 'none' : 'height 200ms cubic-bezier(0.32, 0.72, 0, 1)',
+                transition: 'height 200ms cubic-bezier(0.32, 0.72, 0, 1)',
               }}
             >
               <TradePanel tradeStore={tradeStore} chainStore={chainStore} onArm={arm} />
@@ -384,6 +341,25 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
         <ProfileView onLogout={onLogout} onDismiss={() => setShowProfile(false)} />
       ) : null}
       {showHistory ? <HistoryView onDismiss={() => setShowHistory(false)} /> : null}
+      {showModeConfirmation ? (
+        <AlertDialog
+          title={nextMode === 'live' ? 'Switch to LIVE trading?' : 'Switch to PRACTICE mode?'}
+          message={
+            nextMode === 'live'
+              ? 'Real money will be used for orders and quotes.'
+              : 'Orders will go to the Webull paper environment.'
+          }
+          actions={[
+            {
+              label: nextMode === 'live' ? 'Switch to LIVE' : 'Switch to PRACTICE',
+              role: nextMode === 'live' ? 'destructive' : undefined,
+              onSelect: () => void confirmModeSwitch(),
+            },
+            { label: 'Cancel', role: 'cancel' },
+          ]}
+          onDismiss={() => setShowModeConfirmation(false)}
+        />
+      ) : null}
     </div>
   );
 }

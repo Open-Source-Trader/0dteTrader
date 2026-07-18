@@ -20,6 +20,11 @@ interface AlertDialogProps {
  */
 export function AlertDialog({ title, message, actions, onDismiss }: AlertDialogProps) {
   const backdropRef = useRef<HTMLDivElement>(null);
+  // See Sheet: parents hand us inline closures, so keep the latest callback in
+  // a ref and let the focus/effect logic below run once on mount instead of
+  // re-focusing the first button on every parent re-render.
+  const onDismissRef = useRef(onDismiss);
+  onDismissRef.current = onDismiss;
 
   useEffect(() => {
     const backdrop = backdropRef.current;
@@ -28,7 +33,7 @@ export function AlertDialog({ title, message, actions, onDismiss }: AlertDialogP
 
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
-        onDismiss();
+        onDismissRef.current();
         return;
       }
       if (event.key !== 'Tab' || !backdrop) return;
@@ -49,7 +54,8 @@ export function AlertDialog({ title, message, actions, onDismiss }: AlertDialogP
       window.removeEventListener('keydown', onKey);
       previouslyFocused?.focus();
     };
-  }, [onDismiss]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount once; see onDismissRef.
+  }, []);
 
   return (
     <div ref={backdropRef} className="alert-backdrop" role="alertdialog" aria-modal="true" aria-label={title}>

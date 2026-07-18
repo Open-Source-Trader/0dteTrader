@@ -1,6 +1,6 @@
 # 0dteTrader
 
-Rapid futures/options quick-trade iOS app backed by the official Webull OpenAPI.
+Rapid options quick-trade iOS app backed by the official Webull OpenAPI.
 
 - `apps/ios` — SwiftUI iPhone app (iOS 17+)
 - `apps/api` — NestJS + TypeScript backend (auth, encrypted credential vault, market data, trading proxy)

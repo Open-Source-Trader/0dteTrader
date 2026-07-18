@@ -27,7 +27,7 @@ backend brokers every Webull call using the user's encrypted, server-side creden
 | `UsersModule` | Profile read/update; kill-switch flag |
 | `CredentialsModule` | Store/rotate/delete Webull creds; AES-256-GCM encrypt before persist; decrypt in-memory only |
 | `BrokerModule` | `BrokerGateway` interface; `MockBrokerGateway` (deterministic dev/test) and `WebullBrokerGateway` (real, P4); per-user client factory with token caching |
-| `MarketDataModule` | REST: candles, quote, options chain, futures contracts; WS gateway streaming subscribed quotes |
+| `MarketDataModule` | REST: candles, quote, options chain; WS gateway streaming subscribed quotes |
 | `TradingModule` | Order preview/place/cancel/replace; positions; account summary; idempotency; server-side re-validation of Auto-OTM + mid price; audit log |
 
 ### BrokerGateway interface (the key seam)
@@ -37,7 +37,6 @@ interface BrokerGateway {
   getQuote(userId: string, symbol: string): Promise<Quote>;
   getCandles(userId: string, symbol: string, req: CandleRequest): Promise<Candle[]>;
   getOptionsChain(userId: string, symbol: string, expiration?: string): Promise<OptionsChain>;
-  getFuturesContracts(userId: string, root: string): Promise<FuturesContract[]>;
   previewOrder(userId: string, order: OrderRequest): Promise<OrderPreview>;
   placeOrder(userId: string, order: OrderRequest, idempotencyKey: string): Promise<OrderResult>;
   cancelOrder(userId: string, orderId: string): Promise<void>;
@@ -76,7 +75,7 @@ Features/
   Profile/            ProfileView, WebullCredentialsForm
   Chart/              ChartView (candles + indicator overlays), IndicatorEngine, SymbolSearch
   Trade/              TradePanelView, FloatingTradeButtons, OptionsChainViewModel,
-                      AutoContractSelector, OrderTicketView, PositionsStripView, FuturesSelector
+                      AutoContractSelector, OrderTicketView, PositionsStripView
 ```
 
 **Charting:** DanielGindi/Charts (SwiftPM) for v1 candlesticks + indicator overlays.

@@ -1,8 +1,8 @@
 import type { AuthStore } from './AuthStore';
 
 const DISCLAIMER_PARAGRAPHS = [
-  'Trading securities, options, and futures involves substantial risk of loss and is not suitable for every investor. You may lose all of your invested capital.',
-  'Options on their expiration date ("0DTE") are especially volatile: prices can move violently in minutes, liquidity can disappear, and positions can expire worthless the same day. Futures trading involves leverage and can result in losses exceeding your initial investment.',
+  'Trading securities and options involves substantial risk of loss and is not suitable for every investor. You may lose all of your invested capital.',
+  'Options on their expiration date ("0DTE") are especially volatile: prices can move violently in minutes, liquidity can disappear, and positions can expire worthless the same day.',
   '0dteTrader is an order-entry tool only. It does not provide investment advice, recommendations, or analysis, and nothing in the app should be interpreted as such. Order routing, contract selection, and pricing are validated by the backend, but market conditions, connectivity, or broker outages may prevent or delay execution.',
   'By tapping "I Understand and Accept" you acknowledge these risks and agree that you are solely responsible for every order submitted through this app.',
 ];

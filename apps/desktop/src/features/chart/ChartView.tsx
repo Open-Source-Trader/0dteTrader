@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { CandleInterval } from '@0dtetrader/shared-types';
+import type { CandleInterval, TradingMode } from '@0dtetrader/shared-types';
 import { useStore } from '../../core/observable';
 import { Menu } from '../../design/components/Menu';
 import { Spinner } from '../../design/components/Spinner';
@@ -20,6 +20,8 @@ interface ChartViewProps {
   drawingsStore: DrawingsStore;
   onSymbolSearch: () => void;
   onIndicatorSettings: () => void;
+  tradingMode: TradingMode;
+  onToggleMode: () => void;
 }
 
 // Interval hotkeys. 'H'/'D' are uppercase (shift held) so they don't collide
@@ -46,7 +48,7 @@ const SKELETON_BARS = [
 ];
 
 /** Chart surface: header, candle chart with overlays and drawing tools, sub-panes. */
-export function ChartView({ store, drawingsStore, onSymbolSearch, onIndicatorSettings }: ChartViewProps) {
+export function ChartView({ store, drawingsStore, onSymbolSearch, onIndicatorSettings, tradingMode, onToggleMode }: ChartViewProps) {
   const { symbol, interval, candles, quote, isLoading, errorMessage, isStale, indicatorSettings } =
     useStore(store);
 
@@ -240,6 +242,18 @@ export function ChartView({ store, drawingsStore, onSymbolSearch, onIndicatorSet
         ) : null}
 
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 12 }}>
+          <button
+            onClick={onToggleMode}
+            aria-label={`Trading mode ${tradingMode === 'live' ? 'LIVE' : 'PRACTICE'}. Switch mode`}
+            style={{
+              fontSize: 'var(--fs-caption2)',
+              color: tradingMode === 'live' ? 'var(--pnl-positive)' : '#ff9f0a',
+              fontWeight: 700,
+              letterSpacing: '0.04em',
+            }}
+          >
+            {tradingMode === 'live' ? 'LIVE' : 'PRACTICE'}
+          </button>
           <DrawToolsMenu store={drawingsStore} />
           <Menu
             trigger={

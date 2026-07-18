@@ -1,5 +1,5 @@
 import { Controller, Get, Inject, Query } from '@nestjs/common';
-import { Candle, FuturesContract, OptionsChain, Quote } from '@0dtetrader/shared-types';
+import { Candle, OptionsChain, Quote } from '@0dtetrader/shared-types';
 import {
   BROKER_GATEWAY,
   BrokerGateway,
@@ -10,7 +10,6 @@ import {
 } from '../common/current-user.decorator';
 import {
   CandlesQueryDto,
-  FuturesQueryDto,
   OptionsChainQueryDto,
   QuoteQueryDto,
 } from './dto/market-query.dto';
@@ -55,13 +54,5 @@ export class MarketDataController {
     @Query() query: OptionsChainQueryDto,
   ): Promise<OptionsChain> {
     return this.broker.getOptionsChain(user.userId, query.symbol, query.expiration);
-  }
-
-  @Get('futures')
-  getFutures(
-    @CurrentUser() user: AuthenticatedUser,
-    @Query() query: FuturesQueryDto,
-  ): Promise<FuturesContract[]> {
-    return this.broker.getFuturesContracts(user.userId, query.root);
   }
 }

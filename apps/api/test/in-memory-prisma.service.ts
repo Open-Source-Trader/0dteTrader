@@ -8,7 +8,8 @@ import { randomUUID } from 'node:crypto';
  * app uses (documented on PrismaService) and emulates:
  *   - @default(uuid()) / @default(now()) / @updatedAt
  *   - unique constraints on user.email, refreshToken.tokenHash,
- *     webullCredential.userId and orderAudit.(userId, idempotencyKey)
+ *     webullCredential.(userId, environment) and
+ *     orderAudit.(userId, idempotencyKey)
  *     (violations throw a P2002-coded error like the real client)
  *   - nullable unique column semantics for orderAudit.idempotencyKey
  *     (multiple NULL keys never conflict, as in Postgres)
@@ -52,6 +53,7 @@ export class InMemoryPrismaService {
       const row = {
         id: randomUUID(),
         tradingDisabled: false,
+        tradingMode: 'live',
         createdAt: now,
         updatedAt: now,
         ...data,
@@ -68,10 +70,25 @@ export class InMemoryPrismaService {
   };
 
   readonly webullCredential = {
-    findUnique: async ({ where }: any) =>
-      this.credentials.find((c) => c.userId === where.userId) ?? null,
+    findUnique: async ({ where }: any) => {
+      const key = where.userId_environment ?? {
+        userId: where.userId,
+        environment: 'live',
+      };
+      return (
+        this.credentials.find(
+          (c) => c.userId === key.userId && c.environment === key.environment,
+        ) ?? null
+      );
+    },
     upsert: async ({ where, create, update }: any) => {
-      const existing = this.credentials.find((c) => c.userId === where.userId);
+      const key = where.userId_environment ?? {
+        userId: where.userId,
+        environment: 'live',
+      };
+      const existing = this.credentials.find(
+        (c) => c.userId === key.userId && c.environment === key.environment,
+      );
       if (existing) {
         Object.assign(existing, update, { updatedAt: new Date() });
         return existing;
@@ -87,7 +104,13 @@ export class InMemoryPrismaService {
       return row;
     },
     delete: async ({ where }: any) => {
-      const idx = this.credentials.findIndex((c) => c.userId === where.userId);
+      const key = where.userId_environment ?? {
+        userId: where.userId,
+        environment: 'live',
+      };
+      const idx = this.credentials.findIndex(
+        (c) => c.userId === key.userId && c.environment === key.environment,
+      );
       if (idx === -1) {
         throw Object.assign(new Error('Record not found'), { code: 'P2025' });
       }

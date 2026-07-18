@@ -86,20 +86,6 @@ describe('OrdersService', () => {
     expect(history.totalRealizedPnl).toBe(-40);
   });
 
-  it('uses the futures multiplier for futures contracts', async () => {
-    await orders.record(
-      USER,
-      fill({ contractSymbol: 'MESU26', side: 'buy', quantity: 1, filledPrice: 6000 }),
-    );
-    await orders.record(
-      USER,
-      fill({ contractSymbol: 'MESU26', side: 'sell', quantity: 1, filledPrice: 6002 }),
-    );
-
-    const history = await orders.history(USER);
-    expect(history.entries[0].realizedPnl).toBe(10); // 2 points × MES $5 multiplier
-  });
-
   it('keeps rejected and cancelled orders in history with no P/L', async () => {
     await orders.record(USER, fill({ status: 'rejected', filledPrice: undefined }));
     await orders.record(USER, fill({ status: 'cancelled', filledPrice: undefined, orderType: 'mid' }));
@@ -112,10 +98,23 @@ describe('OrdersService', () => {
 
   it('scopes history to the requesting user', async () => {
     await orders.record(USER, fill());
-    await orders.record('user-2', fill({ contractSymbol: 'MESU26' }));
+    await orders.record('user-2', fill({ contractSymbol: 'QQQ260717C00505000' }));
 
     const history = await orders.history(USER);
     expect(history.entries).toHaveLength(1);
     expect(history.entries[0].contractSymbol).toBe(OCC);
+  });
+
+  it("stamps the order with the user's current trading mode", async () => {
+    const practiceUser = await prisma.user.create({
+      data: { email: 'p@example.com', passwordHash: 'h', tradingMode: 'practice' },
+    });
+    await orders.record(practiceUser.id as string, fill());
+    await orders.record(USER, fill());
+
+    const byUser = (userId: string) =>
+      prisma.tradeOrders.find((o) => o.userId === userId);
+    expect(byUser(practiceUser.id as string).environment).toBe('practice');
+    expect(byUser(USER).environment).toBe('live'); // unknown user → default
   });
 });

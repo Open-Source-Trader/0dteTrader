@@ -2,7 +2,6 @@ import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import {
   Candle,
   CandleRequest,
-  FuturesContract,
   OptionContract,
   OptionType,
   OptionsChain,
@@ -19,15 +18,12 @@ import {
   estimateBuyingPower,
   findExplicitOption,
   formatOccSymbol,
-  futuresRootOf,
-  FUTURES_SPECS,
   OPTION_MULTIPLIER,
   parseOccSymbol,
   resolveAutoOtm,
 } from './contract-resolution';
 import {
   optionExpirations,
-  thirdFriday,
   todayUtc,
   ymd,
 } from './expiration-calendar';
@@ -38,9 +34,6 @@ export const MOCK_BUYING_POWER = 25_000;
 
 /** Delay before a mid order fills, per the mock contract. */
 const MID_FILL_DELAY_MS = 200;
-
-const MONTH_CODES = ['F', 'G', 'H', 'J', 'K', 'M', 'N', 'Q', 'U', 'V', 'X', 'Z'];
-const QUARTERLY_MONTHS = [3, 6, 9, 12];
 
 // ---------------------------------------------------------------------------
 // Deterministic PRNG utilities
@@ -76,35 +69,6 @@ function daysBetween(a: Date, b: Date): number {
   return Math.round((b.getTime() - a.getTime()) / 86_400_000);
 }
 
-/** Next `count` quarterly futures contract months whose expiry has not passed. */
-function nextQuarterlyContracts(
-  now: Date,
-  count: number,
-): { year: number; month: number }[] {
-  const today = todayUtc(now);
-  const out: { year: number; month: number }[] = [];
-  let year = now.getUTCFullYear();
-  let month = now.getUTCMonth() + 1;
-  while (out.length < count) {
-    if (
-      QUARTERLY_MONTHS.includes(month) &&
-      thirdFriday(year, month).getTime() >= today.getTime()
-    ) {
-      out.push({ year, month });
-    }
-    month += 1;
-    if (month > 12) {
-      month = 1;
-      year += 1;
-    }
-  }
-  return out;
-}
-
-function futuresSymbol(root: string, year: number, month: number): string {
-  return `${root}${MONTH_CODES[month - 1]}${String(year % 100).padStart(2, '0')}`;
-}
-
 // ---------------------------------------------------------------------------
 // Mock state
 // ---------------------------------------------------------------------------
@@ -121,7 +85,7 @@ interface StoredOrder extends OrderResult {
 }
 
 interface PositionAgg {
-  assetClass: 'option' | 'future';
+  assetClass: 'option';
   quantity: number; // signed
   avgPrice: number;
 }
@@ -132,7 +96,6 @@ interface PositionAgg {
  *   wall-clock second (lazy), so prices are stable within a process run.
  * - Synthetic option chains: $1 strikes under $250, $5 above; expirations
  *   today/+1d/weekly/monthly.
- * - Synthetic front + deferred futures for ES/MES/NQ/MNQ/CL/GC.
  * - Market orders fill immediately at last; mid orders fill at mid after
  *   200 ms; cancel transitions to cancelled. Positions update on fills.
  * - $25,000 fixed buying power per user.
@@ -170,8 +133,7 @@ export class MockBrokerGateway implements BrokerGateway, OnModuleDestroy {
       );
       return this.assembleQuote(symbol, bid, ask, last);
     }
-    const root = futuresRootOf(symbol);
-    const base = root ? FUTURES_SPECS[root].base : 20 + (fnv1a(symbol) % 481);
+    const base = 20 + (fnv1a(symbol) % 481);
     const price = this.walkPrice(symbol, base);
     const half = Math.max(0.01, round2(price * 0.0002));
     return this.assembleQuote(symbol, round2(price - half), round2(price + half), price);
@@ -190,9 +152,7 @@ export class MockBrokerGateway implements BrokerGateway, OnModuleDestroy {
       return [];
     }
     const seed = fnv1a(`${symbol}|${req.interval}`);
-    const base = futuresRootOf(symbol)
-      ? FUTURES_SPECS[futuresRootOf(symbol)!].base
-      : 20 + (fnv1a(symbol) % 481);
+    const base = 20 + (fnv1a(symbol) % 481);
 
     const firstBucket = Math.floor(from / intervalMs);
     const lastBucket = Math.floor(to / intervalMs);
@@ -261,33 +221,6 @@ export class MockBrokerGateway implements BrokerGateway, OnModuleDestroy {
     };
   }
 
-  async getFuturesContracts(
-    _userId: string,
-    root: string,
-  ): Promise<FuturesContract[]> {
-    const spec = FUTURES_SPECS[root.toUpperCase()];
-    if (!spec) {
-      throw brokerErrors.contractNotFound(
-        `Unknown futures root: ${root}. Supported: ${Object.keys(FUTURES_SPECS).join(', ')}`,
-      );
-    }
-    const now = new Date();
-    return nextQuarterlyContracts(now, 2).map(({ year, month }, i) => {
-      const symbol = futuresSymbol(root.toUpperCase(), year, month);
-      const price = this.walkPrice(symbol, spec.base);
-      const half = Math.max(0.01, round2(price * 0.0002));
-      return {
-        symbol,
-        root: root.toUpperCase(),
-        expiration: ymd(thirdFriday(year, month)),
-        frontMonth: i === 0,
-        bid: round2(price - half),
-        ask: round2(price + half),
-        last: price,
-      };
-    });
-  }
-
   // -------------------------------------------------------------------------
   // Trading
   // -------------------------------------------------------------------------
@@ -299,12 +232,7 @@ export class MockBrokerGateway implements BrokerGateway, OnModuleDestroy {
         ? resolved.last
         : computeMid(resolved.bid, resolved.ask);
     const estBuyingPower = round2(
-      estimateBuyingPower(
-        order.assetClass,
-        resolved.contractSymbol,
-        order.quantity,
-        price,
-      ),
+      estimateBuyingPower(order.quantity, price),
     );
 
     const warnings: string[] = [];
@@ -339,12 +267,7 @@ export class MockBrokerGateway implements BrokerGateway, OnModuleDestroy {
         ? resolved.last
         : computeMid(resolved.bid, resolved.ask);
 
-    const cost = estimateBuyingPower(
-      order.assetClass,
-      resolved.contractSymbol,
-      order.quantity,
-      limitOrFill,
-    );
+    const cost = estimateBuyingPower(order.quantity, limitOrFill);
     if (cost > MOCK_BUYING_POWER) {
       throw brokerErrors.insufficientBuyingPower(
         `Order requires ~${round2(cost)} but only ${MOCK_BUYING_POWER} available`,
@@ -417,10 +340,7 @@ export class MockBrokerGateway implements BrokerGateway, OnModuleDestroy {
     for (const [symbol, agg] of positions) {
       if (agg.quantity === 0) continue;
       const { last } = this.quoteForContract(symbol);
-      const multiplier =
-        agg.assetClass === 'option'
-          ? OPTION_MULTIPLIER
-          : FUTURES_SPECS[futuresRootOf(symbol) ?? '']?.multiplier ?? 1;
+      const multiplier = OPTION_MULTIPLIER;
       out.push({
         symbol,
         assetClass: agg.assetClass,
@@ -449,48 +369,29 @@ export class MockBrokerGateway implements BrokerGateway, OnModuleDestroy {
     last: number;
     expiration?: string;
   }> {
-    if (order.assetClass === 'option') {
-      const { optionType } = order.selection;
-      if (!optionType) {
-        throw brokerErrors.orderRejected(
-          'selection.optionType is required for option orders',
-        );
-      }
-      const chain = await this.getOptionsChain(
-        userId,
-        order.underlying,
-        order.selection.expiration,
+    const { optionType } = order.selection;
+    if (!optionType) {
+      throw brokerErrors.orderRejected(
+        'selection.optionType is required for option orders',
       );
-      const contract =
-        order.selection.mode === 'auto_otm'
-          ? resolveAutoOtm(chain.contracts, optionType, chain.underlyingPrice)
-          : findExplicitOption(
-              chain.contracts,
-              optionType,
-              order.selection.strike ?? NaN,
-            );
-      if (!contract) {
-        throw brokerErrors.contractNotFound(
-          `No ${optionType} contract at strike ${order.selection.strike} ` +
-            `for ${order.underlying} ${chain.expirations[0]}`,
-        );
-      }
-      return {
-        contractSymbol: contract.symbol,
-        bid: contract.bid,
-        ask: contract.ask,
-        last: contract.last,
-        expiration: contract.expiration,
-      };
     }
-
-    const contracts = await this.getFuturesContracts(userId, order.underlying);
-    const contract = contracts.find(
-      (c) => c.symbol === order.selection.contractSymbol,
+    const chain = await this.getOptionsChain(
+      userId,
+      order.underlying,
+      order.selection.expiration,
     );
+    const contract =
+      order.selection.mode === 'auto_otm'
+        ? resolveAutoOtm(chain.contracts, optionType, chain.underlyingPrice)
+        : findExplicitOption(
+            chain.contracts,
+            optionType,
+            order.selection.strike ?? NaN,
+          );
     if (!contract) {
       throw brokerErrors.contractNotFound(
-        `No futures contract ${order.selection.contractSymbol} for root ${order.underlying}`,
+        `No ${optionType} contract at strike ${order.selection.strike} ` +
+          `for ${order.underlying} ${chain.expirations[0]}`,
       );
     }
     return {
@@ -502,23 +403,17 @@ export class MockBrokerGateway implements BrokerGateway, OnModuleDestroy {
     };
   }
 
-  /** Current quote for a resolved contract symbol (option OCC or futures). */
+  /** Current quote for a resolved contract symbol (option OCC). */
   private quoteForContract(symbol: string): {
     bid: number;
     ask: number;
     last: number;
   } {
     const occ = parseOccSymbol(symbol);
-    if (occ) {
-      return this.priceOption(occ.underlying, occ.expiration, occ.strike, occ.optionType);
+    if (!occ) {
+      throw brokerErrors.contractNotFound(`Unknown contract symbol: ${symbol}`);
     }
-    const root = futuresRootOf(symbol);
-    if (root) {
-      const price = this.walkPrice(symbol, FUTURES_SPECS[root].base);
-      const half = Math.max(0.01, round2(price * 0.0002));
-      return { bid: round2(price - half), ask: round2(price + half), last: price };
-    }
-    throw brokerErrors.contractNotFound(`Unknown contract symbol: ${symbol}`);
+    return this.priceOption(occ.underlying, occ.expiration, occ.strike, occ.optionType);
   }
 
   /** Deterministic option price from the underlying's current price. */
@@ -528,10 +423,7 @@ export class MockBrokerGateway implements BrokerGateway, OnModuleDestroy {
     strike: number,
     optionType: OptionType,
   ): { bid: number; ask: number; last: number } {
-    const root = futuresRootOf(underlying);
-    const base = root
-      ? FUTURES_SPECS[root].base
-      : 20 + (fnv1a(underlying) % 481);
+    const base = 20 + (fnv1a(underlying) % 481);
     const price = this.walkPrice(underlying, base);
 
     const [y, m, d] = expiration.split('-').map(Number);
@@ -596,7 +488,7 @@ export class MockBrokerGateway implements BrokerGateway, OnModuleDestroy {
 
   private applyFill(
     userId: string,
-    assetClass: 'option' | 'future',
+    assetClass: 'option',
     contractSymbol: string,
     side: 'buy' | 'sell',
     quantity: number,

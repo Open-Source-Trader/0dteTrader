@@ -1,4 +1,5 @@
-import { IsString, MinLength } from 'class-validator';
+import { IsIn, IsOptional, IsString, MinLength } from 'class-validator';
+import { TradingMode } from '@0dtetrader/shared-types';
 
 export class WebullCredentialsDto {
   @IsString()
@@ -12,4 +13,8 @@ export class WebullCredentialsDto {
   @IsString()
   @MinLength(1)
   accountId!: string;
+
+  @IsOptional()
+  @IsIn(['live', 'practice'])
+  environment?: TradingMode;
 }

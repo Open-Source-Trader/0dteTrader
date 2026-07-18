@@ -102,8 +102,38 @@ describe('0dteTrader API (e2e)', () => {
       id: userId,
       email: user.email,
       tradingDisabled: false,
+      tradingMode: 'live',
       webullConfigured: false,
+      webullPracticeConfigured: false,
     });
+  });
+
+  it('PATCH /v1/me switches the trading mode and validates the value', async () => {
+    const patched = await request(server)
+      .patch('/v1/me')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({ tradingMode: 'practice' })
+      .expect(200);
+    expect(patched.body.tradingMode).toBe('practice');
+
+    const me = await request(server)
+      .get('/v1/me')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .expect(200);
+    expect(me.body.tradingMode).toBe('practice');
+
+    await request(server)
+      .patch('/v1/me')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({ tradingMode: 'demo' })
+      .expect(400);
+
+    const back = await request(server)
+      .patch('/v1/me')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({ tradingMode: 'live' })
+      .expect(200);
+    expect(back.body.tradingMode).toBe('live');
   });
 
   it('saves Webull credentials (never echoed back) and reflects it in /me', async () => {
@@ -112,7 +142,7 @@ describe('0dteTrader API (e2e)', () => {
       .set('Authorization', `Bearer ${accessToken}`)
       .send({ appKey: 'ak', appSecret: 'sk', accountId: 'acct-1' })
       .expect(200);
-    expect(put.body).toEqual({ webullConfigured: true });
+    expect(put.body).toEqual({ webullConfigured: true, environment: 'live' });
     expect(JSON.stringify(put.body)).not.toContain('sk');
 
     const me = await request(server)
@@ -153,7 +183,40 @@ describe('0dteTrader API (e2e)', () => {
       .expect(200);
   });
 
-  it('serves market data (quote, candles, chain, futures)', async () => {
+  it('stores credentials per environment (live / practice)', async () => {
+    const auth = { Authorization: `Bearer ${accessToken}` };
+
+    // Live credentials already exist from the tests above; add practice.
+    const put = await request(server)
+      .put('/v1/me/webull-credentials')
+      .set(auth)
+      .send({ appKey: 'pak', appSecret: 'psk', accountId: 'pacct', environment: 'practice' })
+      .expect(200);
+    expect(put.body).toEqual({ webullConfigured: true, environment: 'practice' });
+
+    let me = await request(server).get('/v1/me').set(auth).expect(200);
+    expect(me.body.webullConfigured).toBe(true);
+    expect(me.body.webullPracticeConfigured).toBe(true);
+    expect(prisma.credentials).toHaveLength(2);
+
+    // An invalid environment is rejected.
+    await request(server)
+      .put('/v1/me/webull-credentials')
+      .set(auth)
+      .send({ appKey: 'x', appSecret: 'y', accountId: 'z', environment: 'demo' })
+      .expect(400);
+
+    // Deleting practice leaves live untouched.
+    await request(server)
+      .delete('/v1/me/webull-credentials?environment=practice')
+      .set(auth)
+      .expect(204);
+    me = await request(server).get('/v1/me').set(auth).expect(200);
+    expect(me.body.webullConfigured).toBe(true);
+    expect(me.body.webullPracticeConfigured).toBe(false);
+  });
+
+  it('serves market data (quote, candles, chain)', async () => {
     const auth = { Authorization: `Bearer ${accessToken}` };
     const quote = await request(server)
       .get('/v1/market/quote?symbol=SPY')
@@ -184,13 +247,6 @@ describe('0dteTrader API (e2e)', () => {
     expect(chain.body.underlying).toBe('SPY');
     expect(chain.body.expirations.length).toBeGreaterThanOrEqual(3);
     expect(chain.body.contracts.length).toBeGreaterThan(0);
-
-    const futures = await request(server)
-      .get('/v1/market/futures?root=MES')
-      .set(auth)
-      .expect(200);
-    expect(futures.body).toHaveLength(2);
-    expect(futures.body[0].frontMonth).toBe(true);
   });
 
   it('previews an auto_otm order (server-resolved contract)', async () => {

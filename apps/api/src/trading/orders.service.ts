@@ -5,12 +5,7 @@ import {
   TradeHistory,
   TradeHistoryEntry,
 } from '@0dtetrader/shared-types';
-import {
-  futuresRootOf,
-  FUTURES_SPECS,
-  OPTION_MULTIPLIER,
-  parseOccSymbol,
-} from '../broker/contract-resolution';
+import { OPTION_MULTIPLIER } from '../broker/contract-resolution';
 import { OrderEventsService } from '../broker/order-events.service';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -44,13 +39,18 @@ export class OrdersService implements OnModuleDestroy {
   /** Upsert an order row; updates only fields a status change can move. */
   async record(userId: string, order: OrderResult): Promise<void> {
     const placedAt = new Date(order.timestamp);
+    // Stamp the environment (live/practice) in effect when the order is first
+    // recorded; later status updates never move an order across environments.
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    const environment = user?.tradingMode === 'practice' ? 'practice' : 'live';
     await this.prisma.tradeOrder.upsert({
       where: { id: order.orderId },
       create: {
         id: order.orderId,
         userId,
         contractSymbol: order.contractSymbol,
-        assetClass: parseOccSymbol(order.contractSymbol) ? 'option' : 'future',
+        assetClass: 'option',
+        environment,
         side: order.side,
         quantity: order.quantity,
         orderType: order.orderType,
@@ -93,10 +93,7 @@ export class OrdersService implements OnModuleDestroy {
         row.filledPrice !== null;
       if (!isFill) return entry;
 
-      const multiplier =
-        row.assetClass === 'option'
-          ? OPTION_MULTIPLIER
-          : FUTURES_SPECS[futuresRootOf(row.contractSymbol) ?? '']?.multiplier ?? 1;
+      const multiplier = OPTION_MULTIPLIER;
       const position = book.get(row.contractSymbol) ?? { quantity: 0, avgPrice: 0 };
       const signed = row.side === 'buy' ? row.quantity : -row.quantity;
       const price = row.filledPrice as number;

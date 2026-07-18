@@ -20,9 +20,19 @@ Errors: `{ "error": { "code": string, "message": string } }` with appropriate HT
 
 | Method | Path | Body | Returns |
 |---|---|---|---|
-| GET | `/v1/me` | — | `{ id, email, tradingDisabled, webullConfigured }` |
-| PUT | `/v1/me/webull-credentials` | `{ appKey, appSecret, accountId }` | `{ webullConfigured: true }` |
-| DELETE | `/v1/me/webull-credentials` | — | 204 |
+| GET | `/v1/me` | — | `{ id, email, tradingDisabled, tradingMode, webullConfigured, webullPracticeConfigured }` |
+| PATCH | `/v1/me` | `{ tradingMode: 'live' \| 'practice' }` | updated `Me` |
+| PUT | `/v1/me/webull-credentials` | `{ appKey, appSecret, accountId, environment? }` | `{ webullConfigured: true, environment }` |
+| DELETE | `/v1/me/webull-credentials?environment=` | — | 204 |
+
+`tradingMode` is a per-user server-side setting selecting the Webull
+environment (live production vs practice/paper sandbox) used for quotes and
+orders. `webullConfigured` reflects stored **live** credentials;
+`webullPracticeConfigured` reflects stored **practice** credentials. The
+optional `environment` (`'live'` default, or `'practice'`) selects which
+credential set a PUT/DELETE applies to. Practice mode with no stored practice
+credentials falls back to the server's built-in practice app credentials
+(`WEBULL_PRACTICE_*`).
 
 Credentials are never returned in any response.
 
@@ -33,7 +43,6 @@ Credentials are never returned in any response.
 | GET | `/v1/market/quote` | `symbol` | `Quote` |
 | GET | `/v1/market/candles` | `symbol, interval (1m/5m/15m/1h/1d), from, to` | `Candle[]` |
 | GET | `/v1/market/options-chain` | `symbol, expiration?` | `OptionsChain` |
-| GET | `/v1/market/futures` | `root` | `FuturesContract[]` |
 
 ## Trading
 
@@ -50,7 +59,7 @@ Credentials are never returned in any response.
 ```json
 {
   "underlying": "SPY",
-  "assetClass": "option" | "future",
+  "assetClass": "option",
   "side": "buy" | "sell",
   "quantity": 1,
   "orderType": "mid" | "market",
@@ -58,8 +67,7 @@ Credentials are never returned in any response.
     "mode": "auto_otm" | "explicit",
     "optionType": "call" | "put",        // required for auto_otm + explicit option
     "expiration": "2026-07-17",          // optional; defaults to nearest
-    "strike": 503,                       // explicit option only
-    "contractSymbol": "MESU26"           // explicit future only
+    "strike": 503                        // explicit option only
   }
 }
 ```
@@ -94,7 +102,6 @@ Quote:        { symbol, bid, ask, last, bidSize, askSize, volume, timestamp }
 Candle:       { time, open, high, low, close, volume }
 OptionContract: { symbol, underlying, expiration, strike, optionType, bid, ask, last }
 OptionsChain: { underlying, underlyingPrice, expirations: string[], contracts: OptionContract[] }
-FuturesContract: { symbol, root, expiration, frontMonth: bool, bid, ask, last }
 Position:     { symbol, assetClass, quantity, avgPrice, markPrice, unrealizedPnl }
 OrderPreview: { resolved: { contractSymbol, price, estBuyingPower }, warnings: string[] }
 OrderResult:  { orderId, status, contractSymbol, side, quantity, orderType, limitPrice?, filledPrice?, timestamp }

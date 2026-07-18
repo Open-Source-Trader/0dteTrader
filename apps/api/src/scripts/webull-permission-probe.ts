@@ -80,18 +80,7 @@ async function main(): Promise<void> {
   await call('stock/snapshot SPY', '/openapi/market-data/stock/snapshot', { symbols: 'SPY', category: 'US_STOCK' });
   await call('stock/bars SPY M1', '/openapi/market-data/stock/bars', { symbol: 'SPY', category: 'US_STOCK', timespan: 'M1', count: 3 });
   await call('stock/bars SPY D', '/openapi/market-data/stock/bars', { symbol: 'SPY', category: 'US_STOCK', timespan: 'D', count: 3 });
-  await call('futures/list ES', '/openapi/instrument/futures/list', { category: 'US_FUTURES', code: 'ES' });
-  await call('futures/by-code ES', '/openapi/instrument/futures/by-code', { category: 'US_FUTURES', code: 'ES', contract_type: 'MONTHLY' });
-  await call('futures/snapshot ESU6', '/openapi/market-data/futures/snapshot', { symbols: 'ESU6', category: 'US_FUTURES' });
-  await call('futures/bars ESU6 M1', '/openapi/market-data/futures/bars', { symbol: 'ESU6', category: 'US_FUTURES', timespan: 'M1', count: 3 });
   await call('option/snapshot SPY', '/openapi/market-data/option/snapshot', { symbols: 'SPY260718C00600000', category: 'US_OPTION' });
-
-  // futures/bars param-shape variants (400 "Parameters not valid" with the
-  // stock-style shape — find the one the endpoint actually accepts)
-  await call('fbars instrument_id', '/openapi/market-data/futures/bars', { instrument_id: '470498499', category: 'US_FUTURES', timespan: 'M1', count: 3 });
-  await call('fbars futures_symbol', '/openapi/market-data/futures/bars', { futures_symbol: 'ESU6', category: 'US_FUTURES', timespan: 'M1', count: 3 });
-  await call('fbars symbol nocount', '/openapi/market-data/futures/bars', { symbol: 'ESU6', category: 'US_FUTURES', timespan: 'M1' });
-  await call('fbars symbols plural', '/openapi/market-data/futures/bars', { symbols: 'ESU6', category: 'US_FUTURES', timespan: 'M1', count: 3 });
 
   // option/bars param-shape variants
   await call('obars symbol singular', '/openapi/market-data/option/bars', { symbol: 'SPY260718C00600000', category: 'US_OPTION', timespan: 'M1', count: 3 });

@@ -25,9 +25,10 @@ model User {
   email          String             @unique
   passwordHash   String
   tradingDisabled Boolean           @default(false)
+  tradingMode    String             @default("live")
   createdAt      DateTime           @default(now())
   updatedAt      DateTime           @updatedAt
-  credential     WebullCredential?
+  credentials    WebullCredential[]
   refreshTokens  RefreshToken[]
   orderAudits    OrderAudit[]
   webullApiToken WebullApiToken?
@@ -38,14 +39,17 @@ model User {
 
 model WebullCredential {
   id           String   @id @default(uuid()) @db.Uuid
-  userId       String   @unique @db.Uuid
+  userId       String   @db.Uuid
   user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // "live" | "practice" — one credential set per environment per user.
+  environment  String   @default("live")
   encAppKey    Bytes
   encAppSecret Bytes
   encAccountId Bytes
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
+  @@unique([userId, environment])
   @@map("webull_credentials")
 }
 
@@ -87,6 +91,8 @@ model TradeOrder {
   user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   contractSymbol String
   assetClass     String
+  // "live" | "practice" — tradingMode in effect when the order was recorded.
+  environment    String   @default("live")
   side           String
   quantity       Float
   orderType      String

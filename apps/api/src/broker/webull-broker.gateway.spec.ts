@@ -2,11 +2,12 @@ import { createHash } from 'node:crypto';
 import { ConfigService } from '@nestjs/config';
 import { OrderRequest } from '@0dtetrader/shared-types';
 import { CredentialsService } from '../credentials/credentials.service';
+import { PrismaService } from '../prisma/prisma.service';
 import { OrderEventsService } from './order-events.service';
 import { parseOccSymbol } from './contract-resolution';
 import { optionExpirations } from './expiration-calendar';
 import { WebullBrokerGateway } from './webull/webull-broker.gateway';
-import { FetchImpl } from './webull/webull-client';
+import { FetchImpl, WebullCredentials } from './webull/webull-client';
 
 /**
  * Gateway tests through its real seams: mocked CredentialsService (fixed fake
@@ -82,32 +83,6 @@ function defaultHandlers(): Record<string, Handler> {
         volume: '5000',
         last_trade_time: Date.now(),
       })),
-    'GET /openapi/market-data/futures/snapshot': (call) =>
-      perSymbol(call, (s) => ({
-        symbol: s,
-        bid: '6000.75',
-        ask: '6001.25',
-        price: '6001',
-        volume: '100',
-        last_trade_time: Date.now(),
-      })),
-    'GET /openapi/instrument/futures/by-code': () => ({
-      status: 200,
-      body: [
-        {
-          symbol: 'ESZ6',
-          contract_month: '202612',
-          contract_type: 'MONTHLY',
-          last_trading_date: '2026-12-18',
-        },
-        {
-          symbol: 'ESH7',
-          contract_month: '202703',
-          contract_type: 'MONTHLY',
-          last_trading_date: '2027-03-19',
-        },
-      ],
-    }),
     'GET /openapi/assets/balance': () => ({
       status: 200,
       body: {
@@ -130,7 +105,6 @@ function defaultHandlers(): Record<string, Handler> {
     'POST /openapi/trade/order/cancel': () => ({ status: 200, body: {} }),
     'GET /openapi/market-data/stock/bars': () => ({ status: 200, body: [] }),
     'GET /openapi/market-data/option/bars': () => ({ status: 200, body: [] }),
-    'GET /openapi/market-data/futures/bars': () => ({ status: 200, body: [] }),
   };
 }
 
@@ -139,6 +113,13 @@ describe('WebullBrokerGateway', () => {
   let handlers: Record<string, Handler>;
   let events: OrderEventsService;
   let gateway: WebullBrokerGateway;
+  /** Per-user trading mode the fake Prisma reports. */
+  let tradingMode: string;
+  /** Stored credentials per environment the fake CredentialsService reports. */
+  let storedCreds: Partial<Record<'live' | 'practice', WebullCredentials>>;
+  let configValues: Record<string, unknown>;
+  /** Saved override so the Prisma-client dotenv autoload can't leak into hosts(). */
+  let savedDataBaseUrl: string | undefined;
 
   const callsTo = (path: string): RecordedCall[] =>
     calls.filter((c) => c.path === path);
@@ -146,6 +127,21 @@ describe('WebullBrokerGateway', () => {
   beforeEach(() => {
     calls = [];
     handlers = defaultHandlers();
+    tradingMode = 'live';
+    savedDataBaseUrl = process.env.WEBULL_MARKET_DATA_BASE_URL;
+    delete process.env.WEBULL_MARKET_DATA_BASE_URL;
+    storedCreds = {
+      live: { appKey: 'AK', appSecret: 'SK', accountId: 'ACC-1' },
+    };
+    configValues = {
+      webull: {
+        apiBaseUrl: 'https://api.sandbox.webull.com',
+        marketDataBaseUrl: '',
+        practiceAppKey: 'PAK',
+        practiceAppSecret: 'PSK',
+        practiceAccountId: 'PACC',
+      },
+    };
     const fetchImpl: FetchImpl = async (url, init) => {
       const path = new URL(url).pathname;
       const call: RecordedCall = {
@@ -165,22 +161,28 @@ describe('WebullBrokerGateway', () => {
       };
     };
     const credentials = {
-      getDecrypted: jest
-        .fn()
-        .mockResolvedValue({ appKey: 'AK', appSecret: 'SK', accountId: 'ACC-1' }),
+      getDecrypted: jest.fn(
+        async (_userId: string, environment: 'live' | 'practice' = 'live') =>
+          storedCreds[environment] ?? null,
+      ),
     } as unknown as CredentialsService;
-    const config = new ConfigService({
-      webull: {
-        apiBaseUrl: 'https://api.sandbox.webull.com',
-        marketDataBaseUrl: '',
+    const config = new ConfigService(configValues);
+    const prisma = {
+      user: {
+        findUnique: jest.fn(async () => ({ id: 'u1', tradingMode })),
       },
-    });
+    } as unknown as PrismaService;
     events = new OrderEventsService();
-    gateway = new WebullBrokerGateway(credentials, config, events, fetchImpl);
+    gateway = new WebullBrokerGateway(credentials, config, events, prisma, fetchImpl);
   });
 
   afterEach(() => {
     gateway.onModuleDestroy();
+    if (savedDataBaseUrl === undefined) {
+      delete process.env.WEBULL_MARKET_DATA_BASE_URL;
+    } else {
+      process.env.WEBULL_MARKET_DATA_BASE_URL = savedDataBaseUrl;
+    }
   });
 
   describe('getQuote', () => {
@@ -202,15 +204,6 @@ describe('WebullBrokerGateway', () => {
       );
     });
 
-    it('translates futures symbols to Webull 1-digit years on the wire', async () => {
-      const quote = await gateway.getQuote('u1', 'ESZ26');
-      expect(quote.symbol).toBe('ESZ26'); // app keeps the project symbol
-      expect(quote.last).toBe(6001);
-      expect(
-        callsTo('/openapi/market-data/futures/snapshot')[0].url,
-      ).toContain('symbols=ESZ6');
-    });
-
     it('throws CONTRACT_NOT_FOUND for unknown symbols', async () => {
       handlers['GET /openapi/market-data/stock/snapshot'] = () => ({
         status: 200,
@@ -219,6 +212,58 @@ describe('WebullBrokerGateway', () => {
       await expect(gateway.getQuote('u1', 'NOPE')).rejects.toMatchObject({
         code: 'CONTRACT_NOT_FOUND',
       });
+    });
+  });
+
+  describe('trading mode (live / practice)', () => {
+    it('live mode uses the prod hosts and the live credential set', async () => {
+      tradingMode = 'live';
+      await gateway.getQuote('u1', 'SPY');
+      // First call is the token create against the trade API host.
+      expect(calls[0].url).toContain('https://api.webull.com');
+      expect(calls[0].headers['x-app-key']).toBe('AK');
+      const snap = callsTo('/openapi/market-data/stock/snapshot')[0];
+      expect(snap.url).toContain('https://data-api.webull.com');
+    });
+
+    it('practice mode uses the sandbox hosts and stored practice credentials', async () => {
+      tradingMode = 'practice';
+      storedCreds.practice = { appKey: 'PAK-U', appSecret: 'PSK-U', accountId: 'PACC-U' };
+      await gateway.getQuote('u1', 'SPY');
+      expect(calls[0].url).toContain('https://api.sandbox.webull.com');
+      expect(calls[0].headers['x-app-key']).toBe('PAK-U');
+      const snap = callsTo('/openapi/market-data/stock/snapshot')[0];
+      expect(snap.url).toContain('https://data-api.sandbox.webull.com');
+    });
+
+    it("practice mode falls back to the server's built-in practice credentials", async () => {
+      tradingMode = 'practice';
+      // No stored practice credentials: storedCreds.practice stays undefined.
+      await gateway.getQuote('u1', 'SPY');
+      expect(calls[0].url).toContain('https://api.sandbox.webull.com');
+      expect(calls[0].headers['x-app-key']).toBe('PAK');
+    });
+
+    it('practice mode fails with an auth error when no credentials exist at all', async () => {
+      tradingMode = 'practice';
+      (configValues.webull as Record<string, string>).practiceAppKey = '';
+      (configValues.webull as Record<string, string>).practiceAppSecret = '';
+      await expect(gateway.getQuote('u1', 'SPY')).rejects.toMatchObject({
+        code: 'BROKER_AUTH_FAILED',
+      });
+      expect(calls).toHaveLength(0);
+    });
+
+    it('caches clients per (user, mode) so modes do not share a client', async () => {
+      await gateway.getQuote('u1', 'SPY');
+      tradingMode = 'practice';
+      await gateway.getQuote('u1', 'SPY');
+      // Two token creates: one per environment client.
+      expect(callsTo('/openapi/auth/token/create')).toHaveLength(2);
+      expect(calls[0].headers['x-app-key']).toBe('AK');
+      // Practice fell back to the built-in practice credentials.
+      const practiceToken = callsTo('/openapi/auth/token/create')[1];
+      expect(practiceToken.headers['x-app-key']).toBe('PAK');
     });
   });
 
@@ -264,41 +309,6 @@ describe('WebullBrokerGateway', () => {
       await expect(
         gateway.getOptionsChain('u1', 'SPY', '1999-01-01'),
       ).rejects.toMatchObject({ code: 'CONTRACT_NOT_FOUND' });
-    });
-  });
-
-  describe('getFuturesContracts', () => {
-    it('maps instruments + snapshots into project-format contracts', async () => {
-      const contracts = await gateway.getFuturesContracts('u1', 'ES');
-      expect(contracts).toHaveLength(2);
-      expect(contracts[0]).toMatchObject({
-        symbol: 'ESZ26',
-        root: 'ES',
-        expiration: '2026-12-18',
-        frontMonth: true,
-        last: 6001,
-        bid: 6000.75,
-        ask: 6001.25,
-      });
-      expect(contracts[1]).toMatchObject({
-        symbol: 'ESH27',
-        frontMonth: false,
-        expiration: '2027-03-19',
-      });
-      // Instruments are queried with Webull-native symbols.
-      expect(
-        callsTo('/openapi/market-data/futures/snapshot')[0].url,
-      ).toContain('symbols=ESZ6%2CESH7');
-    });
-
-    it('rejects an unknown root', async () => {
-      handlers['GET /openapi/instrument/futures/by-code'] = () => ({
-        status: 200,
-        body: [],
-      });
-      await expect(gateway.getFuturesContracts('u1', 'ZZ')).rejects.toMatchObject(
-        { code: 'CONTRACT_NOT_FOUND' },
-      );
     });
   });
 
@@ -424,32 +434,6 @@ describe('WebullBrokerGateway', () => {
       expect(place.body.new_orders[0].position_intent).toBe('BUY_TO_CLOSE');
     });
 
-    it('places futures orders with the Webull symbol and no legs', async () => {
-      await gateway.placeOrder(
-        'u1',
-        {
-          underlying: 'ES',
-          assetClass: 'future',
-          side: 'sell',
-          quantity: 1,
-          orderType: 'market',
-          selection: { mode: 'explicit', contractSymbol: 'ESZ26' },
-        },
-        'idem-key-3',
-      );
-      const place = callsTo('/openapi/trade/order/place')[0];
-      const newOrder = place.body.new_orders[0];
-      expect(newOrder).toMatchObject({
-        instrument_type: 'FUTURES',
-        symbol: 'ESZ6',
-        side: 'SELL',
-        order_type: 'MARKET',
-        market: 'US',
-      });
-      expect(newOrder.legs).toBeUndefined();
-      expect(newOrder.limit_price).toBeUndefined();
-    });
-
     it('emits an orderUpdate when the status poll sees a fill', async () => {
       jest.useFakeTimers();
       try {
@@ -530,32 +514,39 @@ describe('WebullBrokerGateway', () => {
   });
 
   describe('getPositions / getOpenOrders', () => {
-    it('filters positions to options and futures, translating futures symbols', async () => {
+    it('filters positions to options only', async () => {
       handlers['GET /openapi/assets/positions'] = () => ({
         status: 200,
         body: [
           { instrument_type: 'EQUITY', symbol: 'AAPL', quantity: '10' },
           {
-            instrument_type: 'FUTURES',
-            symbol: 'ESZ6',
-            contract_month: '202612',
+            instrument_type: 'OPTION',
+            symbol: 'SPY',
             quantity: '1',
-            cost_price: '6000',
-            last_price: '6001',
-            unrealized_profit_loss: '50',
+            cost_price: '1.5',
+            last_price: '1.6',
+            unrealized_profit_loss: '10',
+            legs: [
+              {
+                symbol: 'SPY',
+                strike_price: '505',
+                option_expire_date: NEAREST_EXPIRATION,
+                option_type: 'CALL',
+              },
+            ],
           },
         ],
       });
       const positions = await gateway.getPositions('u1');
       expect(positions).toEqual([
         {
-          symbol: 'ESZ26',
-          assetClass: 'future',
+          symbol: `SPY${NEAREST_EXPIRATION.slice(2).replace(/-/g, '')}C00505000`,
+          assetClass: 'option',
           quantity: 1,
-          avgPrice: 6000,
-          markPrice: 6001,
-          unrealizedPnl: 50,
-          multiplier: 50,
+          avgPrice: 1.5,
+          markPrice: 1.6,
+          unrealizedPnl: 10,
+          multiplier: 100,
         },
       ]);
     });

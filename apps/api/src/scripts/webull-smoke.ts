@@ -10,7 +10,7 @@
  *
  * Base URL comes from WEBULL_API_BASE_URL (default sandbox). This script is
  * where the "verify during implementation" items from the P4 plan get
- * resolved: response field shapes, error bodies, futures symbol format.
+ * resolved: response field shapes and error bodies.
  */
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -126,10 +126,6 @@ async function main(): Promise<void> {
 
   show('stock/bars AAPL M1', await call('GET', '/openapi/market-data/stock/bars', {
     query: { symbol: 'AAPL', category: 'US_STOCK', timespan: 'M1', count: 5 },
-  }));
-
-  show('instrument/futures/list ES', await call('GET', '/openapi/instrument/futures/list', {
-    query: { category: 'US_FUTURES', code: 'ES' },
   }));
 
   const spy = (await call('GET', '/openapi/market-data/stock/snapshot', {

@@ -60,6 +60,20 @@ paths:
       security: [{ bearerAuth: [] }]
       responses:
         '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Me' } } } }
+    patch:
+      tags: [user]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [tradingMode]
+              properties:
+                tradingMode: { type: string, enum: [live, practice] }
+      responses:
+        '200': { description: Updated, content: { application/json: { schema: { $ref: '#/components/schemas/Me' } } } }
   /me/webull-credentials:
     put:
       tags: [user]
@@ -74,6 +88,8 @@ paths:
     delete:
       tags: [user]
       security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: environment, in: query, schema: { type: string, enum: [live, practice], default: live } }
       responses:
         '204': { description: Deleted }
   /market/quote:
@@ -104,14 +120,6 @@ paths:
         - { name: expiration, in: query, schema: { type: string, format: date } }
       responses:
         '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/OptionsChain' } } } }
-  /market/futures:
-    get:
-      tags: [market]
-      security: [{ bearerAuth: [] }]
-      parameters:
-        - { name: root, in: query, required: true, schema: { type: string } }
-      responses:
-        '200': { description: OK, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/FuturesContract' } } } } }
   /orders/preview:
     post:
       tags: [trading]
@@ -178,7 +186,9 @@ components:
         id: { type: string }
         email: { type: string }
         tradingDisabled: { type: boolean }
-        webullConfigured: { type: boolean }
+        tradingMode: { type: string, enum: [live, practice] }
+        webullConfigured: { type: boolean, description: Live credentials stored }
+        webullPracticeConfigured: { type: boolean, description: Practice credentials stored }
     WebullCredentialsInput:
       type: object
       required: [appKey, appSecret, accountId]
@@ -186,6 +196,7 @@ components:
         appKey: { type: string }
         appSecret: { type: string }
         accountId: { type: string }
+        environment: { type: string, enum: [live, practice], default: live }
     Quote:
       type: object
       properties:
@@ -224,22 +235,12 @@ components:
         underlyingPrice: { type: number }
         expirations: { type: array, items: { type: string, format: date } }
         contracts: { type: array, items: { $ref: '#/components/schemas/OptionContract' } }
-    FuturesContract:
-      type: object
-      properties:
-        symbol: { type: string }
-        root: { type: string }
-        expiration: { type: string, format: date }
-        frontMonth: { type: boolean }
-        bid: { type: number }
-        ask: { type: number }
-        last: { type: number }
     OrderRequest:
       type: object
       required: [underlying, assetClass, side, quantity, orderType, selection]
       properties:
         underlying: { type: string }
-        assetClass: { type: string, enum: [option, future] }
+        assetClass: { type: string, enum: [option] }
         side: { type: string, enum: [buy, sell] }
         quantity: { type: integer, minimum: 1 }
         orderType: { type: string, enum: [mid, market] }
@@ -251,7 +252,6 @@ components:
             optionType: { type: string, enum: [call, put] }
             expiration: { type: string, format: date }
             strike: { type: number }
-            contractSymbol: { type: string }
     OrderPreview:
       type: object
       properties:

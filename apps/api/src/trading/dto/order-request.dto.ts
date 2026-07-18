@@ -36,11 +36,6 @@ export class OrderSelectionDto {
   @IsOptional()
   @IsNumber()
   strike?: number;
-
-  /** Explicit futures orders only. */
-  @IsOptional()
-  @IsString()
-  contractSymbol?: string;
 }
 
 export class OrderRequestDto {
@@ -48,7 +43,7 @@ export class OrderRequestDto {
   @Matches(/^[A-Za-z0-9.]{1,12}$/)
   underlying!: string;
 
-  @IsIn(['option', 'future'])
+  @IsIn(['option'])
   assetClass!: AssetClass;
 
   @IsIn(['buy', 'sell'])

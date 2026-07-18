@@ -28,6 +28,30 @@
   font-size: var(--fs-subheadline);
 }
 
+/* Input + trailing iOS-style clear button (UITextField clearButtonMode). */
+.profile-view .credential-field {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.profile-view .credential-field input {
+  flex: 1;
+  min-width: 0;
+}
+.profile-view .clear-field {
+  flex: none;
+  display: flex;
+  align-items: center;
+  color: var(--label-secondary);
+  opacity: 0.6;
+  cursor: pointer;
+}
+.profile-view .clear-field:hover {
+  opacity: 1;
+}
+
 /* Truncate long emails at the leading edge so the domain stays visible. */
 .profile-view .grouped-row .row-value {
   min-width: 0;

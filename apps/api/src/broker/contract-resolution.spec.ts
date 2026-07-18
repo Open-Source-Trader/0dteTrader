@@ -4,7 +4,6 @@ import {
   estimateBuyingPower,
   findExplicitOption,
   formatOccSymbol,
-  futuresRootOf,
   parseOccSymbol,
   pickExpiration,
   resolveAutoOtm,
@@ -130,21 +129,8 @@ describe('OCC symbol format/parse', () => {
   });
 });
 
-describe('futures symbols + buying power', () => {
-  it('extracts known futures roots', () => {
-    expect(futuresRootOf('MESU26')).toBe('MES');
-    expect(futuresRootOf('ESZ26')).toBe('ES');
-    expect(futuresRootOf('CLU26')).toBe('CL');
-    expect(futuresRootOf('SPY')).toBeNull();
-    expect(futuresRootOf('XXXU26')).toBeNull();
-  });
-
+describe('buying power', () => {
   it('estimates option buying power with the 100x multiplier', () => {
-    expect(estimateBuyingPower('option', 'SPY260717C00503000', 2, 1.5)).toBe(300);
-  });
-
-  it('estimates futures buying power as margin rate × notional', () => {
-    // MES: $5 × 6000 × 10% × 2 contracts
-    expect(estimateBuyingPower('future', 'MESU26', 2, 6000)).toBe(6000);
+    expect(estimateBuyingPower(2, 1.5)).toBe(300);
   });
 });

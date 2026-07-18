@@ -1,4 +1,3 @@
-import { useEffect } from 'react';
 import type { OrderSide } from '@0dtetrader/shared-types';
 import { useStore } from '../../core/observable';
 import { midPrice } from '../../core/models/domain';
@@ -11,16 +10,13 @@ import { Stepper } from '../../design/components/Stepper';
 import { TradeActionButton } from '../../design/components/TradeActionButton';
 import { Format } from '../../design/format';
 import {
-  BoxIcon,
   CalendarIcon,
   ChartLineIcon,
   CheckmarkIcon,
-  DocIcon,
 } from '../../design/icons';
 import type { ChainStore } from './ChainStore';
 import type { TradeStore } from './TradeStore';
 import { PositionsStrip } from './PositionsStrip';
-import { KNOWN_FUTURES_ROOTS } from './futuresRoots';
 
 interface TradePanelProps {
   tradeStore: TradeStore;
@@ -37,21 +33,13 @@ export function TradePanel({ tradeStore, chainStore, onArm }: TradePanelProps) {
   const trade = useStore(tradeStore);
   const chain = useStore(chainStore);
 
-  useEffect(() => {
-    // Ensure a contract list exists even when the chart symbol isn't a root.
-    if (tradeStore.getState().futuresContracts.length === 0) {
-      void tradeStore.loadFuturesContracts();
-    }
-  }, [tradeStore]);
-
   const autoContract = chainStore.autoContract;
   const selectedContract = chainStore.selectedContract;
-  const selectedFuture = tradeStore.selectedFuture;
   const autoMid = autoContract ? midPrice(autoContract.bid, autoContract.ask) : null;
 
-  const canTrade = trade.assetClass === 'option' ? selectedContract !== null : selectedFuture !== null;
+  const canTrade = selectedContract !== null;
 
-  const selectedQuote = trade.assetClass === 'option' ? selectedContract : selectedFuture;
+  const selectedQuote = selectedContract;
   const indicativeMid = selectedQuote ? midPrice(selectedQuote.bid, selectedQuote.ask) : null;
 
   return (
@@ -77,201 +65,136 @@ export function TradePanel({ tradeStore, chainStore, onArm }: TradePanelProps) {
         rowPadding="0"
       />
 
-      <SegmentedControl
-        options={[
-          { value: 'option', label: 'Options' },
-          { value: 'future', label: 'Futures' },
-        ]}
-        value={trade.assetClass}
-        onChange={(value) => tradeStore.setAssetClass(value)}
-      />
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <SegmentedControl
+            options={[
+              { value: 'call', label: 'Call' },
+              { value: 'put', label: 'Put' },
+            ]}
+            value={chain.optionType}
+            onChange={(value) => chainStore.setOptionType(value)}
+          />
+          <button
+            style={{
+              fontSize: 'var(--fs-caption)',
+              fontWeight: 600,
+              padding: '10px 14px',
+              borderRadius: 999,
+              background: chain.isAutoMode ? 'var(--app-accent)' : 'var(--app-surface-elevated)',
+              color: chain.isAutoMode ? '#0b0c10' : 'var(--label-primary)',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 4,
+            }}
+            onClick={() => chainStore.setAutoMode(!chain.isAutoMode)}
+            aria-label="Auto +1 OTM selection"
+            aria-pressed={chain.isAutoMode}
+          >
+            {chain.isAutoMode ? <CheckmarkIcon size={11} /> : null}
+            AUTO
+          </button>
+        </div>
 
-      {trade.assetClass === 'option' ? (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            <SegmentedControl
-              options={[
-                { value: 'call', label: 'Call' },
-                { value: 'put', label: 'Put' },
-              ]}
-              value={chain.optionType}
-              onChange={(value) => chainStore.setOptionType(value)}
-            />
-            <button
+        <div style={{ display: 'flex', gap: 8 }}>
+          <Menu
+            className="chip-flex"
+            direction="up"
+            trigger={
+              <button className="chip-button">
+                <CalendarIcon size={13} />
+                <span className="chip-title">
+                  {chain.selectedExpiration
+                    ? expirationLabel(chain.selectedExpiration)
+                    : 'Expiration'}
+                </span>
+              </button>
+            }
+            items={chainStore.expirations.map((expiration) => ({
+              key: expiration,
+              label: expirationLabel(expiration),
+              checked: expiration === chain.selectedExpiration,
+              onSelect: () => chainStore.selectExpiration(expiration),
+            }))}
+          />
+
+          {chain.isAutoMode ? (
+            <div
               style={{
-                fontSize: 'var(--fs-caption)',
-                fontWeight: 600,
-                padding: '10px 14px',
-                borderRadius: 999,
-                background: chain.isAutoMode ? 'var(--app-accent)' : 'var(--app-surface-elevated)',
-                color: chain.isAutoMode ? '#0b0c10' : 'var(--label-primary)',
+                flex: 1,
+                minWidth: 0,
+                minHeight: 36,
                 display: 'flex',
                 alignItems: 'center',
-                gap: 4,
+                justifyContent: 'center',
+                gap: 8,
+                padding: '0 10px',
+                background: 'var(--app-surface)',
+                borderRadius: 'var(--radius-chip)',
               }}
-              onClick={() => chainStore.setAutoMode(!chain.isAutoMode)}
-              aria-label="Auto +1 OTM selection"
-              aria-pressed={chain.isAutoMode}
             >
-              {chain.isAutoMode ? <CheckmarkIcon size={11} /> : null}
-              AUTO
-            </button>
-          </div>
-
-          <div style={{ display: 'flex', gap: 8 }}>
+              {chain.errorMessage ? (
+                <button
+                  className="text-secondary"
+                  style={{
+                    fontSize: 'var(--fs-caption)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6,
+                  }}
+                  onClick={() => void chainStore.load(chain.underlying)}
+                  aria-label={`Chain failed to load: ${chain.errorMessage}. Activate to retry`}
+                >
+                  <span style={{ color: 'var(--pnl-negative)' }}>Chain unavailable — Retry</span>
+                </button>
+              ) : chain.isLoading ? (
+                <Spinner size={14} />
+              ) : autoContract ? (
+                <>
+                  <span
+                    style={{
+                      fontFamily: 'var(--font-mono)',
+                      fontSize: 'var(--fs-body)',
+                      fontWeight: 500,
+                    }}
+                  >
+                    {Format.strike(autoContract.strike)}
+                    {autoContract.optionType === 'call' ? 'C' : 'P'}
+                  </span>
+                  <span
+                    className="text-secondary numeric"
+                    style={{ fontSize: 'var(--fs-caption)' }}
+                  >
+                    ≈ {autoMid !== null ? Format.price(autoMid) : '—'}
+                  </span>
+                </>
+              ) : (
+                <span className="text-secondary" style={{ fontSize: 'var(--fs-caption)' }}>
+                  No contract
+                </span>
+              )}
+            </div>
+          ) : (
             <Menu
-              className="chip-flex"
               direction="up"
               trigger={
                 <button className="chip-button">
-                  <CalendarIcon size={13} />
+                  <ChartLineIcon size={13} />
                   <span className="chip-title">
-                    {chain.selectedExpiration
-                      ? expirationLabel(chain.selectedExpiration)
-                      : 'Expiration'}
+                    {chain.selectedStrike !== null ? Format.strike(chain.selectedStrike) : 'Strike'}
                   </span>
                 </button>
               }
-              items={chainStore.expirations.map((expiration) => ({
-                key: expiration,
-                label: expirationLabel(expiration),
-                checked: expiration === chain.selectedExpiration,
-                onSelect: () => chainStore.selectExpiration(expiration),
+              items={chainStore.strikes.map((strike) => ({
+                key: String(strike),
+                label: Format.strike(strike),
+                checked: strike === chain.selectedStrike,
+                onSelect: () => chainStore.selectStrike(strike),
               }))}
             />
-
-            {chain.isAutoMode ? (
-              <div
-                style={{
-                  flex: 1,
-                  minWidth: 0,
-                  minHeight: 36,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: 8,
-                  padding: '0 10px',
-                  background: 'var(--app-surface)',
-                  borderRadius: 'var(--radius-chip)',
-                }}
-              >
-                {chain.errorMessage ? (
-                  <button
-                    className="text-secondary"
-                    style={{
-                      fontSize: 'var(--fs-caption)',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 6,
-                    }}
-                    onClick={() => void chainStore.load(chain.underlying)}
-                    aria-label={`Chain failed to load: ${chain.errorMessage}. Activate to retry`}
-                  >
-                    <span style={{ color: 'var(--pnl-negative)' }}>Chain unavailable — Retry</span>
-                  </button>
-                ) : chain.isLoading ? (
-                  <Spinner size={14} />
-                ) : autoContract ? (
-                  <>
-                    <span
-                      style={{
-                        fontFamily: 'var(--font-mono)',
-                        fontSize: 'var(--fs-body)',
-                        fontWeight: 500,
-                      }}
-                    >
-                      {Format.strike(autoContract.strike)}
-                      {autoContract.optionType === 'call' ? 'C' : 'P'}
-                    </span>
-                    <span
-                      className="text-secondary numeric"
-                      style={{ fontSize: 'var(--fs-caption)' }}
-                    >
-                      ≈ {autoMid !== null ? Format.price(autoMid) : '—'}
-                    </span>
-                  </>
-                ) : (
-                  <span className="text-secondary" style={{ fontSize: 'var(--fs-caption)' }}>
-                    No contract
-                  </span>
-                )}
-              </div>
-            ) : (
-              <Menu
-                direction="up"
-                trigger={
-                  <button className="chip-button">
-                    <ChartLineIcon size={13} />
-                    <span className="chip-title">
-                      {chain.selectedStrike !== null ? Format.strike(chain.selectedStrike) : 'Strike'}
-                    </span>
-                  </button>
-                }
-                items={chainStore.strikes.map((strike) => ({
-                  key: String(strike),
-                  label: Format.strike(strike),
-                  checked: strike === chain.selectedStrike,
-                  onSelect: () => chainStore.selectStrike(strike),
-                }))}
-              />
-            )}
-          </div>
+          )}
         </div>
-      ) : (
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          <Menu
-            direction="up"
-            trigger={
-              <button className="chip-button">
-                <BoxIcon size={13} />
-                <span className="chip-title">{trade.futuresRoot}</span>
-              </button>
-            }
-            items={KNOWN_FUTURES_ROOTS.map((root) => ({
-              key: root,
-              label: root,
-              checked: root === trade.futuresRoot,
-              onSelect: () => void tradeStore.setFuturesRoot(root),
-            }))}
-          />
-          <Menu
-            direction="up"
-            trigger={
-              <button className="chip-button">
-                <DocIcon size={13} />
-                <span className="chip-title">{trade.selectedFutureSymbol ?? 'Contract'}</span>
-              </button>
-            }
-            items={trade.futuresContracts.map((contract) => ({
-              key: contract.symbol,
-              label: (
-                <>
-                  {contract.symbol}
-                  {contract.frontMonth ? (
-                    <span className="text-secondary" style={{ marginLeft: 6 }}>
-                      · front
-                    </span>
-                  ) : null}
-                </>
-              ),
-              checked: contract.symbol === trade.selectedFutureSymbol,
-              onSelect: () => tradeStore.selectFuture(contract.symbol),
-            }))}
-          />
-          <span
-            className="text-secondary numeric"
-            style={{
-              fontSize: 'var(--fs-caption)',
-              flex: 'none',
-              minWidth: 96,
-              textAlign: 'right',
-              visibility: selectedFuture ? 'visible' : 'hidden',
-            }}
-          >
-            ≈ {selectedFuture && indicativeMid !== null ? Format.price(indicativeMid) : '—'}
-          </span>
-        </div>
-      )}
+      </div>
 
       {/* Quantity row */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>

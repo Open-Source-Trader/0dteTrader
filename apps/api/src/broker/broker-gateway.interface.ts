@@ -1,7 +1,6 @@
 import {
   Candle,
   CandleRequest,
-  FuturesContract,
   OptionsChain,
   OrderPreview,
   OrderRequest,
@@ -29,7 +28,6 @@ export interface BrokerGateway {
     symbol: string,
     expiration?: string,
   ): Promise<OptionsChain>;
-  getFuturesContracts(userId: string, root: string): Promise<FuturesContract[]>;
   previewOrder(userId: string, order: OrderRequest): Promise<OrderPreview>;
   placeOrder(
     userId: string,

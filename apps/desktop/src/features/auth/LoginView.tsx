@@ -63,7 +63,7 @@ export function LoginView({ store }: { store: AuthStore }) {
           0dteTrader
         </h1>
         <span className="text-secondary" style={{ fontSize: 'var(--fs-subheadline)' }}>
-          Rapid options &amp; futures trading
+          Rapid options trading
         </span>
       </div>
 

@@ -1,6 +1,4 @@
 import type {
-  AssetClass,
-  FuturesContract,
   OptionContract,
   OrderPreview,
   OrderRequest,
@@ -17,7 +15,6 @@ import { orderStatusDisplayName, sideDisplayName } from '../../core/models/domai
 import { Store } from '../../core/observable';
 import { Format } from '../../design/format';
 import type { ChainStore } from './ChainStore';
-import { FALLBACK_FUTURES_ROOT, futuresRootFor } from './futuresRoots';
 
 export type ToastStyle = 'success' | 'error' | 'info';
 
@@ -42,13 +39,8 @@ export interface ArmedOrderTicket {
 }
 
 interface TradeStoreState {
-  assetClass: AssetClass;
   quantity: number;
   orderType: OrderType;
-
-  futuresRoot: string;
-  futuresContracts: FuturesContract[];
-  selectedFutureSymbol: string | null;
 
   positions: Position[];
   openOrders: OrderResult[];
@@ -81,8 +73,8 @@ function newIdempotencyKey(): string {
 
 /**
  * Trade state (TradeViewModel.swift analog): ticket configuration,
- * arm-then-confirm flow, positions and open orders, futures selection,
- * flatten/cancel actions, toasts.
+ * arm-then-confirm flow, positions and open orders, flatten/cancel actions,
+ * toasts.
  */
 export class TradeStore extends Store<TradeStoreState> {
   private toastQueue: Toast[] = [];
@@ -94,12 +86,8 @@ export class TradeStore extends Store<TradeStoreState> {
 
   constructor(private readonly apiClient: ApiClient) {
     super({
-      assetClass: 'option',
       quantity: 1,
       orderType: 'mid',
-      futuresRoot: FALLBACK_FUTURES_ROOT,
-      futuresContracts: [],
-      selectedFutureSymbol: null,
       positions: [],
       openOrders: [],
       workingSymbols: [],
@@ -110,10 +98,6 @@ export class TradeStore extends Store<TradeStoreState> {
       isSubmitting: false,
       toast: null,
     });
-  }
-
-  setAssetClass(assetClass: AssetClass): void {
-    this.set({ assetClass });
   }
 
   setOrderType(orderType: OrderType): void {
@@ -131,54 +115,13 @@ export class TradeStore extends Store<TradeStoreState> {
     this.setQuantity(this.getState().quantity + amount);
   }
 
-  // MARK: - Futures
-
-  async setFuturesRoot(root: string): Promise<void> {
-    const { futuresRoot, futuresContracts } = this.getState();
-    if (root === futuresRoot && futuresContracts.length > 0) return;
-    this.set({ futuresRoot: root });
-    await this.loadFuturesContracts();
-  }
-
-  /** `silent` suppresses the error toast for background 30s refreshes. */
-  async loadFuturesContracts(silent = false): Promise<void> {
-    try {
-      const contracts = await this.apiClient.futures(this.getState().futuresRoot);
-      this.set({ futuresContracts: contracts });
-      const { selectedFutureSymbol } = this.getState();
-      if (
-        selectedFutureSymbol === null ||
-        !contracts.some((contract) => contract.symbol === selectedFutureSymbol)
-      ) {
-        // Front month by default.
-        const front = contracts.find((contract) => contract.frontMonth) ?? contracts[0];
-        this.set({ selectedFutureSymbol: front?.symbol ?? null });
-      }
-    } catch (error) {
-      if (!silent) this.showToast(errorMessage(error), 'error');
-    }
-  }
-
-  selectFuture(symbol: string): void {
-    this.set({ selectedFutureSymbol: symbol });
-  }
-
   /**
-   * Live tick for a subscribed contract symbol: updates the matching futures
-   * contract's quote and recomputes any matching position's mark and P/L
-   * (server-provided multiplier keeps the math consistent with the broker).
+   * Live tick for a subscribed contract symbol: recomputes any matching
+   * position's mark and P/L (server-provided multiplier keeps the math
+   * consistent with the broker).
    */
   applyContractQuote(quote: Quote): void {
-    const { futuresContracts, positions } = this.getState();
-    if (futuresContracts.some((contract) => contract.symbol === quote.symbol)) {
-      this.set({
-        futuresContracts: futuresContracts.map((contract) =>
-          contract.symbol === quote.symbol
-            ? { ...contract, bid: quote.bid, ask: quote.ask, last: quote.last }
-            : contract,
-        ),
-      });
-    }
+    const { positions } = this.getState();
     if (positions.some((position) => position.symbol === quote.symbol)) {
       this.set({
         positions: positions.map((position) =>
@@ -200,59 +143,40 @@ export class TradeStore extends Store<TradeStoreState> {
     }
   }
 
-  get selectedFuture(): FuturesContract | null {
-    const { futuresContracts, selectedFutureSymbol } = this.getState();
-    return futuresContracts.find((contract) => contract.symbol === selectedFutureSymbol) ?? null;
-  }
-
   // MARK: - Arm (step 1)
 
   /** Builds the OrderRequest + idempotency key and opens the confirm sheet. */
   arm(side: OrderSide, underlying: string, chainStore: ChainStore): void {
-    const { assetClass, quantity, orderType } = this.getState();
+    const { quantity, orderType } = this.getState();
     let selection: OrderSelection;
     let summary: string;
-    let requestUnderlying = underlying;
 
-    if (assetClass === 'option') {
-      const chainState = chainStore.getState();
-      const optionType = chainState.optionType;
-      if (chainState.isAutoMode) {
-        selection = {
-          mode: 'auto_otm',
-          optionType,
-          expiration: chainState.selectedExpiration ?? undefined,
-        };
-        const expirationLabel = chainState.selectedExpiration ?? 'nearest';
-        const typeName = optionType === 'call' ? 'Call' : 'Put';
-        summary = `${underlying} AUTO +1 OTM ${typeName} · exp ${expirationLabel}`;
-      } else {
-        const strike = chainState.selectedStrike;
-        const expiration = chainState.selectedExpiration;
-        if (strike === null || expiration === null) {
-          this.showToast('Pick an expiration and strike first.', 'error');
-          return;
-        }
-        selection = { mode: 'explicit', optionType, expiration, strike };
-        const shortName = optionType === 'call' ? 'C' : 'P';
-        summary = `${underlying} ${expiration} ${Format.strike(strike)}${shortName}`;
-      }
+    const chainState = chainStore.getState();
+    const optionType = chainState.optionType;
+    if (chainState.isAutoMode) {
+      selection = {
+        mode: 'auto_otm',
+        optionType,
+        expiration: chainState.selectedExpiration ?? undefined,
+      };
+      const expirationLabel = chainState.selectedExpiration ?? 'nearest';
+      const typeName = optionType === 'call' ? 'Call' : 'Put';
+      summary = `${underlying} AUTO +1 OTM ${typeName} · exp ${expirationLabel}`;
     } else {
-      const contract = this.selectedFuture;
-      if (!contract) {
-        this.showToast('Pick a futures contract first.', 'error');
+      const strike = chainState.selectedStrike;
+      const expiration = chainState.selectedExpiration;
+      if (strike === null || expiration === null) {
+        this.showToast('Pick an expiration and strike first.', 'error');
         return;
       }
-      selection = { mode: 'explicit', contractSymbol: contract.symbol };
-      summary = contract.symbol;
-      // The charted symbol may be a specific contract ("MESU26"); the server
-      // expects the root as the order's underlying.
-      requestUnderlying = contract.root;
+      selection = { mode: 'explicit', optionType, expiration, strike };
+      const shortName = optionType === 'call' ? 'C' : 'P';
+      summary = `${underlying} ${expiration} ${Format.strike(strike)}${shortName}`;
     }
 
     const request: OrderRequest = {
-      underlying: requestUnderlying,
-      assetClass,
+      underlying,
+      assetClass: 'option',
       side,
       quantity,
       orderType,
@@ -339,30 +263,21 @@ export class TradeStore extends Store<TradeStoreState> {
 
     try {
       const side: OrderSide = position.quantity > 0 ? 'sell' : 'buy';
-      let selection: OrderSelection;
-      let underlying: string;
-
-      if (position.assetClass === 'future') {
-        selection = { mode: 'explicit', contractSymbol: position.symbol };
-        underlying = futuresRootFor(position.symbol) ?? this.getState().futuresRoot;
-      } else {
-        const contract = this.optionContractResolver?.(position.symbol);
-        if (!contract) {
-          this.showToast(`Open ${position.symbol}'s chart to flatten this option.`, 'error');
-          return;
-        }
-        selection = {
-          mode: 'explicit',
-          optionType: contract.optionType,
-          expiration: contract.expiration,
-          strike: contract.strike,
-        };
-        underlying = contract.underlying;
+      const contract = this.optionContractResolver?.(position.symbol);
+      if (!contract) {
+        this.showToast(`Open ${position.symbol}'s chart to flatten this option.`, 'error');
+        return;
       }
+      const selection: OrderSelection = {
+        mode: 'explicit',
+        optionType: contract.optionType,
+        expiration: contract.expiration,
+        strike: contract.strike,
+      };
 
       const request: OrderRequest = {
-        underlying,
-        assetClass: position.assetClass,
+        underlying: contract.underlying,
+        assetClass: 'option',
         side,
         quantity: Math.abs(position.quantity),
         orderType: 'market',

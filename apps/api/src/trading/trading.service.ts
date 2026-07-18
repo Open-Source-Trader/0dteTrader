@@ -11,7 +11,6 @@ import {
 } from '../broker/broker-gateway.interface';
 import {
   findExplicitOption,
-  futuresRootOf,
   pickExpiration,
   resolveAutoOtm,
 } from '../broker/contract-resolution';
@@ -155,81 +154,56 @@ export class TradingService {
   ): Promise<OrderRequest> {
     const { selection } = dto;
 
-    if (dto.assetClass === 'option') {
-      if (!selection.optionType) {
-        throw errors.validation('selection.optionType is required for option orders');
-      }
-      const chain = await this.getChainValidated(
-        userId,
-        dto.underlying,
-        selection.expiration,
-      );
-      const expiration = pickExpiration(chain.expirations, selection.expiration);
+    if (!selection.optionType) {
+      throw errors.validation('selection.optionType is required for option orders');
+    }
+    const chain = await this.getChainValidated(
+      userId,
+      dto.underlying,
+      selection.expiration,
+    );
+    const expiration = pickExpiration(chain.expirations, selection.expiration);
 
-      if (selection.mode === 'auto_otm') {
-        const quote = await this.gateway.getQuote(userId, dto.underlying);
-        const contract = resolveAutoOtm(
-          chain.contracts,
-          selection.optionType,
-          quote.last,
-        );
-        return {
-          ...dto,
-          selection: {
-            mode: 'explicit',
-            optionType: selection.optionType,
-            expiration: contract.expiration,
-            strike: contract.strike,
-          },
-        };
-      }
-
-      if (typeof selection.strike !== 'number') {
-        throw errors.validation('selection.strike is required for explicit option orders');
-      }
-      const contract = findExplicitOption(
+    if (selection.mode === 'auto_otm') {
+      const quote = await this.gateway.getQuote(userId, dto.underlying);
+      const contract = resolveAutoOtm(
         chain.contracts,
         selection.optionType,
-        selection.strike,
+        quote.last,
       );
-      if (!contract) {
-        throw errors.validation(
-          `No ${selection.optionType} contract at strike ${selection.strike} ` +
-            `for ${dto.underlying} expiring ${expiration}`,
-        );
-      }
       return {
         ...dto,
         selection: {
           mode: 'explicit',
           optionType: selection.optionType,
-          expiration,
-          strike: selection.strike,
+          expiration: contract.expiration,
+          strike: contract.strike,
         },
       };
     }
 
-    // Futures
-    if (selection.mode === 'auto_otm') {
-      throw errors.validation('selection.mode auto_otm is only supported for options');
+    if (typeof selection.strike !== 'number') {
+      throw errors.validation('selection.strike is required for explicit option orders');
     }
-    if (!selection.contractSymbol) {
-      throw errors.validation('selection.contractSymbol is required for futures orders');
-    }
-    // Clients may send a specific contract symbol (e.g. "MESU26") as the
-    // underlying when it is the charted symbol; gateways expect the root.
-    const root = futuresRootOf(dto.underlying) ?? dto.underlying;
-    const contracts = await this.gateway.getFuturesContracts(userId, root);
-    const contract = contracts.find((c) => c.symbol === selection.contractSymbol);
+    const contract = findExplicitOption(
+      chain.contracts,
+      selection.optionType,
+      selection.strike,
+    );
     if (!contract) {
       throw errors.validation(
-        `No futures contract ${selection.contractSymbol} for root ${root}`,
+        `No ${selection.optionType} contract at strike ${selection.strike} ` +
+          `for ${dto.underlying} expiring ${expiration}`,
       );
     }
     return {
       ...dto,
-      underlying: root,
-      selection: { mode: 'explicit', contractSymbol: selection.contractSymbol },
+      selection: {
+        mode: 'explicit',
+        optionType: selection.optionType,
+        expiration,
+        strike: selection.strike,
+      },
     };
   }
 

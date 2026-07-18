@@ -1,4 +1,4 @@
-import { AssetClass, OptionContract, OptionType } from '@0dtetrader/shared-types';
+import { OptionContract, OptionType } from '@0dtetrader/shared-types';
 import { errors } from '../common/api-exception';
 
 /**
@@ -8,22 +8,6 @@ import { errors } from '../common/api-exception';
  */
 
 export const OPTION_MULTIPLIER = 100;
-
-/** Futures root → contract specs used by the mock gateway. */
-export const FUTURES_SPECS: Record<
-  string,
-  { base: number; multiplier: number }
-> = {
-  ES: { base: 6000, multiplier: 50 },
-  MES: { base: 6000, multiplier: 5 },
-  NQ: { base: 22000, multiplier: 20 },
-  MNQ: { base: 22000, multiplier: 2 },
-  CL: { base: 80, multiplier: 1000 },
-  GC: { base: 2400, multiplier: 100 },
-};
-
-/** Fraction of notional required as buying power for a futures position. */
-export const FUTURES_MARGIN_RATE = 0.1;
 
 // ---------------------------------------------------------------------------
 // Expiration selection
@@ -159,25 +143,8 @@ export function parseOccSymbol(
 // ---------------------------------------------------------------------------
 
 export function estimateBuyingPower(
-  assetClass: AssetClass,
-  contractSymbol: string,
   quantity: number,
   price: number,
 ): number {
-  if (assetClass === 'option') {
-    return quantity * price * OPTION_MULTIPLIER;
-  }
-  const root = futuresRootOf(contractSymbol);
-  const multiplier = root ? FUTURES_SPECS[root].multiplier : 1;
-  return quantity * price * multiplier * FUTURES_MARGIN_RATE;
-}
-
-const FUTURES_SYMBOL_RE = /^([A-Z]{1,4})([FGHJKMNQUVXZ])(\d{2})$/;
-
-/** Extracts the futures root from a contract symbol like MESU26 → MES. */
-export function futuresRootOf(symbol: string): string | null {
-  const match = FUTURES_SYMBOL_RE.exec(symbol);
-  if (!match) return null;
-  const root = match[1];
-  return FUTURES_SPECS[root] ? root : null;
+  return quantity * price * OPTION_MULTIPLIER;
 }

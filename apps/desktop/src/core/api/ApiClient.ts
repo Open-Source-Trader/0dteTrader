@@ -2,7 +2,6 @@ import type {
   AuthTokens,
   Candle,
   CandleInterval,
-  FuturesContract,
   Me,
   OptionsChain,
   OrderPreview,
@@ -11,13 +10,15 @@ import type {
   Position,
   Quote,
   TradeHistory,
+  TradingMode,
   WebullCredentialsInput,
+  WebullCredentialsSaved,
 } from '@0dtetrader/shared-types';
 import { ApiError, parseErrorEnvelope } from './ApiError';
 import type { SessionStore } from './SessionStore';
 
 interface Endpoint {
-  method: 'GET' | 'POST' | 'PUT' | 'DELETE';
+  method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
   path: string;
   query?: Record<string, string>;
   headers?: Record<string, string>;
@@ -123,12 +124,27 @@ export class ApiClient {
     return this.request({ method: 'GET', path: 'v1/me' });
   }
 
-  putWebullCredentials(credentials: WebullCredentialsInput): Promise<{ webullConfigured: true }> {
-    return this.request({ method: 'PUT', path: 'v1/me/webull-credentials', body: credentials });
+  putWebullCredentials(
+    credentials: WebullCredentialsInput,
+    environment: TradingMode = 'live',
+  ): Promise<WebullCredentialsSaved> {
+    return this.request({
+      method: 'PUT',
+      path: 'v1/me/webull-credentials',
+      body: { ...credentials, environment },
+    });
   }
 
-  deleteWebullCredentials(): Promise<void> {
-    return this.requestVoid({ method: 'DELETE', path: 'v1/me/webull-credentials' });
+  deleteWebullCredentials(environment: TradingMode = 'live'): Promise<void> {
+    return this.requestVoid({
+      method: 'DELETE',
+      path: 'v1/me/webull-credentials',
+      query: { environment },
+    });
+  }
+
+  updateTradingMode(mode: TradingMode): Promise<Me> {
+    return this.request({ method: 'PATCH', path: 'v1/me', body: { tradingMode: mode } });
   }
 
   quote(symbol: string): Promise<Quote> {
@@ -146,10 +162,6 @@ export class ApiClient {
     const query: Record<string, string> = { symbol };
     if (expiration) query.expiration = expiration;
     return this.request({ method: 'GET', path: 'v1/market/options-chain', query });
-  }
-
-  futures(root: string): Promise<FuturesContract[]> {
-    return this.request({ method: 'GET', path: 'v1/market/futures', query: { root } });
   }
 
   previewOrder(order: OrderRequest): Promise<OrderPreview> {

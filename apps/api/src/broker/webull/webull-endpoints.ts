@@ -74,20 +74,15 @@ export const EP = {
   stockBars: { host: 'data', method: 'GET', path: '/openapi/market-data/stock/bars' },
   optionSnapshot: { host: 'data', method: 'GET', path: '/openapi/market-data/option/snapshot' },
   optionBars: { host: 'data', method: 'GET', path: '/openapi/market-data/option/bars' },
-  futuresSnapshot: { host: 'data', method: 'GET', path: '/openapi/market-data/futures/snapshot' },
-  futuresBars: { host: 'data', method: 'GET', path: '/openapi/market-data/futures/bars' },
-  futuresByCode: { host: 'data', method: 'GET', path: '/openapi/instrument/futures/by-code' },
-  futuresList: { host: 'data', method: 'GET', path: '/openapi/instrument/futures/list' },
 
   // Account — api host, GET. positions rate limit: 2 req / 2 s [verified: docs].
   accountList: { host: 'api', method: 'GET', path: '/openapi/account/list' },
   balance: { host: 'api', method: 'GET', path: '/openapi/assets/balance' },
   positions: { host: 'api', method: 'GET', path: '/openapi/assets/positions' },
 
-  // Unified orders — api host, POST. Since 2025-12-13 "a single order place
-  // API enables trading across stocks, options, futures, and crypto"
-  // [verified: changelog; futures + options trade-api doc examples;
-  // scripts/webull-smoke.ts exercises these for options].
+  // Unified orders — api host, POST. Since 2025-12-13 a single order place
+  // API handles all instrument types [verified: changelog; options trade-api
+  // doc examples; scripts/webull-smoke.ts exercises these for options].
   orderPreview: { host: 'api', method: 'POST', path: '/openapi/trade/order/preview' },
   orderPlace: { host: 'api', method: 'POST', path: '/openapi/trade/order/place' },
   orderReplace: { host: 'api', method: 'POST', path: '/openapi/trade/order/replace' },
@@ -114,7 +109,6 @@ export type EndpointKey = keyof typeof EP;
 export const CATEGORY = {
   stock: 'US_STOCK',
   option: 'US_OPTION',
-  futures: 'US_FUTURES',
 } as const;
 
 /** Candle interval → Webull `timespan`. [verified: SDK Timespan] */
@@ -129,19 +123,6 @@ export const TIMESPAN: Record<CandleInterval, string> = {
 // ---------------------------------------------------------------------------
 // Symbol helpers
 // ---------------------------------------------------------------------------
-
-/**
- * Webull futures symbols use root + month code + ONE-digit year ("ESZ5"); the
- * app-facing contract uses two digits ("ESZ26"). Translation lives in
- * webull-mappers.ts (toWebullFuturesSymbol / toProjectFuturesSymbol). This
- * tolerant classifier accepts either form (roots may contain digits, e.g.
- * "6BM6").
- */
-const FUTURES_SYMBOL_RE = /^([A-Z0-9]{1,5}?)([FGHJKMNQUVXZ])(\d{1,2})$/;
-
-export function isFuturesSymbol(symbol: string): boolean {
-  return FUTURES_SYMBOL_RE.test(symbol);
-}
 
 /** Webull OCC option symbol — identical to our canonical OCC format.
  *  [verified: SDK option snapshot docstring: "AAPL260522C00300000"] */
@@ -178,7 +159,7 @@ export interface WebullOrderLeg {
   symbol: string;
   strike_price?: string;
   option_expire_date?: string;
-  instrument_type: 'OPTION' | 'FUTURES' | 'EQUITY';
+  instrument_type: 'OPTION' | 'EQUITY';
   option_type?: 'CALL' | 'PUT';
   market: 'US';
 }
@@ -192,7 +173,7 @@ export interface WebullNewOrder {
   side: 'BUY' | 'SELL';
   time_in_force: 'DAY' | 'GTC';
   entrust_type: 'QTY';
-  instrument_type: 'OPTION' | 'FUTURES' | 'EQUITY';
+  instrument_type: 'OPTION' | 'EQUITY';
   market: 'US';
   symbol: string;
   option_strategy?: 'SINGLE';
@@ -265,34 +246,6 @@ export function buildOptionOrder(
   return newOrder;
 }
 
-/**
- * Futures order for the unified endpoint (docs: trade-api/futures; MCP
- * futures_order.py). `contractSymbol` must be the Webull-native form ("ESZ6").
- */
-export function buildFuturesOrder(
-  order: OrderRequest,
-  contractSymbol: string,
-  clientOrderId: string,
-  limitPrice?: number,
-): WebullNewOrder {
-  const newOrder: WebullNewOrder = {
-    client_order_id: clientOrderId,
-    combo_type: 'NORMAL',
-    instrument_type: 'FUTURES',
-    market: 'US',
-    symbol: contractSymbol,
-    side: order.side.toUpperCase() as 'BUY' | 'SELL',
-    order_type: order.orderType === 'market' ? 'MARKET' : 'LIMIT',
-    time_in_force: 'DAY',
-    quantity: String(order.quantity),
-    entrust_type: 'QTY',
-  };
-  if (newOrder.order_type === 'LIMIT' && limitPrice !== undefined) {
-    newOrder.limit_price = String(limitPrice);
-  }
-  return newOrder;
-}
-
 // ---------------------------------------------------------------------------
 // Response fragments that are NOT DTO-mapped in webull-mappers.ts
 // ---------------------------------------------------------------------------
@@ -305,10 +258,7 @@ const asNum = (v: unknown): number | undefined => {
 /** Buying power from the balance response.
  *  [verified fields: account_currency_assets[].buying_power /
  *   option_buying_power / day_buying_power] */
-export function parseBuyingPower(
-  raw: unknown,
-  forOptions: boolean,
-): number | undefined {
+export function parseBuyingPower(raw: unknown): number | undefined {
   const data = (raw ?? {}) as Record<string, unknown>;
   const assets = Array.isArray(data.account_currency_assets)
     ? (data.account_currency_assets as Record<string, unknown>[])
@@ -316,10 +266,7 @@ export function parseBuyingPower(
   const usd =
     assets.find((a) => String(a.currency ?? 'USD') === 'USD') ?? assets[0];
   if (!usd) return undefined;
-  if (forOptions) {
-    return asNum(usd.option_buying_power) ?? asNum(usd.buying_power);
-  }
-  return asNum(usd.futures_buying_power) ?? asNum(usd.buying_power);
+  return asNum(usd.option_buying_power) ?? asNum(usd.buying_power);
 }
 
 /** Place/preview order response → { clientOrderId, orderId }.
@@ -355,50 +302,6 @@ export function parsePreviewCost(raw: unknown): number | undefined {
     asNum(d.estimated_cash) ??
     asNum(d.amount)
   );
-}
-
-/** Futures instruments (by-code / list) rows, pre-DTO-mapping.
- *  [best-effort field names — confirmed against sandbox smoke]. */
-export interface WebullFuturesInstrumentRow {
-  symbol: string;
-  root: string;
-  contractMonth?: string;
-  expiration?: string;
-}
-
-export function parseFuturesInstruments(
-  raw: unknown,
-): WebullFuturesInstrumentRow[] {
-  let rows: unknown = raw;
-  if (rows && typeof rows === 'object' && !Array.isArray(rows)) {
-    const d = rows as Record<string, unknown>;
-    rows = d.result ?? d.list ?? d.instruments ?? d.data;
-  }
-  if (!Array.isArray(rows)) return [];
-  const out: WebullFuturesInstrumentRow[] = [];
-  for (const r of rows as Record<string, unknown>[]) {
-    const symbol = String(r.symbol ?? r.futures_symbol ?? '');
-    if (!symbol) continue;
-    const root = String(
-      r.code ?? r.root ?? symbol.replace(FUTURES_SYMBOL_RE, '$1'),
-    );
-    const expiryRaw =
-      r.last_trading_date ??
-      r.expiration_date ??
-      r.expire_date ??
-      r.expiry_date;
-    out.push({
-      symbol,
-      root,
-      contractMonth:
-        typeof r.contract_month === 'string' ? r.contract_month : undefined,
-      expiration:
-        typeof expiryRaw === 'string' && expiryRaw
-          ? expiryRaw.slice(0, 10)
-          : undefined,
-    });
-  }
-  return out;
 }
 
 /**

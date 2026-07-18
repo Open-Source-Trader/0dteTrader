@@ -4,7 +4,6 @@ import { createHash } from 'node:crypto';
 import {
   Candle,
   CandleRequest,
-  FuturesContract,
   OptionsChain,
   OptionType,
   OrderPreview,
@@ -12,9 +11,11 @@ import {
   OrderResult,
   Position,
   Quote,
+  TradingMode,
 } from '@0dtetrader/shared-types';
 import { brokerErrors } from '../../common/broker-error';
 import { CredentialsService } from '../../credentials/credentials.service';
+import { PrismaService } from '../../prisma/prisma.service';
 import {
   computeMid,
   estimateBuyingPower,
@@ -27,30 +28,26 @@ import { OrderEventsService } from '../order-events.service';
 import {
   asArray,
   asObject,
-  buildFuturesOrder,
   buildOptionOrder,
   CATEGORY,
   formatOccSymbol,
-  isFuturesSymbol,
   parseBuyingPower,
-  parseFuturesInstruments,
   parsePlaceResult,
   parsePreviewCost,
   positionIntentFor,
   TIMESPAN,
   toClientOrderId,
+  WEBULL_PROD_HOSTS,
   WEBULL_SANDBOX_HOSTS,
   WebullHosts,
 } from './webull-endpoints';
-import { FetchImpl, WebullClient } from './webull-client';
+import { FetchImpl, WebullClient, WebullCredentials } from './webull-client';
 import {
   toCandle,
   toOptionContract,
   toOrderResult,
   toPosition,
-  toProjectFuturesSymbol,
   toQuote,
-  toWebullFuturesSymbol,
   WebullBar,
   WebullOrder,
   WebullPosition,
@@ -83,13 +80,14 @@ interface ResolvedContract {
  * (paths/payloads), webull-mappers.ts (response→DTO) and webull-signer.ts;
  * this class maps them onto the BrokerGateway seam.
  *
- * - Per-user WebullClient built from decrypted, encrypted-at-rest credentials;
- *   clients are cached per user and rebuilt when credentials change.
+ * - Per-user WebullClient built from decrypted, encrypted-at-rest credentials
+ *   for the user's current trading mode (live / practice); clients are cached
+ *   per (user, mode) and rebuilt when credentials change. Practice mode falls
+ *   back to the server's built-in practice app credentials when the user has
+ *   not stored their own.
  * - Option chains: the official API has NO chain endpoint (see
  *   webull-endpoints.ts header) — chains are probed by batch-requesting
  *   option snapshots for candidate OCC symbols [best-effort].
- * - Futures symbols: Webull uses 1-digit years ("ESZ6") on the wire; the app
- *   sees 2-digit years ("ESZ26"). Translation happens only here.
  * - Fills: Webull pushes order events over gRPC (out of scope for P4); the
  *   gateway polls order/detail after placement until a terminal status and
  *   emits orderUpdates, so the app still gets fill feedback.
@@ -107,6 +105,7 @@ export class WebullBrokerGateway implements BrokerGateway, OnModuleDestroy {
     private readonly credentials: CredentialsService,
     private readonly config: ConfigService,
     private readonly events: OrderEventsService,
+    private readonly prisma: PrismaService,
     private readonly fetchImpl?: FetchImpl,
   ) {}
 
@@ -116,32 +115,68 @@ export class WebullBrokerGateway implements BrokerGateway, OnModuleDestroy {
   }
 
   // -------------------------------------------------------------------------
-  // Client factory (per-user, credentials-aware)
+  // Client factory (per-user, per-environment, credentials-aware)
   // -------------------------------------------------------------------------
 
+  /** The user's current live/practice mode (per-user server-side setting). */
+  private async tradingModeFor(userId: string): Promise<TradingMode> {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    return user?.tradingMode === 'practice' ? 'practice' : 'live';
+  }
+
+  /**
+   * Credentials for (userId, mode). Practice mode falls back to the server's
+   * built-in practice app credentials when the user hasn't stored their own.
+   */
+  private async credentialsFor(
+    userId: string,
+    mode: TradingMode,
+  ): Promise<WebullCredentials | null> {
+    const stored = await this.credentials.getDecrypted(userId, mode);
+    if (stored) return stored;
+    if (mode !== 'practice') return null;
+    const appKey = this.config.get<string>('webull.practiceAppKey') ?? '';
+    const appSecret = this.config.get<string>('webull.practiceAppSecret') ?? '';
+    const accountId = this.config.get<string>('webull.practiceAccountId') ?? '';
+    if (!appKey || !appSecret) return null;
+    return { appKey, appSecret, accountId };
+  }
+
   private async clientFor(userId: string): Promise<WebullClient> {
-    const creds = await this.credentials.getDecrypted(userId);
+    const mode = await this.tradingModeFor(userId);
+    const creds = await this.credentialsFor(userId, mode);
     if (!creds) {
       throw brokerErrors.authFailed(
-        'No Webull credentials on file — save app key/secret in Profile first',
+        mode === 'practice'
+          ? 'No Webull practice credentials available — save app key/secret in Profile first'
+          : 'No Webull credentials on file — save app key/secret in Profile first',
       );
     }
     const fingerprint = createHash('sha256')
       .update(`${creds.appKey}${creds.appSecret}${creds.accountId}`)
       .digest('hex');
-    const existing = this.clients.get(userId);
+    const cacheKey = `${userId}:${mode}`;
+    const existing = this.clients.get(cacheKey);
     if (existing && existing.fingerprint === fingerprint) {
       return existing.client;
     }
     const client = new WebullClient(creds, {
-      hosts: this.hosts(),
+      hosts: this.hosts(mode),
       fetchImpl: this.fetchImpl,
     });
-    this.clients.set(userId, { fingerprint, client });
+    this.clients.set(cacheKey, { fingerprint, client });
     return client;
   }
 
-  private hosts(): WebullHosts {
+  private hosts(mode: TradingMode): WebullHosts {
+    if (mode === 'live') {
+      const api =
+        this.config.get<string>('webull.liveApiBaseUrl') || WEBULL_PROD_HOSTS.api;
+      const data =
+        this.config.get<string>('webull.liveMarketDataBaseUrl') ||
+        api.replace(/^https:\/\/api\./, 'https://data-api.');
+      return { api, data };
+    }
     const api =
       this.config.get<string>('webull.apiBaseUrl') || WEBULL_SANDBOX_HOSTS.api;
     // Market data lives on a separate host family (api.* → data-api.*). An
@@ -173,20 +208,6 @@ export class WebullBrokerGateway implements BrokerGateway, OnModuleDestroy {
       if (!first) throw brokerErrors.contractNotFound(`Unknown option: ${symbol}`);
       return toQuote(symbol, first);
     }
-    if (isFuturesSymbol(symbol)) {
-      const webullSymbol = toWebullFuturesSymbol(symbol);
-      const rows = asArray(
-        await client.request('futuresSnapshot', {
-          query: { symbols: webullSymbol, category: CATEGORY.futures },
-        }),
-      ) as WebullSnapshot[];
-      const first = rows[0];
-      if (!first) {
-        throw brokerErrors.contractNotFound(`Unknown futures contract: ${symbol}`);
-      }
-      // The app keeps the project-format symbol.
-      return toQuote(symbol, { ...first, symbol });
-    }
     const rows = asArray(
       await client.request('stockSnapshot', {
         query: { symbols: symbol, category: CATEGORY.stock },
@@ -204,20 +225,13 @@ export class WebullBrokerGateway implements BrokerGateway, OnModuleDestroy {
   ): Promise<Candle[]> {
     const client = await this.clientFor(userId);
     const occ = parseOccSymbol(symbol);
-    const futures = !occ && isFuturesSymbol(symbol);
-    const endpoint = occ ? 'optionBars' : futures ? 'futuresBars' : 'stockBars';
-    const category = occ
-      ? CATEGORY.option
-      : futures
-        ? CATEGORY.futures
-        : CATEGORY.stock;
+    const endpoint = occ ? 'optionBars' : 'stockBars';
+    const category = occ ? CATEGORY.option : CATEGORY.stock;
     // Verified against the live API: stock bars take `symbol` (singular), but
-    // option and futures bars require `symbols` (plural) — singular gets a
+    // option bars require `symbols` (plural) — singular gets a
     // 400 "Parameters not valid".
     const query: Record<string, string> = {
-      [occ || futures ? 'symbols' : 'symbol']: futures
-        ? toWebullFuturesSymbol(symbol)
-        : symbol,
+      [occ ? 'symbols' : 'symbol']: symbol,
       category,
       timespan: TIMESPAN[req.interval],
       count: '200',
@@ -313,64 +327,6 @@ export class WebullBrokerGateway implements BrokerGateway, OnModuleDestroy {
     };
   }
 
-  async getFuturesContracts(
-    userId: string,
-    root: string,
-  ): Promise<FuturesContract[]> {
-    const client = await this.clientFor(userId);
-    const raw = await client.request('futuresByCode', {
-      query: {
-        code: root.toUpperCase(),
-        category: CATEGORY.futures,
-        contract_type: 'MONTHLY',
-      },
-    });
-    const instruments = parseFuturesInstruments(raw);
-    if (instruments.length === 0) {
-      throw brokerErrors.contractNotFound(
-        `Unknown futures root: ${root} (or no monthly contracts)`,
-      );
-    }
-    // Nearest expiry first; contracts without a parsable expiry go last.
-    const sorted = [...instruments].sort((a, b) =>
-      (a.expiration ?? '9999').localeCompare(b.expiration ?? '9999'),
-    );
-    const selected = sorted.slice(0, 2);
-
-    const quotes = new Map<string, Quote>();
-    try {
-      const rows = asArray(
-        await client.request('futuresSnapshot', {
-          query: {
-            symbols: selected.map((c) => c.symbol).join(','),
-            category: CATEGORY.futures,
-          },
-        }),
-      ) as WebullSnapshot[];
-      for (const row of rows) {
-        const q = toQuote(String(row.symbol ?? ''), row);
-        if (q.symbol) quotes.set(q.symbol, q);
-      }
-    } catch (err) {
-      this.logger.warn(
-        `futures snapshot failed for ${root}: ${(err as Error).message}`,
-      );
-    }
-
-    return selected.map((c, i) => {
-      const q = quotes.get(c.symbol);
-      return {
-        symbol: toProjectFuturesSymbol(c.symbol, c.contractMonth),
-        root: c.root.toUpperCase(),
-        expiration: c.expiration ?? '',
-        frontMonth: i === 0,
-        bid: q?.bid ?? 0,
-        ask: q?.ask ?? 0,
-        last: q?.last ?? 0,
-      };
-    });
-  }
-
   // -------------------------------------------------------------------------
   // Trading
   // -------------------------------------------------------------------------
@@ -414,12 +370,7 @@ export class WebullBrokerGateway implements BrokerGateway, OnModuleDestroy {
       );
     }
     if (estBuyingPower === undefined) {
-      estBuyingPower = estimateBuyingPower(
-        order.assetClass,
-        resolved.contractSymbol,
-        order.quantity,
-        price,
-      );
+      estBuyingPower = estimateBuyingPower(order.quantity, price);
       warnings.push('Buying-power effect is a local estimate');
     }
 
@@ -427,7 +378,6 @@ export class WebullBrokerGateway implements BrokerGateway, OnModuleDestroy {
       await client.request('balance', {
         query: { account_id: client.accountId },
       }),
-      order.assetClass === 'option',
     );
     if (buyingPower !== undefined && estBuyingPower > buyingPower) {
       warnings.push(
@@ -534,28 +484,20 @@ export class WebullBrokerGateway implements BrokerGateway, OnModuleDestroy {
     clientOrderId: string,
     limitPrice?: number,
   ) {
-    if (order.assetClass === 'option') {
-      if (!resolved.optionTerms) {
-        throw brokerErrors.orderRejected('Option contract terms were not resolved');
-      }
-      const intent = await this.optionPositionIntent(
-        userId,
-        order,
-        resolved.contractSymbol,
-      );
-      return buildOptionOrder(
-        order,
-        resolved.optionTerms,
-        clientOrderId,
-        limitPrice,
-        intent,
-      );
+    if (!resolved.optionTerms) {
+      throw brokerErrors.orderRejected('Option contract terms were not resolved');
     }
-    return buildFuturesOrder(
+    const intent = await this.optionPositionIntent(
+      userId,
       order,
-      toWebullFuturesSymbol(resolved.contractSymbol),
+      resolved.contractSymbol,
+    );
+    return buildOptionOrder(
+      order,
+      resolved.optionTerms,
       clientOrderId,
       limitPrice,
+      intent,
     );
   }
 
@@ -583,53 +525,29 @@ export class WebullBrokerGateway implements BrokerGateway, OnModuleDestroy {
     userId: string,
     order: OrderRequest,
   ): Promise<ResolvedContract> {
-    if (order.assetClass === 'option') {
-      const { optionType } = order.selection;
-      if (!optionType) {
-        throw brokerErrors.orderRejected(
-          'selection.optionType is required for option orders',
-        );
-      }
-      const chain = await this.getOptionsChain(
-        userId,
-        order.underlying,
-        order.selection.expiration,
+    const { optionType } = order.selection;
+    if (!optionType) {
+      throw brokerErrors.orderRejected(
+        'selection.optionType is required for option orders',
       );
-      const contract =
-        order.selection.mode === 'auto_otm'
-          ? resolveAutoOtm(chain.contracts, optionType, chain.underlyingPrice)
-          : chain.contracts.find(
-              (c) =>
-                c.optionType === optionType &&
-                c.strike === order.selection.strike,
-            );
-      if (!contract) {
-        throw brokerErrors.contractNotFound(
-          `No ${optionType} contract at strike ${order.selection.strike ?? '(auto)'} ` +
-            `for ${order.underlying} ${chain.expirations[0]}`,
-        );
-      }
-      return {
-        contractSymbol: contract.symbol,
-        bid: contract.bid,
-        ask: contract.ask,
-        last: contract.last,
-        optionTerms: {
-          underlying: order.underlying.toUpperCase(),
-          expiration: contract.expiration,
-          strike: contract.strike,
-          optionType,
-        },
-      };
     }
-
-    const contracts = await this.getFuturesContracts(userId, order.underlying);
-    const contract = contracts.find(
-      (c) => c.symbol === order.selection.contractSymbol,
+    const chain = await this.getOptionsChain(
+      userId,
+      order.underlying,
+      order.selection.expiration,
     );
+    const contract =
+      order.selection.mode === 'auto_otm'
+        ? resolveAutoOtm(chain.contracts, optionType, chain.underlyingPrice)
+        : chain.contracts.find(
+            (c) =>
+              c.optionType === optionType &&
+              c.strike === order.selection.strike,
+          );
     if (!contract) {
       throw brokerErrors.contractNotFound(
-        `No futures contract ${order.selection.contractSymbol} for root ${order.underlying}`,
+        `No ${optionType} contract at strike ${order.selection.strike ?? '(auto)'} ` +
+          `for ${order.underlying} ${chain.expirations[0]}`,
       );
     }
     return {
@@ -637,6 +555,12 @@ export class WebullBrokerGateway implements BrokerGateway, OnModuleDestroy {
       bid: contract.bid,
       ask: contract.ask,
       last: contract.last,
+      optionTerms: {
+        underlying: order.underlying.toUpperCase(),
+        expiration: contract.expiration,
+        strike: contract.strike,
+        optionType,
+      },
     };
   }
 

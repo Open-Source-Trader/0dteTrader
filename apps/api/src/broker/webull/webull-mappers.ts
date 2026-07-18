@@ -1,19 +1,13 @@
 import {
   Candle,
   CandleInterval,
-  FuturesContract,
   OptionContract,
   OrderResult,
   OrderStatus,
   Position,
   Quote,
 } from '@0dtetrader/shared-types';
-import {
-  formatOccSymbol,
-  futuresRootOf,
-  FUTURES_SPECS,
-  OPTION_MULTIPLIER,
-} from '../contract-resolution';
+import { formatOccSymbol, OPTION_MULTIPLIER } from '../contract-resolution';
 
 /**
  * Pure mapping between Webull OpenAPI payloads and the shared DTOs. Field
@@ -96,70 +90,6 @@ export const INTERVAL_TO_TIMESPAN: Record<CandleInterval, string> = {
   '1h': 'M60',
   '1d': 'D',
 };
-
-// ---------------------------------------------------------------------------
-// Futures symbols: Webull uses 1-digit years (ESZ5), the app 2-digit (ESZ25)
-// ---------------------------------------------------------------------------
-
-const PROJECT_FUTURES_RE = /^([A-Z]{1,4})([FGHJKMNQUVXZ])(\d{2})$/;
-const WEBULL_FUTURES_RE = /^([A-Z]{1,4})([FGHJKMNQUVXZ])(\d)$/;
-
-/** ESZ25 → ESZ5. */
-export function toWebullFuturesSymbol(projectSymbol: string): string {
-  const match = PROJECT_FUTURES_RE.exec(projectSymbol);
-  if (!match) return projectSymbol;
-  const [, root, code, year] = match;
-  return `${root}${code}${year[1]}`;
-}
-
-/**
- * ESZ5 → ESZ25. Prefers contract_month (yyyyMM, unambiguous); otherwise the
- * single-digit year expands to the next matching year at/after the current one.
- */
-export function toProjectFuturesSymbol(
-  webullSymbol: string,
-  contractMonth?: string,
-  now = new Date(),
-): string {
-  const match = WEBULL_FUTURES_RE.exec(webullSymbol);
-  if (!match) return webullSymbol;
-  const [, root, code, digit] = match;
-  let year: number;
-  if (contractMonth && /^\d{6}$/.test(contractMonth)) {
-    year = Number(contractMonth.slice(0, 4));
-  } else {
-    const current = now.getUTCFullYear();
-    year = current + ((Number(digit) - (current % 10) + 10) % 10);
-  }
-  return `${root}${code}${String(year % 100).padStart(2, '0')}`;
-}
-
-export interface WebullFuturesInstrument {
-  symbol?: string;
-  contract_month?: string;
-  contract_type?: string;
-  last_trading_date?: string;
-}
-
-export function toFuturesContract(
-  root: string,
-  instrument: WebullFuturesInstrument,
-  snapshot: WebullSnapshot | undefined,
-  frontMonth: boolean,
-): FuturesContract {
-  return {
-    symbol: toProjectFuturesSymbol(
-      instrument.symbol ?? '',
-      instrument.contract_month,
-    ),
-    root: root.toUpperCase(),
-    expiration: instrument.last_trading_date ?? '',
-    frontMonth,
-    bid: num(snapshot?.bid),
-    ask: num(snapshot?.ask),
-    last: num(snapshot?.price ?? snapshot?.last),
-  };
-}
 
 // ---------------------------------------------------------------------------
 // Options
@@ -246,9 +176,6 @@ export function contractSymbolOf(order: {
       num(leg.strike_price),
     );
   }
-  if (order.instrument_type === 'FUTURES') {
-    return toProjectFuturesSymbol(order.symbol ?? '', order.contract_month);
-  }
   return order.symbol ?? '';
 }
 
@@ -283,19 +210,14 @@ export interface WebullPosition {
 /** Maps a Webull position row; returns null for asset types the app ignores. */
 export function toPosition(pos: WebullPosition): Position | null {
   const type = (pos.instrument_type ?? '').toUpperCase();
-  if (type !== 'OPTION' && type !== 'FUTURES') return null;
-  const symbol = contractSymbolOf(pos);
-  const multiplier =
-    type === 'OPTION'
-      ? OPTION_MULTIPLIER
-      : FUTURES_SPECS[futuresRootOf(symbol) ?? '']?.multiplier ?? 1;
+  if (type !== 'OPTION') return null;
   return {
-    symbol,
-    assetClass: type === 'OPTION' ? 'option' : 'future',
+    symbol: contractSymbolOf(pos),
+    assetClass: 'option',
     quantity: num(pos.quantity),
     avgPrice: num(pos.cost_price),
     markPrice: num(pos.last_price),
     unrealizedPnl: num(pos.unrealized_profit_loss),
-    multiplier,
+    multiplier: OPTION_MULTIPLIER,
   };
 }

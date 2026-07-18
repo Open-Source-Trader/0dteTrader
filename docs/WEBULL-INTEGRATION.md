@@ -52,10 +52,33 @@ This keeps the entire app demoable and all tests deterministic without any Webul
 
 ## 5. Paper vs Live
 
-- P4 targets Webull's paper/sandbox environment first via `WEBULL_API_BASE_URL`.
-- Live requires: explicit user acknowledgement in the app (first-launch risk disclaimer),
-  `NODE_ENV=production`, and the live base URL. There is no code path difference beyond config —
-  the gateway is identical, only the environment changes.
+Trading mode is a **per-user server-side setting** (`users.tradingMode`,
+`'live'` | `'practice'`, default `'live'`), switched via `PATCH /v1/me`. The
+broker gateway reads it from the DB on every client resolution — there are no
+per-request headers and no JWT changes.
+
+- **Dual credential sets.** Each user can store one Webull credential set per
+  environment (`webull_credentials` is keyed on `(userId, environment)`), both
+  AES-256-GCM encrypted at rest. Practice mode uses the stored practice set;
+  if none exists it falls back to the server's built-in practice app
+  credentials (`WEBULL_PRACTICE_APP_KEY` / `WEBULL_PRACTICE_APP_SECRET` /
+  `WEBULL_PRACTICE_ACCOUNT_ID`). Live mode has no fallback — live credentials
+  must be stored per user.
+- **Hosts per mode.** Practice targets the sandbox hosts
+  (`https://api.sandbox.webull.com` / `https://data-api.sandbox.webull.com`),
+  overridable via `WEBULL_API_BASE_URL` / `WEBULL_MARKET_DATA_BASE_URL`. Live
+  targets the production hosts (`https://api.webull.com` /
+  `https://data-api.webull.com`), overridable via
+  `WEBULL_LIVE_API_BASE_URL` / `WEBULL_LIVE_MARKET_DATA_BASE_URL`. Sandbox and
+  production are fully isolated (§7): separate app keys, separate accounts.
+  The HMAC signer keys its algorithm off the request host, so it stays
+  correct in both modes without changes.
+- **Clients are cached per `(userId, mode)`** and rebuilt when the relevant
+  credential set changes, so switching modes never crosses accounts.
+- **Orders are stamped** with the environment in effect when recorded
+  (`trade_orders.environment`), keeping paper and real fills separable in
+  trade history.
+- The mock gateway (`BROKER_GATEWAY=mock`) is mode-agnostic and unchanged.
 
 ## 6. Error Mapping
 

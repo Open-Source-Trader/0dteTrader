@@ -18,6 +18,12 @@ const FOCUSABLE = 'button, input, select, textarea, a[href], [tabindex]:not([tab
  */
 export function Sheet({ detent = 'large', onDismiss, children }: SheetProps) {
   const panelRef = useRef<HTMLDivElement>(null);
+  // Parents pass inline closures whose identity changes on every re-render
+  // (e.g. TradeScreen re-renders on each quote tick). Track the latest
+  // callback in a ref so the mount effect below runs exactly once — re-running
+  // it would steal focus back to the first field while the user is typing.
+  const onDismissRef = useRef(onDismiss);
+  onDismissRef.current = onDismiss;
 
   useEffect(() => {
     const panel = panelRef.current;
@@ -27,7 +33,7 @@ export function Sheet({ detent = 'large', onDismiss, children }: SheetProps) {
 
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
-        onDismiss();
+        onDismissRef.current();
         return;
       }
       if (event.key !== 'Tab' || !panel) return;
@@ -53,11 +59,12 @@ export function Sheet({ detent = 'large', onDismiss, children }: SheetProps) {
       window.removeEventListener('keydown', onKey);
       previouslyFocused?.focus();
     };
-  }, [onDismiss]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount once; see onDismissRef.
+  }, []);
 
   return (
     <>
-      <div className="sheet-backdrop" onClick={onDismiss} />
+      <div className="sheet-backdrop" onClick={() => onDismissRef.current()} />
       <div ref={panelRef} className={`sheet-panel ${detent}`} role="dialog" aria-modal="true" tabIndex={-1}>
         {children}
       </div>

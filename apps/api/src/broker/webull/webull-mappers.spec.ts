@@ -3,36 +3,10 @@ import {
   INTERVAL_TO_TIMESPAN,
   mapOrderStatus,
   toCandle,
-  toFuturesContract,
   toOrderResult,
   toPosition,
-  toProjectFuturesSymbol,
   toQuote,
-  toWebullFuturesSymbol,
 } from './webull-mappers';
-
-describe('futures symbol translation', () => {
-  it('converts project 2-digit years to Webull 1-digit years', () => {
-    expect(toWebullFuturesSymbol('ESZ25')).toBe('ESZ5');
-    expect(toWebullFuturesSymbol('MNQH26')).toBe('MNQH6');
-  });
-
-  it('expands Webull symbols using contract_month when present', () => {
-    expect(toProjectFuturesSymbol('ESZ5', '202512')).toBe('ESZ25');
-    expect(toProjectFuturesSymbol('GCM4', '203406')).toBe('GCM34');
-  });
-
-  it('expands the year digit to the next matching year without contract_month', () => {
-    expect(toProjectFuturesSymbol('ESZ5', undefined, new Date('2025-01-01'))).toBe('ESZ25');
-    expect(toProjectFuturesSymbol('ESZ5', undefined, new Date('2026-07-17'))).toBe('ESZ35');
-    expect(toProjectFuturesSymbol('ESH6', undefined, new Date('2026-01-01'))).toBe('ESH26');
-  });
-
-  it('passes through symbols that do not match either format', () => {
-    expect(toWebullFuturesSymbol('SPY')).toBe('SPY');
-    expect(toProjectFuturesSymbol('SPY')).toBe('SPY');
-  });
-});
 
 describe('mapOrderStatus', () => {
   it('maps the documented Webull statuses', () => {
@@ -144,16 +118,6 @@ describe('contractSymbolOf / toOrderResult', () => {
       timestamp: '2026-07-17T14:30:00.000Z',
     });
   });
-
-  it('translates futures order symbols to project format', () => {
-    expect(
-      contractSymbolOf({
-        instrument_type: 'FUTURES',
-        symbol: 'ESZ5',
-        contract_month: '202512',
-      }),
-    ).toBe('ESZ25');
-  });
 });
 
 describe('toPosition', () => {
@@ -185,31 +149,5 @@ describe('toPosition', () => {
       multiplier: 100,
     });
     expect(toPosition({ instrument_type: 'EQUITY', symbol: 'AAPL' })).toBeNull();
-  });
-});
-
-describe('toFuturesContract', () => {
-  it('combines instrument metadata with a snapshot', () => {
-    expect(
-      toFuturesContract(
-        'es',
-        {
-          symbol: 'ESZ5',
-          contract_month: '202512',
-          contract_type: 'MONTHLY',
-          last_trading_date: '2025-12-19',
-        },
-        { symbol: 'ESZ5', bid: '6001', ask: '6001.5', price: '6001.25' },
-        true,
-      ),
-    ).toEqual({
-      symbol: 'ESZ25',
-      root: 'ES',
-      expiration: '2025-12-19',
-      frontMonth: true,
-      bid: 6001,
-      ask: 6001.5,
-      last: 6001.25,
-    });
   });
 });

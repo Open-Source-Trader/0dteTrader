@@ -115,25 +115,6 @@ describe('MockBrokerGateway', () => {
     });
   });
 
-  describe('futures', () => {
-    it('lists front + deferred contracts for all supported roots', async () => {
-      for (const root of ['ES', 'MES', 'NQ', 'MNQ', 'CL', 'GC']) {
-        const contracts = await gateway.getFuturesContracts(USER, root);
-        expect(contracts).toHaveLength(2);
-        expect(contracts[0].frontMonth).toBe(true);
-        expect(contracts[1].frontMonth).toBe(false);
-        expect(contracts[0].symbol).toMatch(new RegExp(`^${root}[HMUZ]\\d{2}$`));
-        expect(contracts[0].bid).toBeLessThan(contracts[0].ask);
-      }
-    });
-
-    it('rejects an unknown root', async () => {
-      await expect(gateway.getFuturesContracts(USER, 'ZZ')).rejects.toMatchObject({
-        code: 'CONTRACT_NOT_FOUND',
-      });
-    });
-  });
-
   describe('candles', () => {
     it('returns deterministic, well-formed candles', async () => {
       const a = await gateway.getCandles(USER, 'SPY', { interval: '1m' });
@@ -285,26 +266,6 @@ describe('MockBrokerGateway', () => {
       } finally {
         jest.useRealTimers();
       }
-    });
-
-    it('futures orders work end to end', async () => {
-      const contracts = await gateway.getFuturesContracts(USER, 'MES');
-      const result = await gateway.placeOrder(
-        USER,
-        {
-          underlying: 'MES',
-          assetClass: 'future',
-          side: 'buy',
-          quantity: 1,
-          orderType: 'market',
-          selection: { mode: 'explicit', contractSymbol: contracts[0].symbol },
-        },
-        'key-8',
-      );
-      expect(result.status).toBe('filled');
-      expect(result.contractSymbol).toBe(contracts[0].symbol);
-      const positions = await gateway.getPositions(USER);
-      expect(positions[0].assetClass).toBe('future');
     });
   });
 });

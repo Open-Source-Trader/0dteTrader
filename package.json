@@ -2,7 +2,7 @@
   "name": "0dtetrader",
   "private": true,
   "version": "0.1.0",
-  "description": "0dteTrader — rapid futures/options trading app for Webull OpenAPI",
+  "description": "0dteTrader — rapid options trading app for Webull OpenAPI",
   "workspaces": [
     "apps/api",
     "apps/desktop",

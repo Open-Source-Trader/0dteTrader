@@ -8,7 +8,8 @@
 // Enums / string unions
 // ---------------------------------------------------------------------------
 
-export type AssetClass = 'option' | 'future';
+export type AssetClass = 'option';
+export type TradingMode = 'live' | 'practice';
 export type OrderSide = 'buy' | 'sell';
 export type OrderType = 'mid' | 'market';
 export type OptionType = 'call' | 'put';
@@ -49,17 +50,24 @@ export interface Me {
   id: string;
   email: string;
   tradingDisabled: boolean;
+  tradingMode: TradingMode;
+  /** Live Webull credentials are stored. */
   webullConfigured: boolean;
+  /** Practice (paper) Webull credentials are stored. */
+  webullPracticeConfigured: boolean;
 }
 
 export interface WebullCredentialsInput {
   appKey: string;
   appSecret: string;
   accountId: string;
+  /** Environment this credential set belongs to; defaults to 'live'. */
+  environment?: TradingMode;
 }
 
 export interface WebullCredentialsSaved {
   webullConfigured: true;
+  environment: TradingMode;
 }
 
 // ---------------------------------------------------------------------------
@@ -116,17 +124,6 @@ export interface OptionsChain {
   contracts: OptionContract[];
 }
 
-export interface FuturesContract {
-  symbol: string;
-  root: string;
-  /** YYYY-MM-DD. */
-  expiration: string;
-  frontMonth: boolean;
-  bid: number;
-  ask: number;
-  last: number;
-}
-
 // ---------------------------------------------------------------------------
 // Trading
 // ---------------------------------------------------------------------------
@@ -139,8 +136,6 @@ export interface OrderSelection {
   expiration?: string;
   /** Explicit option orders only. */
   strike?: number;
-  /** Explicit futures orders only. */
-  contractSymbol?: string;
 }
 
 export interface OrderRequest {
@@ -181,7 +176,7 @@ export interface Position {
   avgPrice: number;
   markPrice: number;
   unrealizedPnl: number;
-  /** Contract multiplier (options: 100; futures: per spec). Lets clients recompute P/L from live quotes. */
+  /** Contract multiplier (options: 100). Lets clients recompute P/L from live quotes. */
   multiplier: number;
 }
 

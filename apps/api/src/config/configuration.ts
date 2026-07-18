@@ -13,9 +13,20 @@ export interface AppConfig {
   credEncryptionKey?: string;
   brokerGateway: 'mock' | 'webull';
   webull: {
+    /** Practice (sandbox) overrides; default to the sandbox hosts. */
     apiBaseUrl: string;
     /** Falls back to apiBaseUrl when unset. */
     marketDataBaseUrl: string;
+    /** Live (production) overrides; default to the prod hosts. */
+    liveApiBaseUrl: string;
+    /** Falls back to liveApiBaseUrl (api. → data-api.) when unset. */
+    liveMarketDataBaseUrl: string;
+    /** Built-in practice app credentials — fallback when a user has not
+     *  stored their own practice credentials. */
+    practiceAppKey: string;
+    practiceAppSecret: string;
+    practiceAccountId: string;
+    practiceApplicationId: string;
   };
 }
 
@@ -49,8 +60,23 @@ export default (): AppConfig => ({
       process.env.WEBULL_MARKET_DATA_BASE_URL ||
       process.env.WEBULL_API_BASE_URL ||
       'https://api.sandbox.webull.com',
+    liveApiBaseUrl:
+      process.env.WEBULL_LIVE_API_BASE_URL || 'https://api.webull.com',
+    liveMarketDataBaseUrl:
+      process.env.WEBULL_LIVE_MARKET_DATA_BASE_URL ||
+      liveDataHost(process.env.WEBULL_LIVE_API_BASE_URL),
+    practiceAppKey: process.env.WEBULL_PRACTICE_APP_KEY ?? '',
+    practiceAppSecret: process.env.WEBULL_PRACTICE_APP_SECRET ?? '',
+    practiceAccountId: process.env.WEBULL_PRACTICE_ACCOUNT_ID ?? '',
+    practiceApplicationId: process.env.WEBULL_PRACTICE_APPLICATION_ID ?? '',
   },
 });
+
+/** Derives the live market-data host (api.* → data-api.*) from the API host. */
+function liveDataHost(liveApiBaseUrl: string | undefined): string {
+  const api = liveApiBaseUrl || 'https://api.webull.com';
+  return api.replace(/^https:\/\/api\./, 'https://data-api.');
+}
 
 /**
  * Fail-fast validation of security-critical environment at boot.

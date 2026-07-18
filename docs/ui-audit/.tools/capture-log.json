@@ -1,0 +1,296 @@
+{
+  "log": [
+    {
+      "name": "01-risk-disclaimer",
+      "buttons": [
+        "I Understand and Accept"
+      ],
+      "inputs": [],
+      "headings": [
+        "Risk Disclosure"
+      ]
+    },
+    {
+      "name": "02-login",
+      "buttons": [
+        "Log In",
+        "Create an account"
+      ],
+      "inputs": [
+        "Email",
+        "Password"
+      ],
+      "headings": [
+        "0dteTrader"
+      ]
+    },
+    {
+      "name": "03-register",
+      "buttons": [
+        "Log In",
+        "Create an account",
+        "Cancel",
+        "Create Account"
+      ],
+      "inputs": [
+        "Email",
+        "Password",
+        "Email",
+        "Password (8+ characters)",
+        "Confirm password"
+      ],
+      "headings": [
+        "0dteTrader"
+      ]
+    },
+    {
+      "name": "04-after-register",
+      "buttons": [
+        "Profile",
+        "Trade history",
+        "Toggle layout",
+        "SPY",
+        "Drawing tools",
+        "1m",
+        "Indicator settings",
+        "Options",
+        "Futures",
+        "Call",
+        "Put",
+        "Auto +1 OTM selection",
+        "Expiration",
+        "Decrease quantity",
+        "Increase quantity",
+        "+1",
+        "+5",
+        "+10",
+        "Mid",
+        "Market",
+        "SELL",
+        "BUY"
+      ],
+      "inputs": [],
+      "headings": []
+    },
+    {
+      "name": "05-trade-fullscreen",
+      "buttons": [
+        "Profile",
+        "Trade history",
+        "Toggle layout",
+        "SPY",
+        "Drawing tools",
+        "1m",
+        "Indicator settings",
+        "Options",
+        "Futures",
+        "Call",
+        "Put",
+        "Auto +1 OTM selection",
+        "Expiration",
+        "Decrease quantity",
+        "Increase quantity",
+        "+1",
+        "+5",
+        "+10",
+        "Mid",
+        "Market",
+        "SELL",
+        "BUY"
+      ],
+      "inputs": [],
+      "headings": []
+    },
+    {
+      "name": "06-symbol-search",
+      "buttons": [
+        "Profile",
+        "Trade history",
+        "Toggle layout",
+        "SPY",
+        "Drawing tools",
+        "1m",
+        "Indicator settings",
+        "Options",
+        "Futures",
+        "Call",
+        "Put",
+        "Auto +1 OTM selection",
+        "Expiration",
+        "Decrease quantity",
+        "Increase quantity",
+        "+1",
+        "+5",
+        "+10",
+        "Mid",
+        "Market",
+        "SELL",
+        "BUY",
+        "Close",
+        "SPY",
+        "QQQ",
+        "SPX",
+        "IWM",
+        "DIA",
+        "VXX",
+        "BTC",
+        "ETH",
+        "SOL",
+        "XRP",
+        "DOGE",
+        "ADA",
+        "AVAX",
+        "LINK",
+        "LTC",
+        "MES",
+        "ES",
+        "MNQ",
+        "NQ",
+        "CL",
+        "GC",
+        "AAPL",
+        "MSFT",
+        "NVDA",
+        "TSLA",
+        "AMD",
+        "AMZN",
+        "META",
+        "GOOGL",
+        "AVGO",
+        "SMCI"
+      ],
+      "inputs": [
+        "Symbol"
+      ],
+      "headings": [
+        "Indices & ETFs",
+        "Crypto",
+        "Futures Roots",
+        "Stocks"
+      ]
+    },
+    {
+      "name": "07-indicator-settings",
+      "buttons": [
+        "Profile",
+        "Trade history",
+        "Toggle layout",
+        "SPY",
+        "Drawing tools",
+        "1m",
+        "Indicator settings",
+        "Options",
+        "Futures",
+        "Call",
+        "Put",
+        "Auto +1 OTM selection",
+        "Expiration",
+        "Decrease quantity",
+        "Increase quantity",
+        "+1",
+        "+5",
+        "+10",
+        "Mid",
+        "Market",
+        "SELL",
+        "BUY",
+        "Done",
+        "",
+        "",
+        "Decrement",
+        "Increment",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        ""
+      ],
+      "inputs": [],
+      "headings": [
+        "Price Overlays",
+        "Sub-Panes"
+      ]
+    },
+    {
+      "name": "08-trade-split",
+      "buttons": [
+        "Profile",
+        "Trade history",
+        "Toggle layout",
+        "SPY",
+        "Drawing tools",
+        "1m",
+        "Indicator settings",
+        "SELL",
+        "BUY"
+      ],
+      "inputs": [],
+      "headings": []
+    },
+    {
+      "name": "09-profile",
+      "buttons": [
+        "Profile",
+        "Trade history",
+        "Toggle layout",
+        "SPY",
+        "Drawing tools",
+        "1m",
+        "Indicator settings",
+        "SELL",
+        "BUY",
+        "Done",
+        "Save Credentials",
+        "Log Out"
+      ],
+      "inputs": [
+        "App Key",
+        "App Secret",
+        "Account ID"
+      ],
+      "headings": [
+        "Account",
+        "Webull API"
+      ]
+    },
+    {
+      "name": "10-history",
+      "buttons": [
+        "Profile",
+        "Trade history",
+        "Toggle layout",
+        "SPY",
+        "Drawing tools",
+        "1m",
+        "Indicator settings",
+        "SELL",
+        "BUY",
+        "Done"
+      ],
+      "inputs": [],
+      "headings": []
+    },
+    {
+      "name": "11-order-confirm",
+      "buttons": [
+        "Profile",
+        "Trade history",
+        "Toggle layout",
+        "SPY",
+        "Drawing tools",
+        "1m",
+        "Indicator settings",
+        "SELL",
+        "BUY"
+      ],
+      "inputs": [],
+      "headings": []
+    }
+  ],
+  "errors": [
+    "clickFirst found none of: button:has-text(\"Buy\")",
+    "clickFirst found none of: button:has-text(\"Cancel\") | button:has-text(\"Close\") | [aria-label=\"Close\"]"
+  ]
+}

@@ -1,0 +1,41 @@
+{
+  "log": [
+    {
+      "buyState": {
+        "found": true,
+        "disabled": true
+      }
+    },
+    {
+      "ocButtons": [
+        "",
+        "",
+        "",
+        "SPY",
+        "",
+        "1m",
+        "",
+        "Options",
+        "Futures",
+        "Call",
+        "Put",
+        "AUTO",
+        "Expiration",
+        "Strike",
+        "",
+        "",
+        "+1",
+        "+5",
+        "+10",
+        "Mid",
+        "Market",
+        "SELL",
+        "BUY"
+      ]
+    }
+  ],
+  "errors": [
+    "none of: button:text-is(\"BUY\") | button:has-text(\"BUY\")",
+    "none of: button:has-text(\"Cancel\") | button:has-text(\"Close\") | [aria-label=\"Close\"]"
+  ]
+}

@@ -61,6 +61,9 @@ struct ChartDrawing: Codable, Equatable, Identifiable, Sendable {
 struct PriceAlert: Codable, Equatable, Identifiable, Sendable {
     let id: UUID
     var price: Double
+    /// Set when the alert fires; fired alerts stay on the chart (dimmed)
+    /// until deleted instead of vanishing silently. Absent in older payloads.
+    var firedAt: Date? = nil
 }
 
 /// Per-symbol chart annotations (trend lines, rays, horizontal lines, boxes,
@@ -140,16 +143,19 @@ final class ChartDrawingsModel: ObservableObject {
         persist()
     }
 
-    /// Returns alerts crossed between two consecutive last prices; crossed
-    /// alerts are removed (they fire once).
+    /// Returns alerts crossed between two consecutive last prices. Crossed
+    /// alerts are marked fired (fire once) and stay rendered dimmed until the
+    /// user deletes them, so the price level isn't lost when it matters most.
     func checkAlerts(previousLast: Double, last: Double) -> [PriceAlert] {
         guard previousLast != last else { return [] }
-        let crossed = alerts.filter { (previousLast - $0.price) * (last - $0.price) <= 0 }
-        if !crossed.isEmpty {
-            let crossedIds = Set(crossed.map(\.id))
-            alerts.removeAll { crossedIds.contains($0.id) }
-            persist()
+        let crossed = alerts.filter { $0.firedAt == nil && (previousLast - $0.price) * (last - $0.price) <= 0 }
+        guard !crossed.isEmpty else { return [] }
+        let crossedIds = Set(crossed.map(\.id))
+        let now = Date()
+        for index in alerts.indices where crossedIds.contains(alerts[index].id) {
+            alerts[index].firedAt = now
         }
+        persist()
         return crossed
     }
 

@@ -8,14 +8,28 @@ struct FloatingTradeButtons: View {
     let onSide: (OrderSide) -> Void
 
     var body: some View {
-        HStack(spacing: 16) {
-            TradeActionButton(title: "SELL", color: .sellRed, isEnabled: isEnabled) {
-                onSide(.sell)
+        VStack(spacing: AppSpacing.sm) {
+            HStack(spacing: AppSpacing.lg) {
+                TradeActionButton(title: "SELL", color: .sellRedFill, isEnabled: isEnabled) {
+                    onSide(.sell)
+                }
+                .shadow(color: AppElevation.toast.color, radius: AppElevation.toast.radius, y: AppElevation.toast.y)
+                TradeActionButton(title: "BUY", color: .buyGreenFill, isEnabled: isEnabled) {
+                    onSide(.buy)
+                }
+                .shadow(color: AppElevation.toast.color, radius: AppElevation.toast.radius, y: AppElevation.toast.y)
             }
-            TradeActionButton(title: "BUY", color: .buyGreen, isEnabled: isEnabled) {
-                onSide(.buy)
+            .padding(.horizontal, AppSpacing.xl)
+
+            if !isEnabled {
+                Text("Select a contract in split view to trade")
+                    .font(.chipLabel)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, AppSpacing.md)
+                    .padding(.vertical, AppSpacing.xs)
+                    .background(Color.appSurface.opacity(0.9))
+                    .clipShape(Capsule())
             }
         }
-        .padding(.horizontal, 20)
     }
 }

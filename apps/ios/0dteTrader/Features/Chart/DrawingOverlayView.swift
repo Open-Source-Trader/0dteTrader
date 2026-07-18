@@ -1,5 +1,29 @@
+import Combine
 import DGCharts
 import UIKit
+
+/// Drawing-canvas metrics (pt values).
+///
+/// NOTE: belongs in the design system as `AppCanvas`; the foundation is
+/// frozen for this pass, so the namespace lives here for now.
+enum AppCanvas {
+    static let handleRadius: CGFloat = 5
+    /// Hit slop for lines, handles and alerts (yields 44pt touch targets).
+    static let hitSlop: CGFloat = 22
+    static let strokeNormal: CGFloat = 1.25
+    static let strokeSelected: CGFloat = 2
+    static let strokeAlert: CGFloat = 1
+    static let handleRingWidth: CGFloat = 1.5
+    static let alertDash: [CGFloat] = [5, 4]
+    static let rectFillAlpha: CGFloat = 0.12
+    static let tagCornerRadius: CGFloat = 4
+    static let tagPaddingH: CGFloat = 4
+    static let tagPaddingV: CGFloat = 2
+    /// Minimum on-screen length for a drag-placed drawing to be kept.
+    static let minDrawingLength: CGFloat = 12
+    /// Magnet: snap anchors to a candle's OHLC within this pixel distance.
+    static let magnetDistance: CGFloat = 12
+}
 
 /// Annotation canvas layered above the candle chart: renders and edits trend
 /// lines, rays, horizontal lines, boxes and alert lines anchored to
@@ -11,12 +35,36 @@ import UIKit
 /// everything else falls through to the chart's own pan/zoom.
 final class DrawingOverlayView: UIView {
     weak var chart: CombinedChartView?
-    var model: ChartDrawingsModel?
     var firstTime: TimeInterval = 0
     var intervalSeconds: TimeInterval = 60
+    /// Candles backing the chart, used for magnet snap-to-OHLC on anchors.
+    var candles: [Candle] = []
 
-    private var displayLink: CADisplayLink?
-    private var draft: ChartDrawing?
+    /// The annotations model. Redraws are change-driven: model publications
+    /// plus chart-transform callbacks from CandleChartRepresentable's
+    /// coordinator (no free-running display link).
+    var model: ChartDrawingsModel? {
+        didSet {
+            cancellables = []
+            if let model {
+                model.$drawings
+                    .sink { [weak self] _ in self?.modelDidChange() }
+                    .store(in: &cancellables)
+                model.$alerts
+                    .sink { [weak self] _ in self?.modelDidChange() }
+                    .store(in: &cancellables)
+                model.$selectedId
+                    .sink { [weak self] _ in self?.modelDidChange() }
+                    .store(in: &cancellables)
+            }
+            modelDidChange()
+        }
+    }
+
+    private var cancellables: Set<AnyCancellable> = []
+    private var draft: ChartDrawing? {
+        didSet { setNeedsDisplay() }
+    }
 
     private enum DragMode {
         case whole
@@ -35,10 +83,15 @@ final class DrawingOverlayView: UIView {
 
     private var drag: DragState?
 
-    private let accentColor = UIColor(red: 0.337, green: 0.561, blue: 0.969, alpha: 1)
+    // Dynamic token twin from DesignSystem/AppColors.swift (dark + light).
+    private let accentColor: UIColor = .appAccent
     private let alertColor = UIColor.systemOrange
-    private let handleRadius: CGFloat = 5
-    private let hitDistance: CGFloat = 10
+    /// Handle fill contrasts the chart surface in both themes.
+    private let handleFillColor = UIColor { traits in
+        traits.userInterfaceStyle == .dark
+            ? UIColor.white
+            : UIColor(white: 0.11, alpha: 1)
+    }
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -56,20 +109,14 @@ final class DrawingOverlayView: UIView {
         fatalError("init(coder:) is not supported")
     }
 
-    override func didMoveToWindow() {
-        super.didMoveToWindow()
-        displayLink?.invalidate()
-        displayLink = nil
-        if window != nil {
-            let link = CADisplayLink(target: self, selector: #selector(tick))
-            link.preferredFramesPerSecond = 30
-            link.add(to: .main, forMode: .common)
-            displayLink = link
-        }
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        setNeedsDisplay()
     }
 
-    @objc private func tick() {
+    private func modelDidChange() {
         setNeedsDisplay()
+        rebuildAccessibilityElements()
     }
 
     // In cursor mode, claim only touches near a shape so the chart keeps its
@@ -78,6 +125,49 @@ final class DrawingOverlayView: UIView {
         guard let model else { return false }
         if model.tool != .cursor { return bounds.contains(point) }
         return hitTest(at: point) != nil
+    }
+
+    // MARK: - Accessibility
+
+    /// Synthesizes one accessibility element per drawing/alert so VoiceOver
+    /// users can perceive annotations; frames include the 44pt hit slop.
+    private func rebuildAccessibilityElements() {
+        guard let model else {
+            accessibilityElements = nil
+            return
+        }
+        var elements: [UIAccessibilityElement] = []
+        for drawing in model.drawings {
+            guard let a = pixel(for: drawing.p1) else { continue }
+            let b = drawing.p2.flatMap { pixel(for: $0) } ?? a
+            let element = UIAccessibilityElement(accessibilityContainer: self)
+            element.accessibilityLabel = "\(drawing.kind.rawValue) at \(Format.price(drawing.p1.price))"
+            element.accessibilityTraits = .button
+            element.accessibilityHint = "Double-tap to select"
+            element.accessibilityFrameInContainerSpace = CGRect(
+                x: min(a.x, b.x) - AppCanvas.hitSlop,
+                y: min(a.y, b.y) - AppCanvas.hitSlop,
+                width: abs(b.x - a.x) + AppCanvas.hitSlop * 2,
+                height: max(abs(b.y - a.y) + AppCanvas.hitSlop * 2, 44)
+            )
+            elements.append(element)
+        }
+        for alert in model.alerts {
+            guard let p = pixel(for: DrawingPoint(time: firstTime, price: alert.price)) else { continue }
+            let element = UIAccessibilityElement(accessibilityContainer: self)
+            element.accessibilityLabel = alert.firedAt == nil
+                ? "Price alert at \(Format.price(alert.price))"
+                : "Fired price alert at \(Format.price(alert.price))"
+            element.accessibilityTraits = .button
+            element.accessibilityFrameInContainerSpace = CGRect(
+                x: 0,
+                y: p.y - AppCanvas.hitSlop,
+                width: bounds.width,
+                height: 44
+            )
+            elements.append(element)
+        }
+        accessibilityElements = elements
     }
 
     // MARK: - Coordinate mapping
@@ -90,13 +180,26 @@ final class DrawingOverlayView: UIView {
         return pixelPoint
     }
 
-    private func dataPoint(at pixel: CGPoint) -> DrawingPoint {
+    private func dataPoint(at touchPoint: CGPoint) -> DrawingPoint {
         guard let chart else { return DrawingPoint(time: firstTime, price: 0) }
-        let value = chart.getTransformer(forAxis: .left).valueForTouchPoint(pixel)
-        return DrawingPoint(
+        let value = chart.getTransformer(forAxis: .left).valueForTouchPoint(touchPoint)
+        var point = DrawingPoint(
             time: firstTime + Double(value.x) * intervalSeconds,
             price: Double(value.y)
         )
+        guard intervalSeconds > 0 else { return point }
+        // Magnet: snap to the nearest OHLC of the touched candle when the
+        // anchor lands within `magnetDistance` of it.
+        let index = Int(((point.time - firstTime) / intervalSeconds).rounded())
+        guard candles.indices.contains(index) else { return point }
+        let candle = candles[index]
+        let candidates = [candle.open, candle.high, candle.low, candle.close]
+        if let nearest = candidates.min(by: { abs($0 - point.price) < abs($1 - point.price) }),
+           let snapped = pixel(for: DrawingPoint(time: point.time, price: nearest)),
+           abs(snapped.y - touchPoint.y) <= AppCanvas.magnetDistance {
+            point.price = nearest
+        }
+        return point
     }
 
     // MARK: - Gestures
@@ -108,10 +211,14 @@ final class DrawingOverlayView: UIView {
         case .hline:
             let point = dataPoint(at: location)
             model.add(ChartDrawing(id: UUID(), kind: .hline, p1: point, p2: nil))
+            Haptics.impact(.light)
         case .alert:
             model.addAlert(price: dataPoint(at: location).price)
+            Haptics.impact(.light)
         case .cursor:
-            model.selectedId = hitTest(at: location)?.id
+            let hit = hitTest(at: location)
+            model.selectedId = hit?.id
+            if hit != nil { Haptics.selection() }
         case .trend, .ray, .rect:
             break // Placed by drag.
         }
@@ -144,7 +251,16 @@ final class DrawingOverlayView: UIView {
         case .ended:
             if var finished = draft {
                 finished.p2 = dataPoint(at: location)
-                model.add(finished)
+                // Reject tap-like micro-drags so invisible zero-length shapes
+                // never get persisted.
+                var length: CGFloat = 0
+                if let a = pixel(for: finished.p1), let p2 = finished.p2, let b = pixel(for: p2) {
+                    length = hypot(b.x - a.x, b.y - a.y)
+                }
+                if length >= AppCanvas.minDrawingLength {
+                    model.add(finished)
+                    Haptics.impact(.light)
+                }
             }
             draft = nil
         case .cancelled, .failed:
@@ -164,6 +280,7 @@ final class DrawingOverlayView: UIView {
         case .began:
             guard let hit = hitTest(at: location) else { return }
             model.selectedId = hit.id
+            Haptics.selection()
             let start = dataPoint(at: location)
             if let drawing = model.drawings.first(where: { $0.id == hit.id }) {
                 drag = DragState(
@@ -209,22 +326,22 @@ final class DrawingOverlayView: UIView {
         guard let model else { return nil }
         for alert in model.alerts.reversed() {
             if let pixelPoint = pixel(for: DrawingPoint(time: firstTime, price: alert.price)),
-               abs(point.y - pixelPoint.y) <= hitDistance {
+               abs(point.y - pixelPoint.y) <= AppCanvas.hitSlop {
                 return (alert.id, .alert)
             }
         }
         for drawing in model.drawings.reversed() {
             guard let a = pixel(for: drawing.p1) else { continue }
             let b = drawing.p2.flatMap { pixel(for: $0) }
-            if hypot(point.x - a.x, point.y - a.y) <= handleRadius + 5 {
+            if hypot(point.x - a.x, point.y - a.y) <= AppCanvas.hitSlop {
                 return (drawing.id, .p1)
             }
-            if let b, hypot(point.x - b.x, point.y - b.y) <= handleRadius + 5 {
+            if let b, hypot(point.x - b.x, point.y - b.y) <= AppCanvas.hitSlop {
                 return (drawing.id, .p2)
             }
             switch drawing.kind {
             case .hline:
-                if abs(point.y - a.y) <= hitDistance { return (drawing.id, .whole) }
+                if abs(point.y - a.y) <= AppCanvas.hitSlop { return (drawing.id, .whole) }
             case .rect:
                 guard let b else { continue }
                 let rect = CGRect(
@@ -234,14 +351,24 @@ final class DrawingOverlayView: UIView {
                 if rect.contains(point) { return (drawing.id, .whole) }
             case .trend, .ray:
                 guard let b else { continue }
-                var end = b
-                if drawing.kind == .ray, a != b {
-                    end = CGPoint(x: a.x + (b.x - a.x) * 100, y: a.y + (b.y - a.y) * 100)
-                }
-                if segmentDistance(point, a, end) <= hitDistance { return (drawing.id, .whole) }
+                let end = drawing.kind == .ray ? rayEnd(from: a, through: b) : b
+                if segmentDistance(point, a, end) <= AppCanvas.hitSlop { return (drawing.id, .whole) }
             }
         }
         return nil
+    }
+
+    /// Extends a ray parametrically only to the bounds edge, so strokes and
+    /// hit tests never run tens of thousands of points off screen.
+    private func rayEnd(from a: CGPoint, through b: CGPoint) -> CGPoint {
+        let d = CGPoint(x: b.x - a.x, y: b.y - a.y)
+        guard d.x != 0 || d.y != 0 else { return b }
+        var t = CGFloat.greatestFiniteMagnitude
+        if d.x > 0 { t = min(t, (bounds.width - a.x) / d.x) }
+        if d.x < 0 { t = min(t, -a.x / d.x) }
+        if d.y > 0 { t = min(t, (bounds.height - a.y) / d.y) }
+        if d.y < 0 { t = min(t, -a.y / d.y) }
+        return CGPoint(x: a.x + d.x * t, y: a.y + d.y * t)
     }
 
     private func segmentDistance(_ p: CGPoint, _ a: CGPoint, _ b: CGPoint) -> CGFloat {
@@ -263,13 +390,13 @@ final class DrawingOverlayView: UIView {
             render(draft, selected: false, in: context)
         }
         for alert in model.alerts {
-            renderAlert(price: alert.price, selected: alert.id == model.selectedId, in: context)
+            renderAlert(alert: alert, selected: alert.id == model.selectedId, in: context)
         }
     }
 
     private func render(_ drawing: ChartDrawing, selected: Bool, in context: CGContext) {
         context.setStrokeColor(accentColor.cgColor)
-        context.setLineWidth(selected ? 2 : 1.25)
+        context.setLineWidth(selected ? AppCanvas.strokeSelected : AppCanvas.strokeNormal)
         context.setLineDash(phase: 0, lengths: [])
         guard let a = pixel(for: drawing.p1) else { return }
 
@@ -287,7 +414,7 @@ final class DrawingOverlayView: UIView {
                 x: min(a.x, b.x), y: min(a.y, b.y),
                 width: abs(b.x - a.x), height: abs(b.y - a.y)
             )
-            context.setFillColor(accentColor.withAlphaComponent(0.12).cgColor)
+            context.setFillColor(accentColor.withAlphaComponent(AppCanvas.rectFillAlpha).cgColor)
             context.fill(rect)
             context.stroke(rect)
             if selected {
@@ -297,10 +424,7 @@ final class DrawingOverlayView: UIView {
 
         case .trend, .ray:
             guard let p2 = drawing.p2, let b = pixel(for: p2) else { return }
-            var end = b
-            if drawing.kind == .ray, a != b {
-                end = CGPoint(x: a.x + (b.x - a.x) * 100, y: a.y + (b.y - a.y) * 100)
-            }
+            let end = drawing.kind == .ray ? rayEnd(from: a, through: b) : b
             context.move(to: a)
             context.addLine(to: end)
             context.strokePath()
@@ -311,46 +435,72 @@ final class DrawingOverlayView: UIView {
         }
     }
 
-    private func renderAlert(price: Double, selected: Bool, in context: CGContext) {
-        guard let point = pixel(for: DrawingPoint(time: firstTime, price: price)) else { return }
-        context.setStrokeColor(alertColor.cgColor)
-        context.setLineWidth(selected ? 2 : 1)
-        context.setLineDash(phase: 0, lengths: [5, 4])
+    private func renderAlert(alert: PriceAlert, selected: Bool, in context: CGContext) {
+        guard let point = pixel(for: DrawingPoint(time: firstTime, price: alert.price)) else { return }
+        let isFired = alert.firedAt != nil
+        // Fired alerts stay on the chart dimmed until the user deletes them.
+        let color = isFired ? alertColor.withAlphaComponent(0.35) : alertColor
+        context.setStrokeColor(color.cgColor)
+        context.setLineWidth(selected ? AppCanvas.strokeSelected : AppCanvas.strokeAlert)
+        context.setLineDash(phase: 0, lengths: AppCanvas.alertDash)
         context.move(to: CGPoint(x: 0, y: point.y))
         context.addLine(to: CGPoint(x: bounds.width, y: point.y))
         context.strokePath()
         context.setLineDash(phase: 0, lengths: [])
-        renderPriceTag(price: price, y: point.y, color: alertColor, prefix: "⏰ ", in: context)
+        renderPriceTag(price: alert.price, y: point.y, color: color, showsBell: !isFired, in: context)
     }
 
+    /// Price tag pinned to the right edge inside the plot (clear of the left
+    /// axis labels), Dynamic Type-scaled, with rounded corners. Alerts get a
+    /// small bell glyph instead of an emoji prefix.
     private func renderPriceTag(
         price: Double,
         y: CGFloat,
         color: UIColor,
-        prefix: String = "",
+        showsBell: Bool = false,
         in context: CGContext
     ) {
-        let label = "\(prefix)\(Format.price(price))" as NSString
+        let font = UIFontMetrics(forTextStyle: .caption2)
+            .scaledFont(for: UIFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium))
+        let label = Format.price(price) as NSString
         let attributes: [NSAttributedString.Key: Any] = [
-            .font: UIFont.monospacedDigitSystemFont(ofSize: 10, weight: .medium),
+            .font: font,
             .foregroundColor: UIColor.black,
         ]
         let size = label.size(withAttributes: attributes)
-        let background = CGRect(x: 4, y: y - size.height / 2 - 2, width: size.width + 8, height: size.height + 4)
+        let bell = showsBell
+            ? UIImage(systemName: "bell.fill")?
+                .withConfiguration(UIImage.SymbolConfiguration(pointSize: 8, weight: .bold))
+                .withTintColor(.black, renderingMode: .alwaysOriginal)
+            : nil
+        let bellWidth = bell.map { $0.size.width + 2 } ?? 0
+        let background = CGRect(
+            x: bounds.width - size.width - bellWidth - AppCanvas.tagPaddingH * 2 - 4,
+            y: y - size.height / 2 - AppCanvas.tagPaddingV,
+            width: size.width + bellWidth + AppCanvas.tagPaddingH * 2,
+            height: size.height + AppCanvas.tagPaddingV * 2
+        )
+        let path = UIBezierPath(roundedRect: background, cornerRadius: AppCanvas.tagCornerRadius)
         context.setFillColor(color.cgColor)
-        context.fill(background)
-        label.draw(at: CGPoint(x: background.minX + 4, y: background.minY + 2), withAttributes: attributes)
+        context.addPath(path.cgPath)
+        context.fillPath()
+        var labelX = background.minX + AppCanvas.tagPaddingH
+        if let bell {
+            bell.draw(at: CGPoint(x: labelX, y: background.midY - bell.size.height / 2))
+            labelX += bellWidth
+        }
+        label.draw(at: CGPoint(x: labelX, y: background.minY + AppCanvas.tagPaddingV), withAttributes: attributes)
     }
 
     private func renderHandle(at point: CGPoint, in context: CGContext) {
         let rect = CGRect(
-            x: point.x - handleRadius, y: point.y - handleRadius,
-            width: handleRadius * 2, height: handleRadius * 2
+            x: point.x - AppCanvas.handleRadius, y: point.y - AppCanvas.handleRadius,
+            width: AppCanvas.handleRadius * 2, height: AppCanvas.handleRadius * 2
         )
-        context.setFillColor(UIColor.white.cgColor)
+        context.setFillColor(handleFillColor.cgColor)
         context.fillEllipse(in: rect)
         context.setStrokeColor(accentColor.cgColor)
-        context.setLineWidth(1.5)
+        context.setLineWidth(AppCanvas.handleRingWidth)
         context.strokeEllipse(in: rect)
     }
 }

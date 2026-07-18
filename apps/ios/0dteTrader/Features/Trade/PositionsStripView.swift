@@ -13,26 +13,28 @@ struct PositionsStripView: View {
     @State private var orderPendingCancel: OrderResult?
 
     var body: some View {
-        VStack(spacing: 6) {
+        VStack(spacing: AppSpacing.sm) {
             if !positions.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
+                    HStack(spacing: AppSpacing.sm) {
                         ForEach(positions) { position in
                             positionChip(position)
                         }
                     }
-                    .padding(.horizontal, 12)
+                    .padding(.horizontal, AppSpacing.md)
                 }
+                .mask(scrollFadeMask)
             }
             if !openOrders.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
+                    HStack(spacing: AppSpacing.sm) {
                         ForEach(openOrders) { order in
                             orderChip(order)
                         }
                     }
-                    .padding(.horizontal, 12)
+                    .padding(.horizontal, AppSpacing.md)
                 }
+                .mask(scrollFadeMask)
             }
         }
         .alert(
@@ -45,7 +47,7 @@ struct PositionsStripView: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: { position in
-            Text("Submit a market \(position.quantity > 0 ? "sell" : "buy") order to close \(position.symbol)?")
+            Text("Submit a market \(position.quantity > 0 ? "sell" : "buy") order to close \(position.symbol)? Realizes \(Format.signedPrice(position.unrealizedPnl)) unrealized P&L.")
         }
         .alert(
             "Cancel order?",
@@ -61,68 +63,91 @@ struct PositionsStripView: View {
         }
     }
 
+    /// Trailing-edge fade so clipped chips hint that more content exists.
+    private var scrollFadeMask: some View {
+        HStack(spacing: 0) {
+            Color.black
+            LinearGradient(colors: [.black, .clear], startPoint: .leading, endPoint: .trailing)
+                .frame(width: AppSpacing.xxl)
+        }
+    }
+
     // MARK: - Chips
 
     private func positionChip(_ position: Position) -> some View {
-        Button {
+        let isWorking = workingSymbols.contains(position.symbol)
+        return Button {
             Haptics.selection()
             positionPendingFlatten = position
         } label: {
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: AppSpacing.xxs) {
                 HStack(spacing: 6) {
                     Text(position.symbol)
                         .font(.chipLabel)
-                    if workingSymbols.contains(position.symbol) {
+                    if isWorking {
                         ProgressView()
                             .controlSize(.mini)
+                            .accessibilityLabel("Order working")
                     }
                 }
                 Text("\(Format.signedQuantity(position.quantity)) @ \(Format.price(position.avgPrice))")
-                    .font(.caption2)
+                    .font(.priceSmall)
                     .foregroundStyle(.secondary)
                 Text(Format.signedPrice(position.unrealizedPnl))
-                    .font(.caption.weight(.semibold))
+                    .font(.priceSmall.weight(.semibold))
                     .foregroundStyle(position.unrealizedPnl >= 0 ? Color.pnlPositive : Color.pnlNegative)
+                    .contentTransition(.numericText())
+                    .animation(.easeInOut(duration: 0.2), value: position.unrealizedPnl)
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 7)
+            .padding(.horizontal, AppSpacing.md)
+            .padding(.vertical, AppSpacing.sm)
             .background(Color.appSurface)
-            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .stroke(Color.appBorder.opacity(0.5), lineWidth: 0.5)
+                RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+                    .stroke(Color.appBorder, lineWidth: 1)
             )
+            .opacity(isWorking ? 0.6 : 1)
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel("Position \(position.symbol), tap to flatten")
+        .buttonStyle(AppPressStyle())
+        .disabled(isWorking)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Position \(position.symbol), quantity \(position.quantity), average price \(Format.price(position.avgPrice)), unrealized P&L \(Format.signedPrice(position.unrealizedPnl)) dollars")
+        .accessibilityHint("Double-tap to flatten at market")
     }
 
     private func orderChip(_ order: OrderResult) -> some View {
-        HStack(spacing: 8) {
-            VStack(alignment: .leading, spacing: 2) {
+        HStack(spacing: AppSpacing.sm) {
+            VStack(alignment: .leading, spacing: AppSpacing.xxs) {
                 Text("\(order.side.displayName) \(order.quantity) \(order.contractSymbol)")
                     .font(.chipLabel)
+                    .foregroundStyle(order.side == .buy ? Color.buyGreen : Color.sellRed)
                 Text("\(order.orderType.displayName) · \(order.status.displayName)")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
+            .accessibilityElement(children: .combine)
             Button {
                 Haptics.selection()
                 orderPendingCancel = order
             } label: {
                 Image(systemName: "xmark.circle.fill")
+                    .font(.body)
                     .foregroundStyle(.secondary)
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Cancel order")
+            .buttonStyle(AppPressStyle())
+            .accessibilityLabel("Cancel \(order.side.displayName) order, \(order.quantity) \(order.contractSymbol)")
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 7)
+        .padding(.leading, AppSpacing.md)
+        .padding(.trailing, AppSpacing.xxs)
+        .padding(.vertical, AppSpacing.sm)
         .background(Color.appSurface)
-        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .stroke(Color.appBorder.opacity(0.5), lineWidth: 0.5)
+            RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+                .stroke(Color.appBorder, lineWidth: 1)
         )
     }
 

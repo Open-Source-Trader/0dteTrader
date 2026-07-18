@@ -43,6 +43,8 @@ final class ChartViewModel: ObservableObject {
     @Published private(set) var isLoading = false
     @Published var errorMessage: String?
     @Published private(set) var alertNotice: ChartAlertNotice?
+    /// The main chart's visible candle-index window; indicator panes track it.
+    @Published var visibleXRange: ClosedRange<Double>?
 
     /// Drawing tools + price alerts for the current symbol.
     let drawings = ChartDrawingsModel()
@@ -93,8 +95,10 @@ final class ChartViewModel: ObservableObject {
             candles = dtos.map(Candle.init(dto:))
         } catch let error as APIError {
             errorMessage = error.userMessage
+            Haptics.error()
         } catch {
             errorMessage = error.localizedDescription
+            Haptics.error()
         }
     }
 
@@ -129,6 +133,7 @@ final class ChartViewModel: ObservableObject {
                     id: UUID(),
                     message: "Alert: \(symbol) crossed \(Format.price(alert.price))"
                 )
+                Haptics.success()
             }
         }
         guard !candles.isEmpty else { return }
@@ -163,6 +168,19 @@ final class ChartViewModel: ObservableObject {
     }
 
     // MARK: - Indicator series for rendering
+
+    /// Change vs the open of the first candle of the current session — a
+    /// client-side prev-close proxy (Quote carries no previous close).
+    var dayChange: (change: Double, percent: Double)? {
+        guard let last = candles.last else { return nil }
+        let calendar = Calendar.current
+        guard let sessionOpen = candles.first(where: {
+            calendar.isDate($0.time, inSameDayAs: last.time)
+        })?.open, sessionOpen > 0 else { return nil }
+        let current = quote?.last ?? last.close
+        let change = current - sessionOpen
+        return (change, change / sessionOpen * 100)
+    }
 
     /// Overlays drawn on top of the candles (SMA, EMA, VWAP, Bollinger).
     var priceOverlays: [IndicatorSeries] {

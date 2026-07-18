@@ -11,91 +11,114 @@ struct OrderConfirmSheet: View {
     }
 
     var body: some View {
-        VStack(spacing: 16) {
-            Capsule()
-                .fill(Color.appBorder)
-                .frame(width: 40, height: 5)
-                .padding(.top, 8)
+        ScrollView(.vertical) {
+            VStack(spacing: AppSpacing.lg) {
+                Text(ticket.summary)
+                    .font(.title3.bold())
+                    .multilineTextAlignment(.center)
 
-            Text("Confirm \(ticket.side.displayName)")
-                .font(.title3.bold())
+                VStack(spacing: AppSpacing.md) {
+                    LabeledContent("Quantity", value: "\(ticket.request.quantity)")
+                    LabeledContent("Order type", value: ticket.request.orderType == OrderType.mid.rawValue ? "Limit at mid" : "Market")
 
-            Text(ticket.summary)
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-
-            VStack(spacing: 10) {
-                LabeledContent("Quantity", value: "\(ticket.request.quantity)")
-                LabeledContent("Order type", value: ticket.request.orderType == OrderType.mid.rawValue ? "Limit at mid" : "Market")
-
-                if tradeViewModel.isPreviewLoading {
-                    HStack {
-                        ProgressView()
-                        Text("Resolving contract…")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
+                    if tradeViewModel.isPreviewLoading {
+                        // Placeholder rows mirror the loaded layout so the card
+                        // doesn't jump when the preview resolves.
+                        LabeledContent("Contract") {
+                            Text("MES 5000C").font(.priceMedium)
+                        }
+                        LabeledContent("Est. price") {
+                            Text(Format.price(0)).font(.priceLarge)
+                        }
+                        LabeledContent("Est. buying power") {
+                            Text(Format.price(0)).font(.priceMedium)
+                        }
+                        .redacted(reason: .placeholder)
+                    } else if let preview = tradeViewModel.preview {
+                        LabeledContent("Contract") {
+                            Text(preview.contractSymbol).font(.priceMedium)
+                        }
+                        LabeledContent("Est. price") {
+                            Text(Format.price(preview.price))
+                                .font(.priceLarge)
+                                .foregroundStyle(sideColor)
+                        }
+                        LabeledContent("Est. buying power") {
+                            Text(Format.price(preview.estBuyingPower)).font(.priceMedium)
+                        }
+                        ForEach(preview.warnings, id: \.self) { warning in
+                            Label(warning, systemImage: "exclamationmark.triangle")
+                                .font(.footnote)
+                                .foregroundStyle(Color.appWarning)
+                        }
                     }
-                } else if let preview = tradeViewModel.preview {
-                    LabeledContent("Contract", value: preview.contractSymbol)
-                        .font(.subheadline)
-                    LabeledContent("Est. price", value: Format.price(preview.price))
-                    LabeledContent("Est. buying power", value: Format.price(preview.estBuyingPower))
-                    ForEach(preview.warnings, id: \.self) { warning in
-                        Label(warning, systemImage: "exclamationmark.triangle")
+
+                    if let previewError = tradeViewModel.previewError {
+                        Text(previewError)
                             .font(.footnote)
-                            .foregroundStyle(.orange)
+                            .foregroundStyle(Color.pnlNegative)
+                            .multilineTextAlignment(.center)
+                        Button("Retry") {
+                            Task { await tradeViewModel.loadPreview() }
+                        }
+                        .font(.footnote)
                     }
                 }
+                .animation(.easeInOut(duration: 0.2), value: tradeViewModel.isPreviewLoading)
+                .padding()
+                .frame(maxWidth: .infinity)
+                .background(Color.appSurface)
+                .clipShape(RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous))
 
-                if let previewError = tradeViewModel.previewError {
-                    Text(previewError)
+                HStack(spacing: AppSpacing.md) {
+                    Button("Cancel") {
+                        tradeViewModel.cancelArmedOrder()
+                    }
+                    .buttonStyle(.bordered)
+                    .frame(maxWidth: .infinity, minHeight: 52)
+
+                    Button {
+                        Haptics.impact(.medium)
+                        Task { await tradeViewModel.confirmArmedOrder() }
+                    } label: {
+                        ZStack {
+                            Text("Confirm \(ticket.side.displayName)")
+                                .font(.headline)
+                                .opacity(tradeViewModel.isSubmitting ? 0 : 1)
+                            if tradeViewModel.isSubmitting {
+                                ProgressView()
+                                    .tint(.white)
+                            }
+                        }
+                        .animation(.easeInOut(duration: 0.15), value: tradeViewModel.isSubmitting)
+                        .foregroundStyle(confirmEnabled ? .white : .secondary)
+                        .frame(maxWidth: .infinity, minHeight: 52)
+                        .background(confirmEnabled ? Color.appAccentFill : Color.appSurfaceElevated)
+                        .clipShape(RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous))
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(AppPressStyle())
+                    .disabled(!confirmEnabled)
+                    .accessibilityLabel(tradeViewModel.isSubmitting
+                        ? "Submitting order"
+                        : "Confirm \(ticket.side.displayName)")
+                }
+
+                if let submitError = tradeViewModel.submitError {
+                    Label(submitError, systemImage: "exclamationmark.circle.fill")
                         .font(.footnote)
                         .foregroundStyle(Color.pnlNegative)
                         .multilineTextAlignment(.center)
-                    Button("Retry") {
-                        Task { await tradeViewModel.loadPreview() }
-                    }
-                    .font(.footnote)
                 }
             }
-            .padding()
-            .frame(maxWidth: .infinity)
-            .background(Color.appSurface)
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-
-            HStack(spacing: 12) {
-                Button("Cancel") {
-                    tradeViewModel.cancelArmedOrder()
-                }
-                .buttonStyle(.bordered)
-                .frame(maxWidth: .infinity, minHeight: 52)
-
-                Button {
-                    Task { await tradeViewModel.confirmArmedOrder() }
-                } label: {
-                    Group {
-                        if tradeViewModel.isSubmitting {
-                            ProgressView()
-                                .tint(.white)
-                        } else {
-                            Text("Confirm \(ticket.side.displayName)")
-                                .font(.headline)
-                        }
-                    }
-                    .foregroundStyle(.white)
-                    .frame(maxWidth: .infinity, minHeight: 52)
-                    .background(confirmEnabled ? sideColor : sideColor.opacity(0.35))
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                }
-                .buttonStyle(.plain)
-                .disabled(!confirmEnabled)
-            }
+            .padding(.horizontal, AppSpacing.lg)
+            .padding(.top, AppSpacing.sm)
+            .padding(.bottom, AppSpacing.md)
         }
-        .padding(.horizontal, 20)
-        .padding(.bottom, 12)
-        .presentationDetents([.medium])
-        .presentationDragIndicator(.hidden)
+        .scrollBounceBehavior(.basedOnSize)
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
+        .presentationBackground(Color.appBackground)
     }
 
     private var confirmEnabled: Bool {

@@ -21,6 +21,9 @@ struct IndicatorPaneRepresentable: UIViewRepresentable {
     var guideLines: [Double] = []
     var yRange: ClosedRange<Double>?
     var xValueCount: Int
+    /// The main chart's visible x-range; when set, the pane pins its window
+    /// to it so indicator values align with the candles above.
+    var visibleRange: ClosedRange<Double>?
 
     func makeUIView(context: Context) -> CombinedChartView {
         let chart = CombinedChartView()
@@ -81,7 +84,7 @@ struct IndicatorPaneRepresentable: UIViewRepresentable {
                 for (index, value) in paneSeries.values.enumerated() {
                     guard let value else { continue }
                     entries.append(BarChartDataEntry(x: Double(index), y: value))
-                    entryColors.append(value >= 0 ? .systemGreen : .systemRed)
+                    entryColors.append(value >= 0 ? .chartUp : .chartDown)
                 }
                 guard !entries.isEmpty else { continue }
                 let set = BarChartDataSet(entries: entries, label: paneSeries.id)
@@ -100,15 +103,21 @@ struct IndicatorPaneRepresentable: UIViewRepresentable {
 
         chart.data = data
 
-        // Align the pane's x-range with the main chart's candle indices.
-        chart.xAxis.axisMinimum = -0.5
-        chart.xAxis.axisMaximum = Double(max(xValueCount, 1)) - 0.5
+        // Align the pane's x-range with the main chart's visible window when
+        // known, else fall back to the full series.
+        if let visibleRange {
+            chart.xAxis.axisMinimum = visibleRange.lowerBound
+            chart.xAxis.axisMaximum = visibleRange.upperBound
+        } else {
+            chart.xAxis.axisMinimum = -0.5
+            chart.xAxis.axisMaximum = Double(max(xValueCount, 1)) - 0.5
+        }
 
         let leftAxis = chart.leftAxis
         leftAxis.removeAllLimitLines()
         for limit in guideLines {
             let line = ChartLimitLine(limit: limit)
-            line.lineColor = UIColor.separator
+            line.lineColor = UIColor.secondaryLabel
             line.lineWidth = 0.5
             line.lineDashLengths = [4, 3]
             leftAxis.addLimitLine(line)

@@ -10,60 +10,134 @@ struct IndicatorSettingsView: View {
         NavigationStack {
             Form {
                 Section("Price Overlays") {
-                    Toggle("SMA", isOn: $settings.smaEnabled)
+                    Toggle(isOn: $settings.smaEnabled) {
+                        labelWithSwatch("SMA", id: "sma")
+                    }
                     if settings.smaEnabled {
-                        Stepper("Period: \(settings.smaPeriod)", value: $settings.smaPeriod, in: 2...200)
+                        Stepper("Period: \(settings.smaPeriod)",
+                                value: $settings.smaPeriod,
+                                in: IndicatorSettings.maPeriodRange)
+                            .monospacedDigit()
+                            .accessibilityLabel("SMA period")
+                            .accessibilityValue("\(settings.smaPeriod)")
                     }
 
-                    Toggle("EMA", isOn: $settings.emaEnabled)
+                    Toggle(isOn: $settings.emaEnabled) {
+                        labelWithSwatch("EMA", id: "ema")
+                    }
                     if settings.emaEnabled {
-                        Stepper("Period: \(settings.emaPeriod)", value: $settings.emaPeriod, in: 2...200)
+                        Stepper("Period: \(settings.emaPeriod)",
+                                value: $settings.emaPeriod,
+                                in: IndicatorSettings.maPeriodRange)
+                            .monospacedDigit()
+                            .accessibilityLabel("EMA period")
+                            .accessibilityValue("\(settings.emaPeriod)")
                     }
 
-                    Toggle("VWAP", isOn: $settings.vwapEnabled)
+                    Toggle(isOn: $settings.vwapEnabled) {
+                        labelWithSwatch("VWAP", id: "vwap")
+                    }
 
                     Toggle("Volume", isOn: $settings.volumeEnabled)
 
                     Toggle("Bollinger Bands", isOn: $settings.bollingerEnabled)
                     if settings.bollingerEnabled {
-                        Stepper("Period: \(settings.bollingerPeriod)", value: $settings.bollingerPeriod, in: 5...100)
-                        Stepper(
-                            "Width: \(Format.price(settings.bollingerMultiplier, fractionDigits: 1))σ",
-                            value: $settings.bollingerMultiplier,
-                            in: 0.5...4.0,
-                            step: 0.5
-                        )
+                        Stepper("Period: \(settings.bollingerPeriod)",
+                                value: $settings.bollingerPeriod,
+                                in: IndicatorSettings.bollingerPeriodRange)
+                            .monospacedDigit()
+                            .accessibilityLabel("Bollinger Bands period")
+                            .accessibilityValue("\(settings.bollingerPeriod)")
+                        // Unitless sigma multiplier — Format.price is for prices/P&L.
+                        // NOTE: belongs in DesignSystem as `Format.multiplier`; the
+                        // foundation is frozen for this pass.
+                        Stepper("Width: \(String(format: "%.1f", settings.bollingerMultiplier))σ",
+                                value: $settings.bollingerMultiplier,
+                                in: IndicatorSettings.bollingerMultiplierRange,
+                                step: 0.5)
+                            .monospacedDigit()
+                            .accessibilityLabel("Bollinger Bands width")
+                            .accessibilityValue("\(String(format: "%.1f", settings.bollingerMultiplier)) sigma")
                     }
                 }
+                .listRowBackground(Color.appSurface)
 
                 Section("Sub-Panes") {
                     Toggle("RSI", isOn: $settings.rsiEnabled)
                     if settings.rsiEnabled {
-                        Stepper("Period: \(settings.rsiPeriod)", value: $settings.rsiPeriod, in: 2...50)
+                        Stepper("Period: \(settings.rsiPeriod)",
+                                value: $settings.rsiPeriod,
+                                in: IndicatorSettings.oscillatorPeriodRange)
+                            .monospacedDigit()
+                            .accessibilityLabel("RSI period")
+                            .accessibilityValue("\(settings.rsiPeriod)")
                     }
 
-                    Toggle("MACD (12, 26, 9)", isOn: $settings.macdEnabled)
+                    Toggle("MACD", isOn: $settings.macdEnabled)
 
                     Toggle("Stochastic", isOn: $settings.stochEnabled)
                     if settings.stochEnabled {
-                        Stepper("%K Period: \(settings.stochKPeriod)", value: $settings.stochKPeriod, in: 5...50)
-                        Stepper("%K Smoothing: \(settings.stochKSmooth)", value: $settings.stochKSmooth, in: 1...10)
-                        Stepper("%D Period: \(settings.stochDPeriod)", value: $settings.stochDPeriod, in: 1...10)
+                        Stepper("%K Period: \(settings.stochKPeriod)",
+                                value: $settings.stochKPeriod,
+                                in: IndicatorSettings.stochKPeriodRange)
+                            .monospacedDigit()
+                            .accessibilityLabel("Stochastic %K period")
+                            .accessibilityValue("\(settings.stochKPeriod)")
+                        Stepper("%K Smoothing: \(settings.stochKSmooth)",
+                                value: $settings.stochKSmooth,
+                                in: IndicatorSettings.stochSmoothRange)
+                            .monospacedDigit()
+                            .accessibilityLabel("Stochastic %K smoothing")
+                            .accessibilityValue("\(settings.stochKSmooth)")
+                        Stepper("%D Period: \(settings.stochDPeriod)",
+                                value: $settings.stochDPeriod,
+                                in: IndicatorSettings.stochSmoothRange)
+                            .monospacedDigit()
+                            .accessibilityLabel("Stochastic %D period")
+                            .accessibilityValue("\(settings.stochDPeriod)")
                     }
 
                     Toggle("ATR", isOn: $settings.atrEnabled)
                     if settings.atrEnabled {
-                        Stepper("Period: \(settings.atrPeriod)", value: $settings.atrPeriod, in: 2...50)
+                        Stepper("Period: \(settings.atrPeriod)",
+                                value: $settings.atrPeriod,
+                                in: IndicatorSettings.oscillatorPeriodRange)
+                            .monospacedDigit()
+                            .accessibilityLabel("ATR period")
+                            .accessibilityValue("\(settings.atrPeriod)")
                     }
+                } footer: {
+                    Text("MACD uses standard 12 / 26 / 9 parameters. Settings save automatically.")
                 }
+                .listRowBackground(Color.appSurface)
             }
+            .tint(.appAccent)
+            .scrollContentBackground(.hidden)
+            .background(Color.appBackground)
+            .animation(AppMotion.standard, value: settings)
+            .sensoryFeedback(.selection, trigger: settings)
             .navigationTitle("Indicators")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("Reset") { settings = .default }
+                        .disabled(settings == .default)
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Done") { dismiss() }
                 }
             }
+        }
+    }
+
+    /// Toggle label with a color dot keying it to the chart's line color.
+    private func labelWithSwatch(_ title: String, id: String) -> some View {
+        HStack(spacing: AppSpacing.sm) {
+            Circle()
+                .fill(ChartStyle.overlayColor(for: id))
+                .frame(width: 8, height: 8)
+                .accessibilityHidden(true)
+            Text(title)
         }
     }
 }

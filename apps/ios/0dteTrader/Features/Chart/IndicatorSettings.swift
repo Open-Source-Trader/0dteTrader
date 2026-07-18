@@ -43,6 +43,16 @@ struct IndicatorSettings: Codable, Equatable, Sendable {
     )
 }
 
+/// Parameter ranges owned by the model so views don't carry magic numbers.
+extension IndicatorSettings {
+    static let maPeriodRange = 2...200
+    static let bollingerPeriodRange = 5...100
+    static let bollingerMultiplierRange = 0.5...4.0
+    static let oscillatorPeriodRange = 2...50
+    static let stochKPeriodRange = 5...50
+    static let stochSmoothRange = 1...10
+}
+
 // Decoding lives in an extension so the memberwise initializer stays available.
 // decodeIfPresent keeps settings saved by older app versions valid.
 extension IndicatorSettings {

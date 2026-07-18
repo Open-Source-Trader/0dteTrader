@@ -5,6 +5,7 @@ import SwiftUI
 struct HistoryView: View {
     let apiClient: APIClient
 
+    @Environment(\.dismiss) private var dismiss
     @State private var history: TradeHistoryDTO?
     @State private var errorMessage: String?
 
@@ -14,25 +15,34 @@ struct HistoryView: View {
                 if let history {
                     content(history)
                 } else if let errorMessage {
-                    Text(errorMessage)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    ErrorStateView(message: errorMessage, systemImage: "exclamationmark.triangle") {
+                        Task { await load() }
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
-                    ProgressView()
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    skeletonList
                 }
             }
             .background(Color.appBackground)
             .navigationTitle("History")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { dismiss() }
+                }
+            }
+            .transaction { $0.animation = .easeOut(duration: 0.2) }
         }
         .task { await load() }
     }
 
     private func load() async {
+        errorMessage = nil
         do {
-            history = try await apiClient.orderHistory()
+            let result = try await apiClient.orderHistory()
+            withAnimation(.easeOut(duration: 0.2)) {
+                history = result
+            }
         } catch let error as APIError {
             errorMessage = error.userMessage
         } catch {
@@ -40,38 +50,59 @@ struct HistoryView: View {
         }
     }
 
+    /// Skeleton rows shaped like history rows while the first load runs.
+    private var skeletonList: some View {
+        List {
+            ForEach(0..<6, id: \.self) { _ in
+                VStack(alignment: .leading, spacing: AppSpacing.xs) {
+                    SkeletonView(cornerRadius: AppRadius.sm)
+                        .frame(height: 15)
+                    SkeletonView(cornerRadius: AppRadius.sm)
+                        .frame(width: 220, height: 12)
+                }
+                .padding(.vertical, AppSpacing.xs)
+            }
+        }
+        .listStyle(.insetGrouped)
+    }
+
     @ViewBuilder
     private func content(_ history: TradeHistoryDTO) -> some View {
-        List {
-            Section {
-                HStack {
-                    Text("Net realized P/L")
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Text(Format.signedPrice(history.totalRealizedPnl))
-                        .font(.priceMedium)
-                        .foregroundStyle(history.totalRealizedPnl >= 0 ? Color.buyGreen : Color.sellRed)
+        if history.entries.isEmpty {
+            ContentUnavailableView(
+                "No Orders Yet",
+                systemImage: "clock.arrow.circlepath",
+                description: Text("Filled and working orders will appear here.")
+            )
+        } else {
+            List {
+                Section {
+                    HStack {
+                        Text("Net realized P/L")
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Text(Format.signedPrice(history.totalRealizedPnl))
+                            .font(.priceLarge)
+                            .foregroundStyle(history.totalRealizedPnl > 0 ? Color.pnlPositive
+                                             : history.totalRealizedPnl < 0 ? Color.pnlNegative : .secondary)
+                    }
                 }
-            }
 
-            Section {
-                if history.entries.isEmpty {
-                    Text("No orders yet.")
-                        .foregroundStyle(.secondary)
-                } else {
+                Section {
                     ForEach(history.entries, id: \.orderId) { entry in
                         row(entry)
                     }
                 }
             }
+            .refreshable { await load() }
         }
     }
 
     private func row(_ entry: TradeHistoryEntryDTO) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: AppSpacing.xs) {
             HStack {
                 Text("\(entry.side.uppercased()) \(entry.quantity) \(entry.contractSymbol)")
-                    .font(.subheadline.weight(.semibold))
+                    .font(.system(.subheadline, design: .monospaced).weight(.semibold))
                     .lineLimit(1)
                 Spacer()
                 Text(OrderStatus(tolerant: entry.status).displayName)
@@ -85,12 +116,15 @@ struct HistoryView: View {
                 Spacer()
                 if let realized = entry.realizedPnl {
                     Text(Format.signedPrice(realized))
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(realized >= 0 ? Color.buyGreen : Color.sellRed)
+                        .font(.priceSmall.weight(.semibold))
+                        .foregroundStyle(realized > 0 ? Color.pnlPositive : realized < 0 ? Color.pnlNegative : .secondary)
                 }
             }
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, AppSpacing.xs)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(entry.side.uppercased()) \(entry.quantity) \(entry.contractSymbol), \(OrderStatus(tolerant: entry.status).displayName)")
+        .accessibilityValue(entry.realizedPnl.map { "realized P/L \(Format.signedPrice($0)) dollars" } ?? "")
     }
 
     private func detailLine(_ entry: TradeHistoryEntryDTO) -> String {
@@ -101,7 +135,7 @@ struct HistoryView: View {
             parts.append("limit \(Format.price(limit))")
         }
         if let date = DateParsing.dateTime(entry.timestamp) {
-            parts.append(date.formatted(date: .abbreviated, time: .shortened))
+            parts.append(date.formatted(.dateTime.month(.abbreviated).day().hour().minute()))
         }
         return parts.joined(separator: " · ")
     }

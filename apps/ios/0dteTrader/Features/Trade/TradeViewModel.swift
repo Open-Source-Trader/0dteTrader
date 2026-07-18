@@ -40,6 +40,7 @@ final class TradeViewModel: ObservableObject {
     // Futures selection
     @Published private(set) var futuresRoot: String = FuturesRoots.fallback
     @Published private(set) var futuresContracts: [FuturesContract] = []
+    @Published private(set) var futuresError: String?
     @Published var selectedFutureSymbol: String?
 
     // Positions & orders
@@ -52,6 +53,9 @@ final class TradeViewModel: ObservableObject {
     @Published private(set) var preview: OrderPreview?
     @Published private(set) var isPreviewLoading = false
     @Published private(set) var previewError: String?
+    /// Submission failures, kept separate from preview errors so the confirm
+    /// sheet can render each with the correct recovery action.
+    @Published private(set) var submitError: String?
     @Published private(set) var isSubmitting = false
 
     @Published private(set) var toast: Toast?
@@ -92,13 +96,16 @@ final class TradeViewModel: ObservableObject {
         do {
             let contracts = try await apiClient.futures(root: futuresRoot).map(FuturesContract.init(dto:))
             futuresContracts = contracts
+            futuresError = nil
             if selectedFutureSymbol == nil || !contracts.contains(where: { $0.symbol == selectedFutureSymbol }) {
                 // Front month by default.
                 selectedFutureSymbol = contracts.first(where: \.frontMonth)?.symbol ?? contracts.first?.symbol
             }
         } catch let error as APIError {
+            futuresError = error.userMessage
             if !silent { showToast(error.userMessage, style: .error) }
         } catch {
+            futuresError = error.localizedDescription
             if !silent { showToast(error.localizedDescription, style: .error) }
         }
     }
@@ -213,6 +220,7 @@ final class TradeViewModel: ObservableObject {
         )
         preview = nil
         previewError = nil
+        submitError = nil
         Task { await loadPreview() }
     }
 
@@ -239,6 +247,7 @@ final class TradeViewModel: ObservableObject {
     func confirmArmedOrder() async {
         guard let ticket = armedTicket, !isSubmitting else { return }
         isSubmitting = true
+        submitError = nil
         defer { isSubmitting = false }
         do {
             let result = OrderResult(dto: try await apiClient.placeOrder(
@@ -253,14 +262,15 @@ final class TradeViewModel: ObservableObject {
             await refreshTradingData()
         } catch let error as APIError {
             // Keep the ticket armed so the user can retry with the same key.
-            previewError = error.userMessage
+            submitError = error.userMessage
         } catch {
-            previewError = error.localizedDescription
+            submitError = error.localizedDescription
         }
     }
 
     func cancelArmedOrder() {
         armedTicket = nil
+        submitError = nil
     }
 
     // MARK: - Positions & open orders (FR-23..25)
@@ -368,19 +378,54 @@ final class TradeViewModel: ObservableObject {
 
     // MARK: - Toast
 
+    /// Toasts waiting behind the one on screen; drained in order so rapid
+    /// order-status events don't silently replace each other.
+    private var toastQueue: [Toast] = []
+
     func showToast(_ message: String, style: Toast.Style) {
         let toast = Toast(message: message, style: style)
-        self.toast = toast
         if style == .success {
             Haptics.success()
         } else if style == .error {
             Haptics.error()
         }
+        toastQueue.append(toast)
+        guard self.toast == nil else { return }
+        showNextToast()
+    }
+
+    /// Manual dismiss (tap on the toast capsule): drops the visible toast and
+    /// drains the queue.
+    func dismissCurrentToast() {
         toastDismissTask?.cancel()
+        if let current = toast {
+            toastQueue.removeAll { $0.id == current.id }
+        }
+        toast = nil
+        scheduleNextToast()
+    }
+
+    private func showNextToast() {
+        guard let next = toastQueue.first else { return }
+        toast = next
+        toastDismissTask?.cancel()
+        // Errors carry longer API messages and stay up longer to stay readable.
+        let duration: UInt64 = next.style == .error ? 5_000_000_000 : 3_000_000_000
         toastDismissTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 3_000_000_000)
-            guard let self, !Task.isCancelled, self.toast?.id == toast.id else { return }
+            try? await Task.sleep(nanoseconds: duration)
+            guard let self, !Task.isCancelled else { return }
+            self.toastQueue.removeAll { $0.id == next.id }
             self.toast = nil
+            self.scheduleNextToast()
+        }
+    }
+
+    private func scheduleNextToast() {
+        toastDismissTask = Task { [weak self] in
+            // Let the exit transition finish before the next toast enters.
+            try? await Task.sleep(nanoseconds: 250_000_000)
+            guard let self, !Task.isCancelled else { return }
+            self.showNextToast()
         }
     }
 }

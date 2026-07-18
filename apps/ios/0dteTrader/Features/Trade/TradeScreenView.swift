@@ -20,6 +20,8 @@ struct TradeScreenView: View {
     @State private var showIndicatorSettings = false
     @State private var showProfile = false
     @State private var showHistory = false
+    @GestureState private var isDraggingDivider = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private let settingsStore: SettingsStore
 
@@ -38,6 +40,15 @@ struct TradeScreenView: View {
         NavigationStack {
             layoutContent
                 .background(Color.appBackground)
+                .overlay(alignment: .top) {
+                    if let toast = tradeViewModel.toast {
+                        ToastView(toast: toast, onDismiss: { tradeViewModel.dismissCurrentToast() })
+                            .padding(.top, AppSpacing.sm)
+                            .transition(reduceMotion ? .opacity : .move(edge: .top).combined(with: .opacity))
+                            .zIndex(1)
+                    }
+                }
+                .animation(AppMotion.standard, value: tradeViewModel.toast)
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
                     ToolbarItem(placement: .topBarLeading) {
@@ -46,6 +57,7 @@ struct TradeScreenView: View {
                         } label: {
                             Image(systemName: "person.circle")
                         }
+                        .accessibilityLabel("Profile")
                     }
                     ToolbarItem(placement: .topBarLeading) {
                         Button {
@@ -65,15 +77,6 @@ struct TradeScreenView: View {
                     }
                 }
         }
-        .overlay(alignment: .top) {
-            if let toast = tradeViewModel.toast {
-                ToastView(toast: toast)
-                    .padding(.top, 4)
-                    .transition(.move(edge: .top).combined(with: .opacity))
-                    .zIndex(1)
-            }
-        }
-        .animation(.easeInOut(duration: 0.2), value: tradeViewModel.toast)
         .sheet(item: $tradeViewModel.armedTicket) { ticket in
             OrderConfirmSheet(tradeViewModel: tradeViewModel, ticket: ticket)
         }
@@ -81,9 +84,13 @@ struct TradeScreenView: View {
             SymbolSearchView(currentSymbol: chartViewModel.symbol) { symbol in
                 chartViewModel.selectSymbol(symbol)
             }
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
         }
         .sheet(isPresented: $showIndicatorSettings) {
             IndicatorSettingsView(settings: $chartViewModel.indicatorSettings)
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
         }
         .sheet(isPresented: $showProfile) {
             ProfileView(viewModel: container.makeProfileViewModel(onLogout: onLogout))
@@ -162,20 +169,31 @@ struct TradeScreenView: View {
             // Layout A — FR-10.
             ZStack(alignment: .bottom) {
                 chartView
-                VStack(spacing: 10) {
+                VStack(spacing: AppSpacing.sm) {
                     positionsStrip
                     FloatingTradeButtons(isEnabled: canTrade) { side in
                         tradeViewModel.arm(side: side, underlying: chartViewModel.symbol, chainViewModel: chainViewModel)
                     }
                 }
-                .padding(.bottom, 12)
+                .padding(.bottom, AppSpacing.lg)
+                .background(
+                    LinearGradient(colors: [.clear, Color.appBackground],
+                                   startPoint: .top, endPoint: .bottom)
+                        .ignoresSafeArea(edges: .bottom)
+                )
             }
 
         case .split:
             // Layout B — FR-11 with draggable divider.
             GeometryReader { geometry in
                 let totalHeight = geometry.size.height
-                let panelHeight = max((totalHeight * splitFraction).rounded(), 120)
+                // One budget for both clamps: chart keeps >=100pt, divider 18pt,
+                // and the panel never drops below its scrollable floor.
+                let minPanelHeight: CGFloat = 200
+                let panelHeight = min(
+                    max((totalHeight * splitFraction).rounded(), minPanelHeight),
+                    max(totalHeight - dividerHeight - 100, minPanelHeight)
+                )
                 VStack(spacing: 0) {
                     chartView
                         .frame(height: max(totalHeight - panelHeight - dividerHeight, 100))
@@ -190,6 +208,7 @@ struct TradeScreenView: View {
                         }
                     )
                     .frame(height: panelHeight)
+                    .clipped()
                 }
                 .frame(height: totalHeight)
             }
@@ -224,29 +243,46 @@ struct TradeScreenView: View {
 
     private func divider(totalHeight: CGFloat) -> some View {
         RoundedRectangle(cornerRadius: 2.5)
-            .fill(Color.appBorder)
-            .frame(width: 48, height: 5)
+            .fill(isDraggingDivider ? Color.appAccent : Color(uiColor: .tertiaryLabel))
+            .frame(width: 36, height: 5)
+            .scaleEffect(isDraggingDivider ? 1.15 : 1)
+            .animation(AppMotion.quick, value: isDraggingDivider)
             .frame(maxWidth: .infinity)
             .frame(height: dividerHeight)
             .background(Color.appSurface)
-            .contentShape(Rectangle())
+            // Visual stays 18pt; the hit area expands to the 44pt HIG minimum.
+            .contentShape(Rectangle().inset(by: -13))
             .gesture(
                 DragGesture()
+                    .updating($isDraggingDivider) { _, state, _ in state = true }
                     .onChanged { value in
                         if dragStartFraction == nil {
                             dragStartFraction = splitFraction
                         }
                         let start = dragStartFraction ?? splitFraction
                         let delta = -value.translation.height / totalHeight
-                        // Clamp to the PRD range: panel is 1/4...1/2 of screen height.
-                        splitFraction = min(0.5, max(0.25, start + delta))
+                        // Clamp so the ticket can never be dragged below its
+                        // scrollable floor (PRD max remains 1/2 of screen height).
+                        splitFraction = min(0.5, max(0.32, start + delta))
                     }
                     .onEnded { _ in
                         dragStartFraction = nil
+                        Haptics.selection()
                         settingsStore.splitFraction = splitFraction
                     }
             )
             .accessibilityLabel("Resize trade panel")
+            .accessibilityValue("\(Int((splitFraction * 100).rounded())) percent of screen")
+            .accessibilityAdjustableAction { direction in
+                let step = 0.05
+                switch direction {
+                case .increment: splitFraction = min(0.5, splitFraction + step)
+                case .decrement: splitFraction = max(0.32, splitFraction - step)
+                @unknown default: break
+                }
+                settingsStore.splitFraction = splitFraction
+                Haptics.selection()
+            }
     }
 
     // MARK: - Helpers
@@ -275,7 +311,9 @@ struct TradeScreenView: View {
 
     private func toggleLayout() {
         Haptics.selection()
-        layout = layout == .fullscreen ? .split : .fullscreen
+        withAnimation(AppMotion.standard) {
+            layout = layout == .fullscreen ? .split : .fullscreen
+        }
         settingsStore.layoutMode = layout
     }
 

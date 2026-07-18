@@ -6,81 +6,101 @@ struct LoginView: View {
     @State private var email = ""
     @State private var password = ""
     @State private var showRegister = false
+    @FocusState private var focusedField: LoginField?
+
+    private enum LoginField: Hashable {
+        case email, password
+    }
 
     private var isFormValid: Bool {
         email.contains("@") && !password.isEmpty
     }
 
     var body: some View {
-        VStack(spacing: 24) {
-            Spacer()
+        ScrollView {
+            VStack(spacing: AppSpacing.xxl) {
+                Spacer()
 
-            VStack(spacing: 6) {
-                Text("0dteTrader")
-                    .font(.largeTitle.bold())
-                Text("Rapid options & futures trading")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
-
-            VStack(spacing: 14) {
-                TextField("Email", text: $email)
-                    .textContentType(.emailAddress)
-                    .keyboardType(.emailAddress)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .padding(12)
-                    .background(Color.appSurface)
-                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-
-                SecureField("Password", text: $password)
-                    .textContentType(.password)
-                    .padding(12)
-                    .background(Color.appSurface)
-                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-            }
-
-            if let errorMessage = viewModel.errorMessage {
-                Text(errorMessage)
-                    .font(.footnote)
-                    .foregroundStyle(Color.pnlNegative)
-                    .multilineTextAlignment(.center)
-            }
-
-            Button {
-                Task {
-                    await viewModel.login(email: email.trimmingCharacters(in: .whitespaces), password: password)
+                VStack(spacing: AppSpacing.sm) {
+                    Text("0dteTrader")
+                        .font(.largeTitle.bold())
+                    Text("Rapid options & futures trading")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
                 }
-            } label: {
-                Group {
-                    if viewModel.isLoading {
-                        ProgressView()
-                            .tint(.white)
-                    } else {
-                        Text("Log In")
-                            .font(.headline)
+
+                VStack(spacing: AppSpacing.lg) {
+                    TextField("Email", text: $email)
+                        .textContentType(.emailAddress)
+                        .keyboardType(.emailAddress)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .focused($focusedField, equals: .email)
+                        .submitLabel(.next)
+                        .onSubmit { focusedField = .password }
+                        .accessibilityLabel("Email address")
+                        .authField(isFocused: focusedField == .email)
+
+                    AuthPasswordField(
+                        placeholder: "Password",
+                        text: $password,
+                        contentType: .password,
+                        focused: $focusedField,
+                        field: .password,
+                        submitLabel: .go
+                    ) {
+                        submit()
                     }
                 }
-                .frame(maxWidth: .infinity, minHeight: 50)
-                .background(isFormValid ? Color.appAccent : Color.appAccent.opacity(0.35))
-                .foregroundStyle(.white)
-                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-            }
-            .buttonStyle(.plain)
-            .disabled(!isFormValid || viewModel.isLoading)
 
-            Button("Create an account") {
-                showRegister = true
-            }
-            .font(.subheadline)
-            .foregroundStyle(Color.appAccent)
+                if let errorMessage = viewModel.errorMessage {
+                    Label(errorMessage, systemImage: "exclamationmark.circle.fill")
+                        .font(.footnote)
+                        .foregroundStyle(Color.sellRed)
+                        .multilineTextAlignment(.center)
+                        .accessibilityAddTraits(.isStaticText)
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                }
 
-            Spacer()
+                AuthPrimaryButton(
+                    title: "Log In",
+                    isLoading: viewModel.isLoading,
+                    isEnabled: isFormValid,
+                    accessibilityID: "login.submit"
+                ) {
+                    submit()
+                }
+
+                Button("Create an account") {
+                    showRegister = true
+                }
+                .font(.subheadline)
+                .foregroundStyle(Color.appAccent)
+                .frame(minWidth: 44, minHeight: 44)
+                .contentShape(Rectangle())
+
+                Spacer()
+            }
+            .padding(AppSpacing.xxl)
+            .frame(maxWidth: .infinity)
+            .containerRelativeFrame(.vertical)
+            .animation(AppMotion.standard, value: viewModel.errorMessage)
         }
-        .padding(24)
         .scrollDismissesKeyboard(.interactively)
+        .onChange(of: viewModel.errorMessage) { _, message in
+            if message != nil {
+                Haptics.error()
+            }
+        }
         .sheet(isPresented: $showRegister) {
             RegisterView(viewModel: viewModel)
+        }
+    }
+
+    private func submit() {
+        guard isFormValid, !viewModel.isLoading else { return }
+        Task {
+            await viewModel.login(email: email.trimmingCharacters(in: .whitespaces), password: password)
         }
     }
 }

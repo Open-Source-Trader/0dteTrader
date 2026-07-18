@@ -72,6 +72,13 @@ struct RootView: View {
             RiskDisclaimerView(viewModel: authViewModel)
         case .unauthenticated:
             LoginView(viewModel: authViewModel)
+        case .restoreFailed:
+            ErrorStateView(
+                message: "Couldn't restore your session. Check your connection and try again.",
+                systemImage: "wifi.exclamationmark",
+                retryTitle: "Retry",
+                onRetry: { authViewModel.retryRestore() }
+            )
         case .authenticated:
             TradeScreenView(container: container) {
                 await authViewModel.logout()

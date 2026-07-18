@@ -25,7 +25,7 @@ final class AppContainer: ObservableObject {
         self.quoteSocket = QuoteSocketClient(streamURL: AppConfig.streamURL, urlSession: urlSession) {
             try await sessionStore.accessTokenOrRefresh()
         }
-        self.appLockManager = AppLockManager(settings: settings)
+        self.appLockManager = AppLockManager(settingsStore: settings)
     }
 
     // MARK: - View model factories

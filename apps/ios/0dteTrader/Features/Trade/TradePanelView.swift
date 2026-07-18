@@ -10,36 +10,46 @@ struct TradePanelView: View {
     let positionsStrip: PositionsStripView
     let onArm: (OrderSide) -> Void
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     var body: some View {
-        VStack(spacing: 8) {
-            positionsStrip
+        ScrollView(.vertical) {
+            VStack(spacing: AppSpacing.sm) {
+                positionsStrip
 
-            Picker("Asset class", selection: $tradeViewModel.assetClass) {
-                Text("Options").tag(AssetClass.option)
-                Text("Futures").tag(AssetClass.future)
-            }
-            .pickerStyle(.segmented)
-
-            if tradeViewModel.assetClass == .option {
-                optionsSection
-            } else {
-                futuresSection
-            }
-
-            quantityRow
-            orderTypeRow
-
-            HStack(spacing: 12) {
-                TradeActionButton(title: "SELL", color: .sellRed, isEnabled: canTrade) {
-                    onArm(.sell)
+                Picker("Asset class", selection: $tradeViewModel.assetClass) {
+                    Text("Options").tag(AssetClass.option)
+                    Text("Futures").tag(AssetClass.future)
                 }
-                TradeActionButton(title: "BUY", color: .buyGreen, isEnabled: canTrade) {
-                    onArm(.buy)
+                .pickerStyle(.segmented)
+
+                if tradeViewModel.assetClass == .option {
+                    optionsSection
+                } else {
+                    futuresSection
+                }
+
+                quantityRow
+                orderTypeRow
+
+                HStack(spacing: AppSpacing.md) {
+                    TradeActionButton(title: "SELL", color: .sellRedFill, isEnabled: canTrade) {
+                        onArm(.sell)
+                    }
+                    TradeActionButton(title: "BUY", color: .buyGreenFill, isEnabled: canTrade) {
+                        onArm(.buy)
+                    }
                 }
             }
+            .padding(.horizontal, AppSpacing.md)
+            .padding(.top, AppSpacing.xs)
+            .padding(.bottom, AppSpacing.sm)
+            .frame(maxWidth: .infinity)
+            .animation(reduceMotion ? nil : .snappy(duration: 0.22, extraBounce: 0), value: tradeViewModel.assetClass)
+            .animation(reduceMotion ? nil : .snappy(duration: 0.22, extraBounce: 0), value: chainViewModel.isAutoMode)
         }
-        .padding(.horizontal, 12)
-        .padding(.top, 4)
+        .scrollIndicators(.hidden)
+        .scrollBounceBehavior(.basedOnSize)
         .background(Color.appBackground)
         .task {
             // Ensure a contract list exists even when the chart symbol isn't
@@ -53,8 +63,14 @@ struct TradePanelView: View {
     // MARK: - Options
 
     private var optionsSection: some View {
-        VStack(spacing: 8) {
-            HStack(spacing: 8) {
+        VStack(spacing: AppSpacing.sm) {
+            if let message = chainViewModel.errorMessage {
+                errorRow(message) {
+                    Task { await chainViewModel.load(underlying: underlying) }
+                }
+            }
+
+            HStack(spacing: AppSpacing.sm) {
                 Picker("Option type", selection: $chainViewModel.optionType) {
                     Text("Call").tag(OptionType.call)
                     Text("Put").tag(OptionType.put)
@@ -70,7 +86,7 @@ struct TradePanelView: View {
                 .accessibilityLabel("Auto +1 OTM selection")
             }
 
-            HStack(spacing: 8) {
+            HStack(spacing: AppSpacing.sm) {
                 expirationMenu
 
                 if chainViewModel.isAutoMode {
@@ -99,7 +115,8 @@ struct TradePanelView: View {
         } label: {
             chipLabel(
                 title: chainViewModel.selectedExpiration.map(expirationLabel) ?? "Expiration",
-                systemImage: "calendar"
+                systemImage: "calendar",
+                isPlaceholder: chainViewModel.selectedExpiration == nil
             )
         }
     }
@@ -121,7 +138,8 @@ struct TradePanelView: View {
         } label: {
             chipLabel(
                 title: chainViewModel.selectedStrike.map(Format.strike) ?? "Strike",
-                systemImage: "chart.line.uptrend.xyaxis"
+                systemImage: "chart.line.uptrend.xyaxis",
+                isPlaceholder: chainViewModel.selectedStrike == nil
             )
         }
     }
@@ -135,7 +153,7 @@ struct TradePanelView: View {
                 Text("\(Format.strike(contract.strike))\(contract.optionType.shortName)")
                     .font(.priceMedium)
                 Text(contract.mid.map { "≈ \(Format.price($0))" } ?? "—")
-                    .font(.caption)
+                    .font(.priceSmall)
                     .foregroundStyle(.secondary)
             } else {
                 Text("No contract")
@@ -146,86 +164,124 @@ struct TradePanelView: View {
         .frame(maxWidth: .infinity, minHeight: 34)
         .padding(.horizontal, 10)
         .background(Color.appSurface)
-        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: AppRadius.sm, style: .continuous))
     }
 
     // MARK: - Futures
 
     private var futuresSection: some View {
-        HStack(spacing: 8) {
-            Menu {
-                ForEach(FuturesRoots.known, id: \.self) { root in
-                    Button(root) {
-                        Task { await tradeViewModel.setFuturesRoot(root) }
-                    }
+        VStack(spacing: AppSpacing.sm) {
+            if let message = tradeViewModel.futuresError {
+                errorRow(message) {
+                    Task { await tradeViewModel.loadFuturesContracts() }
                 }
-            } label: {
-                chipLabel(title: tradeViewModel.futuresRoot, systemImage: "shippingbox")
             }
 
-            Menu {
-                ForEach(tradeViewModel.futuresContracts) { contract in
-                    Button {
-                        tradeViewModel.selectedFutureSymbol = contract.symbol
-                    } label: {
-                        HStack {
-                            Text(contract.symbol)
-                            if contract.frontMonth {
-                                Text("· front")
-                                    .foregroundStyle(.secondary)
-                            }
-                            if contract.symbol == tradeViewModel.selectedFutureSymbol {
-                                Image(systemName: "checkmark")
+            HStack(spacing: AppSpacing.sm) {
+                Menu {
+                    ForEach(FuturesRoots.known, id: \.self) { root in
+                        Button(root) {
+                            Task { await tradeViewModel.setFuturesRoot(root) }
+                        }
+                    }
+                } label: {
+                    chipLabel(title: tradeViewModel.futuresRoot, systemImage: "shippingbox", fillWidth: false)
+                }
+
+                Menu {
+                    ForEach(tradeViewModel.futuresContracts) { contract in
+                        Button {
+                            tradeViewModel.selectedFutureSymbol = contract.symbol
+                        } label: {
+                            HStack {
+                                Text(contract.symbol)
+                                if contract.frontMonth {
+                                    Text("· front")
+                                        .foregroundStyle(.secondary)
+                                }
+                                if contract.symbol == tradeViewModel.selectedFutureSymbol {
+                                    Image(systemName: "checkmark")
+                                }
                             }
                         }
                     }
+                } label: {
+                    chipLabel(
+                        title: tradeViewModel.selectedFutureSymbol ?? "Contract",
+                        systemImage: "doc.text",
+                        isPlaceholder: tradeViewModel.selectedFutureSymbol == nil,
+                        fillWidth: false
+                    )
                 }
-            } label: {
-                chipLabel(
-                    title: tradeViewModel.selectedFutureSymbol ?? "Contract",
-                    systemImage: "doc.text"
-                )
+
+                Spacer(minLength: 0)
             }
 
-            if let future = tradeViewModel.selectedFuture {
-                Text(future.mid.map { "≈ \(Format.price($0))" } ?? "—")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+            // Second row matches autoContractLabel's height so switching asset
+            // class doesn't reflow the ticket.
+            HStack {
+                if let future = tradeViewModel.selectedFuture {
+                    Text(future.mid.map { "≈ \(Format.price($0))" } ?? "—")
+                        .font(.priceSmall)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                } else {
+                    Text("No contract")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
+            .frame(maxWidth: .infinity, minHeight: 34)
+            .padding(.horizontal, 10)
+            .background(Color.appSurface)
+            .clipShape(RoundedRectangle(cornerRadius: AppRadius.sm, style: .continuous))
         }
     }
 
     // MARK: - Quantity & order type
 
     private var quantityRow: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: AppSpacing.md) {
             Text("Qty")
                 .font(.panelLabel)
                 .foregroundStyle(.secondary)
 
             Button {
+                Haptics.selection()
                 tradeViewModel.addQuantity(-1)
             } label: {
                 Image(systemName: "minus")
-                    .frame(width: 30, height: 30)
-                    .background(Color.appSurfaceElevated)
-                    .clipShape(Circle())
+                    .frame(width: 44, height: 44)
+                    .background(Circle().fill(Color.appSurfaceElevated).frame(width: 32, height: 32))
+                    .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(AppPressStyle())
+            .accessibilityLabel("Decrease quantity")
 
             Text("\(tradeViewModel.quantity)")
                 .font(.priceMedium)
                 .frame(minWidth: 36)
+                .accessibilityLabel("Quantity")
+                .accessibilityValue("\(tradeViewModel.quantity)")
+                .accessibilityAdjustableAction { direction in
+                    switch direction {
+                    case .increment: tradeViewModel.addQuantity(1)
+                    case .decrement: tradeViewModel.addQuantity(-1)
+                    @unknown default: break
+                    }
+                }
 
             Button {
+                Haptics.selection()
                 tradeViewModel.addQuantity(1)
             } label: {
                 Image(systemName: "plus")
-                    .frame(width: 30, height: 30)
-                    .background(Color.appSurfaceElevated)
-                    .clipShape(Circle())
+                    .frame(width: 44, height: 44)
+                    .background(Circle().fill(Color.appSurfaceElevated).frame(width: 32, height: 32))
+                    .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(AppPressStyle())
+            .accessibilityLabel("Increase quantity")
 
             Spacer()
 
@@ -236,7 +292,7 @@ struct TradePanelView: View {
     }
 
     private var orderTypeRow: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: AppSpacing.md) {
             Picker("Order type", selection: $tradeViewModel.orderType) {
                 Text("Mid").tag(OrderType.mid)
                 Text("Market").tag(OrderType.market)
@@ -245,18 +301,22 @@ struct TradePanelView: View {
 
             if let line = quoteLine {
                 Text(line)
-                    .font(.caption)
+                    .font(.priceSmall)
                     .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                    .layoutPriority(1)
             }
         }
     }
 
-    /// Live `bid × ask` (and mid when a mid order is armed) for the selected contract.
+    /// Live `bid × ask` plus indicative mid and estimated notional (qty × mid)
+    /// for the selected contract.
     private var quoteLine: String? {
         guard let pair = selectedQuotePair else { return nil }
         var line = "\(Format.price(pair.bid)) × \(Format.price(pair.ask))"
-        if tradeViewModel.orderType == .mid {
-            line += " · ≈ \(indicativeMid.map(Format.price) ?? "—")"
+        if let mid = indicativeMid {
+            line += " · ≈ \(Format.price(mid)) · Est. \(Format.price(mid * Double(tradeViewModel.quantity)))"
         }
         return line
     }
@@ -291,19 +351,47 @@ struct TradePanelView: View {
 
     // MARK: - Shared chrome
 
-    private func chipLabel(title: String, systemImage: String) -> some View {
+    /// Inline load-error row with a retry action (chain / futures failures).
+    private func errorRow(_ message: String, retry: @escaping () -> Void) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(Color.pnlNegative)
+                .accessibilityHidden(true)
+            Text(message)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+            Spacer()
+            Button("Retry", action: retry)
+                .font(.chipLabel)
+                .foregroundStyle(Color.appAccent)
+        }
+        .padding(.horizontal, AppSpacing.md)
+        .padding(.vertical, AppSpacing.sm)
+        .background(Color.appSurface)
+        .clipShape(RoundedRectangle(cornerRadius: AppRadius.sm, style: .continuous))
+    }
+
+    private func chipLabel(
+        title: String,
+        systemImage: String,
+        isPlaceholder: Bool = false,
+        fillWidth: Bool = true
+    ) -> some View {
         HStack(spacing: 6) {
             Image(systemName: systemImage)
                 .font(.caption)
+                .accessibilityHidden(true)
             Text(title)
-                .font(.chipLabel)
+                .font(.system(.caption, design: .monospaced).weight(.semibold))
+                .foregroundStyle(isPlaceholder ? .secondary : .primary)
                 .lineLimit(1)
         }
-        .foregroundStyle(.primary)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
-        .frame(maxWidth: .infinity)
+        .foregroundStyle(isPlaceholder ? .secondary : .primary)
+        .padding(.horizontal, AppSpacing.md)
+        .padding(.vertical, 11)
+        .frame(maxWidth: fillWidth ? .infinity : nil, minHeight: 44)
         .background(Color.appSurfaceElevated)
-        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: AppRadius.sm, style: .continuous))
     }
 }

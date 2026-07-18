@@ -37,12 +37,13 @@ final class SettingsStore: @unchecked Sendable {
         set { defaults.set(newValue.rawValue, forKey: Keys.layoutMode) }
     }
 
-    /// Trade panel height as a fraction of screen height, clamped to the PRD range 1/4...1/2.
+    /// Trade panel height as a fraction of screen height, clamped so the panel
+    /// always fits the trade ticket (floor 0.32, PRD ceiling 1/2).
     var splitFraction: Double {
         get {
             let stored = defaults.double(forKey: Keys.splitFraction)
-            guard stored > 0 else { return 0.34 }
-            return min(0.5, max(0.25, stored))
+            guard stored > 0 else { return 0.38 }
+            return min(0.5, max(0.32, stored))
         }
         set { defaults.set(newValue, forKey: Keys.splitFraction) }
     }

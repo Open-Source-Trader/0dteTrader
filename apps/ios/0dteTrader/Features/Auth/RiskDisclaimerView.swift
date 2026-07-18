@@ -6,34 +6,53 @@ struct RiskDisclaimerView: View {
     @ObservedObject var viewModel: AuthViewModel
 
     var body: some View {
-        VStack(spacing: 20) {
+        VStack(spacing: 0) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 40))
+                .symbolRenderingMode(.hierarchical)
+                .foregroundStyle(Color.appWarning)
+                .padding(.top, AppSpacing.xxxl)
+                .accessibilityHidden(true)
+
             Text("Risk Disclosure")
                 .font(.title.bold())
-                .padding(.top, 32)
+                .accessibilityAddTraits(.isHeader)
+                .padding(.top, AppSpacing.lg)
 
             ScrollView {
                 Text(disclaimerText)
-                    .font(.footnote)
+                    .font(.callout)
                     .foregroundStyle(.secondary)
+                    .lineSpacing(AppSpacing.xs)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 4)
+            }
+            .padding(.top, AppSpacing.xxl)
+            // Bottom fade signals that the copy continues when truncated.
+            .overlay(alignment: .bottom) {
+                LinearGradient(colors: [Color.appBackground.opacity(0), Color.appBackground],
+                               startPoint: .top, endPoint: .bottom)
+                    .frame(height: AppSpacing.xxxl)
+                    .allowsHitTesting(false)
             }
 
             Button {
-                Haptics.impact(.medium)
+                Haptics.success()
                 viewModel.acceptDisclaimer()
             } label: {
                 Text("I Understand and Accept")
                     .font(.headline)
                     .foregroundStyle(.white)
-                    .frame(maxWidth: .infinity, minHeight: 50)
-                    .background(Color.appAccent)
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .frame(maxWidth: .infinity, minHeight: 52)
+                    .background(Color.appAccentFill)
+                    .clipShape(RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous))
+                    .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
-            .padding(.bottom, 8)
+            .buttonStyle(AppPressStyle())
+            .accessibilityHint("Accepts the risk disclosure and continues to sign in")
+            .padding(.top, AppSpacing.lg)
+            .padding(.bottom, AppSpacing.sm)
         }
-        .padding(24)
+        .padding(AppSpacing.xxl)
     }
 
     private var disclaimerText: String {

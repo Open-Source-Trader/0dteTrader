@@ -16,9 +16,11 @@ final class AppLockManager: ObservableObject {
         self.settingsStore = settingsStore
     }
 
-    /// Called when the app goes to the background.
+    /// Called when the app goes to the background (and on `.inactive`, before
+    /// the app-switcher snapshot is taken).
     func lockIfNeeded() {
         if settingsStore.appLockEnabled {
+            lastAttemptFailed = false
             isLocked = true
         }
     }
@@ -41,6 +43,18 @@ final class AppLockManager: ObservableObject {
                 continuation.resume(returning: result)
             }
         }
+        if !success {
+            UINotificationFeedbackGenerator().notificationOccurred(.error)
+        }
+        lastAttemptFailed = !success
         isLocked = !success
+    }
+
+    /// Drops the lock without biometrics (e.g. the user chooses password
+    /// sign-in instead from the lock screen). The JWT remains the real auth
+    /// boundary, so this does not weaken security.
+    func forceUnlock() {
+        lastAttemptFailed = false
+        isLocked = false
     }
 }

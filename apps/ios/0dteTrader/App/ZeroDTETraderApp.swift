@@ -7,6 +7,7 @@ struct ZeroDTETraderApp: App {
     var body: some Scene {
         WindowGroup {
             RootView(container: container)
+                .tint(.appAccent)
         }
     }
 }

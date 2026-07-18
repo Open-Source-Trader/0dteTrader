@@ -10,6 +10,8 @@ final class AuthViewModel: ObservableObject {
         case disclaimer
         case unauthenticated
         case authenticated
+        /// Session restore failed for a non-auth reason (offline/server) — retryable.
+        case restoreFailed
     }
 
     @Published private(set) var state: State = .checking
@@ -81,11 +83,22 @@ final class AuthViewModel: ObservableObject {
 
     private func restoreSession() async {
         state = .checking
-        if await sessionStore.restoreSession() {
-            becomeAuthenticated()
-        } else {
-            state = .unauthenticated
+        do {
+            if try await sessionStore.restoreSession() {
+                becomeAuthenticated()
+            } else {
+                state = .unauthenticated
+            }
+        } catch {
+            // Offline or server failure — not an auth rejection; offer a retry
+            // instead of silently dumping the user to Login.
+            state = .restoreFailed
         }
+    }
+
+    /// Retries a failed session restore (offline/server error on launch).
+    func retryRestore() {
+        Task { await restoreSession() }
     }
 
     private func authenticate(_ action: () async throws -> AuthTokensDTO) async {
@@ -98,9 +111,14 @@ final class AuthViewModel: ObservableObject {
             try await sessionStore.signIn(with: tokens)
             becomeAuthenticated()
         } catch let error as APIError {
-            errorMessage = error.userMessage
+            switch error {
+            case .network:
+                errorMessage = "You're offline or the server is unreachable. Check your connection and try again."
+            default:
+                errorMessage = error.userMessage
+            }
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = "Something went wrong. Please try again."
         }
     }
 

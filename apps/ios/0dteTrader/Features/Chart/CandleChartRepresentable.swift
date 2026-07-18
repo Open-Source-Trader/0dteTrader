@@ -202,7 +202,7 @@ struct CandleChartRepresentable: UIViewRepresentable {
         guard !candles.isEmpty else {
             chart.data = nil
             chart.notifyDataSetChanged()
-            chart.accessibilityChartDescriptor = nil
+            chart.accessibilityValue = nil
             container.overlay.setNeedsDisplay()
             return
         }
@@ -285,10 +285,8 @@ struct CandleChartRepresentable: UIViewRepresentable {
         container.overlay.setNeedsDisplay()
 
         if let last = candles.last {
-            chart.accessibilityChartDescriptor = AXChartDescriptor(
-                title: "Price chart",
-                summary: "\(candles.count) candles, last close \(Format.price(last.close))"
-            )
+            chart.accessibilityLabel = "Price chart"
+            chart.accessibilityValue = "\(candles.count) candles, last close \(Format.price(last.close))"
         }
 
         // Keep the latest candle in view on first load and when a new candle

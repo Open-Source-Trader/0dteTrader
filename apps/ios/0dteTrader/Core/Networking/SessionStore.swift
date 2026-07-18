@@ -38,13 +38,16 @@ actor SessionStore {
     }
 
     /// Attempts to restore a session from the Keychain-stored refresh token (app launch).
-    func restoreSession() async -> Bool {
+    /// Returns false when there is no (valid) stored session; rethrows network/server
+    /// failures so callers can distinguish "offline" from "logged out".
+    func restoreSession() async throws -> Bool {
         guard hasStoredRefreshToken() else { return false }
         do {
             _ = try await refreshAccessToken()
             return true
-        } catch {
-            return false
+        } catch let error as APIError {
+            if case .unauthorized = error { return false }
+            throw error
         }
     }
 

@@ -1,4 +1,5 @@
 import { useStore } from '../../core/observable';
+import { Menu } from '../../design/components/Menu';
 import {
   BellIcon,
   CursorIcon,
@@ -19,34 +20,60 @@ const TOOLS: { tool: DrawingTool; label: string; Icon: typeof CursorIcon }[] = [
   { tool: 'alert', label: 'Price alert', Icon: BellIcon },
 ];
 
-/** TradingView-style vertical drawing toolbar overlaying the chart. */
-export function DrawingToolbar({ store }: { store: DrawingsStore }) {
+/** Drawing-tool dropdown for the chart header (TradingView-style tools). */
+export function DrawToolsMenu({ store }: { store: DrawingsStore }) {
   const { tool, selectedId, drawings, alerts } = useStore(store);
   const hasAnnotations = drawings.length > 0 || alerts.length > 0;
+  const ActiveIcon = TOOLS.find((t) => t.tool === tool)?.Icon ?? CursorIcon;
+  const toolActive = tool !== 'cursor';
 
   return (
-    <div className="draw-toolbar">
-      {TOOLS.map(({ tool: t, label, Icon }) => (
+    <Menu
+      trigger={
         <button
-          key={t}
-          className={`draw-tool${tool === t ? ' active' : ''}`}
-          title={label}
-          aria-label={label}
-          onClick={() => store.setTool(tool === t ? 'cursor' : t)}
+          style={{
+            padding: 8,
+            background: toolActive ? 'var(--app-accent)' : 'var(--app-surface-elevated)',
+            color: toolActive ? '#fff' : 'var(--label-primary)',
+            borderRadius: '50%',
+            display: 'flex',
+          }}
+          aria-label="Drawing tools"
+          title="Drawing tools"
         >
-          <Icon size={15} />
+          <ActiveIcon size={15} />
         </button>
-      ))}
-      {hasAnnotations ? (
-        <button
-          className="draw-tool"
-          title={selectedId ? 'Delete selection' : 'Clear all drawings'}
-          aria-label={selectedId ? 'Delete selection' : 'Clear all drawings'}
-          onClick={() => store.removeSelectedOrClear()}
-        >
-          <TrashIcon size={15} />
-        </button>
-      ) : null}
-    </div>
+      }
+      items={[
+        ...TOOLS.map(({ tool: t, label, Icon }) => ({
+          key: t,
+          label: (
+            <>
+              <Icon size={14} />
+              {label}
+            </>
+          ),
+          checked: tool === t,
+          onSelect: () => store.setTool(t),
+        })),
+        ...(hasAnnotations
+          ? [
+              {
+                key: 'clear',
+                label: (
+                  <span
+                    style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--pnl-negative)' }}
+                  >
+                    <TrashIcon size={14} />
+                    {selectedId ? 'Delete selection' : 'Clear all drawings'}
+                  </span>
+                ),
+                checked: false,
+                onSelect: () => store.removeSelectedOrClear(),
+              },
+            ]
+          : []),
+      ]}
+    />
   );
 }

@@ -430,42 +430,6 @@
   min-width: 0;
 }
 
-/* --- Chart drawing toolbar --- */
-.draw-toolbar {
-  position: absolute;
-  top: 8px;
-  left: 6px;
-  z-index: 4;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 4px;
-  background: rgba(26, 28, 36, 0.85);
-  border: 0.5px solid var(--app-border);
-  border-radius: 8px;
-  backdrop-filter: blur(6px);
-}
-
-.draw-toolbar .draw-tool {
-  width: 26px;
-  height: 26px;
-  border-radius: 6px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--label-secondary);
-}
-
-.draw-toolbar .draw-tool:hover {
-  color: var(--label-primary);
-  background: var(--app-surface-elevated);
-}
-
-.draw-toolbar .draw-tool.active {
-  background: var(--app-accent);
-  color: #fff;
-}
-
 /* --- Toast --- */
 .toast {
   position: absolute;

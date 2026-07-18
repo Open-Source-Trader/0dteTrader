@@ -7,7 +7,7 @@ import { ChevronDownIcon, SlidersIcon } from '../../design/icons';
 import type { ChartStore } from './ChartStore';
 import { CHART_INTERVALS } from './ChartStore';
 import { CandleChart, type OverlaySeries } from './CandleChart';
-import { DrawingToolbar } from './DrawingToolbar';
+import { DrawToolsMenu } from './DrawingToolbar';
 import type { DrawingsStore } from './drawings';
 import { IndicatorPane, type PaneSeries } from './IndicatorPane';
 import * as engine from './indicatorEngine';
@@ -178,6 +178,7 @@ export function ChartView({ store, drawingsStore, onSymbolSearch, onIndicatorSet
         ) : null}
 
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 12 }}>
+          <DrawToolsMenu store={drawingsStore} />
           <Menu
             trigger={
               <button
@@ -223,7 +224,6 @@ export function ChartView({ store, drawingsStore, onSymbolSearch, onIndicatorSet
           showVolume={indicatorSettings.volumeEnabled}
           drawingsStore={drawingsStore}
         />
-        <DrawingToolbar store={drawingsStore} />
         {isLoading ? (
           <div
             style={{

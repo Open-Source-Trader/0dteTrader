@@ -1,41 +1,6 @@
 {
-  "log": [
-    {
-      "buyState": {
-        "found": true,
-        "disabled": true
-      }
-    },
-    {
-      "ocButtons": [
-        "",
-        "",
-        "",
-        "SPY",
-        "",
-        "1m",
-        "",
-        "Options",
-        "Futures",
-        "Call",
-        "Put",
-        "AUTO",
-        "Expiration",
-        "Strike",
-        "",
-        "",
-        "+1",
-        "+5",
-        "+10",
-        "Mid",
-        "Market",
-        "SELL",
-        "BUY"
-      ]
-    }
-  ],
+  "log": [],
   "errors": [
-    "none of: button:text-is(\"BUY\") | button:has-text(\"BUY\")",
-    "none of: button:has-text(\"Cancel\") | button:has-text(\"Close\") | [aria-label=\"Close\"]"
+    "TimeoutError: page.fill: Timeout 30000ms exceeded.\nCall log:\n  - waiting for locator('input[placeholder=\"Password (8+ characters)\"]')\n"
   ]
 }

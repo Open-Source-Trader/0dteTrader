@@ -88,6 +88,17 @@ accounts; production keys get 401 `UNAUTHORIZED` on sandbox hosts.
 | Signature algorithm | HMAC-SHA1 + MD5 body hash (legacy host) | HMAC-SHA256 + SHA-256 body hash |
 | First token creation | SMS approval in the Webull app | `NORMAL` immediately, no 2FA |
 
+**Verified against live (2026-07-18):**
+- `data-api.webull.com` can hang (connection never completes); `api.webull.com` serves the
+  same `/openapi/market-data/*` paths. Set `WEBULL_MARKET_DATA_BASE_URL=https://api.webull.com`
+  in that case — the signer keys its algorithm off the request host, so it stays correct.
+- Option and futures **bars** endpoints require `symbols` (plural); singular `symbol` returns
+  400 "Parameters not valid". Stock bars accept `symbol`.
+- Quote access is an app-level entitlement: stock / `US_OPTION` / `US_FUTURES` quotes each
+  need a subscription in the OpenAPI console, else 401 "Insufficient permission, please
+  subscribe to … quotes" (surfaced by the API as `BROKER_PERMISSION_DENIED`, HTTP 403).
+- New access tokens start `PENDING` (approval in the Webull app) but still serve API calls.
+
 Sandbox credential creation steps live in docs/RUNBOOK.md ("Getting sandbox credentials").
 
 ## 8. P4 Implementation (as built)

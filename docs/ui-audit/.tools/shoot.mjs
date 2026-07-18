@@ -58,8 +58,8 @@ try {
   // Email field, so use .last() for Email; password placeholders are unique).
   const email = `audit-${Date.now()}@example.com`;
   await page.locator('input[placeholder="Email"]').last().fill(email).catch((e) => errors.push(String(e)));
-  await page.fill('input[placeholder="Password (8+ characters)"]', 'AuditPass123!').catch((e) => errors.push(String(e)));
-  await page.fill('input[placeholder="Confirm password"]', 'AuditPass123!').catch((e) => errors.push(String(e)));
+  await page.locator('input[placeholder="Password"]').last().fill('AuditPass123!').catch((e) => errors.push(String(e)));
+  await page.locator('input[placeholder="Confirm password"]').last().fill('AuditPass123!').catch((e) => errors.push(String(e)));
   await clickFirst(['button:has-text("Create Account")', 'button[type="submit"]']);
   await snap('04-after-register', 4000);
 

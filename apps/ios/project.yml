@@ -57,6 +57,8 @@ targets:
     settings:
       base:
         PRODUCT_MODULE_NAME: ZeroDTETraderTests
+        # Newer Xcode/xcodegen no longer implies a generated Info.plist.
+        GENERATE_INFOPLIST_FILE: YES
 
 schemes:
   0dteTrader:

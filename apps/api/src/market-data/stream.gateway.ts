@@ -22,6 +22,7 @@ import {
   OrderUpdateEvent,
 } from '../broker/order-events.service';
 import { Subscription } from 'rxjs';
+import { CryptoDataService } from './crypto-data.service';
 
 const QUOTE_TICK_MS = 1000;
 
@@ -52,6 +53,7 @@ export class StreamGateway
 
   constructor(
     @Inject(BROKER_GATEWAY) private readonly broker: BrokerGateway,
+    private readonly crypto: CryptoDataService,
     private readonly jwt: JwtService,
     private readonly config: ConfigService,
     orderEvents: OrderEventsService,
@@ -182,7 +184,9 @@ export class StreamGateway
     const state = this.clients.get(anyClient);
     if (!state) return;
     try {
-      const quote = await this.broker.getQuote(state.userId, symbol);
+      const quote = this.crypto.isCryptoSymbol(symbol)
+        ? await this.crypto.getQuote(symbol)
+        : await this.broker.getQuote(state.userId, symbol);
       this.broadcast(set, { type: 'quote', data: quote });
     } catch (err) {
       this.logger.warn(`quote tick failed for ${symbol}: ${(err as Error).message}`);

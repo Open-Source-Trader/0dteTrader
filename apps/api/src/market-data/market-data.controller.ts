@@ -14,11 +14,13 @@ import {
   OptionsChainQueryDto,
   QuoteQueryDto,
 } from './dto/market-query.dto';
+import { CryptoDataService } from './crypto-data.service';
 
 @Controller('market')
 export class MarketDataController {
   constructor(
     @Inject(BROKER_GATEWAY) private readonly broker: BrokerGateway,
+    private readonly crypto: CryptoDataService,
   ) {}
 
   @Get('quote')
@@ -26,6 +28,9 @@ export class MarketDataController {
     @CurrentUser() user: AuthenticatedUser,
     @Query() query: QuoteQueryDto,
   ): Promise<Quote> {
+    if (this.crypto.isCryptoSymbol(query.symbol)) {
+      return this.crypto.getQuote(query.symbol);
+    }
     return this.broker.getQuote(user.userId, query.symbol);
   }
 
@@ -34,6 +39,9 @@ export class MarketDataController {
     @CurrentUser() user: AuthenticatedUser,
     @Query() query: CandlesQueryDto,
   ): Promise<Candle[]> {
+    if (this.crypto.isCryptoSymbol(query.symbol)) {
+      return this.crypto.getCandles(query.symbol, query.interval, query.from, query.to);
+    }
     return this.broker.getCandles(user.userId, query.symbol, {
       interval: query.interval,
       from: query.from,

@@ -10,6 +10,8 @@ interface SymbolSection {
 
 const SECTIONS: SymbolSection[] = [
   { title: 'Indices & ETFs', symbols: ['SPY', 'QQQ', 'SPX', 'IWM', 'DIA', 'VXX'] },
+  // Live 24/7 data from Coinbase via the backend's crypto data source.
+  { title: 'Crypto', symbols: ['BTC', 'ETH', 'SOL', 'XRP', 'DOGE', 'ADA', 'AVAX', 'LINK', 'LTC'] },
   { title: 'Futures Roots', symbols: ['MES', 'ES', 'MNQ', 'NQ', 'CL', 'GC'] },
   {
     title: 'Stocks',

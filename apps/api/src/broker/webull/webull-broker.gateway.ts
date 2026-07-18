@@ -225,7 +225,12 @@ export class WebullBrokerGateway implements BrokerGateway, OnModuleDestroy {
     if (req.from) query.start_time = String(Date.parse(req.from));
     if (req.to) query.end_time = String(Date.parse(req.to));
     const raw = await client.request(endpoint, { query });
-    return asArray(raw).map((b) => toCandle(b as WebullBar));
+    // Webull returns bars newest-first; chart clients require ascending
+    // (lightweight-charts setData throws on unsorted input, DGCharts mirrors
+    // the same assumption) — sort by bucket start.
+    return asArray(raw)
+      .map((b) => toCandle(b as WebullBar))
+      .sort((a, b) => a.time.localeCompare(b.time));
   }
 
   /**

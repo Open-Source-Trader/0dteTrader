@@ -13,8 +13,28 @@ import { createHash, createHmac, randomUUID } from 'node:crypto';
 const SIGNATURE_VERSION = '1.0';
 const API_VERSION = 'v2';
 
-/** Hosts still on the legacy HMAC-SHA1/MD5 scheme (verify in sandbox smoke). */
-const LEGACY_HOSTS = new Set(['api.webull.com', 'data-api.webull.com']);
+/**
+ * Hosts still on the legacy HMAC-SHA1/MD5 scheme. Source: official Python SDK
+ * webull/core/utils/common.py is_not_upgrade_api_host — every host NOT in this
+ * set (including data-api.webull.com and the sandbox hosts) signs with
+ * HMAC-SHA256 + SHA-256 body hash.
+ */
+const LEGACY_HOSTS = new Set([
+  'api.webull.com',
+  'events-api.webull.com',
+  'api.webull.hk',
+  'events-api.webull.hk',
+  'pre-openapi-us-alb.webullbroker.com',
+  'pre-openapi-us-events.webullbroker.com',
+  'pre-openapi-alb.webullbroker.com',
+  'pre-openapi-events.webullbroker.com',
+  'us-openapi-alb.uat.webullbroker.com',
+  'us-openapi-events.uat.webullbroker.com',
+  'hk-openapi.uat.webullbroker.com',
+  'hk-openapi-events-api.uat.webullbroker.com',
+  'api.sandbox.webull.hk',
+  'events-api.sandbox.webull.hk',
+]);
 
 export function isLegacyHost(host: string): boolean {
   return LEGACY_HOSTS.has(host.toLowerCase());

@@ -87,6 +87,11 @@ describe('isLegacyHost', () => {
     expect(isLegacyHost('api.webull.com')).toBe(true);
     expect(isLegacyHost('api.sandbox.webull.com')).toBe(false);
   });
+
+  it('signs market-data hosts with HMAC-SHA256 (per the official SDK)', () => {
+    expect(isLegacyHost('data-api.webull.com')).toBe(false);
+    expect(isLegacyHost('data-api.sandbox.webull.com')).toBe(false);
+  });
 });
 
 describe('compactJson', () => {

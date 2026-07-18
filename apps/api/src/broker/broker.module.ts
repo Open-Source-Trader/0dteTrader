@@ -1,13 +1,11 @@
 import { Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { CredentialsModule } from '../credentials/credentials.module';
+import { CredentialsService } from '../credentials/credentials.service';
 import { BROKER_GATEWAY, BrokerGateway } from './broker-gateway.interface';
 import { MockBrokerGateway } from './mock-broker.gateway';
 import { OrderEventsService } from './order-events.service';
-import { WebullBrokerGateway } from './webull-broker.gateway';
-import { WebullClientProvider } from './webull/webull-client.provider';
-import { WebullHttpClient } from './webull/webull-http.client';
-import { WebullTokenStore } from './webull/webull-token.store';
+import { WebullBrokerGateway } from './webull/webull-broker.gateway';
 
 /**
  * Provides the active BrokerGateway under the BROKER_GATEWAY token, selected
@@ -17,19 +15,16 @@ import { WebullTokenStore } from './webull/webull-token.store';
   imports: [CredentialsModule],
   providers: [
     OrderEventsService,
-    WebullHttpClient,
-    WebullTokenStore,
-    WebullClientProvider,
     {
       provide: BROKER_GATEWAY,
-      inject: [ConfigService, OrderEventsService, WebullClientProvider],
+      inject: [ConfigService, OrderEventsService, CredentialsService],
       useFactory: (
         config: ConfigService,
         events: OrderEventsService,
-        webullClient: WebullClientProvider,
+        credentials: CredentialsService,
       ): BrokerGateway =>
         config.get<'mock' | 'webull'>('brokerGateway') === 'webull'
-          ? new WebullBrokerGateway(webullClient, events)
+          ? new WebullBrokerGateway(credentials, config, events)
           : new MockBrokerGateway(events),
     },
   ],

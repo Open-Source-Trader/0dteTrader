@@ -28,8 +28,14 @@ src/
                            iv‖authTag‖ciphertext); plaintext never logged
   broker/                  BrokerGateway interface + BROKER_GATEWAY token;
                            MockBrokerGateway (deterministic), WebullBrokerGateway
-                           (501 stub, P4); OrderEventsService (orderUpdate bus);
-                           contract-resolution.ts (auto-OTM / mid / OCC symbols)
+                           (real, P4 — see broker/webull/); OrderEventsService
+                           (orderUpdate bus); contract-resolution.ts
+                           (auto-OTM / mid / OCC symbols)
+  broker/webull/           P4 Webull OpenAPI stack: webull-endpoints.ts
+                           (single path/payload mapping file), webull-signer.ts
+                           (HMAC signing, official docs test vector),
+                           webull-client.ts (per-user HTTP + token lifecycle +
+                           429 backoff), webull-mappers.ts (response → DTO)
   market-data/             REST: quote, candles, options-chain, futures;
                            WS gateway at /v1/stream (1s quote ticks per symbol,
                            orderUpdate fan-out)
@@ -55,6 +61,7 @@ test/
 | `npm run lint` | eslint over `src/` and `test/` |
 | `npm run db:migrate` | `prisma migrate deploy` (needs `DATABASE_URL`) |
 | `npm run db:generate` | `prisma generate` (also runs on `postinstall`) |
+| `npm run smoke:webull` | Live sandbox smoke test (`src/scripts/webull-smoke.ts`, needs `WEBULL_SMOKE_APP_KEY/SECRET`; `-- --trade` also places+cancels a far-OTM order) |
 
 From the repo root, `npm install && npm run build && npm test` builds
 `packages/shared-types` first, then this package, then runs the whole suite.
@@ -68,7 +75,9 @@ built-in development defaults (a loud warning is logged when
 `JWT_REFRESH_SECRET`, and a valid base64 32-byte `CRED_ENCRYPTION_KEY`.
 
 `BROKER_GATEWAY=mock` (default) selects the deterministic mock broker;
-`webull` selects the stub that returns `501 NOT_IMPLEMENTED` until P4.
+`webull` selects the real Webull OpenAPI gateway (P4 — per-user clients from
+the encrypted credentials; sandbox hosts by default, see
+`../../docs/WEBULL-INTEGRATION.md` §7–§8).
 
 ## Database
 
@@ -117,6 +126,20 @@ unit + e2e together (`jest --runInBand`):
   - `trading/trading.service` — server-side auto-OTM normalization, mid limit
     price, idempotent replay (gateway hit exactly once), kill switch 403 +
     blocked audit row, audit coverage.
+  - `broker/webull/webull-signer` — HMAC signing against the official docs
+    test vector, host→algorithm classification, percent-encoding.
+  - `broker/webull/webull-mappers` — string-number tolerance, futures symbol
+    translation (`ESZ6`+`contract_month` ↔ `ESZ26`), order status map, OCC
+    symbols from legs, position filtering.
+  - `broker/webull/webull-client` — token create/cache/refresh/clear-on-401,
+    429 backoff (Retry-After + jitter) and exhaustion, 5xx retry, network
+    failure → BROKER_UNAVAILABLE, §6 error mapping table.
+  - `broker/webull-broker.gateway` — full gateway through a fake `fetchImpl`
+    router: quote routing, chain snapshot-probe synthesis (±12 strikes),
+    futures instruments mapping, preview (broker estimate + local fallback),
+    option/futures place payloads (MD5 client_order_id, position_intent),
+    status-poll fill emission (fake timers), cancel, positions/open-orders
+    filtering. No live Webull calls in tests.
 - **E2E** (`test/app.e2e-spec.ts`) boots the entire Nest app (real guards,
   pipes, filters, throttler module, WS adapter) with only `PrismaService`
   overridden by the in-memory fake, then drives supertest through

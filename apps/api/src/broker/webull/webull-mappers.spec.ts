@@ -182,6 +182,7 @@ describe('toPosition', () => {
       avgPrice: 2,
       markPrice: 1.5,
       unrealizedPnl: 50,
+      multiplier: 100,
     });
     expect(toPosition({ instrument_type: 'EQUITY', symbol: 'AAPL' })).toBeNull();
   });

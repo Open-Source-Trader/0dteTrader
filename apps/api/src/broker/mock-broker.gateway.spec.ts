@@ -1,5 +1,6 @@
 import { OrderRequest } from '@0dtetrader/shared-types';
 import { BrokerError } from '../common/broker-error';
+import { isTradingDay, todayUtc, ymd } from './expiration-calendar';
 import {
   MockBrokerGateway,
   MOCK_BUYING_POWER,
@@ -55,14 +56,33 @@ describe('MockBrokerGateway', () => {
   });
 
   describe('options chain', () => {
-    it('offers today/+1d/weekly/monthly expirations, ascending', async () => {
+    it('offers only trading-day expirations, ascending, starting at the next session', async () => {
       const chain = await gateway.getOptionsChain(USER, 'SPY');
       expect(chain.expirations.length).toBeGreaterThanOrEqual(3);
       const sorted = [...chain.expirations].sort();
       expect(chain.expirations).toEqual(sorted);
-      expect(chain.expirations[0]).toBe(
-        new Date().toISOString().slice(0, 10),
-      );
+      for (const expiration of chain.expirations) {
+        expect(isTradingDay(new Date(`${expiration}T12:00:00Z`))).toBe(true);
+      }
+      // SPY lists dailies: the nearest expiration is the first trading day on
+      // or after today (today itself during the week).
+      let next = todayUtc(new Date());
+      while (!isTradingDay(next)) next = new Date(next.getTime() + 86_400_000);
+      expect(chain.expirations[0]).toBe(ymd(next));
+    });
+
+    it('offers a single-name ticker only weekly/monthly expirations', async () => {
+      const chain = await gateway.getOptionsChain(USER, 'AAPL');
+      for (const expiration of chain.expirations) {
+        // Weeklies/monthlies expire Friday, or earlier when Friday is a holiday.
+        const weekday = new Date(`${expiration}T12:00:00Z`).getUTCDay();
+        expect(weekday).toBeGreaterThanOrEqual(1);
+        expect(weekday).toBeLessThanOrEqual(5);
+        expect(isTradingDay(new Date(`${expiration}T12:00:00Z`))).toBe(true);
+      }
+      // Fewer listings than a daily-expiry ETF queried the same day.
+      const spy = await gateway.getOptionsChain(USER, 'SPY');
+      expect(chain.expirations.length).toBeLessThan(spy.expirations.length);
     });
 
     it('uses $1 strikes under $250 and $5 strikes above', async () => {
@@ -249,15 +269,22 @@ describe('MockBrokerGateway', () => {
     });
 
     it('previews with resolved contract, price, buying power, warnings', async () => {
-      const preview = await gateway.previewOrder(USER, marketOrder());
-      expect(preview.resolved.contractSymbol).toMatch(/^SPY\d{6}C\d{8}$/);
-      expect(preview.resolved.price).toBeGreaterThan(0);
-      expect(preview.resolved.estBuyingPower).toBeCloseTo(
-        preview.resolved.price * 100,
-        2,
-      );
-      // Today is the default expiration → 0DTE warning.
-      expect(preview.warnings.join(' ')).toMatch(/0DTE/);
+      // Pin the clock to a regular trading Tuesday: SPY lists a daily
+      // expiration that day, so the default expiration is today (0DTE).
+      jest.useFakeTimers({ now: new Date('2026-07-14T15:00:00Z') });
+      try {
+        const preview = await gateway.previewOrder(USER, marketOrder());
+        expect(preview.resolved.contractSymbol).toMatch(/^SPY\d{6}C\d{8}$/);
+        expect(preview.resolved.price).toBeGreaterThan(0);
+        expect(preview.resolved.estBuyingPower).toBeCloseTo(
+          preview.resolved.price * 100,
+          2,
+        );
+        // Today is the default expiration → 0DTE warning.
+        expect(preview.warnings.join(' ')).toMatch(/0DTE/);
+      } finally {
+        jest.useRealTimers();
+      }
     });
 
     it('futures orders work end to end', async () => {

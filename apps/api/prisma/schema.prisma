@@ -31,6 +31,7 @@ model User {
   refreshTokens  RefreshToken[]
   orderAudits    OrderAudit[]
   webullApiToken WebullApiToken?
+  tradeOrders    TradeOrder[]
 
   @@map("users")
 }
@@ -76,6 +77,27 @@ model RefreshToken {
 
   @@index([userId])
   @@map("refresh_tokens")
+}
+
+// One row per broker order, kept current as order-update events arrive
+// (fills land asynchronously). Feeds the trade-history endpoint.
+model TradeOrder {
+  id             String   @id // broker orderId
+  userId         String   @db.Uuid
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  contractSymbol String
+  assetClass     String
+  side           String
+  quantity       Float
+  orderType      String
+  limitPrice     Float?
+  filledPrice    Float?
+  status         String
+  placedAt       DateTime
+  updatedAt      DateTime @updatedAt
+
+  @@index([userId, placedAt])
+  @@map("trade_orders")
 }
 
 model OrderAudit {

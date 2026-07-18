@@ -37,6 +37,7 @@ export class InMemoryPrismaService {
   readonly credentials: any[] = [];
   readonly refreshTokens: any[] = [];
   readonly orderAudits: any[] = [];
+  readonly tradeOrders: any[] = [];
 
   readonly user = {
     findUnique: async ({ where }: any) => {
@@ -159,6 +160,28 @@ export class InMemoryPrismaService {
       this.orderAudits.filter((a) => matches(a, where)),
   };
 
+  readonly tradeOrder = {
+    upsert: async ({ where, create, update }: any) => {
+      const existing = this.tradeOrders.find((o) => o.id === where.id);
+      if (existing) {
+        Object.assign(existing, update, { updatedAt: new Date() });
+        return existing;
+      }
+      const row = { updatedAt: new Date(), ...create };
+      this.tradeOrders.push(row);
+      return row;
+    },
+    findMany: async ({ where, orderBy }: any = {}) => {
+      const rows = this.tradeOrders.filter((o) => matches(o, where));
+      if (orderBy?.placedAt === 'asc') {
+        rows.sort((a, b) => a.placedAt.getTime() - b.placedAt.getTime());
+      } else if (orderBy?.placedAt === 'desc') {
+        rows.sort((a, b) => b.placedAt.getTime() - a.placedAt.getTime());
+      }
+      return rows;
+    },
+  };
+
   // Prisma lifecycle no-ops.
   async $connect(): Promise<void> {}
   async $disconnect(): Promise<void> {}
@@ -171,6 +194,7 @@ export class InMemoryPrismaService {
     this.credentials.length = 0;
     this.refreshTokens.length = 0;
     this.orderAudits.length = 0;
+    this.tradeOrders.length = 0;
   }
 
   /** Test helper: flip the kill switch for a user. */

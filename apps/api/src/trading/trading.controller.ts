@@ -13,6 +13,7 @@ import {
   OrderPreview,
   OrderResult,
   Position,
+  TradeHistory,
 } from '@0dtetrader/shared-types';
 import { errors } from '../common/api-exception';
 import {
@@ -20,6 +21,7 @@ import {
   CurrentUser,
 } from '../common/current-user.decorator';
 import { OrderRequestDto } from './dto/order-request.dto';
+import { OrdersService } from './orders.service';
 import { TradingService } from './trading.service';
 
 /**
@@ -29,7 +31,16 @@ import { TradingService } from './trading.service';
 @Throttle({ default: { limit: 10, ttl: 60_000 } })
 @Controller()
 export class TradingController {
-  constructor(private readonly trading: TradingService) {}
+  constructor(
+    private readonly trading: TradingService,
+    private readonly orders: OrdersService,
+  ) {}
+
+  /** Declared before the parameterized order routes so /history never matches an id. */
+  @Get('orders/history')
+  getHistory(@CurrentUser() user: AuthenticatedUser): Promise<TradeHistory> {
+    return this.orders.history(user.userId);
+  }
 
   @Post('orders/preview')
   @HttpCode(200)

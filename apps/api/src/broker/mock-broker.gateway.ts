@@ -25,6 +25,12 @@ import {
   parseOccSymbol,
   resolveAutoOtm,
 } from './contract-resolution';
+import {
+  optionExpirations,
+  thirdFriday,
+  todayUtc,
+  ymd,
+} from './expiration-calendar';
 import { OrderEventsService } from './order-events.service';
 
 /** Fixed mock buying power per user (docs/WEBULL-INTEGRATION.md §4). */
@@ -63,52 +69,11 @@ function mulberry32(seed: number): () => number {
 const round2 = (v: number): number => Math.round(v * 100) / 100;
 
 // ---------------------------------------------------------------------------
-// Date helpers (all UTC for timezone independence)
+// Date helpers (calendar-aware ones live in expiration-calendar.ts)
 // ---------------------------------------------------------------------------
-
-function ymd(d: Date): string {
-  const y = d.getUTCFullYear();
-  const m = String(d.getUTCMonth() + 1).padStart(2, '0');
-  const day = String(d.getUTCDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
-}
-
-function addDays(d: Date, days: number): Date {
-  return new Date(d.getTime() + days * 86_400_000);
-}
-
-function todayUtc(now: Date): Date {
-  return new Date(
-    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
-  );
-}
-
-/** Third Friday of the given month (options monthly expiry). */
-function thirdFriday(year: number, month: number): Date {
-  const first = new Date(Date.UTC(year, month - 1, 1));
-  const firstFriday = 1 + ((5 - first.getUTCDay() + 7) % 7);
-  return new Date(Date.UTC(year, month - 1, firstFriday + 14));
-}
 
 function daysBetween(a: Date, b: Date): number {
   return Math.round((b.getTime() - a.getTime()) / 86_400_000);
-}
-
-/**
- * Option expirations offered by the mock: today (0DTE), +1d, weekly (+7d),
- * and the next monthly (3rd Friday), ascending, deduped.
- */
-export function mockOptionExpirations(now: Date): string[] {
-  const today = todayUtc(now);
-  let monthly = thirdFriday(now.getUTCFullYear(), now.getUTCMonth() + 1);
-  if (monthly.getTime() <= today.getTime()) {
-    const next = new Date(
-      Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1),
-    );
-    monthly = thirdFriday(next.getUTCFullYear(), next.getUTCMonth() + 1);
-  }
-  const all = [today, addDays(today, 1), addDays(today, 7), monthly].map(ymd);
-  return [...new Set(all)];
 }
 
 /** Next `count` quarterly futures contract months whose expiry has not passed. */
@@ -259,7 +224,7 @@ export class MockBrokerGateway implements BrokerGateway, OnModuleDestroy {
     symbol: string,
     expiration?: string,
   ): Promise<OptionsChain> {
-    const expirations = mockOptionExpirations(new Date());
+    const expirations = optionExpirations(symbol, new Date());
     const chosen = expiration ?? expirations[0];
     if (!expirations.includes(chosen)) {
       throw brokerErrors.contractNotFound(
@@ -463,6 +428,7 @@ export class MockBrokerGateway implements BrokerGateway, OnModuleDestroy {
         avgPrice: round2(agg.avgPrice),
         markPrice: last,
         unrealizedPnl: round2((last - agg.avgPrice) * agg.quantity * multiplier),
+        multiplier,
       });
     }
     return out;

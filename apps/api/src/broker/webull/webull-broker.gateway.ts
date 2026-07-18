@@ -22,7 +22,7 @@ import {
   resolveAutoOtm,
 } from '../contract-resolution';
 import { BrokerGateway } from '../broker-gateway.interface';
-import { mockOptionExpirations } from '../mock-broker.gateway';
+import { optionExpirations } from '../expiration-calendar';
 import { OrderEventsService } from '../order-events.service';
 import {
   asArray,
@@ -231,7 +231,7 @@ export class WebullBrokerGateway implements BrokerGateway, OnModuleDestroy {
     expiration?: string,
   ): Promise<OptionsChain> {
     const client = await this.clientFor(userId);
-    const expirations = mockOptionExpirations(new Date());
+    const expirations = optionExpirations(symbol, new Date());
     const chosen = expiration ?? expirations[0];
     if (!expirations.includes(chosen)) {
       throw brokerErrors.contractNotFound(

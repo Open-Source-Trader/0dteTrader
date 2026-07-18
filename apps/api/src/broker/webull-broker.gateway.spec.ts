@@ -4,6 +4,7 @@ import { OrderRequest } from '@0dtetrader/shared-types';
 import { CredentialsService } from '../credentials/credentials.service';
 import { OrderEventsService } from './order-events.service';
 import { parseOccSymbol } from './contract-resolution';
+import { optionExpirations } from './expiration-calendar';
 import { WebullBrokerGateway } from './webull/webull-broker.gateway';
 import { FetchImpl } from './webull/webull-client';
 
@@ -24,7 +25,8 @@ interface RecordedCall {
 
 type Handler = (call: RecordedCall) => { status: number; body: unknown };
 
-const TODAY = new Date().toISOString().slice(0, 10);
+/** The expiration an unqualified SPY order resolves to (nearest listed). */
+const NEAREST_EXPIRATION = optionExpirations('SPY', new Date())[0];
 
 function defaultHandlers(): Record<string, Handler> {
   const perSymbol = (
@@ -385,7 +387,7 @@ describe('WebullBrokerGateway', () => {
         symbol: 'SPY',
         strike_price: '505',
         option_type: 'CALL',
-        option_expire_date: TODAY,
+        option_expire_date: NEAREST_EXPIRATION,
         instrument_type: 'OPTION',
         market: 'US',
       });
@@ -493,7 +495,7 @@ describe('WebullBrokerGateway', () => {
         {
           symbol: 'SPY',
           strike_price: '505',
-          option_expire_date: TODAY,
+          option_expire_date: NEAREST_EXPIRATION,
           option_type: 'CALL',
         },
       ],
@@ -553,6 +555,7 @@ describe('WebullBrokerGateway', () => {
           avgPrice: 6000,
           markPrice: 6001,
           unrealizedPnl: 50,
+          multiplier: 50,
         },
       ]);
     });

@@ -181,6 +181,21 @@ export interface Position {
   avgPrice: number;
   markPrice: number;
   unrealizedPnl: number;
+  /** Contract multiplier (options: 100; futures: per spec). Lets clients recompute P/L from live quotes. */
+  multiplier: number;
+}
+
+/** A historical order with the realized P/L its fill produced (closing fills only). */
+export interface TradeHistoryEntry extends OrderResult {
+  /** Realized P/L from the position this fill closed; null for opening fills and non-fills. */
+  realizedPnl: number | null;
+}
+
+export interface TradeHistory {
+  /** Newest first. */
+  entries: TradeHistoryEntry[];
+  /** Sum of realized P/L across all closing fills. */
+  totalRealizedPnl: number;
 }
 
 // ---------------------------------------------------------------------------

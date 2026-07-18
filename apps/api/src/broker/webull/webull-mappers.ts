@@ -8,7 +8,12 @@ import {
   Position,
   Quote,
 } from '@0dtetrader/shared-types';
-import { formatOccSymbol } from '../contract-resolution';
+import {
+  formatOccSymbol,
+  futuresRootOf,
+  FUTURES_SPECS,
+  OPTION_MULTIPLIER,
+} from '../contract-resolution';
 
 /**
  * Pure mapping between Webull OpenAPI payloads and the shared DTOs. Field
@@ -279,12 +284,18 @@ export interface WebullPosition {
 export function toPosition(pos: WebullPosition): Position | null {
   const type = (pos.instrument_type ?? '').toUpperCase();
   if (type !== 'OPTION' && type !== 'FUTURES') return null;
+  const symbol = contractSymbolOf(pos);
+  const multiplier =
+    type === 'OPTION'
+      ? OPTION_MULTIPLIER
+      : FUTURES_SPECS[futuresRootOf(symbol) ?? '']?.multiplier ?? 1;
   return {
-    symbol: contractSymbolOf(pos),
+    symbol,
     assetClass: type === 'OPTION' ? 'option' : 'future',
     quantity: num(pos.quantity),
     avgPrice: num(pos.cost_price),
     markPrice: num(pos.last_price),
     unrealizedPnl: num(pos.unrealized_profit_loss),
+    multiplier,
   };
 }

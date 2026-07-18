@@ -3,7 +3,8 @@
  * Webull sandbox smoke test (docs/RUNBOOK.md). Exercises the real OpenAPI end
  * to end with credentials from the environment — never committed:
  *
- *   WEBULL_SMOKE_APP_KEY=...    WEBULL_SMOKE_APP_SECRET=...
+ *   WEBULL_APP_KEY=...    WEBULL_APP_SECRET=...
+ *   (or the WEBULL_SMOKE_APP_KEY / WEBULL_SMOKE_APP_SECRET overrides)
  *   npm run smoke:webull            # market data + account, read-only
  *   npm run smoke:webull -- --trade # also place + cancel a far-OTM SPY order
  *
@@ -32,14 +33,16 @@ function loadDotEnv(): void {
 
 loadDotEnv();
 
-const APP_KEY = process.env.WEBULL_SMOKE_APP_KEY ?? '';
-const APP_SECRET = process.env.WEBULL_SMOKE_APP_SECRET ?? '';
+const APP_KEY =
+  process.env.WEBULL_SMOKE_APP_KEY ?? process.env.WEBULL_APP_KEY ?? '';
+const APP_SECRET =
+  process.env.WEBULL_SMOKE_APP_SECRET ?? process.env.WEBULL_APP_SECRET ?? '';
 const BASE_URL = process.env.WEBULL_API_BASE_URL || 'https://api.sandbox.webull.com';
 const TRADE = process.argv.includes('--trade');
 
 if (!APP_KEY || !APP_SECRET) {
   console.error(
-    'Set WEBULL_SMOKE_APP_KEY and WEBULL_SMOKE_APP_SECRET (shell env or .env).',
+    'Set WEBULL_APP_KEY and WEBULL_APP_SECRET (shell env or .env).',
   );
   process.exit(1);
 }

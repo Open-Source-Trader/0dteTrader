@@ -1,8 +1,8 @@
 import SwiftUI
 
-/// Layout B's bottom trade panel (FR-13..18): asset class, contract selection
-/// (expiration / strike / AUTO for options, root / contract for futures),
-/// quantity quick-steppers, mid/market toggle, and Buy/Sell arm buttons.
+/// Layout B's bottom trade panel (FR-13..18): option type / expiration /
+/// strike / AUTO contract selection, quantity quick-steppers, mid/market
+/// toggle, and Buy/Sell arm buttons. Options-only.
 struct TradePanelView: View {
     @ObservedObject var tradeViewModel: TradeViewModel
     @ObservedObject var chainViewModel: OptionsChainViewModel
@@ -16,19 +16,7 @@ struct TradePanelView: View {
         ScrollView(.vertical) {
             VStack(spacing: AppSpacing.sm) {
                 positionsStrip
-
-                Picker("Asset class", selection: $tradeViewModel.assetClass) {
-                    Text("Options").tag(AssetClass.option)
-                    Text("Futures").tag(AssetClass.future)
-                }
-                .pickerStyle(.segmented)
-
-                if tradeViewModel.assetClass == .option {
-                    optionsSection
-                } else {
-                    futuresSection
-                }
-
+                optionsSection
                 quantityRow
                 orderTypeRow
 
@@ -45,19 +33,11 @@ struct TradePanelView: View {
             .padding(.top, AppSpacing.xs)
             .padding(.bottom, AppSpacing.sm)
             .frame(maxWidth: .infinity)
-            .animation(reduceMotion ? nil : .snappy(duration: 0.22, extraBounce: 0), value: tradeViewModel.assetClass)
             .animation(reduceMotion ? nil : .snappy(duration: 0.22, extraBounce: 0), value: chainViewModel.isAutoMode)
         }
         .scrollIndicators(.hidden)
         .scrollBounceBehavior(.basedOnSize)
         .background(Color.appBackground)
-        .task {
-            // Ensure a contract list exists even when the chart symbol isn't
-            // a futures root (setFuturesRoot skips no-op reloads).
-            if tradeViewModel.futuresContracts.isEmpty {
-                await tradeViewModel.loadFuturesContracts()
-            }
-        }
     }
 
     // MARK: - Options
@@ -168,77 +148,6 @@ struct TradePanelView: View {
         .clipShape(RoundedRectangle(cornerRadius: AppRadius.sm, style: .continuous))
     }
 
-    // MARK: - Futures
-
-    private var futuresSection: some View {
-        VStack(spacing: AppSpacing.sm) {
-            if let message = tradeViewModel.futuresError {
-                errorRow(message) {
-                    Task { await tradeViewModel.loadFuturesContracts() }
-                }
-            }
-
-            HStack(spacing: AppSpacing.sm) {
-                Menu {
-                    ForEach(FuturesRoots.known, id: \.self) { root in
-                        Button(root) {
-                            Task { await tradeViewModel.setFuturesRoot(root) }
-                        }
-                    }
-                } label: {
-                    chipLabel(title: tradeViewModel.futuresRoot, systemImage: "shippingbox", fillWidth: false)
-                }
-
-                Menu {
-                    ForEach(tradeViewModel.futuresContracts) { contract in
-                        Button {
-                            tradeViewModel.selectedFutureSymbol = contract.symbol
-                        } label: {
-                            HStack {
-                                Text(contract.symbol)
-                                if contract.frontMonth {
-                                    Text("· front")
-                                        .foregroundStyle(.secondary)
-                                }
-                                if contract.symbol == tradeViewModel.selectedFutureSymbol {
-                                    Image(systemName: "checkmark")
-                                }
-                            }
-                        }
-                    }
-                } label: {
-                    chipLabel(
-                        title: tradeViewModel.selectedFutureSymbol ?? "Contract",
-                        systemImage: "doc.text",
-                        isPlaceholder: tradeViewModel.selectedFutureSymbol == nil,
-                        fillWidth: false
-                    )
-                }
-
-                Spacer(minLength: 0)
-            }
-
-            // Second row matches autoContractLabel's height so switching asset
-            // class doesn't reflow the ticket.
-            HStack {
-                if let future = tradeViewModel.selectedFuture {
-                    Text(future.mid.map { "≈ \(Format.price($0))" } ?? "—")
-                        .font(.priceSmall)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                } else {
-                    Text("No contract")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .frame(maxWidth: .infinity, minHeight: 34)
-            .padding(.horizontal, 10)
-            .background(Color.appSurface)
-            .clipShape(RoundedRectangle(cornerRadius: AppRadius.sm, style: .continuous))
-        }
-    }
-
     // MARK: - Quantity & order type
 
     private var quantityRow: some View {
@@ -312,49 +221,24 @@ struct TradePanelView: View {
     }
 
     /// Live `bid × ask` plus indicative mid and estimated notional for the
-    /// selected contract (mid × qty × contract multiplier — options: 100).
+    /// selected contract (mid × qty × 100, the option multiplier).
     private var quoteLine: String? {
-        guard let pair = selectedQuotePair else { return nil }
-        var line = "\(Format.price(pair.bid)) × \(Format.price(pair.ask))"
-        if let mid = indicativeMid {
-            let multiplier: Double = tradeViewModel.assetClass == .option ? 100 : 1
-            let notional = mid * Double(tradeViewModel.quantity) * multiplier
+        guard let contract = chainViewModel.selectedContract else { return nil }
+        var line = "\(Format.price(contract.bid)) × \(Format.price(contract.ask))"
+        if let mid = contract.mid {
+            let notional = mid * Double(tradeViewModel.quantity) * 100
             line += " · ≈ \(Format.price(mid)) · Est. \(Format.price(notional))"
         }
         return line
     }
 
-    private var selectedQuotePair: (bid: Double, ask: Double)? {
-        switch tradeViewModel.assetClass {
-        case .option:
-            return chainViewModel.selectedContract.map { ($0.bid, $0.ask) }
-        case .future:
-            return tradeViewModel.selectedFuture.map { ($0.bid, $0.ask) }
-        }
-    }
-
-    /// Indicative mid for the currently selected contract (server recomputes at send).
-    private var indicativeMid: Double? {
-        switch tradeViewModel.assetClass {
-        case .option:
-            return chainViewModel.selectedContract?.mid
-        case .future:
-            return tradeViewModel.selectedFuture?.mid
-        }
-    }
-
     private var canTrade: Bool {
-        switch tradeViewModel.assetClass {
-        case .option:
-            return chainViewModel.selectedContract != nil
-        case .future:
-            return tradeViewModel.selectedFuture != nil
-        }
+        chainViewModel.selectedContract != nil
     }
 
     // MARK: - Shared chrome
 
-    /// Inline load-error row with a retry action (chain / futures failures).
+    /// Inline load-error row with a retry action (chain load failures).
     private func errorRow(_ message: String, retry: @escaping () -> Void) -> some View {
         HStack(spacing: 6) {
             Image(systemName: "exclamationmark.triangle.fill")

@@ -29,19 +29,12 @@ struct ArmedOrderTicket: Identifiable, Sendable {
 }
 
 /// Trade state: ticket configuration, arm-then-confirm order flow, positions
-/// and open orders, futures contract selection, flatten/cancel actions.
+/// and open orders, flatten/cancel actions. Options-only.
 @MainActor
 final class TradeViewModel: ObservableObject {
     // Ticket configuration
-    @Published var assetClass: AssetClass = .option
     @Published var quantity = 1
     @Published var orderType: OrderType = .mid
-
-    // Futures selection
-    @Published private(set) var futuresRoot: String = FuturesRoots.fallback
-    @Published private(set) var futuresContracts: [FuturesContract] = []
-    @Published private(set) var futuresError: String?
-    @Published var selectedFutureSymbol: String?
 
     // Positions & orders
     @Published private(set) var positions: [Position] = []
@@ -83,53 +76,10 @@ final class TradeViewModel: ObservableObject {
         setQuantity(quantity + amount)
     }
 
-    // MARK: - Futures (FR-21)
-
-    func setFuturesRoot(_ root: String) async {
-        guard root != futuresRoot || futuresContracts.isEmpty else { return }
-        futuresRoot = root
-        await loadFuturesContracts()
-    }
-
-    /// `silent` suppresses the error toast for background 30s refreshes.
-    func loadFuturesContracts(silent: Bool = false) async {
-        do {
-            let contracts = try await apiClient.futures(root: futuresRoot).map(FuturesContract.init(dto:))
-            futuresContracts = contracts
-            futuresError = nil
-            if selectedFutureSymbol == nil || !contracts.contains(where: { $0.symbol == selectedFutureSymbol }) {
-                // Front month by default.
-                selectedFutureSymbol = contracts.first(where: \.frontMonth)?.symbol ?? contracts.first?.symbol
-            }
-        } catch let error as APIError {
-            futuresError = error.userMessage
-            if !silent { showToast(error.userMessage, style: .error) }
-        } catch {
-            futuresError = error.localizedDescription
-            if !silent { showToast(error.localizedDescription, style: .error) }
-        }
-    }
-
-    var selectedFuture: FuturesContract? {
-        futuresContracts.first { $0.symbol == selectedFutureSymbol }
-    }
-
-    /// Live tick for a subscribed contract symbol: updates the matching futures
-    /// contract's quote and recomputes any matching position's mark and P/L
-    /// (server-provided multiplier keeps the math consistent with the broker).
+    /// Live tick for a subscribed contract symbol: recomputes any matching
+    /// position's mark and P/L (server-provided multiplier keeps the math
+    /// consistent with the broker).
     func applyContractQuote(_ quote: Quote) {
-        if let index = futuresContracts.firstIndex(where: { $0.symbol == quote.symbol }) {
-            let old = futuresContracts[index]
-            futuresContracts[index] = FuturesContract(
-                symbol: old.symbol,
-                root: old.root,
-                expiration: old.expiration,
-                frontMonth: old.frontMonth,
-                bid: quote.bid,
-                ask: quote.ask,
-                last: quote.last
-            )
-        }
         if let index = positions.firstIndex(where: { $0.symbol == quote.symbol }) {
             var position = positions[index]
             position.markPrice = quote.last
@@ -139,13 +89,6 @@ final class TradeViewModel: ObservableObject {
         }
     }
 
-    #if DEBUG
-    /// Test hook: futuresContracts is private(set).
-    func setFuturesContractsForTesting(_ contracts: [FuturesContract]) {
-        futuresContracts = contracts
-    }
-    #endif
-
     // MARK: - Arm (step 1 of FR-19)
 
     /// Builds the OrderRequest, generates the idempotency key, and opens the
@@ -153,59 +96,36 @@ final class TradeViewModel: ObservableObject {
     func arm(side: OrderSide, underlying: String, chainViewModel: OptionsChainViewModel) {
         let selection: OrderSelectionDTO
         let summary: String
-        var requestUnderlying = underlying
+        let optionType = chainViewModel.optionType
 
-        switch assetClass {
-        case .option:
-            let optionType = chainViewModel.optionType
-            if chainViewModel.isAutoMode {
-                selection = OrderSelectionDTO(
-                    mode: "auto_otm",
-                    optionType: optionType.rawValue,
-                    expiration: chainViewModel.selectedExpiration,
-                    strike: nil,
-                    contractSymbol: nil
-                )
-                let expirationLabel = chainViewModel.selectedExpiration ?? "nearest"
-                summary = "\(underlying) AUTO +1 OTM \(optionType.displayName) · exp \(expirationLabel)"
-            } else {
-                guard let strike = chainViewModel.selectedStrike,
-                      let expiration = chainViewModel.selectedExpiration
-                else {
-                    showToast("Pick an expiration and strike first.", style: .error)
-                    return
-                }
-                selection = OrderSelectionDTO(
-                    mode: "explicit",
-                    optionType: optionType.rawValue,
-                    expiration: expiration,
-                    strike: strike,
-                    contractSymbol: nil
-                )
-                summary = "\(underlying) \(expiration) \(Format.strike(strike))\(optionType.shortName)"
-            }
-
-        case .future:
-            guard let contract = selectedFuture else {
-                showToast("Pick a futures contract first.", style: .error)
+        if chainViewModel.isAutoMode {
+            selection = OrderSelectionDTO(
+                mode: "auto_otm",
+                optionType: optionType.rawValue,
+                expiration: chainViewModel.selectedExpiration,
+                strike: nil
+            )
+            let expirationLabel = chainViewModel.selectedExpiration ?? "nearest"
+            summary = "\(underlying) AUTO +1 OTM \(optionType.displayName) · exp \(expirationLabel)"
+        } else {
+            guard let strike = chainViewModel.selectedStrike,
+                  let expiration = chainViewModel.selectedExpiration
+            else {
+                showToast("Pick an expiration and strike first.", style: .error)
                 return
             }
             selection = OrderSelectionDTO(
                 mode: "explicit",
-                optionType: nil,
-                expiration: nil,
-                strike: nil,
-                contractSymbol: contract.symbol
+                optionType: optionType.rawValue,
+                expiration: expiration,
+                strike: strike
             )
-            summary = contract.symbol
-            // The charted symbol may be a specific contract ("MESU26"); the
-            // server expects the root as the order's underlying.
-            requestUnderlying = contract.root
+            summary = "\(underlying) \(expiration) \(Format.strike(strike))\(optionType.shortName)"
         }
 
         let request = OrderRequestDTO(
-            underlying: requestUnderlying,
-            assetClass: assetClass.rawValue,
+            underlying: underlying,
+            assetClass: "option",
             side: side.rawValue,
             quantity: quantity,
             orderType: orderType.rawValue,
@@ -296,46 +216,27 @@ final class TradeViewModel: ObservableObject {
     func flatten(_ position: Position) async {
         guard position.quantity != 0 else { return }
         guard !workingSymbols.contains(position.symbol) else { return }
+
+        guard let contract = optionContractResolver?(position.symbol) else {
+            showToast("Open \(position.symbol)'s chart to flatten this option.", style: .error)
+            return
+        }
         workingSymbols.insert(position.symbol)
         defer { workingSymbols.remove(position.symbol) }
 
         let side: OrderSide = position.quantity > 0 ? .sell : .buy
-        let selection: OrderSelectionDTO
-        let underlying: String
-
-        switch position.assetClass {
-        case .future:
-            selection = OrderSelectionDTO(
-                mode: "explicit",
-                optionType: nil,
-                expiration: nil,
-                strike: nil,
-                contractSymbol: position.symbol
-            )
-            underlying = FuturesRoots.root(for: position.symbol) ?? futuresRoot
-
-        case .option:
-            guard let contract = optionContractResolver?(position.symbol) else {
-                showToast("Open \(position.symbol)'s chart to flatten this option.", style: .error)
-                return
-            }
-            selection = OrderSelectionDTO(
-                mode: "explicit",
-                optionType: contract.optionType.rawValue,
-                expiration: contract.expiration,
-                strike: contract.strike,
-                contractSymbol: nil
-            )
-            underlying = contract.underlying
-        }
-
         let request = OrderRequestDTO(
-            underlying: underlying,
-            assetClass: position.assetClass.rawValue,
+            underlying: contract.underlying,
+            assetClass: "option",
             side: side.rawValue,
             quantity: abs(position.quantity),
             orderType: OrderType.market.rawValue,
-            selection: selection
+            selection: OrderSelectionDTO(
+                mode: "explicit",
+                optionType: contract.optionType.rawValue,
+                expiration: contract.expiration,
+                strike: contract.strike
+            )
         )
         do {
             let result = OrderResult(dto: try await apiClient.placeOrder(

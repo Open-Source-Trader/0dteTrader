@@ -37,6 +37,64 @@ enum TradePanelDensity: Sendable {
         case .dense: return 40
         }
     }
+
+    /// Call/Put + Mid/Market segmented rows, and the AUTO contract label
+    /// (desktop parity: .segmented 36 → 32 → 30px per tier).
+    var segmentedMinHeight: CGFloat {
+        switch self {
+        case .roomy: return 34
+        case .compact: return 32
+        case .dense: return 30
+        }
+    }
+
+    /// Expiration/strike chip triggers (desktop parity: .chip-button
+    /// vertical padding 8 → 6 → 5px per tier).
+    var chipVerticalPadding: CGFloat {
+        switch self {
+        case .roomy: return 11
+        case .compact: return 6
+        case .dense: return 5
+        }
+    }
+
+    var chipMinHeight: CGFloat {
+        switch self {
+        case .roomy: return 44
+        case .compact: return 32
+        case .dense: return 30
+        }
+    }
+
+    /// Quantity stepper − / + buttons: the visible chamfered square
+    /// (desktop parity: .stepper 36 → 32 → 30px per tier).
+    var stepperVisualSize: CGFloat {
+        switch self {
+        case .roomy: return 34
+        case .compact: return 32
+        case .dense: return 30
+        }
+    }
+
+    /// The stepper's touch frame — scaled with the visual so the row
+    /// actually compacts instead of pinning the row at 44pt.
+    var stepperTouchSize: CGFloat {
+        switch self {
+        case .roomy: return 44
+        case .compact: return 40
+        case .dense: return 36
+        }
+    }
+
+    /// +1/+5/+10 quick chips (desktop parity: .quick-chip padding shrinks
+    /// with the tier).
+    var quickChipMinHeight: CGFloat {
+        switch self {
+        case .roomy: return 44
+        case .compact: return 32
+        case .dense: return 30
+        }
+    }
 }
 
 /// Layout B's bottom trade panel (FR-13..18): option type / expiration /
@@ -104,7 +162,8 @@ struct TradePanelView: View {
                         .init(OptionType.call, "Call", accent: .buyGreen),
                         .init(OptionType.put, "Put", accent: .sellRed),
                     ],
-                    selection: $chainViewModel.optionType
+                    selection: $chainViewModel.optionType,
+                    minHeight: density.segmentedMinHeight
                 )
                 .accessibilityLabel("Option type")
 
@@ -192,7 +251,7 @@ struct TradePanelView: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .frame(maxWidth: .infinity, minHeight: 34)
+        .frame(maxWidth: .infinity, minHeight: density.segmentedMinHeight)
         .padding(.horizontal, 10)
         .background {
             HudPanelShape(chamfer: 6)
@@ -217,7 +276,7 @@ struct TradePanelView: View {
                 tradeViewModel.addQuantity(-1)
             } label: {
                 Image(systemName: "minus")
-                    .frame(width: 44, height: 44)
+                    .frame(width: density.stepperTouchSize, height: density.stepperTouchSize)
                     .background {
                         HudPanelShape(chamfer: 5)
                             .fill(Color.hudPanel)
@@ -225,7 +284,7 @@ struct TradePanelView: View {
                                 HudPanelShape(chamfer: 5)
                                     .strokeBorder(Color.hudStroke.opacity(0.35), lineWidth: 1)
                             }
-                            .frame(width: 34, height: 34)
+                            .frame(width: density.stepperVisualSize, height: density.stepperVisualSize)
                     }
                     .contentShape(Rectangle())
             }
@@ -251,7 +310,7 @@ struct TradePanelView: View {
                 tradeViewModel.addQuantity(1)
             } label: {
                 Image(systemName: "plus")
-                    .frame(width: 44, height: 44)
+                    .frame(width: density.stepperTouchSize, height: density.stepperTouchSize)
                     .background {
                         HudPanelShape(chamfer: 5)
                             .fill(Color.hudPanel)
@@ -259,7 +318,7 @@ struct TradePanelView: View {
                                 HudPanelShape(chamfer: 5)
                                     .strokeBorder(Color.hudStroke.opacity(0.35), lineWidth: 1)
                             }
-                            .frame(width: 34, height: 34)
+                            .frame(width: density.stepperVisualSize, height: density.stepperVisualSize)
                     }
                     .contentShape(Rectangle())
             }
@@ -268,9 +327,9 @@ struct TradePanelView: View {
 
             Spacer()
 
-            QuickChipButton(title: "+1") { tradeViewModel.addQuantity(1) }
-            QuickChipButton(title: "+5") { tradeViewModel.addQuantity(5) }
-            QuickChipButton(title: "+10") { tradeViewModel.addQuantity(10) }
+            QuickChipButton(title: "+1", minHeight: density.quickChipMinHeight) { tradeViewModel.addQuantity(1) }
+            QuickChipButton(title: "+5", minHeight: density.quickChipMinHeight) { tradeViewModel.addQuantity(5) }
+            QuickChipButton(title: "+10", minHeight: density.quickChipMinHeight) { tradeViewModel.addQuantity(10) }
         }
     }
 
@@ -281,7 +340,8 @@ struct TradePanelView: View {
                     .init(OrderType.mid, "Mid"),
                     .init(OrderType.market, "Market"),
                 ],
-                selection: $tradeViewModel.orderType
+                selection: $tradeViewModel.orderType,
+                minHeight: density.segmentedMinHeight
             )
             .accessibilityLabel("Order type")
 
@@ -356,8 +416,8 @@ struct TradePanelView: View {
         }
         .foregroundStyle(isPlaceholder ? .secondary : .primary)
         .padding(.horizontal, AppSpacing.md)
-        .padding(.vertical, 11)
-        .frame(maxWidth: fillWidth ? .infinity : nil, minHeight: 44)
+        .padding(.vertical, density.chipVerticalPadding)
+        .frame(maxWidth: fillWidth ? .infinity : nil, minHeight: density.chipMinHeight)
         .background {
             HudPanelShape(chamfer: 6)
                 .fill(Color.hudPanel)

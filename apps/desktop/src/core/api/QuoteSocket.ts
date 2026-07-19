@@ -79,6 +79,10 @@ export class QuoteSocket extends Store<QuoteSocketState> {
     symbols.forEach((symbol) => this.subscribedSymbols.add(symbol));
     if (this.getState().connectionState === 'connected' && newSymbols.length > 0) {
       this.send({ type: 'subscribe', symbols: newSymbols });
+      // Re-arm the receive watchdog: if it previously fired while nothing
+      // was subscribed (no-op), the link's health is only re-checked when a
+      // message arrives — without this, a half-open socket goes unnoticed.
+      this.resetWatchdog();
     }
   }
 

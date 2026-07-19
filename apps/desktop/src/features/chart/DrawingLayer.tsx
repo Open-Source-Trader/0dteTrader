@@ -26,8 +26,6 @@ interface DrawingLayerProps {
   store: DrawingsStore;
   /** Candle data version: live updates shift price→y geometry, so repaint. */
   candles: ChartCandle[];
-  /** First candle's bucket time (epoch s) — anchor for time→logical mapping. */
-  firstTime: number;
   intervalSec: number;
 }
 
@@ -42,36 +40,70 @@ interface DragState {
 /**
  * TradingView-style annotation overlay: renders and edits trend lines, rays,
  * horizontal lines, boxes, and alert lines on a canvas above the chart pane.
- * Anchors are (time, price); times map to x via the uniform bucket spacing so
- * shapes stay put across pan/zoom, live appends, and reloads. Repaints are
- * event-driven (store/pan/zoom/resize/data), not a permanent rAF loop.
+ * Anchors are (time, price); times resolve to the NEAREST ACTUAL BAR index
+ * (binary search), not arithmetic on uniform buckets — session/weekend gaps
+ * make the candle array non-uniform, and bucket arithmetic drifts anchors
+ * across gaps. Repaints are event-driven (store/pan/zoom/resize/data).
  */
-export function DrawingLayer({ chart, series, store, candles, firstTime, intervalSec }: DrawingLayerProps) {
+export function DrawingLayer({ chart, series, store, candles, intervalSec }: DrawingLayerProps) {
   const { tool, drawings, alerts } = useStore(store);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const dragRef = useRef<DragState | null>(null);
   const draftingRef = useRef(false);
   const hoverIdRef = useRef<string | null>(null);
   const scheduleRef = useRef<() => void>(() => {});
-  const geometryRef = useRef({ firstTime, intervalSec });
-  geometryRef.current = { firstTime, intervalSec };
+  const candlesRef = useRef(candles);
+  candlesRef.current = candles;
+  const intervalSecRef = useRef(intervalSec);
+  intervalSecRef.current = intervalSec;
 
   // MARK: - Coordinate mapping
 
+  /** Anchor time → bar index: nearest actual candle; extrapolates uniformly
+   *  only for times past the last bar (forward projections). */
+  const timeToLogical = (time: number): number => {
+    const arr = candlesRef.current;
+    if (arr.length === 0) return 0;
+    const lastIndex = arr.length - 1;
+    if (time > arr[lastIndex].time) {
+      return lastIndex + (time - arr[lastIndex].time) / intervalSecRef.current;
+    }
+    let lo = 0;
+    let hi = lastIndex;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (arr[mid].time < time) lo = mid + 1;
+      else hi = mid;
+    }
+    if (lo > 0 && Math.abs(arr[lo - 1].time - time) < Math.abs(arr[lo].time - time)) {
+      return lo - 1;
+    }
+    return lo;
+  };
+
+  /** Bar index → anchor time (inverse of timeToLogical). */
+  const logicalToTime = (logical: number): number => {
+    const arr = candlesRef.current;
+    if (arr.length === 0) return 0;
+    const lastIndex = arr.length - 1;
+    if (logical > lastIndex) {
+      return arr[lastIndex].time + (logical - lastIndex) * intervalSecRef.current;
+    }
+    const index = Math.max(0, Math.min(lastIndex, Math.round(logical)));
+    return arr[index].time;
+  };
+
   const toXY = (point: DrawingPoint): { x: number | null; y: number | null } => {
-    const { firstTime: t0, intervalSec: step } = geometryRef.current;
-    const logical = (point.time - t0) / step;
-    const x = chart.timeScale().logicalToCoordinate(logical as Logical);
+    const x = chart.timeScale().logicalToCoordinate(timeToLogical(point.time) as Logical);
     const y = series.priceToCoordinate(point.price);
     return { x: x ?? null, y: y ?? null };
   };
 
   const toPoint = (x: number, y: number): DrawingPoint | null => {
-    const { firstTime: t0, intervalSec: step } = geometryRef.current;
     const logical = chart.timeScale().coordinateToLogical(x);
     const price = series.coordinateToPrice(y);
     if (logical === null || price === null) return null;
-    return { time: t0 + logical * step, price };
+    return { time: logicalToTime(logical), price };
   };
 
   /** Pointer event → logical canvas coordinates (compensates the app scale). */

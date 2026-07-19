@@ -296,16 +296,12 @@ struct TradePanelView: View {
         }
     }
 
-    /// Live `bid × ask` plus indicative mid and estimated notional for the
-    /// selected contract (mid × qty × 100, the option multiplier).
     private var quoteLine: String? {
         guard let contract = chainViewModel.selectedContract else { return nil }
-        var line = "\(Format.price(contract.bid)) × \(Format.price(contract.ask))"
-        if let mid = contract.mid {
-            let notional = mid * Double(tradeViewModel.quantity) * 100
-            line += " · ≈ \(Format.price(mid)) · Est. \(Format.price(notional))"
+        if tradeViewModel.orderType == .mid, let mid = contract.mid {
+            return "≈ \(Format.price(mid))"
         }
-        return line
+        return "\(Format.price(contract.bid)) × \(Format.price(contract.ask))"
     }
 
     private var canTrade: Bool {

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { CandleInterval, TradingMode } from '@0dtetrader/shared-types';
+import type { ChartInterval, TradingMode } from '@0dtetrader/shared-types';
 import type { ApiClient } from '../../core/api/ApiClient';
 import { useStore } from '../../core/observable';
 import { Menu } from '../../design/components/Menu';
@@ -36,19 +36,23 @@ interface ChartViewProps {
 
 // Interval hotkeys. 'H'/'D' are uppercase (shift held) so they don't collide
 // with the drawing-tool hotkeys (plain v/t/r/h/b/a in DrawingLayer).
-const INTERVAL_SHORTCUTS: Record<string, CandleInterval> = {
+const INTERVAL_SHORTCUTS: Record<string, ChartInterval> = {
   '1': '1m',
   '5': '5m',
   '3': '15m',
+  '0': '30m',
   H: '1h',
+  '4': '4h',
   D: '1d',
 };
 
-const INTERVAL_HINTS: Record<CandleInterval, string> = {
+const INTERVAL_HINTS: Partial<Record<ChartInterval, string>> = {
   '1m': '1',
   '5m': '5',
   '15m': '3',
+  '30m': '0',
   '1h': '⇧H',
+  '4h': '4',
   '1d': '⇧D',
 };
 
@@ -58,7 +62,16 @@ const SKELETON_BARS = [
 ];
 
 /** Chart surface: header, candle chart with overlays and drawing tools, sub-panes. */
-export function ChartView({ store, drawingsStore, apiClient, onSymbolSearch, onIndicatorSettings, tradingMode, onToggleMode, gexExpiration }: ChartViewProps) {
+export function ChartView({
+  store,
+  drawingsStore,
+  apiClient,
+  onSymbolSearch,
+  onIndicatorSettings,
+  tradingMode,
+  onToggleMode,
+  gexExpiration,
+}: ChartViewProps) {
   const {
     symbol,
     interval,
@@ -340,22 +353,25 @@ export function ChartView({ store, drawingsStore, apiClient, onSymbolSearch, onI
               key: option,
               label: (
                 <>
-                  {option}
-                  <span
-                    style={{
-                      marginLeft: 12,
-                      fontSize: 'var(--fs-caption)',
-                      color: 'var(--label-secondary)',
-                    }}
-                  >
-                    {INTERVAL_HINTS[option]}
-                  </span>
+                  {option.toUpperCase()}
+                  {INTERVAL_HINTS[option] ? (
+                    <span
+                      style={{
+                        marginLeft: 12,
+                        fontSize: 'var(--fs-caption)',
+                        color: 'var(--label-secondary)',
+                      }}
+                    >
+                      {INTERVAL_HINTS[option]}
+                    </span>
+                  ) : null}
                 </>
               ),
               checked: option === interval,
               onSelect: () => store.selectInterval(option),
             }))}
           />
+          <DrawToolsMenu store={drawingsStore} />
           <button
             className="chart-icon-button"
             onClick={onIndicatorSettings}
@@ -373,105 +389,100 @@ export function ChartView({ store, drawingsStore, apiClient, onSymbolSearch, onI
         style={{ flex: 1, minHeight: 100, margin: '3px 8px', padding: 0, display: 'flex' }}
       >
         <div className="hud-clip" style={{ flex: 1, minHeight: 0, position: 'relative' }}>
-        {/* Drawing tools live on the canvas (the mockup header has no room);
-            below the OHLC legend line so the two never collide. */}
-        <div style={{ position: 'absolute', top: 26, left: 56, zIndex: 4 }}>
-          <DrawToolsMenu store={drawingsStore} />
-        </div>
-        <CandleChart
-          candles={candles}
-          overlays={twcLineOverlays.length > 0 ? [...overlays, ...twcLineOverlays] : overlays}
-          symbol={symbol}
-          interval={interval}
-          showVolume={indicatorSettings.volumeEnabled}
-          drawingsStore={drawingsStore}
-          candleColors={twcModel?.candleColors ?? null}
-          twcModel={twcModel}
-          gexLevels={gexLevels}
-          gexSettings={gexSettings.enabled ? gexSettings : null}
-          gexStale={gex.stale}
-          onVisibleRangeChange={setVisibleRange}
-        />
-        {twcModel?.banner ? <TwcBiasBanner banner={twcModel.banner} /> : null}
-        {gex.errorMessage ? (
-          <div
-            role="status"
-            style={{
-              position: 'absolute',
-              bottom: 8,
-              left: 56,
-              fontSize: 'var(--fs-caption2)',
-              color: 'var(--warning-orange)',
-              pointerEvents: 'none',
-              zIndex: 3,
-            }}
-          >
-            GEX unavailable: {gex.errorMessage}
-          </div>
-        ) : null}
-        {isLoading && candles.length === 0 ? (
-          <div className="chart-skeleton" aria-hidden="true">
-            {SKELETON_BARS.map((height, index) => (
-              <div className="bar" key={index} style={{ height: `${height}%` }} />
-            ))}
-          </div>
-        ) : isLoading ? (
-          <div
-            style={{
-              position: 'absolute',
-              inset: 0,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              pointerEvents: 'none',
-            }}
-          >
-            <Spinner />
-          </div>
-        ) : null}
-        {errorMessage && candles.length === 0 ? (
-          <div
-            role="alert"
-            style={{
-              position: 'absolute',
-              inset: 0,
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: 12,
-              padding: 16,
-              textAlign: 'center',
-            }}
-          >
-            <span className="text-secondary" style={{ fontSize: 'var(--fs-footnote)' }}>
-              {errorMessage}
-            </span>
-            <button
-              onClick={() => void store.loadCandles()}
+          <CandleChart
+            candles={candles}
+            overlays={twcLineOverlays.length > 0 ? [...overlays, ...twcLineOverlays] : overlays}
+            symbol={symbol}
+            interval={interval}
+            showVolume={indicatorSettings.volumeEnabled}
+            drawingsStore={drawingsStore}
+            candleColors={twcModel?.candleColors ?? null}
+            twcModel={twcModel}
+            gexLevels={gexLevels}
+            gexSettings={gexSettings.enabled ? gexSettings : null}
+            gexStale={gex.stale}
+            onVisibleRangeChange={setVisibleRange}
+          />
+          {twcModel?.banner ? <TwcBiasBanner banner={twcModel.banner} /> : null}
+          {gex.errorMessage ? (
+            <div
+              role="status"
               style={{
-                color: 'var(--app-accent-text)',
-                fontSize: 'var(--fs-footnote)',
-                fontWeight: 600,
-                minHeight: 44,
-                padding: '0 16px',
+                position: 'absolute',
+                bottom: 8,
+                left: 56,
+                fontSize: 'var(--fs-caption2)',
+                color: 'var(--warning-orange)',
+                pointerEvents: 'none',
+                zIndex: 3,
               }}
             >
-              Retry
-            </button>
-          </div>
-        ) : null}
-        {errorMessage && candles.length > 0 ? (
-          // Refresh failed over live candles: surface it without blocking.
-          <div className="toast" role="alert">
-            <div
-              className="toast-capsule"
-              style={{ borderColor: 'color-mix(in srgb, var(--pnl-negative) 60%, transparent)' }}
-            >
-              {errorMessage}
+              GEX unavailable: {gex.errorMessage}
             </div>
-          </div>
-        ) : null}
+          ) : null}
+          {isLoading && candles.length === 0 ? (
+            <div className="chart-skeleton" aria-hidden="true">
+              {SKELETON_BARS.map((height, index) => (
+                <div className="bar" key={index} style={{ height: `${height}%` }} />
+              ))}
+            </div>
+          ) : isLoading ? (
+            <div
+              style={{
+                position: 'absolute',
+                inset: 0,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                pointerEvents: 'none',
+              }}
+            >
+              <Spinner />
+            </div>
+          ) : null}
+          {errorMessage && candles.length === 0 ? (
+            <div
+              role="alert"
+              style={{
+                position: 'absolute',
+                inset: 0,
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 12,
+                padding: 16,
+                textAlign: 'center',
+              }}
+            >
+              <span className="text-secondary" style={{ fontSize: 'var(--fs-footnote)' }}>
+                {errorMessage}
+              </span>
+              <button
+                onClick={() => void store.loadCandles()}
+                style={{
+                  color: 'var(--app-accent-text)',
+                  fontSize: 'var(--fs-footnote)',
+                  fontWeight: 600,
+                  minHeight: 44,
+                  padding: '0 16px',
+                }}
+              >
+                Retry
+              </button>
+            </div>
+          ) : null}
+          {errorMessage && candles.length > 0 ? (
+            // Refresh failed over live candles: surface it without blocking.
+            <div className="toast" role="alert">
+              <div
+                className="toast-capsule"
+                style={{ borderColor: 'color-mix(in srgb, var(--pnl-negative) 60%, transparent)' }}
+              >
+                {errorMessage}
+              </div>
+            </div>
+          ) : null}
         </div>
       </div>
 
@@ -499,7 +510,12 @@ export function ChartView({ store, drawingsStore, apiClient, onSymbolSearch, onI
             macdHistogram: 'Hist',
           })}
         >
-          <IndicatorPane height={72} candles={candles} series={macdSeries} visibleRange={visibleRange} />
+          <IndicatorPane
+            height={72}
+            candles={candles}
+            series={macdSeries}
+            visibleRange={visibleRange}
+          />
         </PaneCard>
       ) : null}
       {stochSeries && visiblePanes.has('stochEnabled') ? (
@@ -522,7 +538,12 @@ export function ChartView({ store, drawingsStore, apiClient, onSymbolSearch, onI
           title={`ATR (${indicatorSettings.atrPeriod})`}
           readouts={paneReadouts(atrSeries, { atr: '' })}
         >
-          <IndicatorPane height={68} candles={candles} series={atrSeries} visibleRange={visibleRange} />
+          <IndicatorPane
+            height={68}
+            candles={candles}
+            series={atrSeries}
+            visibleRange={visibleRange}
+          />
         </PaneCard>
       ) : null}
     </div>
@@ -531,10 +552,7 @@ export function ChartView({ store, drawingsStore, apiClient, onSymbolSearch, onI
 
 /** Live value readouts for a pane card: last non-null of each labeled series,
  *  in label order. Histogram series get their sign color (green/red). */
-function paneReadouts(
-  series: PaneSeries[],
-  labels: Record<string, string>,
-): PaneReadout[] {
+function paneReadouts(series: PaneSeries[], labels: Record<string, string>): PaneReadout[] {
   const readouts: PaneReadout[] = [];
   for (const [id, label] of Object.entries(labels)) {
     const spec = series.find((candidate) => candidate.id === id);
@@ -543,8 +561,8 @@ function paneReadouts(
     if (value === null) continue;
     const color =
       spec.kind === 'histogram'
-        ? (value >= 0 ? spec.positiveColor : spec.negativeColor) ?? 'var(--label-secondary)'
-        : spec.color ?? 'var(--label-secondary)';
+        ? ((value >= 0 ? spec.positiveColor : spec.negativeColor) ?? 'var(--label-secondary)')
+        : (spec.color ?? 'var(--label-secondary)');
     readouts.push({ label, value: value.toFixed(2), color });
   }
   return readouts;

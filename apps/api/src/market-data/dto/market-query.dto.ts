@@ -1,10 +1,4 @@
-import {
-  IsDateString,
-  IsIn,
-  IsOptional,
-  IsString,
-  Matches,
-} from 'class-validator';
+import { IsDateString, IsIn, IsOptional, IsString, Matches } from 'class-validator';
 import { CandleInterval } from '@0dtetrader/shared-types';
 
 export class QuoteQueryDto {
@@ -18,7 +12,7 @@ export class CandlesQueryDto {
   @Matches(/^[A-Za-z0-9.]{1,20}$/)
   symbol!: string;
 
-  @IsIn(['1m', '5m', '15m', '1h', '1d'])
+  @IsIn(['1m', '5m', '15m', '30m', '1h', '4h', '1d'])
   interval!: CandleInterval;
 
   @IsOptional()

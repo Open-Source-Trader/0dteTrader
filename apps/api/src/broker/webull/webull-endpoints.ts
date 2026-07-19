@@ -116,7 +116,9 @@ export const TIMESPAN: Record<CandleInterval, string> = {
   '1m': 'M1',
   '5m': 'M5',
   '15m': 'M15',
+  '30m': 'M30',
   '1h': 'M60',
+  '4h': 'M240',
   '1d': 'D',
 };
 
@@ -132,21 +134,14 @@ export { formatOccSymbol };
 // Order payloads [verified: SDK samples/order/*.py + trade-api doc examples]
 // ---------------------------------------------------------------------------
 
-export type PositionIntent =
-  | 'BUY_TO_OPEN'
-  | 'BUY_TO_CLOSE'
-  | 'SELL_TO_OPEN'
-  | 'SELL_TO_CLOSE';
+export type PositionIntent = 'BUY_TO_OPEN' | 'BUY_TO_CLOSE' | 'SELL_TO_OPEN' | 'SELL_TO_CLOSE';
 
 /**
  * Picks the position_intent for an option order from the current position
  * [verified: field added 2026-03-28, changelog]. Buy against a short position
  * closes it; sell against a long position closes it; otherwise it opens.
  */
-export function positionIntentFor(
-  side: 'buy' | 'sell',
-  existingQuantity: number,
-): PositionIntent {
+export function positionIntentFor(side: 'buy' | 'sell', existingQuantity: number): PositionIntent {
   if (side === 'buy') {
     return existingQuantity < 0 ? 'BUY_TO_CLOSE' : 'BUY_TO_OPEN';
   }
@@ -265,8 +260,7 @@ export function parseBuyingPower(raw: unknown): number | undefined {
   const assets = Array.isArray(data.account_currency_assets)
     ? (data.account_currency_assets as Record<string, unknown>[])
     : [];
-  const usd =
-    assets.find((a) => String(a.currency ?? 'USD') === 'USD') ?? assets[0];
+  const usd = assets.find((a) => String(a.currency ?? 'USD') === 'USD') ?? assets[0];
   if (!usd) return undefined;
   return asNum(usd.option_buying_power) ?? asNum(usd.buying_power);
 }
@@ -284,10 +278,7 @@ export function parsePlaceResult(raw: unknown): {
       ? (raw[0] as Record<string, unknown>)
       : d;
   return {
-    clientOrderId:
-      inner?.client_order_id !== undefined
-        ? String(inner.client_order_id)
-        : undefined,
+    clientOrderId: inner?.client_order_id !== undefined ? String(inner.client_order_id) : undefined,
     orderId: inner?.order_id !== undefined ? String(inner.order_id) : undefined,
   };
 }

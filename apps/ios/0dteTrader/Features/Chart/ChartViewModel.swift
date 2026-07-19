@@ -5,7 +5,9 @@ enum ChartInterval: String, CaseIterable, Sendable {
     case m1 = "1m"
     case m5 = "5m"
     case m15 = "15m"
+    case m30 = "30m"
     case h1 = "1h"
+    case h4 = "4h"
     case d1 = "1d"
 
     var seconds: TimeInterval {
@@ -13,10 +15,58 @@ enum ChartInterval: String, CaseIterable, Sendable {
         case .m1: return 60
         case .m5: return 300
         case .m15: return 900
+        case .m30: return 1_800
         case .h1: return 3_600
+        case .h4: return 14_400
         case .d1: return 86_400
         }
     }
+}
+
+enum TickInterval: String, CaseIterable, Sendable {
+    case t500 = "500t"
+    case t1000 = "1000t"
+    case t2500 = "2500t"
+    case t5000 = "5000t"
+    case t10000 = "10000t"
+
+    var tickSize: Int {
+        switch self {
+        case .t500: return 500
+        case .t1000: return 1_000
+        case .t2500: return 2_500
+        case .t5000: return 5_000
+        case .t10000: return 10_000
+        }
+    }
+}
+
+enum AnyChartInterval: Hashable, Sendable {
+    case candle(ChartInterval)
+    case tick(TickInterval)
+
+    var rawValue: String {
+        switch self {
+        case .candle(let interval): return interval.rawValue
+        case .tick(let interval): return interval.rawValue
+        }
+    }
+
+    var seconds: TimeInterval {
+        switch self {
+        case .candle(let interval): return interval.seconds
+        case .tick: return 0
+        }
+    }
+
+    var isTick: Bool {
+        if case .tick = self { return true }
+        return false
+    }
+
+    static let allCases: [AnyChartInterval] =
+        ChartInterval.allCases.map { .candle($0) } +
+        TickInterval.allCases.map { .tick($0) }
 }
 
 /// One computed indicator line, aligned with the candle array (nil = warm-up gap).
@@ -37,7 +87,7 @@ struct ChartAlertNotice: Equatable, Sendable {
 @MainActor
 final class ChartViewModel: ObservableObject {
     @Published private(set) var symbol: String
-    @Published private(set) var interval: ChartInterval = .m1
+    @Published private(set) var interval: AnyChartInterval = .candle(.m1)
     @Published private(set) var candles: [Candle] = []
     @Published private(set) var quote: Quote?
     @Published private(set) var isLoading = false
@@ -94,6 +144,17 @@ final class ChartViewModel: ObservableObject {
     /// Upper bound on rendered candles so live appends stay cheap.
     private let maxCandles = 600
 
+    private struct TickAccumulator {
+        var count: Int
+        var open: Double
+        var high: Double
+        var low: Double
+        var close: Double
+        var firstTimestamp: Date
+    }
+
+    private var tickAccumulator: TickAccumulator?
+
     init(apiClient: APIClient, socket: QuoteSocketClient, settingsStore: SettingsStore) {
         self.apiClient = apiClient
         self.socket = socket
@@ -126,6 +187,13 @@ final class ChartViewModel: ObservableObject {
         isLoading = true
         errorMessage = nil
         defer { isLoading = false }
+
+        if case .tick(let tickInterval) = interval {
+            tickAccumulator = nil
+            candles = TickStorage.load(symbol: symbol, interval: tickInterval)
+            return
+        }
+
         do {
             let from = Date().addingTimeInterval(-interval.seconds * 400)
             let dtos = try await apiClient.candles(symbol: symbol, interval: interval.rawValue, from: from)
@@ -151,17 +219,17 @@ final class ChartViewModel: ObservableObject {
         symbol = normalized
         settingsStore.lastSymbol = normalized
         drawings.setSymbol(normalized)
+        tickAccumulator = nil
         quote = nil
         candles = []
-        // Levels are symbol-keyed server-side: drop the old symbol's overlay
-        // immediately rather than painting its walls over the new chart.
         socket.subscribe(symbols: [normalized])
         updateGexPolling()
         Task { await loadCandles() }
     }
 
-    func selectInterval(_ newInterval: ChartInterval) {
+    func selectInterval(_ newInterval: AnyChartInterval) {
         guard newInterval != interval else { return }
+        tickAccumulator = nil
         interval = newInterval
         Task { await loadCandles() }
     }
@@ -232,12 +300,17 @@ final class ChartViewModel: ObservableObject {
                 Haptics.success()
             }
         }
+
+        if case .tick(let tickInterval) = interval {
+            handleTickQuote(quote, tickInterval: tickInterval)
+            return
+        }
+
         guard !candles.isEmpty else { return }
-        // Unparseable timestamps map to epoch 0 (Quote.init(dto:)); keep the
-        // quote display, skip candle bucketing.
         guard quote.timestamp.timeIntervalSince1970 > 0 else { return }
 
-        let bucketSeconds = (quote.timestamp.timeIntervalSince1970 / interval.seconds).rounded(.down) * interval.seconds
+        let seconds = interval.seconds
+        let bucketSeconds = (quote.timestamp.timeIntervalSince1970 / seconds).rounded(.down) * seconds
         let bucketStart = Date(timeIntervalSince1970: bucketSeconds)
         var last = candles[candles.count - 1]
 
@@ -263,6 +336,41 @@ final class ChartViewModel: ObservableObject {
         }
     }
 
+    private func handleTickQuote(_ quote: Quote, tickInterval: TickInterval) {
+        let price = quote.last
+        guard quote.timestamp.timeIntervalSince1970 > 0 else { return }
+
+        if tickAccumulator == nil {
+            tickAccumulator = TickAccumulator(
+                count: 1, open: price, high: price, low: price,
+                close: price, firstTimestamp: quote.timestamp
+            )
+            return
+        }
+
+        tickAccumulator!.count += 1
+        tickAccumulator!.close = price
+        tickAccumulator!.high = max(tickAccumulator!.high, price)
+        tickAccumulator!.low = min(tickAccumulator!.low, price)
+
+        if tickAccumulator!.count >= tickInterval.tickSize {
+            let candle = Candle(
+                time: tickAccumulator!.firstTimestamp,
+                open: tickAccumulator!.open,
+                high: tickAccumulator!.high,
+                low: tickAccumulator!.low,
+                close: tickAccumulator!.close,
+                volume: 0
+            )
+            candles.append(candle)
+            if candles.count > maxCandles {
+                candles.removeFirst(candles.count - maxCandles)
+            }
+            tickAccumulator = nil
+            TickStorage.save(symbol: symbol, interval: tickInterval, candles: candles)
+        }
+    }
+
     // MARK: - Indicator series for rendering
 
     /// Change vs the open of the first candle of the current session — a
@@ -283,10 +391,16 @@ final class ChartViewModel: ObservableObject {
     /// settings on every SwiftUI body evaluation (same lifecycle as the
     /// indicator series below; ~2 ms at 600 candles).
     var twcRenderModel: TwcRenderModel? {
-        TwcEngine.compute(
+        let seconds: Int
+        if case .tick(let t) = interval {
+            seconds = t.tickSize
+        } else {
+            seconds = Int(interval.seconds)
+        }
+        return TwcEngine.compute(
             candles: candles,
             settings: twcSettings,
-            intervalSeconds: Int(interval.seconds)
+            intervalSeconds: seconds
         )
     }
 

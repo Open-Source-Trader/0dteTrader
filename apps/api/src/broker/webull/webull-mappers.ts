@@ -87,7 +87,9 @@ export const INTERVAL_TO_TIMESPAN: Record<CandleInterval, string> = {
   '1m': 'M1',
   '5m': 'M5',
   '15m': 'M15',
+  '30m': 'M30',
   '1h': 'M60',
+  '4h': 'M240',
   '1d': 'D',
 };
 
@@ -186,10 +188,7 @@ export function contractSymbolOf(order: {
 export function toOrderResult(order: WebullOrder): OrderResult {
   const limitPrice = num(order.limit_price, NaN);
   const filledPrice = num(order.filled_price ?? order.avg_filled_price, NaN);
-  const filledQuantity = num(
-    order.filled_quantity ?? order.cum_quantity ?? order.filled_qty,
-    NaN,
-  );
+  const filledQuantity = num(order.filled_quantity ?? order.cum_quantity ?? order.filled_qty, NaN);
   return {
     orderId: order.client_order_id ?? order.order_id ?? '',
     status: mapOrderStatus(order.status ?? order.order_status),

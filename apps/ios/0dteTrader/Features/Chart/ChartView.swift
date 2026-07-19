@@ -54,23 +54,6 @@ struct ChartView: View {
                     gexStale: viewModel.gexStale,
                     onVisibleRangeChange: { viewModel.visibleXRange = $0 }
                 )
-                // Permanent OHLC legend from the latest bar (mockup detail);
-                // the tap/drag marker still shows per-bar values.
-                if let last = viewModel.candles.last {
-                    Text("O \(Format.price(last.open))  H \(Format.price(last.high))  L \(Format.price(last.low))  C \(Format.price(last.close))")
-                        .font(.priceSmall)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
-                        .padding(.leading, 52)
-                        .padding(.top, AppSpacing.xs)
-                        .allowsHitTesting(false)
-                }
-                // Drawing tools live on the canvas (the mockup header has no
-                // room); below the OHLC legend line so the two never collide.
-                drawingToolsMenu
-                    .padding(.leading, 52)
-                    .padding(.top, 26)
                 if let banner = viewModel.twcRenderModel?.banner {
                     TwcBiasBannerView(banner: banner)
                 }
@@ -412,6 +395,8 @@ struct ChartView: View {
 
             intervalMenu
 
+            drawingToolsMenu
+
             Button {
                 Haptics.selection()
                 onIndicatorSettings()
@@ -466,14 +451,14 @@ struct ChartView: View {
 
     private var intervalMenu: some View {
         Menu {
-            ForEach(ChartInterval.allCases, id: \.self) { interval in
-                Button(interval.rawValue) {
+            ForEach(AnyChartInterval.allCases, id: \.self) { interval in
+                Button(interval.rawValue.uppercased()) {
                     Haptics.selection()
                     viewModel.selectInterval(interval)
                 }
             }
         } label: {
-            Text(viewModel.interval.rawValue)
+            Text(viewModel.interval.rawValue.uppercased())
                 .font(.chipLabel)
                 .foregroundStyle(Color.appAccent)
                 .padding(.horizontal, AppSpacing.md)

@@ -9,11 +9,7 @@ import { Spinner } from '../../design/components/Spinner';
 import { Stepper } from '../../design/components/Stepper';
 import { TradeActionButton } from '../../design/components/TradeActionButton';
 import { Format } from '../../design/format';
-import {
-  CalendarIcon,
-  ChartLineIcon,
-  CheckmarkIcon,
-} from '../../design/icons';
+import { CalendarIcon, ChartLineIcon, CheckmarkIcon } from '../../design/icons';
 import type { ChainStore } from './ChainStore';
 import type { TradeStore } from './TradeStore';
 import { PositionsStrip } from './PositionsStrip';
@@ -257,11 +253,9 @@ export function TradePanel({ tradeStore, chainStore, onArm, density = 'roomy' }:
           }}
         >
           {selectedQuote
-            ? `${Format.price(selectedQuote.bid)} × ${Format.price(selectedQuote.ask)}${
-                trade.orderType === 'mid'
-                  ? ` · ≈ ${indicativeMid !== null ? Format.price(indicativeMid) : '—'}`
-                  : ''
-              }`
+            ? trade.orderType === 'mid'
+              ? `≈ ${indicativeMid !== null ? Format.price(indicativeMid) : '—'}`
+              : `${Format.price(selectedQuote.bid)} × ${Format.price(selectedQuote.ask)}`
             : ''}
         </span>
       </div>

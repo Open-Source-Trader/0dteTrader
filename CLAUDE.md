@@ -81,3 +81,5 @@ Say what you did and why, not just a block of code. Flag concerns even when you 
 A few patterns recur often enough to name: the _Kitchen Sink_ (restructuring half the codebase while you are at it), the _Wrong Abstraction_ (copy-paste twice before you abstract), the _Optimistic Path_ (the happy path handled and the 500 ignored), and the _Runaway Refactor_ (a fix that cascades across files). Catch yourself in any of these and the right move is to stop, not to push through.
 
 ---
+
+**Always update the IOS and Electron app as a pair, when needed. Never just one or the other**

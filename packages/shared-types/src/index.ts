@@ -14,13 +14,10 @@ export type OrderSide = 'buy' | 'sell';
 export type OrderType = 'mid' | 'market';
 export type OptionType = 'call' | 'put';
 export type SelectionMode = 'auto_otm' | 'explicit';
-export type OrderStatus =
-  | 'submitted'
-  | 'filled'
-  | 'partially_filled'
-  | 'cancelled'
-  | 'rejected';
-export type CandleInterval = '1m' | '5m' | '15m' | '1h' | '1d';
+export type OrderStatus = 'submitted' | 'filled' | 'partially_filled' | 'cancelled' | 'rejected';
+export type CandleInterval = '1m' | '5m' | '15m' | '30m' | '1h' | '4h' | '1d';
+export type TickInterval = '500t' | '1000t' | '2500t' | '5000t' | '10000t';
+export type ChartInterval = CandleInterval | TickInterval;
 
 // ---------------------------------------------------------------------------
 // Auth
@@ -246,6 +243,4 @@ export interface StreamErrorMessage {
 }
 
 export type StreamServerMessage =
-  | StreamQuoteMessage
-  | StreamOrderUpdateMessage
-  | StreamErrorMessage;
+  StreamQuoteMessage | StreamOrderUpdateMessage | StreamErrorMessage;

@@ -1,18 +1,43 @@
-import type { CandleInterval, Quote } from '@0dtetrader/shared-types';
+import type { ChartInterval, TickInterval, Quote } from '@0dtetrader/shared-types';
 import type { ApiClient } from '../../core/api/ApiClient';
 import { errorMessage } from '../../core/api/ApiError';
 import type { QuoteSocket } from '../../core/api/QuoteSocket';
 import { parseDateTime } from '../../core/models/dates';
 import { Store } from '../../core/observable';
 import type { SettingsStore } from '../../core/storage/SettingsStore';
+import { loadTickCandles, saveTickCandles } from '../../core/storage/tickStorage';
 import type { GexSettings } from './gex/gexSettings';
 import type { IndicatorSettings } from './indicatorSettings';
 import { capSubPanes } from './indicatorSettings';
 import type { TwcHeatmapSettings } from './twc/twcSettings';
 
-export const CHART_INTERVALS: CandleInterval[] = ['1m', '5m', '15m', '1h', '1d'];
+export const CHART_INTERVALS: ChartInterval[] = [
+  '1m',
+  '5m',
+  '15m',
+  '30m',
+  '1h',
+  '4h',
+  '1d',
+  '500t',
+  '1000t',
+  '2500t',
+  '5000t',
+  '10000t',
+];
 
-export function intervalSeconds(interval: CandleInterval): number {
+export const TICK_INTERVALS: TickInterval[] = ['500t', '1000t', '2500t', '5000t', '10000t'];
+
+export function isTickInterval(interval: ChartInterval): interval is TickInterval {
+  return interval.endsWith('t');
+}
+
+export function tickSize(interval: TickInterval): number {
+  return parseInt(interval, 10);
+}
+
+export function intervalSeconds(interval: ChartInterval): number {
+  if (isTickInterval(interval)) return tickSize(interval);
   switch (interval) {
     case '1m':
       return 60;
@@ -20,8 +45,12 @@ export function intervalSeconds(interval: CandleInterval): number {
       return 300;
     case '15m':
       return 900;
+    case '30m':
+      return 1800;
     case '1h':
       return 3600;
+    case '4h':
+      return 14400;
     case '1d':
       return 86400;
   }
@@ -39,7 +68,7 @@ export interface ChartCandle {
 
 interface ChartStoreState {
   symbol: string;
-  interval: CandleInterval;
+  interval: ChartInterval;
   candles: ChartCandle[];
   quote: Quote | null;
   isLoading: boolean;
@@ -62,6 +91,14 @@ export class ChartStore extends Store<ChartStoreState> {
   /** Invalidates in-flight candle loads when a newer one starts — the same
    *  generation guard ChainStore uses for chain loads. */
   private loadGeneration = 0;
+  private tickAccumulator: {
+    count: number;
+    open: number;
+    high: number;
+    low: number;
+    close: number;
+    firstTimestamp: number;
+  } | null = null;
 
   constructor(
     private readonly apiClient: ApiClient,
@@ -104,17 +141,24 @@ export class ChartStore extends Store<ChartStoreState> {
   async loadCandles(): Promise<void> {
     const generation = ++this.loadGeneration;
     const { symbol, interval } = this.getState();
+
+    if (isTickInterval(interval)) {
+      this.tickAccumulator = null;
+      this.set({ isLoading: true, errorMessage: null });
+      const stored = await loadTickCandles(symbol, interval);
+      if (generation !== this.loadGeneration) return;
+      this.set({ candles: stored, isLoading: false });
+      return;
+    }
+
     this.set({ isLoading: true, errorMessage: null });
     try {
       const from = new Date(Date.now() - intervalSeconds(interval) * 400 * 1000);
       const dtos = await this.apiClient.candles(symbol, interval, from);
-      // A symbol/interval switch started a newer load; discard this response.
       if (generation !== this.loadGeneration) return;
       const candles: ChartCandle[] = [];
       for (const dto of dtos) {
         const ms = parseDateTime(dto.time);
-        // Skip unparseable timestamps: an epoch-0 candle mid-array breaks the
-        // ascending-time invariant and crashes the chart's setData.
         if (ms === null) continue;
         candles.push({
           time: Math.floor(ms / 1000),
@@ -140,13 +184,15 @@ export class ChartStore extends Store<ChartStoreState> {
     if (!normalized || normalized === symbol) return;
     this.socket.unsubscribeSymbols([symbol]);
     this.settingsStore.lastSymbol = normalized;
+    this.tickAccumulator = null;
     this.set({ symbol: normalized, quote: null, candles: [] });
     this.socket.subscribeSymbols([normalized]);
     void this.loadCandles();
   }
 
-  selectInterval(newInterval: CandleInterval): void {
+  selectInterval(newInterval: ChartInterval): void {
     if (newInterval === this.getState().interval) return;
+    this.tickAccumulator = null;
     this.set({ interval: newInterval });
     void this.loadCandles();
   }
@@ -173,11 +219,15 @@ export class ChartStore extends Store<ChartStoreState> {
     const { symbol, interval, candles } = this.getState();
     if (quote.symbol !== symbol) return;
     this.set({ quote });
+
+    if (isTickInterval(interval)) {
+      this.handleTickQuote(quote);
+      return;
+    }
+
     if (candles.length === 0) return;
 
     const timestampMs = parseDateTime(quote.timestamp);
-    // Unparseable timestamp: keep the quote display, skip candle bucketing
-    // (an epoch-0 fallback would silently corrupt the bucket math).
     if (timestampMs === null) return;
     const timestampSeconds = timestampMs / 1000;
     const seconds = intervalSeconds(interval);
@@ -206,6 +256,51 @@ export class ChartStore extends Store<ChartStoreState> {
         next = next.slice(next.length - MAX_CANDLES);
       }
       this.set({ candles: next });
+    }
+  }
+
+  private handleTickQuote(quote: Quote): void {
+    const { interval, candles, symbol } = this.getState();
+    if (!isTickInterval(interval)) return;
+    const size = tickSize(interval);
+    const price = quote.last;
+    const timestampMs = parseDateTime(quote.timestamp);
+    if (timestampMs === null) return;
+    const timestampSeconds = Math.floor(timestampMs / 1000);
+
+    if (!this.tickAccumulator) {
+      this.tickAccumulator = {
+        count: 1,
+        open: price,
+        high: price,
+        low: price,
+        close: price,
+        firstTimestamp: timestampSeconds,
+      };
+      return;
+    }
+
+    this.tickAccumulator.count += 1;
+    this.tickAccumulator.close = price;
+    this.tickAccumulator.high = Math.max(this.tickAccumulator.high, price);
+    this.tickAccumulator.low = Math.min(this.tickAccumulator.low, price);
+
+    if (this.tickAccumulator.count >= size) {
+      const candle: ChartCandle = {
+        time: this.tickAccumulator.firstTimestamp,
+        open: this.tickAccumulator.open,
+        high: this.tickAccumulator.high,
+        low: this.tickAccumulator.low,
+        close: this.tickAccumulator.close,
+        volume: 0,
+      };
+      let next = [...candles, candle];
+      if (next.length > MAX_CANDLES) {
+        next = next.slice(next.length - MAX_CANDLES);
+      }
+      this.set({ candles: next });
+      this.tickAccumulator = null;
+      void saveTickCandles(symbol, interval, next);
     }
   }
 }

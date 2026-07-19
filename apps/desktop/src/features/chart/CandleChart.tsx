@@ -10,7 +10,7 @@ import {
   type LineWidth,
   type UTCTimestamp,
 } from 'lightweight-charts';
-import type { CandleInterval } from '@0dtetrader/shared-types';
+import type { ChartInterval } from '@0dtetrader/shared-types';
 import { useStore } from '../../core/observable';
 import { Format } from '../../design/format';
 import { chartPalette } from './chartColors';
@@ -44,7 +44,7 @@ interface CandleChartProps {
   candles: ChartCandle[];
   overlays: OverlaySeries[];
   symbol: string;
-  interval: CandleInterval;
+  interval: ChartInterval;
   showVolume: boolean;
   drawingsStore: DrawingsStore;
   /** Per-bar candle repaint colors (TWC regime candles); null = default. */
@@ -61,7 +61,7 @@ interface CandleChartProps {
 
 const VISIBLE_CANDLES = 120;
 
-function formatTick(timeSeconds: number, interval: CandleInterval): string {
+function formatTick(timeSeconds: number, interval: ChartInterval): string {
   const date = new Date(timeSeconds * 1000);
   if (interval === '1d') {
     return `${date.getMonth() + 1}/${date.getDate()}`;
@@ -71,16 +71,11 @@ function formatTick(timeSeconds: number, interval: CandleInterval): string {
   return `${h}:${m}`;
 }
 
-function legendText(bar: { open: number; high: number; low: number; close: number }): string {
-  return `O ${Format.price(bar.open)}  H ${Format.price(bar.high)}  L ${Format.price(bar.low)}  C ${Format.price(bar.close)}`;
-}
-
 /**
  * Candlestick chart with indicator overlays (CandleChartRepresentable analog).
  * Left price axis like the iOS chart; pan/zoom enabled. On data-length change
  * the view snaps to the last 120 bars; in-place tick updates leave the user's
- * pan/zoom alone. The crosshair drives an OHLC legend overlay (falls back to
- * the latest bar when the cursor is off the chart).
+ * pan/zoom alone.
  */
 export function CandleChart({
   candles,
@@ -108,7 +103,6 @@ export function CandleChart({
   intervalRef.current = interval;
   const onVisibleRangeChangeRef = useRef(onVisibleRangeChange);
   onVisibleRangeChangeRef.current = onVisibleRangeChange;
-  const [legend, setLegend] = useState<string | null>(null);
   const [apis, setApis] = useState<{
     chart: IChartApi;
     series: ISeriesApi<'Candlestick'>;
@@ -135,14 +129,28 @@ export function CandleChart({
         timeVisible: true,
         secondsVisible: false,
         tickMarkFormatter: (time: UTCTimestamp) => formatTick(time, intervalRef.current),
+        rightOffset: 12,
+        shiftVisibleRangeOnNewBar: true,
       },
       grid: {
         vertLines: { color: colors.grid },
         horzLines: { color: colors.grid },
       },
       crosshair: {
-        vertLine: { visible: true, labelVisible: true, color: colors.crosshair, style: 3, width: 1 },
-        horzLine: { visible: true, labelVisible: true, color: colors.crosshair, style: 3, width: 1 },
+        vertLine: {
+          visible: true,
+          labelVisible: true,
+          color: colors.crosshair,
+          style: 3,
+          width: 1,
+        },
+        horzLine: {
+          visible: true,
+          labelVisible: true,
+          color: colors.crosshair,
+          style: 3,
+          width: 1,
+        },
       },
       autoSize: true,
     });
@@ -166,13 +174,6 @@ export function CandleChart({
     candleSeriesRef.current = candleSeries;
     setApis({ chart, series: candleSeries });
 
-    // Crosshair → OHLC legend (latest bar when the cursor is off the chart).
-    chart.subscribeCrosshairMove((param) => {
-      const bar = param.seriesData.get(candleSeries) as CandlestickData | undefined;
-      const shown = bar ?? lastBarRef.current;
-      setLegend(shown ? legendText(shown) : null);
-    });
-
     // Mirror the visible x-range to the sub-panes via ChartView state.
     chart.timeScale().subscribeVisibleLogicalRangeChange((range) => {
       onVisibleRangeChangeRef.current?.(range ? { from: range.from, to: range.to } : null);
@@ -187,7 +188,6 @@ export function CandleChart({
       lastLengthRef.current = 0;
       lastFirstTimeRef.current = null;
       lastBarRef.current = null;
-      setLegend(null);
       setApis(null);
     };
   }, []);
@@ -237,12 +237,14 @@ export function CandleChart({
     hadCandleColorsRef.current = candleColors !== null;
 
     if (structuralChange || repaintAll) {
-      series.setData(candles.map((candle, index) => toCandleData(candle, candleColors?.[index] ?? null)));
+      series.setData(
+        candles.map((candle, index) => toCandleData(candle, candleColors?.[index] ?? null)),
+      );
       volumeSeriesRef.current?.setData(candles.map(toVolumeData));
       if (structuralChange && candles.length > 0) {
         chart.timeScale().setVisibleLogicalRange({
           from: Math.max(0, candles.length - VISIBLE_CANDLES),
-          to: candles.length,
+          to: candles.length + 12,
         });
       }
     } else if (candles.length > 0) {
@@ -252,9 +254,6 @@ export function CandleChart({
     lastLengthRef.current = candles.length;
     lastFirstTimeRef.current = firstTime;
     lastBarRef.current = candles.length > 0 ? candles[candles.length - 1] : null;
-    // Keep the OHLC legend live without waiting for a crosshair event —
-    // the mockup shows it permanently.
-    setLegend(lastBarRef.current ? legendText(lastBarRef.current) : null);
   }, [candles, candleColors]);
 
   // Overlay lines: recreate the series set when ids change, reset data otherwise.
@@ -292,7 +291,12 @@ export function CandleChart({
       let runIndex = 0;
       const flushRun = (): void => {
         if (run.length > 0) {
-          expanded.push({ id: `${overlay.id}#${runIndex}`, color: overlay.color, lineWidth, data: run });
+          expanded.push({
+            id: `${overlay.id}#${runIndex}`,
+            color: overlay.color,
+            lineWidth,
+            data: run,
+          });
           runIndex += 1;
           run = [];
         }
@@ -346,23 +350,6 @@ export function CandleChart({
           : `${symbol} chart, no data`
       }
     >
-      {legend ? (
-        <div
-          style={{
-            position: 'absolute',
-            top: 4,
-            left: 52,
-            fontFamily: 'var(--font-mono)',
-            fontSize: 'var(--fs-caption2)',
-            fontVariantNumeric: 'tabular-nums',
-            color: 'var(--label-secondary)',
-            pointerEvents: 'none',
-            zIndex: 2,
-          }}
-        >
-          {legend}
-        </div>
-      ) : null}
       {apis && candles.length > 0 && twcModel ? (
         <TwcOverlay chart={apis.chart} series={apis.series} model={twcModel} candles={candles} />
       ) : null}

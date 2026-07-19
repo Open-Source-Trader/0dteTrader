@@ -12,6 +12,7 @@ struct TradeScreenView: View {
     @StateObject private var chartViewModel: ChartViewModel
     @StateObject private var chainViewModel: OptionsChainViewModel
     @StateObject private var tradeViewModel: TradeViewModel
+    @StateObject private var profileViewModel: ProfileViewModel
 
     @State private var layout: TradeLayout
     @State private var showSymbolSearch = false
@@ -31,6 +32,7 @@ struct TradeScreenView: View {
         _chartViewModel = StateObject(wrappedValue: container.makeChartViewModel())
         _chainViewModel = StateObject(wrappedValue: container.makeOptionsChainViewModel())
         _tradeViewModel = StateObject(wrappedValue: container.makeTradeViewModel())
+        _profileViewModel = StateObject(wrappedValue: container.makeProfileViewModel(onLogout: onLogout))
         _layout = State(initialValue: container.settingsStore.layoutMode)
         self.settingsStore = container.settingsStore
     }
@@ -102,7 +104,7 @@ struct TradeScreenView: View {
             .presentationDragIndicator(.visible)
         }
         .sheet(isPresented: $showProfile) {
-            ProfileView(viewModel: container.makeProfileViewModel(onLogout: onLogout))
+            ProfileView(viewModel: profileViewModel)
         }
         .sheet(isPresented: $showHistory) {
             HistoryView(apiClient: container.apiClient)

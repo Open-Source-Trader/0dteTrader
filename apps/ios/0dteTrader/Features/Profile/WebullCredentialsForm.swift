@@ -11,19 +11,21 @@ struct WebullCredentialsForm: View {
 
     var body: some View {
         VStack(spacing: AppSpacing.md) {
-            SecureField("App Key", text: $viewModel.appKey)
+            TextField("App Key", text: $viewModel.appKey)
                 .textContentType(.none)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
+                .keyboardType(.asciiCapable)
                 .focused($focused, equals: .appKey)
                 .submitLabel(.next)
                 .onSubmit { focused = .appSecret }
                 .authField(isFocused: focused == .appKey)
 
-            SecureField("App Secret", text: $viewModel.appSecret)
-                .textContentType(.password)
+            TextField("App Secret", text: $viewModel.appSecret)
+                .textContentType(.none)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
+                .keyboardType(.asciiCapable)
                 .focused($focused, equals: .appSecret)
                 .submitLabel(.go)
                 .onSubmit {

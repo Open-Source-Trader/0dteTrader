@@ -33,6 +33,8 @@ targets:
         MARKETING_VERSION: "0.1.0"
         CURRENT_PROJECT_VERSION: "1"
         TARGETED_DEVICE_FAMILY: "1"
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: X3Q9GMD432
     prebuildScripts:
       - name: SwiftLint
         basedOnDependencyAnalysis: false

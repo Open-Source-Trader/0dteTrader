@@ -101,13 +101,30 @@ npm run dev:desktop
 
 Then open the printed local URL (usually `http://localhost:5173`).
 
-## Tests and checks
+## All npm scripts
 
-```bash
-npm run lint
-npm run build
-npm run test
-```
+| Command                | What it does                                         |
+| ---------------------- | ---------------------------------------------------- |
+| `npm run setup`        | One-time env setup (deps, Docker, migrations)        |
+| `npm run dev`          | Start the API only (`localhost:3000`)                |
+| `npm run dev:desktop`  | Start the desktop Vite dev server (`localhost:5173`) |
+| `npm run dev:all`      | Start API + desktop concurrently                     |
+| `npm run build`        | Build shared-types, API, and desktop                 |
+| `npm run test`         | Run all workspace tests                              |
+| `npm run lint`         | Lint all workspaces                                  |
+| `npm run format`       | Format all files with Prettier                       |
+| `npm run format:check` | Check formatting (CI)                                |
+| `npm run db:up`        | Start Postgres + Redis containers                    |
+| `npm run db:down`      | Stop and remove containers                           |
+| `npm run db:migrate`   | Apply Prisma migrations                              |
+| `npm run smoke:webull` | Run Webull connectivity smoke test                   |
+
+Desktop-only (run from `apps/desktop`):
+
+| Command            | What it does                                |
+| ------------------ | ------------------------------------------- |
+| `npm run electron` | Launch in Electron (requires `dev` running) |
+| `npm run preview`  | Vite production preview                     |
 
 iOS tests:
 
@@ -151,11 +168,13 @@ Real secrets live only in `.env`, which is gitignored. Never commit credentials.
 
 ## Documentation
 
-- [`docs/RUNBOOK.md`](docs/RUNBOOK.md) — local development, Webull setup, smoke tests, troubleshooting
+- [`docs/PRD.md`](docs/PRD.md) — product requirements document
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — system design and module overview
-- [`docs/SECURITY.md`](docs/SECURITY.md) — threat model, encryption, auth, operational security
 - [`docs/API-SPEC.md`](docs/API-SPEC.md) and [`docs/openapi.yaml`](docs/openapi.yaml) — backend API contract
+- [`docs/SECURITY.md`](docs/SECURITY.md) — threat model, encryption, auth, operational security
 - [`docs/WEBULL-INTEGRATION.md`](docs/WEBULL-INTEGRATION.md) — Webull OpenAPI integration details
+- [`docs/RUNBOOK.md`](docs/RUNBOOK.md) — local development, Webull setup, smoke tests, troubleshooting
+- [`docs/ROADMAP.md`](docs/ROADMAP.md) — future plans and priorities
 
 ## License
 

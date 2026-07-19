@@ -1,10 +1,44 @@
-# CLAUDE.md: Field Notes on Getting a Language Model to Write Code You Will Not Rewrite
+# CLAUDE.md
 
-*A Short List of Rules, Earned by Watching the Same Mistakes Twice*
+## Project Quick Reference
 
-**Abstract.** *This file exists because language models make predictable mistakes when they write code. Not random mistakes, just the same ones, over and over, often enough that it was worth writing them down. What follows is not a set of suggestions but a set of rules. The throughline is the same in every section: the model is fast at generating plausible code and slow to notice that plausible is not the same as correct, so the discipline has to come from the process around it.*
+**What this is:** 0dteTrader — a rapid options trading app (iOS + desktop) backed by Webull OpenAPI and Tradier.
 
-**Index Terms.** *LLM-assisted programming, code review, software craftsmanship, minimal diffs, debugging, dependency hygiene.*
+**Build & verify:**
+
+```bash
+npm run setup          # first time only
+npm run dev:all        # API + desktop concurrently
+npm run build          # full build (shared-types → API → desktop)
+npm run test           # all workspace tests
+npm run lint           # ESLint all workspaces
+npm run format:check   # Prettier
+```
+
+**iOS (from `apps/ios/`):**
+
+```bash
+xcodegen && xcodebuild build -scheme 0dteTrader -destination 'platform=iOS Simulator,name=iPhone 16 Pro'
+```
+
+**Key facts:**
+
+- npm workspaces monorepo: `apps/api` (NestJS), `apps/desktop` (React+Vite), `packages/shared-types`
+- iOS is separate (XcodeGen + SwiftPM). Module name: `ZeroDTETrader`
+- Docker required (Postgres 16 + Redis 7): `npm run db:up`
+- Secrets in `.env` (gitignored) — never commit credentials
+- Desktop is the reference UI; iOS copies its layout behavior
+- See `AGENTS.md` for full architecture and conventions
+
+---
+
+# Field Notes on Getting a Language Model to Write Code You Will Not Rewrite
+
+_A Short List of Rules, Earned by Watching the Same Mistakes Twice_
+
+**Abstract.** _This file exists because language models make predictable mistakes when they write code. Not random mistakes, just the same ones, over and over, often enough that it was worth writing them down. What follows is not a set of suggestions but a set of rules. The throughline is the same in every section: the model is fast at generating plausible code and slow to notice that plausible is not the same as correct, so the discipline has to come from the process around it._
+
+**Index Terms.** _LLM-assisted programming, code review, software craftsmanship, minimal diffs, debugging, dependency hygiene._
 
 ## I. READ BEFORE YOU WRITE
 
@@ -44,6 +78,6 @@ Say what you did and why, not just a block of code. Flag concerns even when you 
 
 ## X. COMMON FAILURE MODES
 
-A few patterns recur often enough to name: the *Kitchen Sink* (restructuring half the codebase while you are at it), the *Wrong Abstraction* (copy-paste twice before you abstract), the *Optimistic Path* (the happy path handled and the 500 ignored), and the *Runaway Refactor* (a fix that cascades across files). Catch yourself in any of these and the right move is to stop, not to push through.
+A few patterns recur often enough to name: the _Kitchen Sink_ (restructuring half the codebase while you are at it), the _Wrong Abstraction_ (copy-paste twice before you abstract), the _Optimistic Path_ (the happy path handled and the 500 ignored), and the _Runaway Refactor_ (a fix that cascades across files). Catch yourself in any of these and the right move is to stop, not to push through.
 
 ---

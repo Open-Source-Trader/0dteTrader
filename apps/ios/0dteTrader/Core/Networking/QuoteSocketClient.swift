@@ -148,7 +148,12 @@ final class QuoteSocketClient: ObservableObject {
                 try? await Task.sleep(nanoseconds: 20_000_000_000)
                 guard let self, !Task.isCancelled else { return }
                 do {
-                    try await self.webSocketTask?.sendPing()
+                    try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
+                        self.webSocketTask?.sendPing { error in
+                            if let error { cont.resume(throwing: error) }
+                            else { cont.resume() }
+                        }
+                    }
                 } catch {
                     self.handleUnexpectedDisconnect()
                     return

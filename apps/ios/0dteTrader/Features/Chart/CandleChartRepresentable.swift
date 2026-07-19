@@ -49,9 +49,9 @@ final class ChartMarkerView: MarkerView {
         )
     }
 
-    override func offset(forValueAtPoint point: CGPoint, chart: ChartViewBase) -> CGPoint {
+    override func offsetForDrawing(atPoint point: CGPoint) -> CGPoint {
+        guard let chart = chartView else { return self.offset }
         var offset = CGPoint(x: -bounds.width / 2, y: -bounds.height - 12)
-        // Keep the marker fully on screen near the edges.
         if point.x + offset.x < 0 {
             offset.x = -point.x + 4
         } else if point.x + offset.x + bounds.width > chart.bounds.width {
@@ -138,7 +138,8 @@ struct CandleChartRepresentable: UIViewRepresentable {
         }
 
         func emit(_ chartView: ChartViewBase) {
-            onVisibleRange?(chartView.lowestVisibleX...chartView.highestVisibleX)
+            guard let barLine = chartView as? BarLineChartViewBase else { return }
+            onVisibleRange?(barLine.lowestVisibleX...barLine.highestVisibleX)
         }
     }
 
@@ -164,7 +165,7 @@ struct CandleChartRepresentable: UIViewRepresentable {
         chart.highlightPerDragEnabled = true
         chart.dragEnabled = true
         chart.pinchZoomEnabled = true
-        chart.setScaleMinima(10, scaleYmin: 1)
+        chart.setScaleMinima(10, scaleY: 1)
 
         let rangeCallback = onVisibleRangeChange
         context.coordinator.onVisibleRange = { range in rangeCallback?(range) }
@@ -231,7 +232,7 @@ struct CandleChartRepresentable: UIViewRepresentable {
             container.gexOverlay.setNeedsDisplay()
             return
         }
-        let previousCount = chart.data?.candleData?.entryCount ?? 0
+        let previousCount = (chart.data as? CombinedChartData)?.candleData?.entryCount ?? 0
 
         // Dashed accent line + axis tag at the last price (mockup's glowing
         // price tag; CoreGraphics can't bloom, so a bright tag stands in).

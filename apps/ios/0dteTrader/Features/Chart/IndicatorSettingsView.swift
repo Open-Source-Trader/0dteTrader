@@ -64,7 +64,7 @@ struct IndicatorSettingsView: View {
                 }
                 .listRowBackground(Color.appSurface)
 
-                Section("Sub-Panes") {
+                Section {
                     Toggle("RSI", isOn: $settings.rsiEnabled)
                     if settings.rsiEnabled {
                         Stepper("Period: \(settings.rsiPeriod)",
@@ -108,6 +108,8 @@ struct IndicatorSettingsView: View {
                             .accessibilityLabel("ATR period")
                             .accessibilityValue("\(settings.atrPeriod)")
                     }
+                } header: {
+                    Text("Sub-Panes")
                 } footer: {
                     Text("MACD uses standard 12 / 26 / 9 parameters. Settings save automatically.")
                 }

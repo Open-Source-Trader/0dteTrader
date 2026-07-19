@@ -24,6 +24,7 @@ Errors: `{ "error": { "code": string, "message": string } }` with appropriate HT
 | PATCH | `/v1/me` | `{ tradingMode: 'live' \| 'practice' }` | updated `Me` |
 | PUT | `/v1/me/webull-credentials` | `{ appKey, appSecret, accountId, environment? }` | `{ webullConfigured: true, environment }` |
 | DELETE | `/v1/me/webull-credentials?environment=` | — | 204 |
+| POST | `/v1/me/webull-session/refresh` | — | `{ refreshed: true, environment }` |
 
 `tradingMode` is a per-user server-side setting selecting the Webull
 environment (live production vs practice/paper sandbox) used for quotes and
@@ -35,6 +36,11 @@ credentials falls back to the server's built-in practice app credentials
 (`WEBULL_PRACTICE_*`).
 
 Credentials are never returned in any response.
+
+`POST /v1/me/webull-session/refresh` drops the cached Webull client/token for
+the caller's **current** trading mode and mints a fresh access token using the
+stored credentials — the "Reconnect" escape hatch when a token goes stale, so
+users don't have to re-enter their app key/secret.
 
 ## Market Data
 

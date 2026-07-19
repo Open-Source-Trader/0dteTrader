@@ -114,6 +114,19 @@ export class WebullBrokerGateway implements BrokerGateway, OnModuleDestroy {
     this.pollTimers.clear();
   }
 
+  /**
+   * Drop the cached client (and its token) for the user's current mode and
+   * mint a fresh access token — the server side of the app's "Reconnect"
+   * button; spares the user re-entering credentials when a token goes stale.
+   */
+  async reauthenticate(userId: string): Promise<TradingMode> {
+    const mode = await this.tradingModeFor(userId);
+    this.clients.delete(`${userId}:${mode}`);
+    const client = await this.clientFor(userId);
+    await client.reauthenticate();
+    return mode;
+  }
+
   // -------------------------------------------------------------------------
   // Client factory (per-user, per-environment, credentials-aware)
   // -------------------------------------------------------------------------
@@ -238,7 +251,14 @@ export class WebullBrokerGateway implements BrokerGateway, OnModuleDestroy {
     };
     if (req.from) query.start_time = String(Date.parse(req.from));
     if (req.to) query.end_time = String(Date.parse(req.to));
-    const raw = await client.request(endpoint, { query });
+    let raw = await client.request(endpoint, { query });
+    // A window covering no trading session (weekend/holiday) returns []; fall
+    // back to the latest bars so the chart still renders the last session.
+    if (asArray(raw).length === 0 && (req.from || req.to)) {
+      delete query.start_time;
+      delete query.end_time;
+      raw = await client.request(endpoint, { query });
+    }
     // Webull returns bars newest-first; chart clients require ascending
     // (lightweight-charts setData throws on unsorted input, DGCharts mirrors
     // the same assumption) — sort by bucket start.

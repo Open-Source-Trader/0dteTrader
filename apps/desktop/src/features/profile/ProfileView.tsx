@@ -53,6 +53,15 @@ export function ProfileView({ onLogout, onDismiss }: ProfileViewProps) {
               >
                 Update Credentials
               </button>
+              {state.me?.tradingMode === environment ? (
+                <button
+                  className="grouped-row button-row"
+                  disabled={env.isReconnecting}
+                  onClick={() => void store.reconnect(environment)}
+                >
+                  {env.isReconnecting ? <Spinner size={14} /> : 'Reconnect to Webull'}
+                </button>
+              ) : null}
               <button
                 className="grouped-row destructive"
                 disabled={env.isDeleting}

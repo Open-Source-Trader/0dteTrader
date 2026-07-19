@@ -13,6 +13,7 @@ import type {
   TradingMode,
   WebullCredentialsInput,
   WebullCredentialsSaved,
+  WebullSessionRefreshed,
 } from '@0dtetrader/shared-types';
 import { ApiError, parseErrorEnvelope } from './ApiError';
 import type { SessionStore } from './SessionStore';
@@ -141,6 +142,11 @@ export class ApiClient {
       path: 'v1/me/webull-credentials',
       query: { environment },
     });
+  }
+
+  /** Mint a fresh Webull access token for the current trading mode ("Reconnect"). */
+  refreshWebullSession(): Promise<WebullSessionRefreshed> {
+    return this.request({ method: 'POST', path: 'v1/me/webull-session/refresh' });
   }
 
   updateTradingMode(mode: TradingMode): Promise<Me> {

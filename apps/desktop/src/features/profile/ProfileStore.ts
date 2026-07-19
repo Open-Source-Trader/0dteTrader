@@ -12,6 +12,7 @@ interface CredentialEnvironmentState {
   isEditing: boolean;
   isSaving: boolean;
   isDeleting: boolean;
+  isReconnecting: boolean;
 }
 
 interface ProfileStoreState {
@@ -32,6 +33,7 @@ const emptyEnvironment = (): CredentialEnvironmentState => ({
   isEditing: false,
   isSaving: false,
   isDeleting: false,
+  isReconnecting: false,
 });
 
 /**
@@ -126,6 +128,32 @@ export class ProfileStore extends Store<ProfileStoreState> {
     } finally {
       this.set({
         [environment]: { ...this.getState()[environment], isDeleting: false },
+      });
+    }
+  }
+
+  /**
+   * "Reconnect": mint a fresh Webull access token using the stored
+   * credentials, so a stale token never forces re-entering secrets. The
+   * server refreshes the caller's current trading mode, so the button is
+   * only shown for the active environment.
+   */
+  async reconnect(environment: TradingMode): Promise<void> {
+    if (this.getState()[environment].isReconnecting) return;
+    this.set({
+      [environment]: { ...this.getState()[environment], isReconnecting: true },
+      errorMessage: null,
+      successMessage: null,
+      messageEnv: environment,
+    });
+    try {
+      await this.apiClient.refreshWebullSession();
+      this.set({ successMessage: 'Webull session refreshed.' });
+    } catch (error) {
+      this.set({ errorMessage: errorMessage(error) });
+    } finally {
+      this.set({
+        [environment]: { ...this.getState()[environment], isReconnecting: false },
       });
     }
   }

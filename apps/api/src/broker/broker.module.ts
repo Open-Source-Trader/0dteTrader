@@ -6,6 +6,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { BROKER_GATEWAY, BrokerGateway } from './broker-gateway.interface';
 import { OrderEventsService } from './order-events.service';
 import { WebullBrokerGateway } from './webull/webull-broker.gateway';
+import { WebullSessionController } from './webull-session.controller';
 
 /**
  * Provides the Webull BrokerGateway under the BROKER_GATEWAY token
@@ -15,6 +16,7 @@ import { WebullBrokerGateway } from './webull/webull-broker.gateway';
  */
 @Module({
   imports: [CredentialsModule],
+  controllers: [WebullSessionController],
   providers: [
     OrderEventsService,
     {

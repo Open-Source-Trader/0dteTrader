@@ -97,6 +97,61 @@ describe('WebullClient token lifecycle', () => {
     expect(calls).toHaveLength(4);
   });
 
+  it('reauthenticate() discards the token and forces a fresh create', async () => {
+    const { client, calls } = makeHarness(
+      withToken(() => ({ status: 200, body: { ok: true } })),
+    );
+    await client.request('accountList');
+    await client.reauthenticate();
+    await client.request('accountList');
+    const creates = calls.filter((c) =>
+      c.url.includes('/openapi/auth/token/create'),
+    );
+    expect(creates).toHaveLength(2);
+    expect(
+      calls.filter((c) => c.url.includes('/openapi/auth/token/refresh')),
+    ).toHaveLength(0);
+  });
+
+  it('backs off token creation after failures instead of one attempt per call', async () => {
+    let nowMs = 1_000_000;
+    const calls: { url: string }[] = [];
+    const fetchImpl: FetchImpl = async (url) => {
+      calls.push({ url });
+      if (url.includes('/openapi/auth/token/create')) {
+        return { status: 417, json: async () => ({ code: 'X', message: 'fail' }) };
+      }
+      return { status: 200, json: async () => ({ ok: true }) };
+    };
+    const client = new WebullClient(CREDS, {
+      hosts: HOSTS,
+      fetchImpl,
+      sleep: async () => {},
+      now: () => new Date(nowMs),
+    });
+    const creates = () =>
+      calls.filter((c) => c.url.includes('/openapi/auth/token/create'));
+
+    // First failure hits the endpoint; subsequent calls short-circuit.
+    await expect(client.request('accountList')).rejects.toMatchObject({
+      code: 'BROKER_AUTH_FAILED',
+    });
+    await expect(client.request('accountList')).rejects.toMatchObject({
+      code: 'BROKER_RATE_LIMITED',
+    });
+    await expect(client.request('accountList')).rejects.toMatchObject({
+      code: 'BROKER_RATE_LIMITED',
+    });
+    expect(creates()).toHaveLength(1);
+
+    // After the backoff window, exactly one real retry goes through.
+    nowMs += 61_000;
+    await expect(client.request('accountList')).rejects.toMatchObject({
+      code: 'BROKER_AUTH_FAILED',
+    });
+    expect(creates()).toHaveLength(2);
+  });
+
   it('refreshes a token that is near expiry', async () => {
     const soonExpiring = {
       token: 'tok-old',

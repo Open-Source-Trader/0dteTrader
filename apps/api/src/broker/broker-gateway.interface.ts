@@ -7,6 +7,7 @@ import {
   OrderResult,
   Position,
   Quote,
+  TradingMode,
 } from '@0dtetrader/shared-types';
 
 /** Injection token for the BrokerGateway (Webull OpenAPI). */
@@ -38,4 +39,9 @@ export interface BrokerGateway {
   cancelOrder(userId: string, orderId: string): Promise<void>;
   getPositions(userId: string): Promise<Position[]>;
   getOpenOrders(userId: string): Promise<OrderResult[]>;
+  /**
+   * Drop the cached Webull client/token for the user's current trading mode
+   * and mint a fresh access token. Returns the mode it applied to.
+   */
+  reauthenticate(userId: string): Promise<TradingMode>;
 }

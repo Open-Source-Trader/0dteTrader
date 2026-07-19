@@ -70,6 +70,12 @@ export interface WebullCredentialsSaved {
   environment: TradingMode;
 }
 
+export interface WebullSessionRefreshed {
+  refreshed: true;
+  /** Trading mode the fresh token was minted for (the user's current mode). */
+  environment: TradingMode;
+}
+
 // ---------------------------------------------------------------------------
 // Market data
 // ---------------------------------------------------------------------------

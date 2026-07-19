@@ -215,6 +215,58 @@ describe('WebullBrokerGateway', () => {
     });
   });
 
+  describe('getCandles', () => {
+    const BAR = {
+      symbol: 'SPY',
+      time: '2026-07-17T19:59:00.000+0000',
+      open: '1',
+      high: '2',
+      low: '0.5',
+      close: '1.5',
+      volume: '10',
+    };
+
+    it('falls back to the latest bars when the requested window is empty (weekend)', async () => {
+      handlers['GET /openapi/market-data/stock/bars'] = (call) => ({
+        status: 200,
+        body: new URL(call.url).searchParams.has('start_time') ? [] : [BAR],
+      });
+      const candles = await gateway.getCandles('u1', 'SPY', {
+        interval: '1m',
+        from: new Date(Date.now() - 400 * 60 * 1000).toISOString(),
+      });
+      expect(candles).toHaveLength(1);
+      const barsCalls = callsTo('/openapi/market-data/stock/bars');
+      expect(barsCalls).toHaveLength(2);
+      expect(barsCalls[0].url).toContain('start_time=');
+      expect(barsCalls[1].url).not.toContain('start_time=');
+    });
+
+    it('does not refetch when the windowed request returns bars', async () => {
+      handlers['GET /openapi/market-data/stock/bars'] = () => ({
+        status: 200,
+        body: [BAR],
+      });
+      const candles = await gateway.getCandles('u1', 'SPY', {
+        interval: '1m',
+        from: new Date(Date.now() - 400 * 60 * 1000).toISOString(),
+      });
+      expect(candles).toHaveLength(1);
+      expect(callsTo('/openapi/market-data/stock/bars')).toHaveLength(1);
+    });
+
+    it('requests the latest bars directly when no window is given', async () => {
+      handlers['GET /openapi/market-data/stock/bars'] = () => ({
+        status: 200,
+        body: [BAR],
+      });
+      await gateway.getCandles('u1', 'SPY', { interval: '1m' });
+      const barsCalls = callsTo('/openapi/market-data/stock/bars');
+      expect(barsCalls).toHaveLength(1);
+      expect(barsCalls[0].url).not.toContain('start_time=');
+    });
+  });
+
   describe('trading mode (live / practice)', () => {
     it('live mode uses the prod hosts and the live credential set', async () => {
       tradingMode = 'live';
@@ -264,6 +316,20 @@ describe('WebullBrokerGateway', () => {
       // Practice fell back to the built-in practice credentials.
       const practiceToken = callsTo('/openapi/auth/token/create')[1];
       expect(practiceToken.headers['x-app-key']).toBe('PAK');
+    });
+
+    it('reauthenticate drops the cached client and mints a fresh token', async () => {
+      await gateway.getQuote('u1', 'SPY');
+      expect(callsTo('/openapi/auth/token/create')).toHaveLength(1);
+
+      await expect(gateway.reauthenticate('u1')).resolves.toBe('live');
+      // Full create, not refresh — the stale token is discarded, not reused.
+      expect(callsTo('/openapi/auth/token/create')).toHaveLength(2);
+      expect(callsTo('/openapi/auth/token/refresh')).toHaveLength(0);
+
+      // The fresh client caches its token: no third create on the next call.
+      await gateway.getQuote('u1', 'SPY');
+      expect(callsTo('/openapi/auth/token/create')).toHaveLength(2);
     });
   });
 

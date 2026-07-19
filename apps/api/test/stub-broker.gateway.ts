@@ -9,6 +9,7 @@ import {
   OrderResult,
   Position,
   Quote,
+  TradingMode,
 } from '@0dtetrader/shared-types';
 import { BrokerGateway } from '../src/broker/broker-gateway.interface';
 import {
@@ -61,6 +62,10 @@ export class StubBrokerGateway implements BrokerGateway {
       volume: 1_000_000,
       timestamp: new Date().toISOString(),
     };
+  }
+
+  async reauthenticate(): Promise<TradingMode> {
+    return 'live';
   }
 
   async getCandles(

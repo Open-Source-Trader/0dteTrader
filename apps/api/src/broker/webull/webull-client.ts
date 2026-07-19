@@ -73,6 +73,10 @@ export class WebullClient {
   private readonly now: () => Date;
   private cachedToken: CachedToken | null = null;
   private tokenInFlight: Promise<string> | null = null;
+  /** Consecutive token-acquire failures driving the backoff below. */
+  private tokenFailures = 0;
+  /** Epoch ms before which no new token create/refresh is attempted. */
+  private tokenRetryAfterMs = 0;
 
   constructor(
     private readonly creds: WebullCredentials,
@@ -92,6 +96,16 @@ export class WebullClient {
   /** Discard the cached token (e.g. after a 401 on a business call). */
   clearToken(): void {
     this.cachedToken = null;
+  }
+
+  /**
+   * Force a brand-new access token (full create, not refresh) on demand —
+   * the server side of the app's "Reconnect" button, for when the user's
+   * token went stale and they don't want to re-enter credentials.
+   */
+  async reauthenticate(): Promise<void> {
+    this.clearToken();
+    await this.ensureToken();
   }
 
   // -------------------------------------------------------------------------
@@ -214,10 +228,32 @@ export class WebullClient {
     ) {
       return this.cachedToken.token;
     }
+    // Circuit breaker: a failed acquire backs off exponentially (cap 60s), so
+    // per-second quote ticks can't hammer the token endpoint (Webull allows
+    // ~10 creates/30s) and trip VERIFY_FAILURE_EXCEED_LIMIT lockouts.
+    if (this.now().getTime() < this.tokenRetryAfterMs) {
+      throw brokerErrors.rateLimited(
+        'Webull token creation is backing off after repeated failures — retry in a minute',
+      );
+    }
     // Single-flight: concurrent callers share one create/refresh.
-    this.tokenInFlight ??= this.acquireToken().finally(() => {
-      this.tokenInFlight = null;
-    });
+    this.tokenInFlight ??= this.acquireToken()
+      .then((token) => {
+        this.tokenFailures = 0;
+        return token;
+      })
+      .catch((err) => {
+        this.tokenFailures += 1;
+        const backoff = Math.min(1000 * 2 ** this.tokenFailures, 60_000);
+        this.tokenRetryAfterMs = this.now().getTime() + backoff;
+        this.logger.warn(
+          `Webull token acquire failed (${this.tokenFailures}x); backing off ${backoff}ms`,
+        );
+        throw err;
+      })
+      .finally(() => {
+        this.tokenInFlight = null;
+      });
     return this.tokenInFlight;
   }
 

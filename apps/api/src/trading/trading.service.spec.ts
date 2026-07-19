@@ -8,6 +8,7 @@ import {
   OrderResult,
   Position,
   Quote,
+  TradingMode,
 } from '@0dtetrader/shared-types';
 import {
   computeMid,
@@ -50,6 +51,10 @@ class StubBrokerGateway implements BrokerGateway {
 
   async getCandles(): Promise<Candle[]> {
     return [];
+  }
+
+  async reauthenticate(): Promise<TradingMode> {
+    return 'live';
   }
 
   async getOptionsChain(

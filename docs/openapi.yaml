@@ -92,6 +92,21 @@ paths:
         - { name: environment, in: query, schema: { type: string, enum: [live, practice], default: live } }
       responses:
         '204': { description: Deleted }
+  /me/webull-session/refresh:
+    post:
+      tags: [user]
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: Fresh Webull access token minted for the caller's current trading mode
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [refreshed, environment]
+                properties:
+                  refreshed: { type: boolean, enum: [true] }
+                  environment: { type: string, enum: [live, practice] }
   /market/quote:
     get:
       tags: [market]

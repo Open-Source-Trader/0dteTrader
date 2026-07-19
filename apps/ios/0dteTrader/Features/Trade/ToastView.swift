@@ -5,6 +5,7 @@ import SwiftUI
 struct ToastView: View {
     let toast: Toast
     var onDismiss: (() -> Void)?
+    @State private var dragOffset: CGFloat = 0
 
     private var tint: Color {
         switch toast.style {
@@ -46,7 +47,22 @@ struct ToastView: View {
         .overlay(HudPanelShape(chamfer: 8).strokeBorder(tint.opacity(0.9), lineWidth: 1))
         .shadow(color: tint.opacity(0.4), radius: 8)
         .padding(.horizontal, AppSpacing.lg)
+        .offset(y: min(dragOffset, 0))
+        .opacity(dragOffset < -40 ? 0 : 1)
         .contentShape(HudPanelShape(chamfer: 8))
+        .gesture(
+            DragGesture(minimumDistance: 10)
+                .onChanged { value in
+                    dragOffset = value.translation.height
+                }
+                .onEnded { value in
+                    if value.translation.height < -30 {
+                        onDismiss?()
+                    } else {
+                        withAnimation(.spring(duration: 0.3)) { dragOffset = 0 }
+                    }
+                }
+        )
         .onTapGesture { onDismiss?() }
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isStaticText)

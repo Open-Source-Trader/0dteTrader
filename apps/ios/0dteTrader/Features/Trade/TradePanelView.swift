@@ -78,6 +78,7 @@ struct TradePanelView: View {
                 }
                 .frame(minHeight: density.buttonMinHeight)
             }
+            .padding(.top, density.spacing)
             .layoutPriority(1)
         }
         .padding(.horizontal, AppSpacing.md)

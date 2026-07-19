@@ -15,6 +15,7 @@ import type {
   WebullCredentialsSaved,
   WebullSessionRefreshed,
 } from '@0dtetrader/shared-types';
+import type { GexLevels } from '../../features/chart/gex/gexTypes';
 import { ApiError, parseErrorEnvelope } from './ApiError';
 import type { SessionStore } from './SessionStore';
 
@@ -168,6 +169,13 @@ export class ApiClient {
     const query: Record<string, string> = { symbol };
     if (expiration) query.expiration = expiration;
     return this.request({ method: 'GET', path: 'v1/market/options-chain', query });
+  }
+
+  /** Dealer GEX/DEX levels + premium heat map (Tradier-backed, server-side). */
+  gexLevels(symbol: string, expiration?: string): Promise<GexLevels> {
+    const query: Record<string, string> = { symbol };
+    if (expiration) query.expiration = expiration;
+    return this.request({ method: 'GET', path: 'v1/market/gex', query });
   }
 
   previewOrder(order: OrderRequest): Promise<OrderPreview> {

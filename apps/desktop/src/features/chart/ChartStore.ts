@@ -5,6 +5,7 @@ import type { QuoteSocket } from '../../core/api/QuoteSocket';
 import { parseDateTime } from '../../core/models/dates';
 import { Store } from '../../core/observable';
 import type { SettingsStore } from '../../core/storage/SettingsStore';
+import type { GexSettings } from './gex/gexSettings';
 import type { IndicatorSettings } from './indicatorSettings';
 import type { TwcHeatmapSettings } from './twc/twcSettings';
 
@@ -46,6 +47,7 @@ interface ChartStoreState {
   isStale: boolean;
   indicatorSettings: IndicatorSettings;
   twcSettings: TwcHeatmapSettings;
+  gexSettings: GexSettings;
 }
 
 /** Upper bound on rendered candles so live appends stay cheap. */
@@ -71,6 +73,7 @@ export class ChartStore extends Store<ChartStoreState> {
       isStale: socket.getState().connectionState !== 'connected',
       indicatorSettings: settingsStore.indicatorSettings,
       twcSettings: settingsStore.twcSettings,
+      gexSettings: settingsStore.gexSettings,
     });
     socket.onQuote((quote) => this.handleLiveQuote(quote));
     // Mirror the socket's connection state so the header can flag frozen
@@ -134,6 +137,11 @@ export class ChartStore extends Store<ChartStoreState> {
   setTwcSettings(settings: TwcHeatmapSettings): void {
     this.settingsStore.twcSettings = settings;
     this.set({ twcSettings: settings });
+  }
+
+  setGexSettings(settings: GexSettings): void {
+    this.settingsStore.gexSettings = settings;
+    this.set({ gexSettings: settings });
   }
 
   // MARK: - Live updates

@@ -1,5 +1,7 @@
 import type { IndicatorSettings } from '../../features/chart/indicatorSettings';
 import { DEFAULT_INDICATOR_SETTINGS } from '../../features/chart/indicatorSettings';
+import type { GexSettings } from '../../features/chart/gex/gexSettings';
+import { DEFAULT_GEX_SETTINGS } from '../../features/chart/gex/gexSettings';
 import type { TwcHeatmapSettings } from '../../features/chart/twc/twcSettings';
 import { DEFAULT_TWC_SETTINGS } from '../../features/chart/twc/twcSettings';
 
@@ -11,6 +13,7 @@ export class SettingsStore {
     layoutMode: 'settings.layoutMode',
     indicatorSettings: 'settings.indicatorSettings',
     twcSettings: 'settings.twcSettings',
+    gexSettings: 'settings.gexSettings',
     riskDisclaimerAccepted: 'settings.riskDisclaimerAccepted',
     lastSymbol: 'settings.lastSymbol',
   };
@@ -50,6 +53,20 @@ export class SettingsStore {
 
   set twcSettings(value: TwcHeatmapSettings) {
     localStorage.setItem(SettingsStore.keys.twcSettings, JSON.stringify(value));
+  }
+
+  get gexSettings(): GexSettings {
+    const raw = localStorage.getItem(SettingsStore.keys.gexSettings);
+    if (!raw) return DEFAULT_GEX_SETTINGS;
+    try {
+      return { ...DEFAULT_GEX_SETTINGS, ...(JSON.parse(raw) as Partial<GexSettings>) };
+    } catch {
+      return DEFAULT_GEX_SETTINGS;
+    }
+  }
+
+  set gexSettings(value: GexSettings) {
+    localStorage.setItem(SettingsStore.keys.gexSettings, JSON.stringify(value));
   }
 
   get hasAcceptedRiskDisclaimer(): boolean {

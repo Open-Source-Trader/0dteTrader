@@ -75,6 +75,9 @@ struct CandleChartRepresentable: UIViewRepresentable {
     var showVolume: Bool = false
     var intervalSeconds: TimeInterval = 60
     var drawingsModel: ChartDrawingsModel?
+    /// TWC Heatmap render model: candle repaints, extra line series, and the
+    /// read-only geometry overlay (nil when the script indicator is off).
+    var twcModel: TwcRenderModel?
     /// Called with the main chart's visible x-range whenever the user pans or
     /// zooms, so non-interactive indicator panes can track the same window.
     var onVisibleRangeChange: ((ClosedRange<Double>) -> Void)?
@@ -83,12 +86,16 @@ struct CandleChartRepresentable: UIViewRepresentable {
     /// overlay can reuse the chart's pixel coordinate space directly.
     final class ContainerView: UIView {
         let chart = CombinedChartView()
+        let twcOverlay = TwcOverlayView()
         let overlay = DrawingOverlayView()
 
         override init(frame: CGRect) {
             super.init(frame: frame)
             addSubview(chart)
+            // TWC geometry below the interactive drawing overlay.
+            addSubview(twcOverlay)
             addSubview(overlay)
+            twcOverlay.chart = chart
             overlay.chart = chart
         }
 
@@ -100,6 +107,7 @@ struct CandleChartRepresentable: UIViewRepresentable {
         override func layoutSubviews() {
             super.layoutSubviews()
             chart.frame = bounds
+            twcOverlay.frame = bounds
             overlay.frame = bounds
         }
     }
@@ -153,6 +161,7 @@ struct CandleChartRepresentable: UIViewRepresentable {
         context.coordinator.onVisibleRange = { range in rangeCallback?(range) }
         context.coordinator.onTransform = { [weak container] in
             container?.overlay.setNeedsDisplay()
+            container?.twcOverlay.setNeedsDisplay()
         }
         chart.delegate = context.coordinator
 
@@ -193,6 +202,8 @@ struct CandleChartRepresentable: UIViewRepresentable {
         container.overlay.firstTime = candles.first?.time.timeIntervalSince1970 ?? 0
         container.overlay.intervalSeconds = intervalSeconds
         container.overlay.candles = candles
+        container.twcOverlay.model = twcModel
+        container.twcOverlay.candles = candles
 
         if let marker = chart.marker as? ChartMarkerView {
             marker.candles = candles
@@ -218,12 +229,28 @@ struct CandleChartRepresentable: UIViewRepresentable {
             )
         }
         let candleSet = CandleChartDataSet(entries: candleEntries, label: "Price")
-        candleSet.increasingColor = .chartUp
-        candleSet.decreasingColor = .chartDown
+        if let regimeColors = twcModel?.candleColors {
+            // TWC regime candles: per-bar colors override the up/down palette.
+            // DGCharts falls back to `colors[index]` when the increasing/
+            // decreasing colors are nil; hidden (nil) bars keep the default.
+            candleSet.increasingColor = nil
+            candleSet.decreasingColor = nil
+            candleSet.colors = candles.enumerated().map { index, candle in
+                if index < regimeColors.count, let color = regimeColors[index] {
+                    return UIColor(twcColor: color)
+                }
+                return candle.close >= candle.open ? .chartUp : .chartDown
+            }
+            candleSet.increasingFilled = true
+            candleSet.decreasingFilled = true
+        } else {
+            candleSet.increasingColor = .chartUp
+            candleSet.decreasingColor = .chartDown
+            // Hollow up / solid down so direction isn't carried by color alone.
+            candleSet.increasingFilled = false
+            candleSet.decreasingFilled = true
+        }
         candleSet.neutralColor = .systemBlue
-        // Hollow up / solid down so direction isn't carried by color alone.
-        candleSet.increasingFilled = false
-        candleSet.decreasingFilled = true
         candleSet.shadowColorSameAsCandle = true
         candleSet.shadowWidth = ChartMetrics.shadowWidth
         candleSet.barSpace = ChartMetrics.barSpace
@@ -275,8 +302,41 @@ struct CandleChartRepresentable: UIViewRepresentable {
             set.axisDependency = .left
             return set
         }
-        if !lineSets.isEmpty {
-            data.lineData = LineChartData(dataSets: lineSets)
+        // TWC line series: split each line's contiguous non-nil runs into
+        // separate datasets so gaps break the line (Pine linebr) instead of
+        // bridging across them.
+        var twcLineSets: [LineChartDataSet] = []
+        for line in twcModel?.lines ?? [] {
+            var runEntries: [ChartDataEntry] = []
+            func flushRun() {
+                guard runEntries.count >= 1 else {
+                    runEntries = []
+                    return
+                }
+                let set = LineChartDataSet(entries: runEntries, label: line.id)
+                set.mode = .linear
+                set.lineWidth = CGFloat(line.lineWidth)
+                set.drawCirclesEnabled = false
+                set.drawValuesEnabled = false
+                set.highlightEnabled = false
+                set.setColor(UIColor(twcColor: line.color))
+                set.axisDependency = .left
+                twcLineSets.append(set)
+                runEntries = []
+            }
+            for (index, value) in line.values.enumerated() {
+                guard index < candles.count else { break }
+                if let value {
+                    runEntries.append(ChartDataEntry(x: Double(index), y: value))
+                } else {
+                    flushRun()
+                }
+            }
+            flushRun()
+        }
+
+        if !lineSets.isEmpty || !twcLineSets.isEmpty {
+            data.lineData = LineChartData(dataSets: lineSets + twcLineSets)
         }
 
         chart.data = data

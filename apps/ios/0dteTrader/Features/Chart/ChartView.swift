@@ -41,8 +41,12 @@ struct ChartView: View {
                     showVolume: viewModel.indicatorSettings.volumeEnabled,
                     intervalSeconds: viewModel.interval.seconds,
                     drawingsModel: drawings,
+                    twcModel: viewModel.twcRenderModel,
                     onVisibleRangeChange: { viewModel.visibleXRange = $0 }
                 )
+                if let banner = viewModel.twcRenderModel?.banner {
+                    TwcBiasBannerView(banner: banner)
+                }
                 if viewModel.isLoading, viewModel.candles.isEmpty {
                     loadingState
                 }

@@ -88,7 +88,10 @@ struct TradeScreenView: View {
             .presentationDragIndicator(.visible)
         }
         .sheet(isPresented: $showIndicatorSettings) {
-            IndicatorSettingsView(settings: $chartViewModel.indicatorSettings)
+            IndicatorSettingsView(
+                settings: $chartViewModel.indicatorSettings,
+                twcSettings: $chartViewModel.twcSettings
+            )
             .presentationDetents([.medium, .large])
             .presentationDragIndicator(.visible)
         }

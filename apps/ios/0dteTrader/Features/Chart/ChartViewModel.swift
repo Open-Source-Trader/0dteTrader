@@ -53,6 +53,10 @@ final class ChartViewModel: ObservableObject {
         didSet { settingsStore.indicatorSettings = indicatorSettings }
     }
 
+    @Published var twcSettings: TwcHeatmapSettings {
+        didSet { settingsStore.twcSettings = twcSettings }
+    }
+
     private let apiClient: APIClient
     private let socket: QuoteSocketClient
     private let settingsStore: SettingsStore
@@ -67,6 +71,7 @@ final class ChartViewModel: ObservableObject {
         self.settingsStore = settingsStore
         self.symbol = settingsStore.lastSymbol ?? "SPY"
         self.indicatorSettings = settingsStore.indicatorSettings
+        self.twcSettings = settingsStore.twcSettings
         drawings.setSymbol(self.symbol)
 
         socket.$lastQuote
@@ -183,6 +188,17 @@ final class ChartViewModel: ObservableObject {
     }
 
     /// Overlays drawn on top of the candles (SMA, EMA, VWAP, Bollinger).
+    /// TWC Heatmap render model, recomputed from the current candles and
+    /// settings on every SwiftUI body evaluation (same lifecycle as the
+    /// indicator series below; ~2 ms at 600 candles).
+    var twcRenderModel: TwcRenderModel? {
+        TwcEngine.compute(
+            candles: candles,
+            settings: twcSettings,
+            intervalSeconds: Int(interval.seconds)
+        )
+    }
+
     var priceOverlays: [IndicatorSeries] {
         var series: [IndicatorSeries] = []
         if indicatorSettings.smaEnabled {

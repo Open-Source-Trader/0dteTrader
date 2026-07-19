@@ -4,6 +4,7 @@ import SwiftUI
 /// view model's settings; changes persist via SettingsStore.
 struct IndicatorSettingsView: View {
     @Binding var settings: IndicatorSettings
+    @Binding var twcSettings: TwcHeatmapSettings
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -108,6 +109,23 @@ struct IndicatorSettingsView: View {
                     }
                 } footer: {
                     Text("MACD uses standard 12 / 26 / 9 parameters. Settings save automatically.")
+                }
+                .listRowBackground(Color.appSurface)
+
+                Section("Scripts") {
+                    HStack(spacing: AppSpacing.sm) {
+                        Toggle(isOn: $twcSettings.enabled) {
+                            Text("TWC Heatmap V5")
+                        }
+                        NavigationLink {
+                            TwcSettingsView(settings: $twcSettings)
+                        } label: {
+                            Image(systemName: "gearshape")
+                                .foregroundStyle(Color.appAccent)
+                        }
+                        .fixedSize()
+                        .accessibilityLabel("TWC Heatmap V5 settings")
+                    }
                 }
                 .listRowBackground(Color.appSurface)
             }

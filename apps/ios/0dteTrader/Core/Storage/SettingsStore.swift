@@ -23,6 +23,7 @@ final class SettingsStore: @unchecked Sendable {
         static let layoutMode = "settings.layoutMode"
         static let splitFraction = "settings.splitFraction"
         static let indicatorSettings = "settings.indicatorSettings"
+        static let twcSettings = "settings.twcSettings"
         static let riskDisclaimerAccepted = "settings.riskDisclaimerAccepted"
         static let lastSymbol = "settings.lastSymbol"
         static let appLockEnabled = "settings.appLockEnabled"
@@ -60,6 +61,22 @@ final class SettingsStore: @unchecked Sendable {
         set {
             if let data = try? encoder.encode(newValue) {
                 defaults.set(data, forKey: Keys.indicatorSettings)
+            }
+        }
+    }
+
+    var twcSettings: TwcHeatmapSettings {
+        get {
+            guard let data = defaults.data(forKey: Keys.twcSettings),
+                  let settings = try? decoder.decode(TwcHeatmapSettings.self, from: data)
+            else {
+                return .default
+            }
+            return settings
+        }
+        set {
+            if let data = try? encoder.encode(newValue) {
+                defaults.set(data, forKey: Keys.twcSettings)
             }
         }
     }

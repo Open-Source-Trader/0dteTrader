@@ -3,7 +3,6 @@ import UIKit
 
 /// Chart surface: header (symbol, last price, interval, indicator settings),
 /// candle chart with overlays, and optional RSI / MACD sub-panes.
-// swiftlint:disable:next type_body_length
 struct ChartView: View {
     @ObservedObject var viewModel: ChartViewModel
     @ObservedObject var drawings: ChartDrawingsModel

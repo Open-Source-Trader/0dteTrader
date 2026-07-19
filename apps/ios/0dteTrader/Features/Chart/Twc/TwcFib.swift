@@ -5,7 +5,6 @@ import Foundation
 /// (zigzag pivots, instant flips, hit latches, ratio growth); geometry is
 /// assembled from the state after the final bar. Pine deletes and redraws all
 /// objects per swing, so a full recompute is equivalent.
-// swiftlint:disable:next type_body_length
 enum TwcFib {
     private static let fibNeg0618 = -0.618033988749895
     private static let fib0618 = 0.618033988749895
@@ -51,7 +50,6 @@ enum TwcFib {
         }
     }
 
-    // swiftlint:disable:next function_body_length cyclomatic_complexity
     static func compute(candles: [Candle], settings: TwcHeatmapSettings, atr14: [Double?]) -> Result {
         guard settings.showFibonacci, !candles.isEmpty else { return .empty }
 
@@ -508,7 +506,6 @@ enum TwcFib {
         return Result(segments: segments, bands: bands, labels: labels)
     }
 
-    // swiftlint:disable:next function_body_length cyclomatic_complexity
     /// Direction-only zigzag fold (Pine f_calcFibDirection): the same swing
     /// detection + instant flip, returning +1/-1 per bar once two pivots
     /// exist, 0 before. Runs regardless of showFibonacci — it feeds the

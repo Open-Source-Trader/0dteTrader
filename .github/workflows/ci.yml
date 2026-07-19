@@ -15,13 +15,13 @@ jobs:
           POSTGRES_USER: odtetrader
           POSTGRES_PASSWORD: odtetrader
           POSTGRES_DB: odtetrader
-        ports: ["5432:5432"]
+        ports: ['5432:5432']
         options: >-
           --health-cmd "pg_isready -U odtetrader"
           --health-interval 5s --health-timeout 3s --health-retries 10
       redis:
         image: redis:7-alpine
-        ports: ["6379:6379"]
+        ports: ['6379:6379']
         options: >-
           --health-cmd "redis-cli ping"
           --health-interval 5s --health-timeout 3s --health-retries 10
@@ -50,6 +50,10 @@ jobs:
       # Xcode can read; select the newest installed Xcode so they agree.
       - name: Select latest Xcode
         run: sudo xcode-select -s "$(ls -d /Applications/Xcode*.app | sort -V | tail -n 1)/Contents/Developer"
+      - name: Install SwiftLint
+        run: brew install swiftlint
+      - name: Lint iOS
+        run: cd apps/ios && swiftlint lint --reporter github-actions-logging
       - name: Generate Xcode project
         run: |
           brew install xcodegen

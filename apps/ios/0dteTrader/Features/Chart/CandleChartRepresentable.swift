@@ -210,7 +210,6 @@ struct CandleChartRepresentable: UIViewRepresentable {
         return container
     }
 
-    // swiftlint:disable:next function_body_length cyclomatic_complexity
     func updateUIView(_ container: ContainerView, context: Context) {
         let chart = container.chart
         container.overlay.model = drawingsModel

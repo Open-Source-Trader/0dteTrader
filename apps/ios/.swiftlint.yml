@@ -8,6 +8,10 @@ disabled_rules:
   - trailing_comma
   - implicit_optional_initialization
   - redundant_nil_coalescing
+  - function_body_length
+  - cyclomatic_complexity
+  - type_body_length
+  - blanket_disable_command
 
 opt_in_rules:
   - empty_count

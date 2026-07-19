@@ -67,6 +67,7 @@
 		A7186651BB033CDCB7CC1B7A /* TwcSmc.swift in Sources */ = {isa = PBXBuildFile; fileRef = 138EEA65E0C0EFB5DC0274AB /* TwcSmc.swift */; };
 		A7CD836B5B785A1950016710 /* TradeViewModelArmTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0526058F68F09D6D8006EA9 /* TradeViewModelArmTests.swift */; };
 		ABD179C4395703F4871CF116 /* WebullCredentialsForm.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60DE9978C39D93AAFB696502 /* WebullCredentialsForm.swift */; };
+		AC8E0FE3F0A7C9B1FBF82848 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 587E130879D8D7B49148A0B8 /* Assets.xcassets */; };
 		AE3CE0F2A8BBF59558945BA0 /* RiskDisclaimerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3B06B67B43D87BA4E513D4E6 /* RiskDisclaimerView.swift */; };
 		AEFDB4B0660FA4A581735737 /* AutoContractSelectorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8BFFC45C736C4CA1ACE35050 /* AutoContractSelectorTests.swift */; };
 		AF14E164AA696AEE1E86D336 /* ProfileViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3AF6ADD076A65353601464B /* ProfileViewModel.swift */; };
@@ -91,7 +92,6 @@
 		F83AEC823F988B892AC676B0 /* DomainModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFDAEEEE369CDB1932258169 /* DomainModels.swift */; };
 		FA4613226A5CD5D1659E22F2 /* AppTokens.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A634522E7872917FEE5D028 /* AppTokens.swift */; };
 		FA95BBF1CC960FD882B84160 /* TwcEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA9E3BE3C364FD4856DF0D38 /* TwcEngine.swift */; };
-		A1B2C3D4E5F6071829AAAAAA /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6071829BBBBBB /* Assets.xcassets */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -106,7 +106,6 @@
 
 /* Begin PBXFileReference section */
 		0175DABB956B8A9AC6D8DF32 /* 0dteTrader.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = 0dteTrader.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		A1B2C3D4E5F6071829BBBBBB /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		023565ED79C05E949FE94DC5 /* ChartViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChartViewModel.swift; sourceTree = "<group>"; };
 		0417CEC2F77C4F03B3EF1BE3 /* LoginView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginView.swift; sourceTree = "<group>"; };
 		0FC8C251F93F780FDB838C81 /* IndicatorEngineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IndicatorEngineTests.swift; sourceTree = "<group>"; };
@@ -128,6 +127,7 @@
 		4F8F671B7B873FD63DA3E730 /* APIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIClient.swift; sourceTree = "<group>"; };
 		542142E3D3D933C8930014C1 /* GexLevels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GexLevels.swift; sourceTree = "<group>"; };
 		57D0C10C131E65B6E4BD1455 /* SessionStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionStore.swift; sourceTree = "<group>"; };
+		587E130879D8D7B49148A0B8 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		59E2E4013217BE7093509DF4 /* AutoContractSelector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutoContractSelector.swift; sourceTree = "<group>"; };
 		5A634522E7872917FEE5D028 /* AppTokens.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppTokens.swift; sourceTree = "<group>"; };
 		5B6F23DB1DFF8EB127BB260D /* StateViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StateViews.swift; sourceTree = "<group>"; };
@@ -394,7 +394,7 @@
 		BCF6C5A332039FF54D4E50B2 /* Resources */ = {
 			isa = PBXGroup;
 			children = (
-				A1B2C3D4E5F6071829BBBBBB /* Assets.xcassets */,
+				587E130879D8D7B49148A0B8 /* Assets.xcassets */,
 				3EE3907F16BDE83369A77A59 /* Fonts */,
 			);
 			path = Resources;
@@ -450,6 +450,7 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = 9BCD72CA739DB87264AF39B6 /* Build configuration list for PBXNativeTarget "0dteTrader" */;
 			buildPhases = (
+				DDF30F17F0874E466E6E6885 /* SwiftLint */,
 				1E07E4529BD3D751325DAB41 /* Sources */,
 				F7A6E2F5502989C50B4E5811 /* Resources */,
 				3933A8024B2770A667B47C9C /* Frameworks */,
@@ -521,7 +522,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				A1B2C3D4E5F6071829AAAAAA /* Assets.xcassets in Resources */,
+				AC8E0FE3F0A7C9B1FBF82848 /* Assets.xcassets in Resources */,
 				27384152B92BBB9950C3DBE8 /* JetBrainsMono-Regular.ttf in Resources */,
 				080162B8B79ACDB8EDB97214 /* JetBrainsMono-SemiBold.ttf in Resources */,
 				D734A1BB2EECF0BE08FCE3F0 /* Orbitron-Bold.ttf in Resources */,
@@ -532,6 +533,28 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		DDF30F17F0874E466E6E6885 /* SwiftLint */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = SwiftLint;
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "if command -v swiftlint &> /dev/null; then\n  swiftlint lint --reporter xcode\nelse\n  echo \"warning: SwiftLint not installed. Run: brew install swiftlint\"\nfi\n";
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		1E07E4529BD3D751325DAB41 /* Sources */ = {

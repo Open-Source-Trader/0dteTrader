@@ -1,4 +1,4 @@
-import { Controller, Get, HttpCode, HttpStatus, Res } from '@nestjs/common';
+import { Controller, Get, HttpStatus, Res } from '@nestjs/common';
 import { Response } from 'express';
 import { Public } from '../common/public.decorator';
 import { PrismaService } from '../prisma/prisma.service';
@@ -9,8 +9,9 @@ export class HealthController {
   constructor(private readonly prisma: PrismaService) {}
 
   @Get()
-  @HttpCode(HttpStatus.OK)
-  async check(@Res() res: Response): Promise<void> {
+  async check(
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<{ status: string; db: string; uptime: number }> {
     let dbStatus = 'ok';
     try {
       await this.prisma.$queryRawUnsafe('SELECT 1');
@@ -19,9 +20,9 @@ export class HealthController {
     }
 
     const status = dbStatus === 'ok' ? 'ok' : 'degraded';
-    const code =
-      status === 'ok' ? HttpStatus.OK : HttpStatus.SERVICE_UNAVAILABLE;
-
-    res.status(code).json({ status, db: dbStatus, uptime: process.uptime() });
+    if (dbStatus !== 'ok') {
+      res.status(HttpStatus.SERVICE_UNAVAILABLE);
+    }
+    return { status, db: dbStatus, uptime: process.uptime() };
   }
 }

@@ -33,6 +33,15 @@ targets:
         MARKETING_VERSION: "0.1.0"
         CURRENT_PROJECT_VERSION: "1"
         TARGETED_DEVICE_FAMILY: "1"
+    prebuildScripts:
+      - name: SwiftLint
+        basedOnDependencyAnalysis: false
+        script: |
+          if command -v swiftlint &> /dev/null; then
+            swiftlint lint --reporter xcode
+          else
+            echo "warning: SwiftLint not installed. Run: brew install swiftlint"
+          fi
     info:
       path: 0dteTrader/Info.plist
       properties:

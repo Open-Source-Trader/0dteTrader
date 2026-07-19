@@ -29,7 +29,6 @@ enum TwcHeatmap {
         let crossDn: [Bool]
     }
 
-    // swiftlint:disable:next function_body_length cyclomatic_complexity
     static func compute(candles: [Candle], settings: TwcHeatmapSettings, intervalSeconds: Int) -> Result {
         let n = candles.count
         let src = TwcMath.sourceSeries(candles, source: settings.source)

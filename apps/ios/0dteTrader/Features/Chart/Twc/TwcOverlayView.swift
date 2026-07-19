@@ -35,7 +35,6 @@ final class TwcOverlayView: UIView {
         return point
     }
 
-    // swiftlint:disable:next function_body_length cyclomatic_complexity
     override func draw(_ rect: CGRect) {
         guard let model, let chart, !candles.isEmpty,
               let context = UIGraphicsGetCurrentContext()

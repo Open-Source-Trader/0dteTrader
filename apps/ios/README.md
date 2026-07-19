@@ -12,6 +12,7 @@ SwiftUI iPhone app for rapid 0DTE options trading against the
 - macOS with Xcode 15+
 - XcodeGen: `brew install xcodegen`
 - The backend running locally: `npm run dev` at the repo root (`http://localhost:3000`)
+- SwiftLint: `brew install swiftlint` (lint runs automatically during Xcode builds and in CI)
 
 ## Generate, run, test
 
@@ -31,6 +32,17 @@ xcodebuild test -scheme 0dteTrader -destination 'platform=iOS Simulator,name=iPh
 ```
 
 (or Cmd+U in Xcode.)
+
+## Linting
+
+SwiftLint runs automatically as a pre-build script in Xcode and in CI. To run it manually:
+
+```bash
+cd apps/ios
+swiftlint lint
+```
+
+Configuration is in `.swiftlint.yml`. The rules are intentionally pragmatic for the current codebase (e.g., structural rules like `function_body_length` and `cyclomatic_complexity` are disabled to avoid noise in complex indicator math and SwiftUI views). You can tighten them as the code is refactored.
 
 ## Configuration
 

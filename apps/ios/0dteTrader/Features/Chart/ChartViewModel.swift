@@ -46,6 +46,14 @@ final class ChartViewModel: ObservableObject {
     /// The main chart's visible candle-index window; indicator panes track it.
     @Published var visibleXRange: ClosedRange<Double>?
 
+    /// GEX/DEX level structure from the server (nil while disabled or before
+    /// the first successful fetch for the current symbol).
+    @Published private(set) var gexLevels: GexLevels?
+    /// Fresh GEX fetch failed — showing the last good computation.
+    @Published private(set) var gexStale = false
+    /// Set only when there is nothing to show (e.g. token not configured).
+    @Published private(set) var gexErrorMessage: String?
+
     /// Drawing tools + price alerts for the current symbol.
     let drawings = ChartDrawingsModel()
 
@@ -57,10 +65,18 @@ final class ChartViewModel: ObservableObject {
         didSet { settingsStore.twcSettings = twcSettings }
     }
 
+    @Published var gexSettings: GexSettings {
+        didSet {
+            settingsStore.gexSettings = gexSettings
+            updateGexPolling()
+        }
+    }
+
     private let apiClient: APIClient
     private let socket: QuoteSocketClient
     private let settingsStore: SettingsStore
     private var cancellables: Set<AnyCancellable> = []
+    private var gexTask: Task<Void, Never>?
 
     /// Upper bound on rendered candles so live appends stay cheap.
     private let maxCandles = 600
@@ -72,6 +88,7 @@ final class ChartViewModel: ObservableObject {
         self.symbol = settingsStore.lastSymbol ?? "SPY"
         self.indicatorSettings = settingsStore.indicatorSettings
         self.twcSettings = settingsStore.twcSettings
+        self.gexSettings = settingsStore.gexSettings
         drawings.setSymbol(self.symbol)
 
         socket.$lastQuote
@@ -80,6 +97,8 @@ final class ChartViewModel: ObservableObject {
                 self?.handleLiveQuote(quote)
             }
             .store(in: &cancellables)
+
+        updateGexPolling()
     }
 
     // MARK: - Loading
@@ -116,7 +135,10 @@ final class ChartViewModel: ObservableObject {
         drawings.setSymbol(normalized)
         quote = nil
         candles = []
+        // Levels are symbol-keyed server-side: drop the old symbol's overlay
+        // immediately rather than painting its walls over the new chart.
         socket.subscribe(symbols: [normalized])
+        updateGexPolling()
         Task { await loadCandles() }
     }
 
@@ -124,6 +146,53 @@ final class ChartViewModel: ObservableObject {
         guard newInterval != interval else { return }
         interval = newInterval
         Task { await loadCandles() }
+    }
+
+    // MARK: - GEX/DEX polling
+
+    /// (Re)starts the GEX poll loop for the current symbol and settings.
+    /// The server caches the option chain (OI is static intraday), so each
+    /// poll is cheap. On failure the last good levels stay on screen,
+    /// flagged stale.
+    private func updateGexPolling() {
+        gexTask?.cancel()
+        gexTask = nil
+        gexLevels = nil
+        gexStale = false
+        gexErrorMessage = nil
+        guard gexSettings.enabled else { return }
+
+        gexTask = Task { [weak self] in
+            while !Task.isCancelled {
+                guard let self else { return }
+                let symbol = self.symbol
+                do {
+                    let dto = try await self.apiClient.gexLevels(symbol: symbol)
+                    guard !Task.isCancelled else { return }
+                    let levels = GexLevels(dto: dto)
+                    // A symbol change during the fetch makes the result
+                    // irrelevant to the chart now on screen.
+                    if levels.symbol == self.symbol {
+                        self.gexLevels = levels
+                        self.gexStale = levels.stale
+                        self.gexErrorMessage = nil
+                    }
+                } catch is CancellationError {
+                    return
+                } catch {
+                    guard !Task.isCancelled else { return }
+                    if self.gexLevels != nil {
+                        self.gexStale = true
+                    } else if let apiError = error as? APIError {
+                        self.gexErrorMessage = apiError.userMessage
+                    } else {
+                        self.gexErrorMessage = error.localizedDescription
+                    }
+                }
+                let seconds = max(self.gexSettings.refreshSeconds, 15)
+                try? await Task.sleep(nanoseconds: UInt64(seconds) * 1_000_000_000)
+            }
+        }
     }
 
     // MARK: - Live updates (FR-8)

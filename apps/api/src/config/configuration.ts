@@ -27,6 +27,12 @@ export interface AppConfig {
     practiceAccountId: string;
     practiceApplicationId: string;
   };
+  tradier: {
+    /** Personal Tradier API token (brokerage or paper account). */
+    token: string;
+    /** https://api.tradier.com or https://sandbox.tradier.com. */
+    baseUrl: string;
+  };
 }
 
 function int(value: string | undefined, fallback: number): number {
@@ -67,6 +73,10 @@ export default (): AppConfig => ({
     practiceAppSecret: process.env.WEBULL_PRACTICE_APP_SECRET ?? '',
     practiceAccountId: process.env.WEBULL_PRACTICE_ACCOUNT_ID ?? '',
     practiceApplicationId: process.env.WEBULL_PRACTICE_APPLICATION_ID ?? '',
+  },
+  tradier: {
+    token: process.env.TRADIER_API_TOKEN ?? '',
+    baseUrl: process.env.TRADIER_BASE_URL || 'https://api.tradier.com',
   },
 });
 

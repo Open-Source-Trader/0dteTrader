@@ -9,6 +9,7 @@ import { AuthModule } from './auth/auth.module';
 import { JwtAuthGuard } from './auth/jwt-auth.guard';
 import { BrokerModule } from './broker/broker.module';
 import { CredentialsModule } from './credentials/credentials.module';
+import { GexModule } from './gex/gex.module';
 import { MarketDataModule } from './market-data/market-data.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { TradingModule } from './trading/trading.module';
@@ -38,6 +39,7 @@ import { UsersModule } from './users/users.module';
     BrokerModule,
     MarketDataModule,
     TradingModule,
+    GexModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: AppThrottlerGuard },

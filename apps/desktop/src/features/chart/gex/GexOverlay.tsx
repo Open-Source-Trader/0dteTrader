@@ -109,21 +109,21 @@ export function GexOverlay({ chart, series, levels, settings, candles, stale }: 
       if (cfg.showPremium && data.topPremium.length > 0) {
         const shown = data.topPremium.slice(0, cfg.maxPremiumStrikes);
         const maxPremium = shown[0].totalPremium;
-        // Band half-height: quarter of the smallest strike gap.
-        const gaps = data.topPremium
-          .map((level) => level.strike)
-          .sort((a, b) => a - b);
-        let minGap = 1;
-        for (let i = 1; i < gaps.length; i++) {
-          const gap = gaps[i] - gaps[i - 1];
+        // Band half-height: a quarter of the tightest strike spacing in the
+        // shown set, so bands on adjacent strikes never overlap.
+        const sortedStrikes = shown.map((level) => level.strike).sort((a, b) => a - b);
+        let minGap = Infinity;
+        for (let i = 1; i < sortedStrikes.length; i++) {
+          const gap = sortedStrikes[i] - sortedStrikes[i - 1];
           if (gap > 0 && gap < minGap) minGap = gap;
         }
+        if (!Number.isFinite(minGap)) minGap = Math.max(data.spot * 0.005, 1);
         const half = minGap / 4;
         shown.forEach((level, index) => {
           const yTop = yAt(level.strike + half);
           const yBottom = yAt(level.strike - half);
           if (yTop === null || yBottom === null) return;
-          const intensity = level.totalPremium / maxPremium;
+          const intensity = maxPremium > 0 ? level.totalPremium / maxPremium : 0;
           const alpha = Math.min(0.15 + intensity * cfg.opacityCap, cfg.opacityCap);
           ctx.fillStyle = `rgba(${COLORS.premium}, ${alpha.toFixed(3)})`;
           ctx.fillRect(0, yTop, pane.width, yBottom - yTop);

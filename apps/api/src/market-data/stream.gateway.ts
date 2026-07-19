@@ -28,7 +28,7 @@ const QUOTE_TICK_MS = 1000;
 /** Abuse guards: each subscribed symbol costs broker/API calls every second. */
 const MAX_SUBSCRIPTIONS_PER_CLIENT = 50;
 const MAX_TRACKED_SYMBOLS = 500;
-const SYMBOL_PATTERN = /^[A-Za-z0-9.\-]{1,32}$/;
+const SYMBOL_PATTERN = /^[A-Za-z0-9.-]{1,32}$/;
 
 interface ClientState {
   userId: string;

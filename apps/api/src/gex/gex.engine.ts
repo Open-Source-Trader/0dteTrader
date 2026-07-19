@@ -240,7 +240,7 @@ export function computeGexLevels(
     gammaFlip,
     callWall,
     putWall,
-    magnet: opts.isZeroDte ? magnet : null,
+    magnet,
     strikes: exposures,
     topPremium,
   };

@@ -43,6 +43,11 @@ export class TradierClient {
   private oiBaseline = new Map<string, { day: string; oi: Map<string, number> }>();
   private rateLimitRemaining: number | null = null;
 
+  /** Last x-ratelimit-remaining seen; null before the first response. */
+  get remainingRequests(): number | null {
+    return this.rateLimitRemaining;
+  }
+
   constructor(
     private readonly token: string,
     private readonly baseUrl: string,
@@ -102,11 +107,11 @@ export class TradierClient {
    */
   async getChain(symbol: string, expiration: string): Promise<ChainOption[]> {
     const body = await this.get<{
-      chain?: { option?: TradierChainOption[] | TradierChainOption } | null;
+      options?: { option?: TradierChainOption[] | TradierChainOption } | null;
     }>(
       `/markets/options/chains?symbol=${encodeURIComponent(symbol)}&expiration=${expiration}&greeks=true`,
     );
-    const raw = body.chain?.option;
+    const raw = body.options?.option;
     const list = raw ? (Array.isArray(raw) ? raw : [raw]) : [];
 
     const key = `${symbol}:${expiration}`;

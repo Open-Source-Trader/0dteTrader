@@ -102,7 +102,9 @@ describe('gex.engine', () => {
     // Symmetric chain: heavy calls above spot, heavy puts below -> flip between.
     const chain: ChainOption[] = [
       option({ strike: 95, optionType: 'put', openInterest: 5000, midIv: 0.22, bid: 0.4, ask: 0.5 }),
-      option({ strike: 100, optionType: 'put', openInterest: 2000, midIv: 0.2, bid: 1.2, ask: 1.4 }),
+      // ATM OI balanced call/put: ATM gamma dwarfs the wings, so any ATM
+      // imbalance would out-weigh the 95/105 walls this fixture is about.
+      option({ strike: 100, optionType: 'put', openInterest: 1000, midIv: 0.2, bid: 1.2, ask: 1.4 }),
       option({ strike: 100, optionType: 'call', openInterest: 1000, midIv: 0.2, bid: 1.9, ask: 2.1 }),
       option({ strike: 105, optionType: 'call', openInterest: 6000, midIv: 0.22, bid: 0.3, ask: 0.4 }),
     ];
@@ -120,8 +122,8 @@ describe('gex.engine', () => {
       expect(levels.putWall).toBe(95);
     });
 
-    it('hides the magnet when not 0DTE, shows it on 0DTE', () => {
-      expect(levels.magnet).toBeNull();
+    it('reports the magnet for any selected expiration', () => {
+      expect(levels.magnet).toBe(105); // highest total OI strike
       const zeroDte = computeGexLevels(chain, {
         symbol: 'TEST',
         expiration: '2026-07-20',
@@ -129,7 +131,7 @@ describe('gex.engine', () => {
         spot: 100,
         now: NOW,
       });
-      expect(zeroDte.magnet).toBe(105); // highest total OI strike
+      expect(zeroDte.magnet).toBe(105);
     });
 
     it('returns top premium strikes sorted descending', () => {

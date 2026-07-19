@@ -130,6 +130,9 @@ struct TradeScreenView: View {
         .onChange(of: chartViewModel.symbol) { _, newSymbol in
             Task { await chainViewModel.load(underlying: newSymbol) }
         }
+        .onChange(of: chainViewModel.selectedExpiration) { _, expiration in
+            chartViewModel.gexExpiration = expiration
+        }
         .onChange(of: container.quoteSocket.lastOrderUpdate) { _, update in
             if let update {
                 tradeViewModel.handleOrderUpdate(update)

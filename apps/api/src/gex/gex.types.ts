@@ -62,7 +62,7 @@ export interface GexLevels {
   callWall: number | null;
   /** Strike with the largest negative GEX contribution. */
   putWall: number | null;
-  /** Highest total-OI strike (0DTE pin target); null when not 0DTE. */
+  /** Highest total-OI strike (pin target) for the selected expiration. */
   magnet: number | null;
   /** Full per-strike profile, ascending by strike. */
   strikes: StrikeExposure[];

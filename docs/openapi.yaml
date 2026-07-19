@@ -330,7 +330,7 @@ components:
         avgPrice: { type: number }
         markPrice: { type: number }
         unrealizedPnl: { type: number }
-        multiplier: { type: number, description: Contract multiplier (options: 100) for client-side live P/L }
+        multiplier: { type: number, description: 'Contract multiplier (options: 100) for client-side live P/L' }
     GexPremiumLevel:
       type: object
       properties:
@@ -354,5 +354,5 @@ components:
         gammaFlip: { type: [number, 'null'], description: Spot where net GEX crosses zero }
         callWall: { type: [number, 'null'] }
         putWall: { type: [number, 'null'] }
-        magnet: { type: [number, 'null'], description: Highest total-OI strike (0DTE pin target) }
+        magnet: { type: [number, 'null'], description: Highest total-OI strike (pin target) for the selected expiration }
         topPremium: { type: array, items: { $ref: '#/components/schemas/GexPremiumLevel' } }

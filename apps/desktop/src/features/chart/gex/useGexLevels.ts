@@ -23,6 +23,8 @@ export function useGexLevels(
   apiClient: ApiClient,
   symbol: string,
   settings: GexSettings,
+  /** Trade-ticket expiration; null lets the server pick 0DTE/nearest. */
+  expiration: string | null = null,
 ): GexState {
   const [state, setState] = useState<GexState>({
     levels: null,
@@ -40,7 +42,7 @@ export function useGexLevels(
 
     const poll = async (): Promise<void> => {
       try {
-        const levels = await apiClient.gexLevels(symbol);
+        const levels = await apiClient.gexLevels(symbol, expiration ?? undefined);
         if (cancelled) return;
         setState({ levels, stale: levels.stale, errorMessage: null });
       } catch (error) {
@@ -67,7 +69,7 @@ export function useGexLevels(
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [apiClient, symbol, settings.enabled]);
+  }, [apiClient, symbol, settings.enabled, expiration]);
 
   return state;
 }

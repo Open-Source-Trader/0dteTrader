@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react';
 import type { IChartApi, ISeriesApi } from 'lightweight-charts';
 import type { ChartCandle } from '../ChartStore';
 import type { GexSettings } from './gexSettings';
-import type { GexLevels } from './gexTypes';
+import type { GexLevels, GexPremiumLevel } from './gexTypes';
 
 interface GexOverlayProps {
   chart: IChartApi;
@@ -36,7 +36,9 @@ function formatDollars(value: number): string {
 /**
  * Read-only canvas overlay for the GEX/DEX level structure: premium heat
  * bands, regime zone shading between the walls, and labeled level lines.
- * Same event-driven repaint pattern as TwcOverlay; no pointer interaction.
+ * Same event-driven repaint pattern as TwcOverlay. The canvas itself stays
+ * pointer-events:none (chart pans/zooms through it); hovering a premium band
+ * shows an OI/premium tooltip via a mousemove listener on the parent.
  */
 export function GexOverlay({ chart, series, levels, settings, candles, stale }: GexOverlayProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -47,6 +49,8 @@ export function GexOverlay({ chart, series, levels, settings, candles, stale }: 
   settingsRef.current = settings;
   const staleRef = useRef(stale);
   staleRef.current = stale;
+  /** Cursor position in canvas coordinates; null when outside the pane. */
+  const mouseRef = useRef<{ x: number; y: number } | null>(null);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -105,6 +109,9 @@ export function GexOverlay({ chart, series, levels, settings, candles, stale }: 
       const cfg = settingsRef.current;
       if (!data || pane.width === 0) return;
 
+      // Band y-ranges collected while drawing, for the hover tooltip.
+      const bandRects: { top: number; bottom: number; level: GexPremiumLevel }[] = [];
+
       // ── Premium heat bands (below the level lines, drawn first) ──
       if (cfg.showPremium && data.topPremium.length > 0) {
         const shown = data.topPremium.slice(0, Math.max(cfg.maxPremiumStrikes, 0));
@@ -128,6 +135,7 @@ export function GexOverlay({ chart, series, levels, settings, candles, stale }: 
             const alpha = Math.min(0.15 + intensity * cfg.opacityCap, cfg.opacityCap);
             ctx.fillStyle = `rgba(${COLORS.premium}, ${alpha.toFixed(3)})`;
             ctx.fillRect(0, yTop, pane.width, yBottom - yTop);
+            bandRects.push({ top: yTop, bottom: yBottom, level });
             // Only the top 3 get text; the rest stay quiet bands.
             if (index < 3) {
               ctx.font = '9px -apple-system, "SF Pro Text", system-ui, sans-serif';
@@ -167,7 +175,8 @@ export function GexOverlay({ chart, series, levels, settings, candles, stale }: 
           drawLine(ctx, pane.width, data.gammaFlip, COLORS.gammaFlip, `Gamma Flip $${data.gammaFlip.toFixed(1)}`, true);
         }
         if (data.magnet !== null) {
-          drawLine(ctx, pane.width, data.magnet, COLORS.magnet, `0DTE Magnet $${data.magnet}`, true);
+          const magnetLabel = data.isZeroDte ? '0DTE Magnet' : 'Magnet';
+          drawLine(ctx, pane.width, data.magnet, COLORS.magnet, `${magnetLabel} $${data.magnet}`, true);
         }
       }
 
@@ -189,6 +198,34 @@ export function GexOverlay({ chart, series, levels, settings, candles, stale }: 
       ctx.fillText(gexText, pane.width - boxWidth + 2, 19);
       ctx.fillStyle = 'rgba(235, 235, 245, 0.6)';
       ctx.fillText(dexText, pane.width - boxWidth + 2, 33);
+
+      // ── Hover tooltip: OI + premium breakdown for the band under the cursor ──
+      const mouse = mouseRef.current;
+      if (mouse) {
+        const hit = bandRects.find((band) => mouse.y >= band.top && mouse.y <= band.bottom);
+        if (hit) {
+          const { level } = hit;
+          const lines = [
+            `$${level.strike} — ${formatDollars(level.totalPremium).replace('+', '')} premium`,
+            `Calls: ${formatDollars(level.callPremium).replace('+', '')} (OI ${level.callOi.toLocaleString()})`,
+            `Puts: ${formatDollars(level.putPremium).replace('+', '')} (OI ${level.putOi.toLocaleString()})`,
+          ];
+          ctx.font = '10px ui-monospace, "SF Mono", Menlo, monospace';
+          const tipWidth = Math.max(...lines.map((line) => ctx.measureText(line).width)) + 16;
+          const tipHeight = lines.length * 14 + 10;
+          const tipX = Math.min(mouse.x + 12, pane.width - tipWidth - 4);
+          const tipY = Math.min(Math.max(mouse.y - tipHeight - 8, 4), pane.height - tipHeight - 4);
+          ctx.fillStyle = 'rgba(28, 28, 30, 0.92)';
+          ctx.fillRect(tipX, tipY, tipWidth, tipHeight);
+          ctx.strokeStyle = `rgba(${COLORS.premium}, 0.8)`;
+          ctx.lineWidth = 1;
+          ctx.strokeRect(tipX + 0.5, tipY + 0.5, tipWidth - 1, tipHeight - 1);
+          lines.forEach((line, index) => {
+            ctx.fillStyle = index === 0 ? `rgba(${COLORS.premium}, 0.95)` : 'rgba(235, 235, 245, 0.8)';
+            ctx.fillText(line, tipX + 8, tipY + 16 + index * 14);
+          });
+        }
+      }
     };
 
     const schedule = () => {
@@ -202,13 +239,33 @@ export function GexOverlay({ chart, series, levels, settings, candles, stale }: 
 
     chart.timeScale().subscribeVisibleLogicalRangeChange(schedule);
     const resizeObserver = new ResizeObserver(schedule);
-    resizeObserver.observe(canvas.parentElement as Element);
+    const parent = canvas.parentElement as Element;
+    resizeObserver.observe(parent);
+
+    // The canvas is pointer-events:none so chart interaction stays intact;
+    // hover is tracked on the parent and mapped into canvas coordinates.
+    const onMouseMove = (event: Event) => {
+      const rect = canvas.getBoundingClientRect();
+      const { clientX, clientY } = event as MouseEvent;
+      const inside =
+        clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom;
+      mouseRef.current = inside ? { x: clientX - rect.left, y: clientY - rect.top } : null;
+      schedule();
+    };
+    const onMouseLeave = () => {
+      mouseRef.current = null;
+      schedule();
+    };
+    parent.addEventListener('mousemove', onMouseMove);
+    parent.addEventListener('mouseleave', onMouseLeave);
     schedule();
 
     return () => {
       scheduleRef.current = () => {};
       chart.timeScale().unsubscribeVisibleLogicalRangeChange(schedule);
       resizeObserver.disconnect();
+      parent.removeEventListener('mousemove', onMouseMove);
+      parent.removeEventListener('mouseleave', onMouseLeave);
       if (raf) cancelAnimationFrame(raf);
     };
   }, [chart, series]);

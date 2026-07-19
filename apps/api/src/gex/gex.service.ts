@@ -27,6 +27,11 @@ function tradingDay(): string {
  */
 @Injectable()
 export class GexService {
+  /** When the Tradier budget dips below this, stop spending requests… */
+  private static readonly RATE_LIMIT_FLOOR = 20;
+  /** …and serve the last computation as long as it's younger than this. */
+  private static readonly BACKOFF_MS = 120_000;
+
   private readonly logger = new Logger(GexService.name);
   private readonly lastGood = new Map<string, GexLevels>();
   private client: TradierClient | null = null;
@@ -55,7 +60,7 @@ export class GexService {
 
   async getLevels(symbol: string, expiration?: string): Promise<GexLevels> {
     const normalized = symbol.toUpperCase().trim();
-    if (!/^[A-Z0-9.\-]{1,12}$/.test(normalized)) {
+    if (!/^[A-Z0-9.-]{1,12}$/.test(normalized)) {
       throw new BadRequestException({
         code: 'VALIDATION_ERROR',
         message: 'A valid symbol is required (e.g. SPY)',
@@ -64,6 +69,23 @@ export class GexService {
     const client = this.getClient();
     const today = tradingDay();
     let selected: string | null = null;
+
+    // Rate-limit backoff: with the budget nearly exhausted, a recent cached
+    // result (within the backed-off 120 s cadence) beats three more requests.
+    const budget = client.remainingRequests;
+    if (budget !== null && budget < GexService.RATE_LIMIT_FLOOR) {
+      const recent = expiration
+        ? this.lastGood.get(`${normalized}:${expiration}`)
+        : [...this.lastGood.values()]
+            .filter((entry) => entry.symbol === normalized)
+            .sort((a, b) => b.asOf.localeCompare(a.asOf))[0];
+      if (recent && Date.now() - Date.parse(recent.asOf) < GexService.BACKOFF_MS) {
+        this.logger.warn(
+          `Tradier rate limit low (${budget} left); serving ${normalized} levels from cache`,
+        );
+        return recent;
+      }
+    }
 
     try {
       const expirations = await client.getExpirations(normalized);

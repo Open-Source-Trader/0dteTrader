@@ -146,7 +146,7 @@ final class GexOverlayView: UIView {
             if let magnet = model.magnet {
                 drawLine(in: context, rect: content, price: magnet,
                          color: GexPresentation.magnetColor,
-                         label: "0DTE Magnet $" + Format.strike(magnet),
+                         label: (model.isZeroDte ? "0DTE Magnet $" : "Magnet $") + Format.strike(magnet),
                          dashed: true)
             }
         }

@@ -84,6 +84,13 @@ final class ChartViewModel: ObservableObject {
     private var cancellables: Set<AnyCancellable> = []
     private var gexTask: Task<Void, Never>?
 
+    /// Trade-ticket expiration for the GEX overlay; nil = server default.
+    var gexExpiration: String? {
+        didSet {
+            if gexExpiration != oldValue { updateGexPolling() }
+        }
+    }
+
     /// Upper bound on rendered candles so live appends stay cheap.
     private let maxCandles = 600
 
@@ -173,12 +180,16 @@ final class ChartViewModel: ObservableObject {
                 guard let self else { return }
                 let symbol = self.symbol
                 do {
-                    let dto = try await self.apiClient.gexLevels(symbol: symbol)
+                    let dto = try await self.apiClient.gexLevels(
+                        symbol: symbol,
+                        expiration: self.gexExpiration
+                    )
                     guard !Task.isCancelled else { return }
                     let levels = GexLevels(dto: dto)
-                    // A symbol change during the fetch makes the result
-                    // irrelevant to the chart now on screen.
-                    if levels.symbol == self.symbol {
+                    // A symbol or expiration change during the fetch makes
+                    // the result irrelevant to the chart now on screen.
+                    if levels.symbol == self.symbol,
+                       self.gexExpiration == nil || levels.expiration == self.gexExpiration {
                         self.gexLevels = levels
                         self.gexStale = levels.stale
                         self.gexErrorMessage = nil

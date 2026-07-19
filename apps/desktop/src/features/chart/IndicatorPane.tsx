@@ -180,11 +180,22 @@ export function IndicatorPane({
   }, [candles, series]);
 
   // View sync: cheap range application while the user pans the main chart.
+  // Guard against feedback loops from bidirectional sync.
   useEffect(() => {
     const chart = chartRef.current;
     if (!chart) return;
-    if (visibleRange) chart.timeScale().setVisibleLogicalRange(visibleRange);
-    else chart.timeScale().fitContent();
+    if (visibleRange) {
+      const current = chart.timeScale().getVisibleLogicalRange();
+      if (
+        current &&
+        Math.abs(current.from - visibleRange.from) < 0.5 &&
+        Math.abs(current.to - visibleRange.to) < 0.5
+      )
+        return;
+      chart.timeScale().setVisibleLogicalRange(visibleRange);
+    } else {
+      chart.timeScale().fitContent();
+    }
   }, [visibleRange]);
 
   return <div ref={containerRef} style={{ height, flex: 'none', position: 'relative' }} />;

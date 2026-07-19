@@ -259,10 +259,18 @@ export function CandleChart({
     lastBarRef.current = candles.length > 0 ? candles[candles.length - 1] : null;
   }, [candles, candleColors]);
 
-  // Sync from sub-pane zoom/pan back to the main chart.
+  // Sync from sub-pane zoom/pan back to the main chart. Guard against
+  // feedback: skip if the chart's current range already matches.
   useEffect(() => {
     const chart = chartRef.current;
     if (!chart || !visibleRange) return;
+    const current = chart.timeScale().getVisibleLogicalRange();
+    if (
+      current &&
+      Math.abs(current.from - visibleRange.from) < 0.5 &&
+      Math.abs(current.to - visibleRange.to) < 0.5
+    )
+      return;
     chart.timeScale().setVisibleLogicalRange(visibleRange);
   }, [visibleRange]);
 

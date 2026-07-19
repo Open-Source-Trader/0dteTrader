@@ -47,6 +47,7 @@ final class TwcOverlayView: UIView {
         // ── Area fills (contiguous same-color runs between two series) ──
         for fill in model.fills {
             var run: [(x: CGFloat, top: CGFloat, bottom: CGFloat)] = []
+            // swiftlint:disable:previous large_tuple
             var runColor: String?
             func flush() {
                 defer {

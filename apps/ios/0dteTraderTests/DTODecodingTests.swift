@@ -97,14 +97,6 @@ final class DTODecodingTests: XCTestCase {
         XCTAssertEqual(chain.contracts[1].optionType, .put)
     }
 
-    func testFuturesContract_decodes() throws {
-        let dto = try decode(FuturesContractDTO.self, """
-        {"symbol":"MESU26","root":"MES","expiration":"2026-09-18","frontMonth":true,"bid":6010.25,"ask":6010.75,"last":6010.50}
-        """)
-        XCTAssertEqual(dto.root, "MES")
-        XCTAssertTrue(dto.frontMonth)
-    }
-
     // MARK: - Trading
 
     func testOrderPreview_decodes() throws {
@@ -131,7 +123,7 @@ final class DTODecodingTests: XCTestCase {
 
     func testOrderResult_decodesWithoutOptionalPrices() throws {
         let dto = try decode(OrderResultDTO.self, """
-        {"orderId":"o-2","status":"submitted","contractSymbol":"MESU26","side":"sell","quantity":1,"orderType":"market","timestamp":"2026-07-17T14:31:00Z"}
+        {"orderId":"o-2","status":"submitted","contractSymbol":"SPY260717C00503000","side":"sell","quantity":1,"orderType":"market","timestamp":"2026-07-17T14:31:00Z"}
         """)
         XCTAssertNil(dto.limitPrice)
         XCTAssertNil(dto.filledPrice)
@@ -140,12 +132,12 @@ final class DTODecodingTests: XCTestCase {
 
     func testPosition_decodesNegativeQuantity() throws {
         let dto = try decode(PositionDTO.self, """
-        {"symbol":"MESU26","assetClass":"future","quantity":-2,"avgPrice":6010.5,"markPrice":6012.0,"unrealizedPnl":-15.0,"multiplier":5}
+        {"symbol":"SPY260717C00503000","assetClass":"option","quantity":-2,"avgPrice":1.5,"markPrice":1.6,"unrealizedPnl":-20.0,"multiplier":100}
         """)
         let position = try XCTUnwrap(Position(dto: dto))
         XCTAssertEqual(position.quantity, -2)
-        XCTAssertEqual(position.assetClass, .future)
-        XCTAssertEqual(position.unrealizedPnl, -15.0, accuracy: 1e-9)
+        XCTAssertEqual(position.assetClass, .option)
+        XCTAssertEqual(position.unrealizedPnl, -20.0, accuracy: 1e-9)
     }
 
     /// An unknown asset class must drop the position, not fall back to .option
@@ -186,8 +178,7 @@ final class DTODecodingTests: XCTestCase {
                 mode: "auto_otm",
                 optionType: "call",
                 expiration: "2026-07-17",
-                strike: nil,
-                contractSymbol: nil
+                strike: nil
             )
         )
         let data = try JSONEncoder().encode(request)
@@ -203,30 +194,6 @@ final class DTODecodingTests: XCTestCase {
         XCTAssertEqual(selection["optionType"] as? String, "call")
         XCTAssertEqual(selection["expiration"] as? String, "2026-07-17")
         // Nil fields must be omitted, not null (server validates explicit-only fields).
-        XCTAssertNil(selection["strike"])
-        XCTAssertNil(selection["contractSymbol"])
-    }
-
-    func testOrderRequest_explicitFuture_encodesContractSymbol() throws {
-        let request = OrderRequestDTO(
-            underlying: "MES",
-            assetClass: "future",
-            side: "sell",
-            quantity: 1,
-            orderType: "market",
-            selection: OrderSelectionDTO(
-                mode: "explicit",
-                optionType: nil,
-                expiration: nil,
-                strike: nil,
-                contractSymbol: "MESU26"
-            )
-        )
-        let data = try JSONEncoder().encode(request)
-        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
-        let selection = try XCTUnwrap(object["selection"] as? [String: Any])
-        XCTAssertEqual(selection["contractSymbol"] as? String, "MESU26")
-        XCTAssertNil(selection["optionType"])
         XCTAssertNil(selection["strike"])
     }
 

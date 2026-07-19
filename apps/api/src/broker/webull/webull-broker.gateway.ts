@@ -75,6 +75,16 @@ interface ResolvedContract {
   };
 }
 
+/** Today's date in the US options market timezone (0DTE warnings). */
+function tradingDay(): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/New_York',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date());
+}
+
 /**
  * Real Webull OpenAPI gateway (P4). Wire details live in webull-endpoints.ts
  * (paths/payloads), webull-mappers.ts (response→DTO) and webull-signer.ts;
@@ -193,15 +203,16 @@ export class WebullBrokerGateway implements BrokerGateway, OnModuleDestroy {
     const api =
       this.config.get<string>('webull.apiBaseUrl') || WEBULL_SANDBOX_HOSTS.api;
     // Market data lives on a separate host family (api.* → data-api.*). An
-    // explicit WEBULL_MARKET_DATA_BASE_URL always wins.
+    // explicit WEBULL_MARKET_DATA_BASE_URL always wins (read through the
+    // config layer like every other override).
     // [verified 2026-07-18 against live] data-api.webull.com can be
     // unreachable (connection hangs) while api.webull.com serves the
     // market-data paths fine — the env override is the escape hatch, and the
     // signer keys its algorithm off the request host, so it stays correct.
-    if (process.env.WEBULL_MARKET_DATA_BASE_URL) {
-      return { api, data: process.env.WEBULL_MARKET_DATA_BASE_URL };
-    }
-    return { api, data: api.replace(/^https:\/\/api\./, 'https://data-api.') };
+    const data =
+      this.config.get<string>('webull.marketDataBaseUrl') ||
+      api.replace(/^https:\/\/api\./, 'https://data-api.');
+    return { api, data };
   }
 
   // -------------------------------------------------------------------------
@@ -288,6 +299,13 @@ export class WebullBrokerGateway implements BrokerGateway, OnModuleDestroy {
     }
     const underlyingQuote = await this.getQuote(userId, symbol);
     const price = underlyingQuote.last;
+    if (!(price > 0)) {
+      // A degraded snapshot (price defaulted to 0) would build negative
+      // strikes and probe garbage OCC symbols — fail clearly instead.
+      throw brokerErrors.unavailable(
+        `No usable underlying price for ${symbol} — cannot probe an option chain`,
+      );
+    }
     const increment = price < 250 ? 1 : 5;
     const atm = Math.round(price / increment) * increment;
 
@@ -362,7 +380,7 @@ export class WebullBrokerGateway implements BrokerGateway, OnModuleDestroy {
     const warnings: string[] = [];
     if (
       resolved.optionTerms &&
-      resolved.optionTerms.expiration === new Date().toISOString().slice(0, 10)
+      resolved.optionTerms.expiration === tradingDay()
     ) {
       warnings.push('0DTE contract — expires today');
     }
@@ -377,7 +395,7 @@ export class WebullBrokerGateway implements BrokerGateway, OnModuleDestroy {
         userId,
         order,
         resolved,
-        toClientOrderId(`prev${Date.now()}`),
+        toClientOrderId(userId, `prev${Date.now()}`),
         order.orderType === 'market' ? undefined : price,
       );
       const raw = await client.request('orderPreview', {
@@ -427,7 +445,7 @@ export class WebullBrokerGateway implements BrokerGateway, OnModuleDestroy {
         ? undefined
         : computeMid(resolved.bid, resolved.ask);
 
-    const clientOrderId = toClientOrderId(idempotencyKey);
+    const clientOrderId = toClientOrderId(userId, idempotencyKey);
     const newOrder = await this.buildNewOrder(
       userId,
       order,
@@ -466,7 +484,7 @@ export class WebullBrokerGateway implements BrokerGateway, OnModuleDestroy {
     await client.request('orderCancel', {
       body: { account_id: client.accountId, client_order_id: orderId },
     });
-    this.stopStatusPoll(orderId);
+    this.stopStatusPoll(userId, orderId);
     this.events.emit(userId, { ...target, status: 'cancelled' });
   }
 
@@ -612,9 +630,10 @@ export class WebullBrokerGateway implements BrokerGateway, OnModuleDestroy {
     client: WebullClient,
     result: OrderResult,
   ): void {
+    const key = `${userId}:${result.orderId}`;
     let attempts = 0;
     const tick = async (): Promise<void> => {
-      this.pollTimers.delete(result.orderId);
+      this.pollTimers.delete(key);
       attempts += 1;
       try {
         const raw = await client.request('orderDetail', {
@@ -642,28 +661,24 @@ export class WebullBrokerGateway implements BrokerGateway, OnModuleDestroy {
         );
       }
       if (attempts < STATUS_POLL_MAX_ATTEMPTS) {
-        this.schedulePoll(userId, client, result, tick);
+        this.schedulePoll(key, tick);
       }
     };
-    this.schedulePoll(userId, client, result, tick);
+    this.schedulePoll(key, tick);
   }
 
-  private schedulePoll(
-    userId: string,
-    client: WebullClient,
-    result: OrderResult,
-    tick: () => Promise<void>,
-  ): void {
+  private schedulePoll(key: string, tick: () => Promise<void>): void {
     const timer = setTimeout(() => void tick(), STATUS_POLL_INTERVAL_MS);
     timer.unref?.();
-    this.pollTimers.set(result.orderId, timer);
+    this.pollTimers.set(key, timer);
   }
 
-  private stopStatusPoll(orderId: string): void {
-    const timer = this.pollTimers.get(orderId);
+  private stopStatusPoll(userId: string, orderId: string): void {
+    const key = `${userId}:${orderId}`;
+    const timer = this.pollTimers.get(key);
     if (timer) {
       clearTimeout(timer);
-      this.pollTimers.delete(orderId);
+      this.pollTimers.delete(key);
     }
   }
 }

@@ -68,7 +68,13 @@ final class ChartViewModel: ObservableObject {
     @Published var gexSettings: GexSettings {
         didSet {
             settingsStore.gexSettings = gexSettings
-            updateGexPolling()
+            // Only connectivity-relevant changes restart the poll loop;
+            // display toggles apply on the next redraw and must not drop the
+            // cached levels (a failed refetch would blank the overlay).
+            if gexSettings.enabled != oldValue.enabled
+                || gexSettings.refreshSeconds != oldValue.refreshSeconds {
+                updateGexPolling()
+            }
         }
     }
 

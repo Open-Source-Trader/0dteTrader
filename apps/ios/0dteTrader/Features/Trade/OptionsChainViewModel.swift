@@ -175,7 +175,14 @@ final class OptionsChainViewModel: ObservableObject {
     func ensureContracts(for expiration: String) async {
         let underlying = self.underlying
         let gen = loadGeneration
-        guard !underlying.isEmpty, !loadedExpirations.contains(expiration) else { return }
+        guard !underlying.isEmpty, !loadedExpirations.contains(expiration) else {
+            // Contracts are already local (revisiting a prior expiration) —
+            // manual mode still needs its strike reseeded.
+            if selectedStrike == nil, let auto = autoContract {
+                selectedStrike = auto.strike
+            }
+            return
+        }
         do {
             if let contracts = try await fetchContracts(underlying: underlying, expiration: expiration) {
                 // A load() that started meanwhile owns the chain now.

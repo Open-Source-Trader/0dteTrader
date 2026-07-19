@@ -65,7 +65,7 @@ account management. A custom backend holds user accounts and encrypted Webull cr
 
 ## 4. Non-Functional Requirements
 
-- NFR-1 Quote-to-screen latency target: < 500 ms on typical broadband/LTE (mock + real).
+- NFR-1 Quote-to-screen latency target: < 500 ms on typical broadband/LTE.
 - NFR-2 Secrets encrypted at rest (AES-256-GCM); TLS in transit; no secrets in the app bundle.
 - NFR-3 Dark-mode-first UI; light mode supported; Dynamic Type respected on non-chart screens.
 - NFR-4 Backend test coverage on auth, encryption, order validation, Auto-OTM, mid-price calc.

@@ -4,8 +4,8 @@ import { brokerErrors } from '../common/broker-error';
 
 /**
  * Live cryptocurrency market data from Coinbase Exchange's public REST API
- * (no credentials required, 24/7). Crypto symbols bypass the broker gateway
- * for quotes/candles so charts show real prices even on the mock broker;
+ * (no credentials required, 24/7). Webull's OpenAPI has no crypto market-data
+ * category, so crypto symbols bypass the broker gateway for quotes/candles;
  * trading still goes through the configured gateway.
  */
 @Injectable()

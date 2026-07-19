@@ -9,12 +9,13 @@ import {
   Quote,
 } from '@0dtetrader/shared-types';
 
-/** Injection token for the active BrokerGateway (BROKER_GATEWAY=mock|webull). */
+/** Injection token for the BrokerGateway (Webull OpenAPI). */
 export const BROKER_GATEWAY = 'BROKER_GATEWAY';
 
 /**
  * The key seam (docs/ARCHITECTURE.md §2). All iOS-facing endpoints depend only
- * on this interface; the implementation is selected by BROKER_GATEWAY.
+ * on this interface; the single implementation is the Webull gateway (live vs
+ * practice selects the live vs paper-trading OpenAPI hosts per user).
  */
 export interface BrokerGateway {
   getQuote(userId: string, symbol: string): Promise<Quote>;

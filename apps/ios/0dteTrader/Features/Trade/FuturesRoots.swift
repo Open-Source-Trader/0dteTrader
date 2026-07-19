@@ -1,6 +1,6 @@
 import Foundation
 
-/// Known tradable futures roots (mock gateway set, WEBULL-INTEGRATION.md §4).
+/// Known tradable futures roots.
 enum FuturesRoots {
     static let known: [String] = ["MES", "ES", "MNQ", "NQ", "CL", "GC"]
 

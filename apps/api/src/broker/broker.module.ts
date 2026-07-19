@@ -4,13 +4,14 @@ import { CredentialsModule } from '../credentials/credentials.module';
 import { CredentialsService } from '../credentials/credentials.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { BROKER_GATEWAY, BrokerGateway } from './broker-gateway.interface';
-import { MockBrokerGateway } from './mock-broker.gateway';
 import { OrderEventsService } from './order-events.service';
 import { WebullBrokerGateway } from './webull/webull-broker.gateway';
 
 /**
- * Provides the active BrokerGateway under the BROKER_GATEWAY token, selected
- * by the BROKER_GATEWAY env var (mock default; docs/ARCHITECTURE.md §2/§7).
+ * Provides the Webull BrokerGateway under the BROKER_GATEWAY token
+ * (docs/ARCHITECTURE.md §2/§7). There is no mock/demo gateway: market data
+ * always comes from Webull; live vs practice only selects the live vs
+ * paper-trading (sandbox) OpenAPI hosts.
  */
 @Module({
   imports: [CredentialsModule],
@@ -25,9 +26,7 @@ import { WebullBrokerGateway } from './webull/webull-broker.gateway';
         credentials: CredentialsService,
         prisma: PrismaService,
       ): BrokerGateway =>
-        config.get<'mock' | 'webull'>('brokerGateway') === 'webull'
-          ? new WebullBrokerGateway(credentials, config, events, prisma)
-          : new MockBrokerGateway(events),
+        new WebullBrokerGateway(credentials, config, events, prisma),
     },
   ],
   exports: [BROKER_GATEWAY, OrderEventsService],

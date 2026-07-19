@@ -11,7 +11,6 @@ export interface AppConfig {
     refreshTtl: number;
   };
   credEncryptionKey?: string;
-  brokerGateway: 'mock' | 'webull';
   webull: {
     /** Practice (sandbox) overrides; default to the sandbox hosts. */
     apiBaseUrl: string;
@@ -52,7 +51,6 @@ export default (): AppConfig => ({
     refreshTtl: int(process.env.JWT_REFRESH_TTL, 1209600),
   },
   credEncryptionKey: process.env.CRED_ENCRYPTION_KEY,
-  brokerGateway: process.env.BROKER_GATEWAY === 'webull' ? 'webull' : 'mock',
   webull: {
     apiBaseUrl:
       process.env.WEBULL_API_BASE_URL || 'https://api.sandbox.webull.com',

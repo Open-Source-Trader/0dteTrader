@@ -5,7 +5,7 @@ Monorepo scaffold (npm workspaces — substituted for pnpm/Turbo to avoid global
 docs set, CI skeleton, docker-compose, `.env.example`.
 
 ## P1 — Backend Core ✅
-NestJS app: Auth, Users, Credentials (AES-256-GCM), BrokerGateway + MockBrokerGateway,
+NestJS app: Auth, Users, Credentials (AES-256-GCM), BrokerGateway,
 MarketData (REST + WS), Trading (idempotency, kill switch, audit), Prisma schema/migrations,
 Jest unit + e2e tests. **155/155 tests green; live smoke test against docker Postgres passed.**
 

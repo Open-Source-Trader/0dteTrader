@@ -18,11 +18,15 @@ npm run db:up          # postgres + redis
 npm run db:migrate     # prisma migrate
 ```
 
-## Run the API (mock broker)
+## Run the API
 
 ```bash
-npm run dev            # http://localhost:3000, BROKER_GATEWAY=mock by default
+npm run dev            # http://localhost:3000 — Webull gateway (paper or live per user)
 ```
+
+The API always talks to Webull — there is no mock/demo data. Without stored
+Webull credentials, market-data and trading calls fail with `AUTH_FAILED`;
+add practice credentials first (see "Switching to real Webull" below).
 
 Smoke test:
 
@@ -48,16 +52,16 @@ Run on the iOS 17 simulator. The app targets `http://localhost:3000` in Debug bu
 ```bash
 npm run lint
 npm run build
-npm run test           # Jest unit + e2e (mock gateway)
+npm run test           # Jest unit + e2e
 ```
 
 iOS: `xcodebuild test -scheme 0dteTrader -destination 'platform=iOS Simulator,name=iPhone 15'`
 (or Cmd+U in Xcode).
 
-## Switching to real Webull (P4+)
+## Webull setup (paper & live)
 
 1. Apply for Webull OpenAPI developer credentials (see docs/WEBULL-INTEGRATION.md).
-2. Set `BROKER_GATEWAY=webull` and the correct `WEBULL_API_BASE_URL` in `.env`
+2. Set the correct `WEBULL_API_BASE_URL` in `.env`
    (`https://api.sandbox.webull.com` for paper, `https://api.webull.com` for live).
 3. In the app: Profile → Webull API → enter app key / app secret / account ID.
    The account ID comes from the sandbox smoke test's `account/list` output (below).

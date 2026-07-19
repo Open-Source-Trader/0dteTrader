@@ -36,19 +36,13 @@ review typically 1–2 business days). Per-user credentials: app key, app secret
   Others are unpublished — treat as ~60 req/min.
 - Quote fan-out: the WS gateway subscribes once per symbol per process, not once per client.
 
-## 4. MockBrokerGateway Contract
+## 4. No mock/demo data
 
-`MockBrokerGateway` implements the same `BrokerGateway` interface with deterministic behavior:
-
-- Price model: random walk seeded per symbol (stable within a process run), 1-second tick.
-- Chains: synthetic strikes at standard increments around the underlying price ($1-wide for
-  underlyings < $250, $5-wide above), expirations: today (0DTE), +1d, weekly +7d, monthly.
-- Futures: synthetic front/deferred months for ES/MES/NQ/MNQ/CL/GC roots.
-- Orders: `market` fills immediately at last; `mid` fills at mid after a 200 ms delay;
-  cancel transitions to `cancelled`. Positions update accordingly.
-- Buying power: fixed $25,000 per mock user.
-
-This keeps the entire app demoable and all tests deterministic without any Webull account.
+The app has **no mock or simulated broker**: market data (quotes, candles,
+chains) always comes from Webull, and orders always go to the Webull OpenAPI.
+Practice mode targets the paper-trading (sandbox) hosts; live mode targets the
+production hosts (§5). Without valid credentials, calls fail fast with
+`BROKER_AUTH_FAILED` rather than falling back to fake data.
 
 ## 5. Paper vs Live
 
@@ -78,7 +72,6 @@ per-request headers and no JWT changes.
 - **Orders are stamped** with the environment in effect when recorded
   (`trade_orders.environment`), keeping paper and real fills separable in
   trade history.
-- The mock gateway (`BROKER_GATEWAY=mock`) is mode-agnostic and unchanged.
 
 ## 6. Error Mapping
 
@@ -140,7 +133,7 @@ depends on Webull payload shapes.
 Key decisions:
 
 - **Option chains are synthesized** — Webull has no chain-discovery endpoint. Expirations are the
-  standard calendar (today/+1d/weekly/monthly, same shape as the mock); strikes are generated
+  standard calendar (today/+1d/weekly/monthly); strikes are generated
   ±12 around ATM ($1 under $250 underlying, $5 above) as candidate OCC symbols and filtered to
   contracts the option-snapshot endpoint actually returns (batched ≤ 20 symbols per call).
   [best-effort — the only official way to discover contracts]
@@ -154,8 +147,8 @@ Key decisions:
 - **`position_intent`** is derived from side + current positions (BUY closes an existing short →
   `BUY_TO_CLOSE`, else `BUY_TO_OPEN`; mirrored for SELL).
 - **previewOrder** uses the real `POST /openapi/trade/order/preview` (`estimated_cost`), falling
-  back to the local `estimateBuyingPower` when preview fails; warnings mirror the mock (0DTE,
-  market-order-on-option) plus a real buying-power check from `GET /openapi/assets/balance`.
+  back to the local `estimateBuyingPower` when preview fails; warnings include 0DTE and
+  market-order-on-option notices plus a real buying-power check from `GET /openapi/assets/balance`.
 - `mid` orders are rested as `LIMIT` at the computed mid; `market` maps to `MARKET`.
 - **Fills**: Webull streams order events over gRPC (not implemented in P4). The gateway emits
   `submitted` immediately, then polls `GET /openapi/trade/order/detail` once per second (max 60)

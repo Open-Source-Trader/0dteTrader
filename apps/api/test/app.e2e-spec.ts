@@ -3,13 +3,17 @@ import { Test } from '@nestjs/testing';
 import { WsAdapter } from '@nestjs/platform-ws';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
+import { BROKER_GATEWAY } from '../src/broker/broker-gateway.interface';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { InMemoryPrismaService } from './in-memory-prisma.service';
+import { StubBrokerGateway } from './stub-broker.gateway';
 
 /**
  * Full-stack e2e over HTTP (supertest). The whole Nest app boots for real;
- * only PrismaService is swapped for the in-memory fake, so no Postgres is
- * needed. Rate limiting is skipped under NODE_ENV=test (see app.module).
+ * only PrismaService is swapped for the in-memory fake and BROKER_GATEWAY for
+ * the deterministic StubBrokerGateway, so neither Postgres nor a Webull
+ * account is needed. Rate limiting is skipped under NODE_ENV=test (see
+ * app.module).
  */
 describe('0dteTrader API (e2e)', () => {
   let app: INestApplication;
@@ -26,6 +30,8 @@ describe('0dteTrader API (e2e)', () => {
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
       .overrideProvider(PrismaService)
       .useValue(prisma)
+      .overrideProvider(BROKER_GATEWAY)
+      .useValue(new StubBrokerGateway())
       .compile();
     app = moduleRef.createNestApplication();
     app.setGlobalPrefix('v1');

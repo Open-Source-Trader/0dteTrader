@@ -26,7 +26,7 @@ backend brokers every Webull call using the user's encrypted, server-side creden
 | `AuthModule` | Register/login/refresh/logout; Argon2id hashing; JWT access (15 min) + rotating refresh tokens |
 | `UsersModule` | Profile read/update; kill-switch flag |
 | `CredentialsModule` | Store/rotate/delete Webull creds; AES-256-GCM encrypt before persist; decrypt in-memory only |
-| `BrokerModule` | `BrokerGateway` interface; `MockBrokerGateway` (deterministic dev/test) and `WebullBrokerGateway` (real, P4); per-user client factory with token caching |
+| `BrokerModule` | `BrokerGateway` interface; `WebullBrokerGateway` (the only implementation — no mock/demo data); per-user client factory with token caching |
 | `MarketDataModule` | REST: candles, quote, options chain; WS gateway streaming subscribed quotes |
 | `TradingModule` | Order preview/place/cancel/replace; positions; account summary; idempotency; server-side re-validation of Auto-OTM + mid price; audit log |
 
@@ -45,7 +45,7 @@ interface BrokerGateway {
 }
 ```
 
-Selected via `BROKER_GATEWAY=mock|webull`. All iOS-facing endpoints depend only on the interface.
+Implemented by `WebullBrokerGateway`. All iOS-facing endpoints depend only on the interface. Market data always comes from Webull; live vs practice only selects the live vs paper-trading (sandbox) OpenAPI hosts per user.
 
 ## 3. Order Flow (tap → fill)
 
@@ -98,6 +98,6 @@ TLS everywhere, cert pinning in the app.
 
 ## 7. Environments
 
-- **local dev:** `BROKER_GATEWAY=mock` — deterministic quotes/fills, no Webull account needed.
-- **paper:** real `WebullBrokerGateway` against Webull paper/sandbox (P4).
+- **local dev:** Webull gateway against the paper/sandbox hosts (per-user practice credentials); there is no mock/demo data path.
+- **paper:** `WebullBrokerGateway` against Webull paper/sandbox (P4).
 - **live:** same gateway, live Webull endpoints; requires explicit per-user confirmation gate.

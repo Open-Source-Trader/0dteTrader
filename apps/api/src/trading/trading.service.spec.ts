@@ -1,10 +1,190 @@
-import { OrderRequest } from '@0dtetrader/shared-types';
+import {
+  Candle,
+  OptionContract,
+  OptionType,
+  OptionsChain,
+  OrderPreview,
+  OrderRequest,
+  OrderResult,
+  Position,
+  Quote,
+} from '@0dtetrader/shared-types';
+import {
+  computeMid,
+  estimateBuyingPower,
+  findExplicitOption,
+  formatOccSymbol,
+} from '../broker/contract-resolution';
+import { optionExpirations } from '../broker/expiration-calendar';
 import { BrokerGateway } from '../broker/broker-gateway.interface';
-import { MockBrokerGateway } from '../broker/mock-broker.gateway';
-import { OrderEventsService } from '../broker/order-events.service';
+import { brokerErrors } from '../common/broker-error';
 import { InMemoryPrismaService } from '../../test/in-memory-prisma.service';
 import { OrderRequestDto } from './dto/order-request.dto';
 import { TradingService } from './trading.service';
+
+const round2 = (v: number): number => Math.round(v * 100) / 100;
+
+/**
+ * Minimal BrokerGateway test double with a fixed quote (last = 100) and a
+ * deterministic ±24-strike chain built from the real expiration calendar, so
+ * TradingService's server-side re-validation is exercised against stable data.
+ * Market orders fill at last; mid orders rest submitted at the mid.
+ */
+class StubBrokerGateway implements BrokerGateway {
+  static readonly PRICE = 100;
+  private readonly orders = new Map<string, OrderResult>();
+  private counter = 0;
+
+  async getQuote(_userId: string, symbol: string): Promise<Quote> {
+    return {
+      symbol,
+      bid: StubBrokerGateway.PRICE - 0.02,
+      ask: StubBrokerGateway.PRICE + 0.02,
+      last: StubBrokerGateway.PRICE,
+      bidSize: 10,
+      askSize: 10,
+      volume: 1_000_000,
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+  async getCandles(): Promise<Candle[]> {
+    return [];
+  }
+
+  async getOptionsChain(
+    _userId: string,
+    symbol: string,
+    expiration?: string,
+  ): Promise<OptionsChain> {
+    const expirations = optionExpirations(symbol, new Date());
+    const chosen = expiration ?? expirations[0];
+    if (!expirations.includes(chosen)) {
+      throw brokerErrors.contractNotFound(
+        `No chain for expiration ${chosen}. Available: ${expirations.join(', ')}`,
+      );
+    }
+    const price = StubBrokerGateway.PRICE;
+    const contracts: OptionContract[] = [];
+    for (let k = -24; k <= 24; k++) {
+      const strike = price + k;
+      for (const optionType of ['call', 'put'] as OptionType[]) {
+        const intrinsic =
+          optionType === 'call'
+            ? Math.max(0, price - strike)
+            : Math.max(0, strike - price);
+        const last = round2(intrinsic + 1);
+        contracts.push({
+          symbol: formatOccSymbol(symbol, chosen, optionType, strike),
+          underlying: symbol.toUpperCase(),
+          expiration: chosen,
+          strike,
+          optionType,
+          bid: round2(last - 0.01),
+          ask: round2(last + 0.01),
+          last,
+        });
+      }
+    }
+    return {
+      underlying: symbol.toUpperCase(),
+      underlyingPrice: price,
+      expirations,
+      contracts,
+    };
+  }
+
+  async previewOrder(userId: string, order: OrderRequest): Promise<OrderPreview> {
+    const resolved = await this.resolveContract(userId, order);
+    const price =
+      order.orderType === 'market'
+        ? resolved.last
+        : computeMid(resolved.bid, resolved.ask);
+    return {
+      resolved: {
+        contractSymbol: resolved.contractSymbol,
+        price,
+        estBuyingPower: round2(estimateBuyingPower(order.quantity, price)),
+      },
+      warnings: [],
+    };
+  }
+
+  async placeOrder(
+    userId: string,
+    order: OrderRequest,
+    _idempotencyKey: string,
+  ): Promise<OrderResult> {
+    const resolved = await this.resolveContract(userId, order);
+    const result: OrderResult = {
+      orderId: `STUB-${String(++this.counter).padStart(6, '0')}`,
+      status: 'submitted',
+      contractSymbol: resolved.contractSymbol,
+      side: order.side,
+      quantity: order.quantity,
+      orderType: order.orderType,
+      timestamp: new Date().toISOString(),
+    };
+    if (order.orderType === 'market') {
+      result.status = 'filled';
+      result.filledPrice = resolved.last;
+    } else {
+      result.limitPrice = computeMid(resolved.bid, resolved.ask);
+    }
+    this.orders.set(result.orderId, result);
+    return result;
+  }
+
+  async cancelOrder(_userId: string, orderId: string): Promise<void> {
+    const record = this.orders.get(orderId);
+    if (!record) throw brokerErrors.orderNotFound(orderId);
+    if (record.status !== 'submitted' && record.status !== 'partially_filled') {
+      throw brokerErrors.orderNotOpen(orderId, record.status);
+    }
+    record.status = 'cancelled';
+  }
+
+  async getOpenOrders(): Promise<OrderResult[]> {
+    return [...this.orders.values()].filter(
+      (o) => o.status === 'submitted' || o.status === 'partially_filled',
+    );
+  }
+
+  async getPositions(): Promise<Position[]> {
+    return [];
+  }
+
+  private async resolveContract(userId: string, order: OrderRequest) {
+    const { optionType } = order.selection;
+    if (!optionType) {
+      throw brokerErrors.orderRejected(
+        'selection.optionType is required for option orders',
+      );
+    }
+    const chain = await this.getOptionsChain(
+      userId,
+      order.underlying,
+      order.selection.expiration,
+    );
+    const contract = findExplicitOption(
+      chain.contracts,
+      optionType,
+      order.selection.strike ?? NaN,
+    );
+    if (!contract) {
+      throw brokerErrors.contractNotFound(
+        `No ${optionType} contract at strike ${order.selection.strike} ` +
+          `for ${order.underlying} ${chain.expirations[0]}`,
+      );
+    }
+    return {
+      contractSymbol: contract.symbol,
+      bid: contract.bid,
+      ask: contract.ask,
+      last: contract.last,
+    };
+  }
+}
 
 function autoOtmCall(overrides: Partial<OrderRequestDto> = {}): OrderRequestDto {
   return {
@@ -20,16 +200,13 @@ function autoOtmCall(overrides: Partial<OrderRequestDto> = {}): OrderRequestDto 
 
 describe('TradingService', () => {
   let prisma: InMemoryPrismaService;
-  let gateway: MockBrokerGateway;
+  let gateway: StubBrokerGateway;
   let trading: TradingService;
   let userId: string;
 
   beforeEach(async () => {
-    // Freeze the mock's 1-second tick so prices are identical across every
-    // call in a test (walk advances once per wall-clock second).
-    jest.spyOn(Date, 'now').mockReturnValue(1_752_000_000_000);
     prisma = new InMemoryPrismaService();
-    gateway = new MockBrokerGateway(new OrderEventsService());
+    gateway = new StubBrokerGateway();
     trading = new TradingService(
       prisma as unknown as ConstructorParameters<typeof TradingService>[0],
       gateway as BrokerGateway,
@@ -38,11 +215,6 @@ describe('TradingService', () => {
       data: { email: 'trader@example.com', passwordHash: 'x' },
     });
     userId = user.id;
-  });
-
-  afterEach(() => {
-    jest.restoreAllMocks();
-    gateway.onModuleDestroy();
   });
 
   describe('auto_otm re-validation', () => {
@@ -167,7 +339,7 @@ describe('TradingService', () => {
         status: 403,
         code: 'TRADING_DISABLED',
       });
-      await expect(trading.cancel(userId, 'MOCK-000001')).rejects.toMatchObject({
+      await expect(trading.cancel(userId, 'STUB-000001')).rejects.toMatchObject({
         status: 403,
         code: 'TRADING_DISABLED',
       });

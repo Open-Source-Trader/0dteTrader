@@ -31,7 +31,6 @@ jobs:
       JWT_ACCESS_SECRET: ci-access-secret-min-32-characters
       JWT_REFRESH_SECRET: ci-refresh-secret-min-32-characters
       CRED_ENCRYPTION_KEY: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
-      BROKER_GATEWAY: mock
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

@@ -11,7 +11,7 @@ SwiftUI iPhone app for rapid 0DTE options and futures trading against the
 
 - macOS with Xcode 15+
 - XcodeGen: `brew install xcodegen`
-- The backend running locally: `npm run dev` at the repo root (mock broker, `http://localhost:3000`)
+- The backend running locally: `npm run dev` at the repo root (`http://localhost:3000`)
 
 ## Generate, run, test
 

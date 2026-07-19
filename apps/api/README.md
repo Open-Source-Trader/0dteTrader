@@ -27,8 +27,8 @@ src/
                            (12-byte random IV per field per write, blob =
                            iv‖authTag‖ciphertext); plaintext never logged
   broker/                  BrokerGateway interface + BROKER_GATEWAY token;
-                           MockBrokerGateway (deterministic), WebullBrokerGateway
-                           (real, P4 — see broker/webull/); OrderEventsService
+                           WebullBrokerGateway (the only implementation — no
+                           mock/demo data; see broker/webull/); OrderEventsService
                            (orderUpdate bus); contract-resolution.ts
                            (auto-OTM / mid / OCC symbols)
   broker/webull/           P4 Webull OpenAPI stack: webull-endpoints.ts
@@ -74,10 +74,11 @@ built-in development defaults (a loud warning is logged when
 (`NODE_ENV=production`) refuses to boot without strong `JWT_ACCESS_SECRET`,
 `JWT_REFRESH_SECRET`, and a valid base64 32-byte `CRED_ENCRYPTION_KEY`.
 
-`BROKER_GATEWAY=mock` (default) selects the deterministic mock broker;
-`webull` selects the real Webull OpenAPI gateway (P4 — per-user clients from
-the encrypted credentials; sandbox hosts by default, see
-`../../docs/WEBULL-INTEGRATION.md` §7–§8).
+The broker gateway is always the real Webull OpenAPI gateway (per-user clients
+from the encrypted credentials; sandbox hosts in practice mode, live hosts in
+live mode — see `../../docs/WEBULL-INTEGRATION.md` §7–§8). There is no
+mock/demo data path; without credentials, broker calls fail fast with
+`BROKER_AUTH_FAILED`.
 
 ## Database
 
@@ -120,12 +121,9 @@ unit + e2e together (`jest --runInBand`):
     strike → strictly above for calls / strictly below for puts), expiration
     defaulting/validation, mid-price calc incl. crossed-spread rejection, OCC
     symbol round-trip, buying-power math.
-  - `broker/mock-broker.gateway` — determinism, chain structure
-    ($1/$5 strikes, today/+1d/weekly/monthly), futures roots, market fill at
-    last, mid fill at mid after 200 ms, cancel, $25k buying power, positions.
   - `trading/trading.service` — server-side auto-OTM normalization, mid limit
     price, idempotent replay (gateway hit exactly once), kill switch 403 +
-    blocked audit row, audit coverage.
+    blocked audit row, audit coverage (against the in-spec stub gateway).
   - `broker/webull/webull-signer` — HMAC signing against the official docs
     test vector, host→algorithm classification, percent-encoding.
   - `broker/webull/webull-mappers` — string-number tolerance, futures symbol
@@ -141,19 +139,18 @@ unit + e2e together (`jest --runInBand`):
     status-poll fill emission (fake timers), cancel, positions/open-orders
     filtering. No live Webull calls in tests.
 - **E2E** (`test/app.e2e-spec.ts`) boots the entire Nest app (real guards,
-  pipes, filters, throttler module, WS adapter) with only `PrismaService`
-  overridden by the in-memory fake, then drives supertest through
-  register → login → /me → save/delete credentials → market data → preview →
-  place → replay → positions → mid-order fill → cancel → kill switch →
-  refresh rotation/reuse → logout.
+  pipes, filters, throttler module, WS adapter) with `PrismaService`
+  overridden by the in-memory fake and `BROKER_GATEWAY` overridden by the
+  deterministic `test/stub-broker.gateway.ts` double, then drives supertest
+  through register → login → /me → save/delete credentials → market data →
+  preview → place → replay → positions → mid-order fill → cancel → kill
+  switch → refresh rotation/reuse → logout.
 
 Test-only affordances: `NODE_ENV=test` skips request throttling (the strict
 10 req/min order limit would otherwise trip long e2e flows) and
 `test/jest.setup.ts` pins deterministic JWT/encryption secrets.
 `InMemoryPrismaService` emulates the exact Prisma delegate surface the app
 uses, including unique-constraint `P2002` errors and NULL-key semantics.
-Price-sensitive specs freeze `Date.now()` so the mock's 1-second random walk
-cannot straddle a tick mid-assertion.
 
 The `InMemoryPrismaService` fake is also why the app code deliberately uses a
 small Prisma surface (no raw SQL, no interactive transactions) — documented on

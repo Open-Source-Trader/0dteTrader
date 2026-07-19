@@ -3,7 +3,8 @@ import SwiftUI
 import UIKit
 
 /// Sub-pane chart for oscillators: RSI (single line + 30/70 guides) and MACD
-/// (histogram bars + MACD/signal lines). Shares the main chart's index-based x-axis.
+/// (histogram bars + MACD/signal lines). Fully independent pan/zoom — the
+/// pane keeps its own viewport, separate from the main chart's.
 struct IndicatorPaneRepresentable: UIViewRepresentable {
     enum SeriesKind: Equatable {
         case line

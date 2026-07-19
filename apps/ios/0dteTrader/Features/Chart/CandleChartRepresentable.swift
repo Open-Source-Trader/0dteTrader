@@ -21,9 +21,6 @@ struct CandleChartRepresentable: UIViewRepresentable {
     var gexModel: GexLevels?
     var gexSettings: GexSettings = .default
     var gexStale: Bool = false
-    /// Called with the main chart's visible x-range whenever the user pans or
-    /// zooms, so non-interactive indicator panes can track the same window.
-    var onVisibleRangeChange: ((ClosedRange<Double>) -> Void)?
     var resetToken: Int = 0
 
     /// Hosts the chart plus the annotation overlay at identical frames so the
@@ -60,29 +57,21 @@ struct CandleChartRepresentable: UIViewRepresentable {
         }
     }
 
-    /// Publishes the main chart's visible x-range and keeps the annotation
-    /// overlay's time/price-anchored shapes in sync on pan/zoom.
+    /// Keeps the annotation overlays' time/price-anchored shapes redrawn in
+    /// sync with the chart viewport on pan/zoom.
     final class Coordinator: NSObject, ChartViewDelegate, UIGestureRecognizerDelegate {
         weak var chart: CombinedChartView?
-        var onVisibleRange: ((ClosedRange<Double>) -> Void)?
         var onTransform: (() -> Void)?
         var lastResetToken: Int = 0
         private var lastXDist: CGFloat = 0
         private var lastYDist: CGFloat = 0
 
         func chartTranslated(_ chartView: ChartViewBase, dX: CGFloat, dY: CGFloat) {
-            emit(chartView)
             onTransform?()
         }
 
         func chartScaled(_ chartView: ChartViewBase, scaleX: CGFloat, scaleY: CGFloat) {
-            emit(chartView)
             onTransform?()
-        }
-
-        func emit(_ chartView: ChartViewBase) {
-            guard let barLine = chartView as? BarLineChartViewBase else { return }
-            onVisibleRange?(barLine.lowestVisibleX...barLine.highestVisibleX)
         }
 
         // TradingView pinch semantics: horizontal finger spread zooms the
@@ -114,7 +103,6 @@ struct CandleChartRepresentable: UIViewRepresentable {
                 _ = chart.viewPortHandler.refresh(newMatrix: matrix, chart: chart, invalidate: true)
                 lastXDist = xDist
                 lastYDist = yDist
-                emit(chart)
                 onTransform?()
             default:
                 break
@@ -157,8 +145,6 @@ struct CandleChartRepresentable: UIViewRepresentable {
         chart.scaleYEnabled = false
         chart.isMultipleTouchEnabled = true
 
-        let rangeCallback = onVisibleRangeChange
-        context.coordinator.onVisibleRange = { range in rangeCallback?(range) }
         context.coordinator.onTransform = { [weak container] in
             container?.overlay.setNeedsDisplay()
             container?.twcOverlay.setNeedsDisplay()
@@ -357,6 +343,13 @@ struct CandleChartRepresentable: UIViewRepresentable {
 
         chart.data = data
         chart.xAxis.valueFormatter = IndexAxisValueFormatter(values: timeLabels)
+        // 12 bars of empty space past the newest candle (TradingView right
+        // offset). Scale 1 = the entire history, so pinching out from the
+        // default 120-bar window has the full range to travel through. Must
+        // be set before notifyDataSetChanged so the value→pixel transform
+        // includes the gap when the snap below positions the viewport.
+        chart.xAxis.axisMinimum = -0.5
+        chart.xAxis.axisMaximum = Double(candles.count - 1) + 12
         chart.notifyDataSetChanged()
         container.overlay.setNeedsDisplay()
         // Candle changes shift the price↔pixel transform; the GEX overlay's
@@ -368,12 +361,6 @@ struct CandleChartRepresentable: UIViewRepresentable {
             chart.accessibilityValue = "\(candles.count) candles, last close \(Format.price(last.close))"
         }
 
-        // 12 bars of empty space past the newest candle (TradingView right
-        // offset). Scale 1 = the entire history, so pinching out from the
-        // default 120-bar window has the full range to travel through.
-        chart.xAxis.axisMinimum = -0.5
-        chart.xAxis.axisMaximum = Double(candles.count - 1) + 12
-
         // Snap to the default view on first load; on live appends just keep
         // the newest candle in view without fighting the user's pan/zoom.
         if previousCount != candles.count {
@@ -382,13 +369,11 @@ struct CandleChartRepresentable: UIViewRepresentable {
             } else {
                 chart.moveViewToX(Double(candles.count - 1))
             }
-            context.coordinator.emit(chart)
         }
 
         if resetToken != context.coordinator.lastResetToken {
             context.coordinator.lastResetToken = resetToken
             snapToDefaultView(chart)
-            context.coordinator.emit(chart)
         }
     }
 

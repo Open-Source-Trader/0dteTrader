@@ -259,6 +259,7 @@ struct ChartView: View {
                             .overlay(RoundedRectangle(cornerRadius: 3).strokeBorder(Color.hudStroke.opacity(0.5), lineWidth: 1))
                     }
                     .opacity(0.7)
+                    .accessibilityLabel("Reset pane view")
                     .padding(.trailing, AppSpacing.sm)
                     .padding(.bottom, AppSpacing.xs)
                 }
@@ -375,6 +376,7 @@ struct ChartView: View {
                 .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(Color.hudStroke.opacity(0.5), lineWidth: 1))
         }
         .opacity(0.7)
+        .accessibilityLabel("Reset chart view")
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
         .padding(.trailing, AppSpacing.sm)
         .padding(.bottom, 28)

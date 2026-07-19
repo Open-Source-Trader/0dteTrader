@@ -12,9 +12,6 @@ coverage/
 # iOS
 apps/ios/build/
 apps/ios/DerivedData/
-apps/ios/*.xcodeproj/
-!apps/ios/project.yml
-*.xcworkspace/
 xcuserdata/
 *.ipa
 *.dSYM.zip

@@ -124,6 +124,12 @@ struct APIClient: @unchecked Sendable {
         try await requestVoid(Endpoint(method: .delete, path: "v1/me/webull-credentials"))
     }
 
+    /// Mint a fresh Webull access token from the stored credentials (the
+    /// server side of the Reconnect button).
+    func refreshWebullSession() async throws {
+        try await requestVoid(Endpoint(method: .post, path: "v1/me/webull-session/refresh"))
+    }
+
     func quote(symbol: String) async throws -> QuoteDTO {
         let endpoint = Endpoint(
             method: .get,

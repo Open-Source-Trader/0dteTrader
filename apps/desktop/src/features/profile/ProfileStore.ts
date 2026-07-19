@@ -3,12 +3,11 @@ import type { ApiClient } from '../../core/api/ApiClient';
 import { errorMessage } from '../../core/api/ApiError';
 import { Store } from '../../core/observable';
 
-type CredentialField = 'appKey' | 'appSecret' | 'accountId';
+type CredentialField = 'appKey' | 'appSecret';
 
 interface CredentialEnvironmentState {
   appKey: string;
   appSecret: string;
-  accountId: string;
   isEditing: boolean;
   isSaving: boolean;
   isDeleting: boolean;
@@ -29,7 +28,6 @@ interface ProfileStoreState {
 const emptyEnvironment = (): CredentialEnvironmentState => ({
   appKey: '',
   appSecret: '',
-  accountId: '',
   isEditing: false,
   isSaving: false,
   isDeleting: false,
@@ -55,8 +53,8 @@ export class ProfileStore extends Store<ProfileStoreState> {
   }
 
   canSaveCredentials(environment: TradingMode): boolean {
-    const { appKey, appSecret, accountId } = this.getState()[environment];
-    return appKey.trim() !== '' && appSecret !== '' && accountId.trim() !== '';
+    const { appKey, appSecret } = this.getState()[environment];
+    return appKey.trim() !== '' && appSecret !== '';
   }
 
   setField(environment: TradingMode, field: CredentialField, value: string): void {
@@ -88,11 +86,12 @@ export class ProfileStore extends Store<ProfileStoreState> {
       messageEnv: environment,
     });
     try {
+      // Account id is intentionally absent: the server discovers it via
+      // Webull's account/list once the token is approved (official flow).
       await this.apiClient.putWebullCredentials(
         {
           appKey: env.appKey.trim(),
           appSecret: env.appSecret,
-          accountId: env.accountId.trim(),
         },
         environment,
       );

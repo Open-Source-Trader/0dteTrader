@@ -36,12 +36,14 @@ struct MeDTO: Decodable, Equatable, Sendable {
     let email: String
     let tradingDisabled: Bool
     let webullConfigured: Bool
+    /// Auto-discovered via Webull account/list; nil until the first
+    /// successful connection (and on older servers).
+    let webullAccountId: String?
 }
 
 struct WebullCredentialsInputDTO: Encodable, Sendable {
     let appKey: String
     let appSecret: String
-    let accountId: String
 }
 
 struct WebullConfiguredResponseDTO: Decodable, Equatable, Sendable {

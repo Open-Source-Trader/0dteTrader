@@ -33,6 +33,14 @@ final class DTODecodingTests: XCTestCase {
         XCTAssertEqual(me.email, "dev@example.com")
         XCTAssertFalse(me.tradingDisabled)
         XCTAssertTrue(me.webullConfigured)
+        XCTAssertNil(me.webullAccountId)
+    }
+
+    func testMe_decodesDiscoveredAccountId() throws {
+        let me = try decode(MeDTO.self, """
+        {"id":"u-1","email":"dev@example.com","tradingDisabled":false,"webullConfigured":true,"webullAccountId":"ACC-9"}
+        """)
+        XCTAssertEqual(me.webullAccountId, "ACC-9")
     }
 
     func testAPIErrorEnvelope_decodes() throws {

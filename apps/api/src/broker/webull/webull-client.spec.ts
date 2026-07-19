@@ -499,3 +499,116 @@ describe('WebullClient error mapping (docs/WEBULL-INTEGRATION.md §6)', () => {
     },
   );
 });
+
+describe('token persistence (tokenStore)', () => {
+  interface StoredShape {
+    token: string;
+    expiresAt: number;
+    status: string;
+  }
+
+  function makeStore(initial: StoredShape | null = null) {
+    let value: StoredShape | null = initial;
+    return {
+      load: jest.fn(async () => value),
+      save: jest.fn(async (token: StoredShape) => {
+        value = token;
+      }),
+      clear: jest.fn(async () => {
+        value = null;
+      }),
+      get value() {
+        return value;
+      },
+    };
+  }
+
+  function makeClientWith(
+    store: ReturnType<typeof makeStore>,
+    responses: (url: string) => FakeResponse,
+  ) {
+    const calls: { url: string }[] = [];
+    const fetchImpl: FetchImpl = async (url, _init) => {
+      calls.push({ url });
+      const res = responses(url);
+      return {
+        status: res.status,
+        headers: { get: () => null },
+        json: async () => res.body,
+      };
+    };
+    const client = new WebullClient(
+      { ...CREDS },
+      { hosts: HOSTS, fetchImpl, tokenStore: store, sleep: async () => {} },
+    );
+    return { client, calls };
+  }
+
+  it('restores a persisted NORMAL token instead of creating a new one', async () => {
+    const store = makeStore({
+      token: 'tok-restored',
+      expiresAt: Date.now() + 14 * 86_400_000,
+      status: 'NORMAL',
+    });
+    const { client, calls } = makeClientWith(store, (url) => {
+      if (url.includes('/auth/token/')) {
+        throw new Error('no token endpoint should be touched');
+      }
+      return { status: 200, body: [] };
+    });
+    await client.request('accountList');
+    expect(calls.some((c) => c.url.includes('/auth/token/'))).toBe(false);
+    expect(store.load).toHaveBeenCalledTimes(1);
+  });
+
+  it('persists a newly created token', async () => {
+    const store = makeStore(null);
+    const { client } = makeClientWith(store, (url) => {
+      if (url.includes('/auth/token/create')) {
+        return { status: 200, body: TOKEN_BODY };
+      }
+      return { status: 200, body: [] };
+    });
+    await client.request('accountList');
+    expect(store.save).toHaveBeenCalledTimes(1);
+    expect(store.value?.token).toBe('tok-1');
+    expect(store.value?.status).toBe('NORMAL');
+  });
+
+  it('refreshes (not creates) a persisted token close to expiry and saves the result', async () => {
+    const store = makeStore({
+      token: 'tok-old',
+      expiresAt: Date.now() + 86_400_000, // 1d left, inside the 2d margin
+      status: 'NORMAL',
+    });
+    const { client, calls } = makeClientWith(store, (url) => {
+      if (url.includes('/auth/token/refresh')) {
+        return { status: 200, body: { ...TOKEN_BODY, token: 'tok-refreshed' } };
+      }
+      if (url.includes('/auth/token/create')) {
+        throw new Error('must refresh, not create');
+      }
+      return { status: 200, body: [] };
+    });
+    await client.request('accountList');
+    expect(calls.some((c) => c.url.includes('/auth/token/refresh'))).toBe(true);
+    expect(store.value?.token).toBe('tok-refreshed');
+  });
+
+  it('clears the store on reauthenticate before minting a fresh token', async () => {
+    const store = makeStore({
+      token: 'tok-stale',
+      expiresAt: Date.now() + 14 * 86_400_000,
+      status: 'NORMAL',
+    });
+    const { client } = makeClientWith(store, (url) => {
+      if (url.includes('/auth/token/create')) {
+        return { status: 200, body: TOKEN_BODY };
+      }
+      return { status: 200, body: [] };
+    });
+    await client.reauthenticate();
+    expect(store.clear).toHaveBeenCalledTimes(1);
+    expect(store.value?.token).toBe('tok-1');
+  });
+});

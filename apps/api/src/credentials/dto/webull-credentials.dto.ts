@@ -10,9 +10,11 @@ export class WebullCredentialsDto {
   @MinLength(1)
   appSecret!: string;
 
+  /** Optional manual override; normally auto-discovered via account/list. */
+  @IsOptional()
   @IsString()
   @MinLength(1)
-  accountId!: string;
+  accountId?: string;
 
   @IsOptional()
   @IsIn(['live', 'practice'])

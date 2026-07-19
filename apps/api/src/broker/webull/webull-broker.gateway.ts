@@ -42,6 +42,7 @@ import {
   WebullHosts,
 } from './webull-endpoints';
 import { FetchImpl, WebullClient, WebullCredentials } from './webull-client';
+import { WebullTokenStore } from './webull-token-store';
 import {
   toCandle,
   toOptionContract,
@@ -116,6 +117,7 @@ export class WebullBrokerGateway implements BrokerGateway, OnModuleDestroy {
     private readonly config: ConfigService,
     private readonly events: OrderEventsService,
     private readonly prisma: PrismaService,
+    private readonly tokenStore?: WebullTokenStore,
     private readonly fetchImpl?: FetchImpl,
   ) {}
 
@@ -175,8 +177,11 @@ export class WebullBrokerGateway implements BrokerGateway, OnModuleDestroy {
           : 'No Webull credentials on file — save app key/secret in Profile first',
       );
     }
+    // The account id is not part of the fingerprint: it is discovered and
+    // set on the live client after auth, and a rebuild for that would
+    // needlessly drop the token cache.
     const fingerprint = createHash('sha256')
-      .update(`${creds.appKey}${creds.appSecret}${creds.accountId}`)
+      .update(`${creds.appKey}${creds.appSecret}`)
       .digest('hex');
     const cacheKey = `${userId}:${mode}`;
     const existing = this.clients.get(cacheKey);
@@ -186,9 +191,41 @@ export class WebullBrokerGateway implements BrokerGateway, OnModuleDestroy {
     const client = new WebullClient(creds, {
       hosts: this.hosts(mode),
       fetchImpl: this.fetchImpl,
+      tokenStore: this.tokenStore?.scopedTo(userId, mode),
     });
     this.clients.set(cacheKey, { fingerprint, client });
     return client;
+  }
+
+  /**
+   * The Webull account id for API calls. Official flow: it is NOT typed by
+   * the user — after authentication it is discovered once via
+   * GET /openapi/account/list and persisted alongside the credentials.
+   */
+  private async accountIdFor(
+    userId: string,
+    client: WebullClient,
+  ): Promise<string> {
+    if (client.hasAccountId()) return client.accountId;
+    const payload = await client.request('accountList');
+    const rows = Array.isArray(payload)
+      ? payload
+      : asArray(asObject(payload)?.accounts);
+    const accountId = rows
+      .map((row) => asObject(row)?.account_id)
+      .find((id): id is string => typeof id === 'string' && id.length > 0);
+    if (!accountId) {
+      throw brokerErrors.authFailed(
+        'Webull returned no accounts for these credentials — check the app key/secret',
+      );
+    }
+    client.setAccountId(accountId);
+    const mode = await this.tradingModeFor(userId);
+    await this.credentials.saveDiscoveredAccountId(userId, mode, accountId);
+    this.logger.log(
+      `Discovered Webull ${mode} account (…${accountId.slice(-4)}) via account/list`,
+    );
+    return accountId;
   }
 
   private hosts(mode: TradingMode): WebullHosts {
@@ -399,7 +436,10 @@ export class WebullBrokerGateway implements BrokerGateway, OnModuleDestroy {
         order.orderType === 'market' ? undefined : price,
       );
       const raw = await client.request('orderPreview', {
-        body: { account_id: client.accountId, new_orders: [newOrder] },
+        body: {
+          account_id: await this.accountIdFor(userId, client),
+          new_orders: [newOrder],
+        },
       });
       estBuyingPower = parsePreviewCost(raw);
     } catch (err) {
@@ -414,7 +454,7 @@ export class WebullBrokerGateway implements BrokerGateway, OnModuleDestroy {
 
     const buyingPower = parseBuyingPower(
       await client.request('balance', {
-        query: { account_id: client.accountId },
+        query: { account_id: await this.accountIdFor(userId, client) },
       }),
     );
     if (buyingPower !== undefined && estBuyingPower > buyingPower) {
@@ -454,7 +494,10 @@ export class WebullBrokerGateway implements BrokerGateway, OnModuleDestroy {
       limitPrice,
     );
     const raw = await client.request('orderPlace', {
-      body: { account_id: client.accountId, new_orders: [newOrder] },
+      body: {
+        account_id: await this.accountIdFor(userId, client),
+        new_orders: [newOrder],
+      },
     });
     const placed = parsePlaceResult(raw);
 
@@ -482,7 +525,10 @@ export class WebullBrokerGateway implements BrokerGateway, OnModuleDestroy {
     const target = open.find((o) => o.orderId === orderId);
     if (!target) throw brokerErrors.orderNotFound(orderId);
     await client.request('orderCancel', {
-      body: { account_id: client.accountId, client_order_id: orderId },
+      body: {
+        account_id: await this.accountIdFor(userId, client),
+        client_order_id: orderId,
+      },
     });
     this.stopStatusPoll(userId, orderId);
     this.events.emit(userId, { ...target, status: 'cancelled' });
@@ -491,7 +537,7 @@ export class WebullBrokerGateway implements BrokerGateway, OnModuleDestroy {
   async getPositions(userId: string): Promise<Position[]> {
     const client = await this.clientFor(userId);
     const raw = await client.request('positions', {
-      query: { account_id: client.accountId },
+      query: { account_id: await this.accountIdFor(userId, client) },
     });
     return asArray(raw)
       .map((p) => toPosition(p as WebullPosition))
@@ -501,7 +547,10 @@ export class WebullBrokerGateway implements BrokerGateway, OnModuleDestroy {
   async getOpenOrders(userId: string): Promise<OrderResult[]> {
     const client = await this.clientFor(userId);
     const raw = await client.request('orderOpen', {
-      query: { account_id: client.accountId, page_size: '100' },
+      query: {
+        account_id: await this.accountIdFor(userId, client),
+        page_size: '100',
+      },
     });
     return this.flattenOrders(raw)
       .map((o) => toOrderResult(o))
@@ -638,7 +687,7 @@ export class WebullBrokerGateway implements BrokerGateway, OnModuleDestroy {
       try {
         const raw = await client.request('orderDetail', {
           query: {
-            account_id: client.accountId,
+            account_id: await this.accountIdFor(userId, client),
             client_order_id: result.orderId,
           },
         });

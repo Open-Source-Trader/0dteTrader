@@ -91,6 +91,10 @@ function defaultHandlers(): Record<string, Handler> {
         ],
       },
     }),
+    'GET /openapi/account/list': () => ({
+      status: 200,
+      body: [{ account_id: 'ACC-DISCOVERED', account_number: 'X1' }],
+    }),
     'GET /openapi/assets/positions': () => ({ status: 200, body: [] }),
     'GET /openapi/trade/order/open': () => ({ status: 200, body: [] }),
     'GET /openapi/trade/order/detail': () => ({ status: 200, body: {} }),
@@ -118,6 +122,7 @@ describe('WebullBrokerGateway', () => {
   /** Stored credentials per environment the fake CredentialsService reports. */
   let storedCreds: Partial<Record<'live' | 'practice', WebullCredentials>>;
   let configValues: Record<string, unknown>;
+  let savedAccountIds: jest.Mock;
   /** Saved override so the Prisma-client dotenv autoload can't leak into hosts(). */
   let savedDataBaseUrl: string | undefined;
 
@@ -165,7 +170,9 @@ describe('WebullBrokerGateway', () => {
         async (_userId: string, environment: 'live' | 'practice' = 'live') =>
           storedCreds[environment] ?? null,
       ),
+      saveDiscoveredAccountId: jest.fn(async () => undefined),
     } as unknown as CredentialsService;
+    savedAccountIds = credentials.saveDiscoveredAccountId as jest.Mock;
     const config = new ConfigService(configValues);
     const prisma = {
       user: {
@@ -173,7 +180,14 @@ describe('WebullBrokerGateway', () => {
       },
     } as unknown as PrismaService;
     events = new OrderEventsService();
-    gateway = new WebullBrokerGateway(credentials, config, events, prisma, fetchImpl);
+    gateway = new WebullBrokerGateway(
+      credentials,
+      config,
+      events,
+      prisma,
+      undefined,
+      fetchImpl,
+    );
   });
 
   afterEach(() => {
@@ -627,6 +641,57 @@ describe('WebullBrokerGateway', () => {
       });
       const orders = await gateway.getOpenOrders('u1');
       expect(orders.map((o) => o.orderId)).toEqual(['a']);
+    });
+  });
+
+  describe('account id auto-discovery (official flow: GET account/list)', () => {
+    beforeEach(() => {
+      // Credentials saved without an account id — the normal case now.
+      storedCreds = { live: { appKey: 'AK', appSecret: 'SK' } };
+    });
+
+    it('discovers, uses, and persists the account id on first account call', async () => {
+      await gateway.getPositions('u1');
+      expect(callsTo('/openapi/account/list')).toHaveLength(1);
+      const positions = callsTo('/openapi/assets/positions');
+      expect(positions[0].url).toContain('account_id=ACC-DISCOVERED');
+      expect(savedAccountIds).toHaveBeenCalledWith('u1', 'live', 'ACC-DISCOVERED');
+    });
+
+    it('discovers only once — later calls reuse the resolved id', async () => {
+      await gateway.getPositions('u1');
+      await gateway.getOpenOrders('u1');
+      expect(callsTo('/openapi/account/list')).toHaveLength(1);
+      expect(callsTo('/openapi/trade/order/open')[0].url).toContain(
+        'account_id=ACC-DISCOVERED',
+      );
+    });
+
+    it('accepts the {accounts: [...]} response wrapper', async () => {
+      handlers['GET /openapi/account/list'] = () => ({
+        status: 200,
+        body: { accounts: [{ account_id: 'ACC-NESTED' }] },
+      });
+      await gateway.getPositions('u1');
+      expect(callsTo('/openapi/assets/positions')[0].url).toContain(
+        'account_id=ACC-NESTED',
+      );
+    });
+
+    it('fails with an auth error when no accounts come back', async () => {
+      handlers['GET /openapi/account/list'] = () => ({ status: 200, body: [] });
+      await expect(gateway.getPositions('u1')).rejects.toMatchObject({
+        code: 'BROKER_AUTH_FAILED',
+      });
+    });
+
+    it('skips discovery entirely when an account id is stored', async () => {
+      storedCreds = { live: { appKey: 'AK', appSecret: 'SK', accountId: 'ACC-1' } };
+      await gateway.getPositions('u1');
+      expect(callsTo('/openapi/account/list')).toHaveLength(0);
+      expect(callsTo('/openapi/assets/positions')[0].url).toContain(
+        'account_id=ACC-1',
+      );
     });
   });
 });

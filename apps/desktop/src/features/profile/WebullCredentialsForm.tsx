@@ -5,7 +5,7 @@ import { Spinner } from '../../design/components/Spinner';
 import { XCircleFillIcon } from '../../design/icons';
 import type { ProfileStore } from './ProfileStore';
 
-type Field = 'appKey' | 'appSecret' | 'accountId';
+type Field = 'appKey' | 'appSecret';
 
 /** Write-only Webull credential entry for one environment; stored values are never shown. */
 export function WebullCredentialsForm({
@@ -16,7 +16,7 @@ export function WebullCredentialsForm({
   environment: TradingMode;
 }) {
   const state = useStore(store);
-  const { appKey, appSecret, accountId, isSaving } = state[environment];
+  const { appKey, appSecret, isSaving } = state[environment];
   const canSave = store.canSaveCredentials(environment) && !isSaving;
   const [reveal, setReveal] = useState(false);
   const inputType = reveal ? 'text' : 'password';
@@ -65,7 +65,10 @@ export function WebullCredentialsForm({
     >
       {renderField('appKey', `wb-${environment}-app-key`, 'App Key', appKey)}
       {renderField('appSecret', `wb-${environment}-app-secret`, 'App Secret', appSecret)}
-      {renderField('accountId', `wb-${environment}-account-id`, 'Account ID', accountId)}
+      <div className="grouped-row footnote" style={{ color: 'var(--text-secondary)' }}>
+        Your account is detected automatically after you approve the
+        connection in the Webull app.
+      </div>
       <button
         type="button"
         className="grouped-row button-row footnote"

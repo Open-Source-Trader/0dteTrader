@@ -3,7 +3,9 @@
 ## 1. Source of Truth
 
 Official Webull OpenAPI: https://developer.webull.com/apis/docs/ (apply for developer credentials;
-review typically 1–2 business days). Per-user credentials: app key, app secret, account ID.
+review typically 1–2 business days). Per-user credentials: app key + app secret only — the
+account ID is auto-discovered via `GET /openapi/account/list` after the first successful
+authentication (official flow; a manual `accountId` override is still accepted on PUT).
 
 > **Status:** P4 is implemented — `WebullBrokerGateway` + `apps/api/src/broker/webull/` (signer,
 > client, endpoints, mappers). Request signing is verified against the official docs test vector;

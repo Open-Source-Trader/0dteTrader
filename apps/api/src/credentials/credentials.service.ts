@@ -24,12 +24,30 @@ export class CredentialsService {
   ): Promise<void> {
     const encAppKey = this.crypto.encrypt(input.appKey);
     const encAppSecret = this.crypto.encrypt(input.appSecret);
-    const encAccountId = this.crypto.encrypt(input.accountId);
+    // No manual account id: store null and let the gateway discover it via
+    // GET /openapi/account/list. Re-saving key/secret clears a previously
+    // discovered id on purpose — it may belong to the old application.
+    const encAccountId = input.accountId
+      ? this.crypto.encrypt(input.accountId)
+      : null;
 
     await this.prisma.webullCredential.upsert({
       where: { userId_environment: { userId, environment } },
       create: { userId, environment, encAppKey, encAppSecret, encAccountId },
       update: { encAppKey, encAppSecret, encAccountId },
+    });
+  }
+
+  /** Persist an account id discovered via account/list (no-op without a row —
+   *  e.g. the server's built-in practice credentials have none). */
+  async saveDiscoveredAccountId(
+    userId: string,
+    environment: TradingMode,
+    accountId: string,
+  ): Promise<void> {
+    await this.prisma.webullCredential.updateMany({
+      where: { userId, environment },
+      data: { encAccountId: this.crypto.encrypt(accountId) },
     });
   }
 
@@ -64,7 +82,9 @@ export class CredentialsService {
     return {
       appKey: this.crypto.decrypt(row.encAppKey),
       appSecret: this.crypto.decrypt(row.encAppSecret),
-      accountId: this.crypto.decrypt(row.encAccountId),
+      accountId: row.encAccountId
+        ? this.crypto.decrypt(row.encAccountId)
+        : undefined,
     };
   }
 }

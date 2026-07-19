@@ -15,8 +15,8 @@ final class ProfileViewModel: ObservableObject {
 
     @Published var appKey = ""
     @Published var appSecret = ""
-    @Published var accountId = ""
     @Published var isEditingCredentials = false
+    @Published private(set) var isReconnecting = false
 
     @Published var appLockEnabled: Bool {
         didSet { settingsStore.appLockEnabled = appLockEnabled }
@@ -40,7 +40,6 @@ final class ProfileViewModel: ObservableObject {
     var canSaveCredentials: Bool {
         !appKey.trimmingCharacters(in: .whitespaces).isEmpty
             && !appSecret.isEmpty
-            && !accountId.trimmingCharacters(in: .whitespaces).isEmpty
     }
 
     func load() async {
@@ -77,17 +76,17 @@ final class ProfileViewModel: ObservableObject {
         successMessage = nil
         defer { isSavingCredentials = false }
         do {
+            // Account id is intentionally absent: the server discovers it via
+            // Webull's account/list once the token is approved.
             try await apiClient.putWebullCredentials(
                 WebullCredentialsInputDTO(
                     appKey: appKey.trimmingCharacters(in: .whitespaces),
-                    appSecret: appSecret,
-                    accountId: accountId.trimmingCharacters(in: .whitespaces)
+                    appSecret: appSecret
                 )
             )
             // Write-only: wipe the fields, never render them back (FR-4).
             appKey = ""
             appSecret = ""
-            accountId = ""
             isEditingCredentials = false
             successMessage = "Webull credentials saved."
             await load()
@@ -108,6 +107,25 @@ final class ProfileViewModel: ObservableObject {
             try await apiClient.deleteWebullCredentials()
             successMessage = "Webull credentials removed."
             await load()
+        } catch let error as APIError {
+            errorMessage = error.userMessage
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    /// "Reconnect": mint a fresh Webull access token from the stored
+    /// credentials (ProfileStore.reconnect analog) — a stale token never
+    /// forces re-entering secrets.
+    func reconnect() async {
+        guard !isReconnecting else { return }
+        isReconnecting = true
+        errorMessage = nil
+        successMessage = nil
+        defer { isReconnecting = false }
+        do {
+            try await apiClient.refreshWebullSession()
+            successMessage = "Webull session refreshed."
         } catch let error as APIError {
             errorMessage = error.userMessage
         } catch {

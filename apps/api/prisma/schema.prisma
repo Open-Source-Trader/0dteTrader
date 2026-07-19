@@ -31,7 +31,7 @@ model User {
   credentials    WebullCredential[]
   refreshTokens  RefreshToken[]
   orderAudits    OrderAudit[]
-  webullApiToken WebullApiToken?
+  webullApiTokens WebullApiToken[]
   tradeOrders    TradeOrder[]
 
   @@map("users")
@@ -45,7 +45,9 @@ model WebullCredential {
   environment  String   @default("live")
   encAppKey    Bytes
   encAppSecret Bytes
-  encAccountId Bytes
+  // Null until discovered via GET /openapi/account/list (the official flow:
+  // the user supplies only app key/secret; the account id is fetched).
+  encAccountId Bytes?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
@@ -53,21 +55,24 @@ model WebullCredential {
   @@map("webull_credentials")
 }
 
-// RESERVED for a follow-up: persisting Webull OpenAPI access tokens so
-// restarts don't force token re-creation (which in production triggers SMS
-// re-verification in the user's Webull app). Today the token cache is
-// in-memory only — nothing reads or writes this table yet. When implemented
-// it also needs per-(user, environment) rows, not userId @unique.
+// Persisted Webull OpenAPI access tokens (encrypted) so restarts reuse the
+// existing token instead of re-creating one — every create on production
+// triggers SMS re-verification in the user's Webull app. One row per
+// (user, environment), mirroring webull_credentials.
 model WebullApiToken {
-  id        String   @id @default(uuid()) @db.Uuid
-  userId    String   @unique @db.Uuid
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  encToken  Bytes
-  expiresAt DateTime
-  status    String
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id          String   @id @default(uuid()) @db.Uuid
+  userId      String   @db.Uuid
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // "live" | "practice"
+  environment String   @default("live")
+  encToken    Bytes
+  expiresAt   DateTime
+  // NORMAL | PENDING (awaiting in-app 2FA verification)
+  status      String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
+  @@unique([userId, environment])
   @@map("webull_api_tokens")
 }
 

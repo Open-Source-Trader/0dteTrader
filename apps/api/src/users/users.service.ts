@@ -1,11 +1,15 @@
 import { Injectable } from '@nestjs/common';
 import { Me, TradingMode } from '@0dtetrader/shared-types';
 import { errors } from '../common/api-exception';
+import { CryptoService } from '../credentials/crypto.service';
 import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
 export class UsersService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly crypto: CryptoService,
+  ) {}
 
   async getMe(userId: string): Promise<Me> {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
@@ -27,6 +31,14 @@ export class UsersService {
       tradingMode: user.tradingMode as TradingMode,
       webullConfigured: live !== null,
       webullPracticeConfigured: practice !== null,
+      // The account id is an identifier, not a secret — surfacing it lets the
+      // user confirm which account was auto-discovered via account/list.
+      webullAccountId: live?.encAccountId
+        ? this.crypto.decrypt(live.encAccountId)
+        : null,
+      webullPracticeAccountId: practice?.encAccountId
+        ? this.crypto.decrypt(practice.encAccountId)
+        : null,
     };
   }
 

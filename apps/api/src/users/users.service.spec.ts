@@ -27,8 +27,10 @@ describe('UsersService', () => {
 
   beforeEach(() => {
     prisma = new InMemoryPrismaService();
+    const crypto = { decrypt: (buf: Buffer) => buf.toString() };
     users = new UsersService(
       prisma as unknown as ConstructorParameters<typeof UsersService>[0],
+      crypto as unknown as ConstructorParameters<typeof UsersService>[1],
     );
   });
 
@@ -43,17 +45,21 @@ describe('UsersService', () => {
       tradingMode: 'live',
       webullConfigured: false,
       webullPracticeConfigured: false,
+      webullAccountId: null,
+      webullPracticeAccountId: null,
     });
 
     addCredential(userId, 'practice');
     me = await users.getMe(userId);
     expect(me.webullConfigured).toBe(false);
     expect(me.webullPracticeConfigured).toBe(true);
+    expect(me.webullPracticeAccountId).toBe('z');
 
     addCredential(userId, 'live');
     me = await users.getMe(userId);
     expect(me.webullConfigured).toBe(true);
     expect(me.webullPracticeConfigured).toBe(true);
+    expect(me.webullAccountId).toBe('z');
   });
 
   it('setTradingMode persists the mode and returns the updated Me', async () => {

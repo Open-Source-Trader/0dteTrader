@@ -111,6 +111,8 @@ describe('0dteTrader API (e2e)', () => {
       tradingMode: 'live',
       webullConfigured: false,
       webullPracticeConfigured: false,
+      webullAccountId: null,
+      webullPracticeAccountId: null,
     });
   });
 

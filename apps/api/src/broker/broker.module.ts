@@ -6,6 +6,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { BROKER_GATEWAY, BrokerGateway } from './broker-gateway.interface';
 import { OrderEventsService } from './order-events.service';
 import { WebullBrokerGateway } from './webull/webull-broker.gateway';
+import { WebullTokenStore } from './webull/webull-token-store';
 import { WebullSessionController } from './webull-session.controller';
 
 /**
@@ -19,16 +20,24 @@ import { WebullSessionController } from './webull-session.controller';
   controllers: [WebullSessionController],
   providers: [
     OrderEventsService,
+    WebullTokenStore,
     {
       provide: BROKER_GATEWAY,
-      inject: [ConfigService, OrderEventsService, CredentialsService, PrismaService],
+      inject: [
+        ConfigService,
+        OrderEventsService,
+        CredentialsService,
+        PrismaService,
+        WebullTokenStore,
+      ],
       useFactory: (
         config: ConfigService,
         events: OrderEventsService,
         credentials: CredentialsService,
         prisma: PrismaService,
+        tokenStore: WebullTokenStore,
       ): BrokerGateway =>
-        new WebullBrokerGateway(credentials, config, events, prisma),
+        new WebullBrokerGateway(credentials, config, events, prisma, tokenStore),
     },
   ],
   exports: [BROKER_GATEWAY, OrderEventsService],

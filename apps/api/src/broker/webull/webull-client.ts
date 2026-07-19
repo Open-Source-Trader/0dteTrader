@@ -12,7 +12,8 @@ import { compactJson, signRequest } from './webull-signer';
 export interface WebullCredentials {
   appKey: string;
   appSecret: string;
-  accountId: string;
+  /** Absent until discovered via GET /openapi/account/list. */
+  accountId?: string;
 }
 
 /** Minimal fetch shape so tests can inject a mock. */
@@ -37,9 +38,20 @@ export interface WebullClientOptions {
   /** Injectable for tests (deterministic nonces/timestamps). */
   uuid?: () => string;
   now?: () => Date;
+  /**
+   * Optional persistence for the access token (official guidance: store and
+   * reuse tokens). Loaded once lazily; every create/refresh/status change is
+   * written back so a backend restart reuses the token instead of minting a
+   * new one (which triggers a 2FA SMS on production).
+   */
+  tokenStore?: {
+    load(): Promise<CachedToken | null>;
+    save(token: CachedToken): Promise<void>;
+    clear(): Promise<void>;
+  };
 }
 
-interface CachedToken {
+export interface CachedToken {
   token: string;
   /** epoch ms */
   expiresAt: number;
@@ -69,9 +81,10 @@ const PENDING_GUIDANCE =
  *   automatically, because every create triggers a fresh 2FA challenge and
  *   repeated creates lock the account (VERIFY_FAILURE_EXCEED_LIMIT). After
  *   an auth failure the client latches and only reauthenticate() (the app's
- *   Reconnect button) mints a new token. NOTE: the cache is in-memory, so a
- *   restart re-creates one token; DB-persisted tokens are a planned
- *   follow-up.
+ *   Reconnect button) mints a new token. With a tokenStore configured, the
+ *   cache hydrates from persistence on first use and every create/refresh/
+ *   status change is written back — restarts reuse the stored token instead
+ *   of re-creating one (official guidance: store and reuse tokens).
  * - Signing: every request signed via webull-signer.ts (validated against the
  *   official docs test vector).
  * - Resilience: 429 → exponential backoff with jitter (honoring Retry-After),
@@ -102,6 +115,8 @@ export class WebullClient {
   private reauthRequired: string | null = null;
   /** Epoch ms before which no token/check poll is attempted (PENDING wait). */
   private nextStatusCheckMs = 0;
+  /** One-shot hydration of the cache from the persisted token store. */
+  private storeHydration: Promise<void> | null = null;
 
   constructor(
     private readonly creds: WebullCredentials,
@@ -115,7 +130,21 @@ export class WebullClient {
   }
 
   get accountId(): string {
+    if (!this.creds.accountId) {
+      throw brokerErrors.authFailed(
+        'Webull account id not yet discovered — authenticate first',
+      );
+    }
     return this.creds.accountId;
+  }
+
+  hasAccountId(): boolean {
+    return Boolean(this.creds.accountId);
+  }
+
+  /** Set the account id discovered via GET /openapi/account/list. */
+  setAccountId(accountId: string): void {
+    this.creds.accountId = accountId;
   }
 
   /** Discard the cached token (used by reauthenticate before a fresh create). */
@@ -135,6 +164,9 @@ export class WebullClient {
     this.tokenRetryAfterMs = 0;
     this.nextStatusCheckMs = 0;
     this.clearToken();
+    // Skip hydration: the persisted token is the stale one being replaced.
+    this.storeHydration = Promise.resolve();
+    await this.options.tokenStore?.clear();
     await this.ensureToken();
   }
 
@@ -251,6 +283,20 @@ export class WebullClient {
   // -------------------------------------------------------------------------
 
   private async ensureToken(): Promise<string> {
+    // First call on a fresh client: pull the persisted token (if any) into
+    // the in-memory cache so restarts reuse it instead of re-creating.
+    if (this.options.tokenStore && !this.storeHydration) {
+      this.storeHydration = this.options.tokenStore.load().then((persisted) => {
+        if (persisted && !this.cachedToken) {
+          this.cachedToken = persisted;
+          this.logger.log(
+            `Webull access token restored from store (status ${persisted.status})`,
+          );
+        }
+      });
+    }
+    if (this.storeHydration) await this.storeHydration;
+
     const cached = this.cachedToken;
     if (
       cached &&
@@ -318,9 +364,11 @@ export class WebullClient {
       const status = await this.checkTokenStatus(cached.token);
       if (status === 'NORMAL') {
         this.cachedToken = { ...cached, status: 'NORMAL' };
+        await this.options.tokenStore?.save(this.cachedToken);
         this.logger.log('Webull access token verified — status NORMAL');
       } else if (status !== 'PENDING' && status !== null) {
         this.cachedToken = null;
+        await this.options.tokenStore?.clear();
         this.reauthRequired =
           'Webull token verification expired (5-minute window) — ' +
           'press Reconnect in Profile and approve in the Webull app';
@@ -378,6 +426,7 @@ export class WebullClient {
       }
     }
     this.cachedToken = token;
+    await this.options.tokenStore?.save(token);
     return token.token;
   }
 

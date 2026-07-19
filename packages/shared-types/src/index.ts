@@ -55,12 +55,21 @@ export interface Me {
   webullConfigured: boolean;
   /** Practice (paper) Webull credentials are stored. */
   webullPracticeConfigured: boolean;
+  /** Live account id (auto-discovered via account/list); null until known. */
+  webullAccountId: string | null;
+  /** Practice account id; null until known. */
+  webullPracticeAccountId: string | null;
 }
 
 export interface WebullCredentialsInput {
   appKey: string;
   appSecret: string;
-  accountId: string;
+  /**
+   * Optional manual override. Normally omitted — the account id is
+   * auto-discovered via GET /openapi/account/list after the first
+   * successful authentication (the official Webull flow).
+   */
+  accountId?: string;
   /** Environment this credential set belongs to; defaults to 'live'. */
   environment?: TradingMode;
 }

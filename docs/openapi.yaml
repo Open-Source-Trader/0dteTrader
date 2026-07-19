@@ -224,13 +224,15 @@ components:
         tradingMode: { type: string, enum: [live, practice] }
         webullConfigured: { type: boolean, description: Live credentials stored }
         webullPracticeConfigured: { type: boolean, description: Practice credentials stored }
+        webullAccountId: { type: string, nullable: true, description: Live account id auto-discovered via Webull account/list }
+        webullPracticeAccountId: { type: string, nullable: true, description: Practice account id auto-discovered via Webull account/list }
     WebullCredentialsInput:
       type: object
-      required: [appKey, appSecret, accountId]
+      required: [appKey, appSecret]
       properties:
         appKey: { type: string }
         appSecret: { type: string }
-        accountId: { type: string }
+        accountId: { type: string, description: 'Optional manual override; normally auto-discovered via account/list' }
         environment: { type: string, enum: [live, practice], default: live }
     Quote:
       type: object

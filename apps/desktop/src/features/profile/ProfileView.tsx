@@ -34,6 +34,10 @@ export function ProfileView({ onLogout, onDismiss }: ProfileViewProps) {
   ) => {
     const env = state[environment];
     const title = environment === 'live' ? 'Webull API — Live' : 'Webull API — Practice';
+    const accountId =
+      environment === 'live'
+        ? state.me?.webullAccountId
+        : state.me?.webullPracticeAccountId;
     return (
       <div className="grouped-section" key={environment}>
         <div className="section-header">{title}</div>
@@ -43,6 +47,12 @@ export function ProfileView({ onLogout, onDismiss }: ProfileViewProps) {
               <div className="grouped-row positive">
                 <CheckCircleFillIcon size={14} />
                 <span>Configured</span>
+              </div>
+              <div className="grouped-row">
+                <span>Account</span>
+                <span className="row-value text-secondary">
+                  {accountId ?? 'detected after first connection'}
+                </span>
               </div>
               <div className="grouped-row footnote text-secondary">
                 Credentials are stored encrypted on the server and are never displayed here.

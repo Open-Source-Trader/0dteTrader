@@ -1,12 +1,14 @@
 import SwiftUI
 
-/// Secure Webull credential entry (PRD FR-2). All three fields are write-only:
-/// after saving, the app only ever shows the "Configured" state.
+/// Secure Webull credential entry (PRD FR-2). Both fields are write-only:
+/// after saving, the app only ever shows the "Configured" state. The account
+/// id is not entered — the server discovers it via Webull's account/list
+/// after the connection is approved (official flow).
 struct WebullCredentialsForm: View {
     @ObservedObject var viewModel: ProfileViewModel
 
     private enum Field: Hashable {
-        case appKey, appSecret, accountId
+        case appKey, appSecret
     }
 
     @FocusState private var focused: Field?
@@ -27,22 +29,15 @@ struct WebullCredentialsForm: View {
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
                 .focused($focused, equals: .appSecret)
-                .submitLabel(.next)
-                .onSubmit { focused = .accountId }
-
-            // An identifier, not a secret — keep it visible so pasted values
-            // can be verified before saving.
-            TextField("Account ID", text: $viewModel.accountId)
-                .textContentType(.none)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-                .font(.system(.body, design: .monospaced))
-                .focused($focused, equals: .accountId)
                 .submitLabel(.go)
                 .onSubmit {
                     guard viewModel.canSaveCredentials else { return }
                     Task { await viewModel.saveCredentials() }
                 }
+
+            Text("Your account is detected automatically after you approve the connection in the Webull app.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
 
             Button {
                 Task { await viewModel.saveCredentials() }

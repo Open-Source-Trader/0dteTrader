@@ -83,12 +83,27 @@ struct ProfileView: View {
             } else if let me = viewModel.me, me.webullConfigured, !viewModel.isEditingCredentials {
                 Label("Configured", systemImage: "checkmark.circle.fill")
                     .foregroundStyle(Color.pnlPositive)
+                LabeledContent("Account") {
+                    Text(me.webullAccountId ?? "detected after first connection")
+                        .foregroundStyle(.secondary)
+                }
                 Text("Credentials are stored encrypted on the server and are never displayed here.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                 Button("Update Credentials") {
                     viewModel.isEditingCredentials = true
                 }
+                Button {
+                    Task { await viewModel.reconnect() }
+                } label: {
+                    HStack(spacing: AppSpacing.sm) {
+                        if viewModel.isReconnecting {
+                            ProgressView().controlSize(.small)
+                        }
+                        Text("Reconnect to Webull")
+                    }
+                }
+                .disabled(viewModel.isReconnecting)
                 Button("Delete Credentials", role: .destructive) {
                     showDeleteConfirmation = true
                 }

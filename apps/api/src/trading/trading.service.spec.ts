@@ -321,6 +321,54 @@ describe('TradingService', () => {
       const b = await trading.place(userId, autoOtmCall(), 'idem-b');
       expect(a.orderId).not.toBe(b.orderId);
     });
+
+    it('rejects a duplicate while the first placement is still in flight', async () => {
+      // Hold the broker call open so the pending claim row is observable.
+      let release: () => void = () => undefined;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const original = gateway.placeOrder.bind(gateway);
+      jest
+        .spyOn(gateway, 'placeOrder')
+        .mockImplementation(async (u, o, k) => {
+          await gate;
+          return original(u, o, k);
+        });
+
+      const first = trading.place(userId, autoOtmCall(), 'idem-flight');
+      // Let the first call reach the broker before firing the duplicate.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      await expect(
+        trading.place(userId, autoOtmCall(), 'idem-flight'),
+      ).rejects.toMatchObject({ status: 409, code: 'ORDER_IN_FLIGHT' });
+
+      release();
+      const result = await first;
+      expect(result.status).toBe('filled');
+      // And once settled, the key replays the original result.
+      await expect(
+        trading.place(userId, autoOtmCall(), 'idem-flight'),
+      ).resolves.toEqual(result);
+    });
+
+    it('frees the key when execution fails so the client can retry', async () => {
+      jest
+        .spyOn(gateway, 'placeOrder')
+        .mockRejectedValueOnce(new Error('broker down'));
+      await expect(
+        trading.place(userId, autoOtmCall(), 'idem-retry'),
+      ).rejects.toThrow('broker down');
+
+      const result = await trading.place(userId, autoOtmCall(), 'idem-retry');
+      expect(result.status).toBe('filled');
+
+      // The failure left only an unkeyed error audit behind.
+      const audits = await prisma.orderAudit.findMany({ where: { userId } });
+      expect(
+        audits.filter((a) => a.idempotencyKey === 'idem-retry'),
+      ).toHaveLength(1);
+    });
   });
 
   describe('kill switch', () => {

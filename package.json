@@ -9,6 +9,7 @@
     "packages/shared-types"
   ],
   "scripts": {
+    "prepare": "husky",
     "setup": "node scripts/setup.js",
     "dev": "npm run dev --workspace apps/api",
     "dev:api": "npm run dev --workspace apps/api",
@@ -32,6 +33,8 @@
   },
   "devDependencies": {
     "concurrently": "^10.0.3",
+    "husky": "^9.1.7",
+    "lint-staged": "^17.1.0",
     "prettier": "^3.9.5"
   }
 }

@@ -32,11 +32,11 @@ npm run dev
 
 Today the app uses a **hybrid broker/data model**:
 
-| Function | Provider | Why |
-|---|---|---|
-| Order execution | **Webull OpenAPI** | Sends real or paper trades. |
-| Candlestick / chart data | **Webull OpenAPI** | OHLCV bars and stock snapshots. |
-| Options chain + Greeks (GEX/DEX, OI, etc.) | **Tradier API** | Webull OpenAPI does not expose option Greeks, implied volatility, open interest, or full chain detail beyond contract price and volume. |
+| Function                                   | Provider           | Why                                                                                                                                     |
+| ------------------------------------------ | ------------------ | --------------------------------------------------------------------------------------------------------------------------------------- |
+| Order execution                            | **Webull OpenAPI** | Sends real or paper trades.                                                                                                             |
+| Candlestick / chart data                   | **Webull OpenAPI** | OHLCV bars and stock snapshots.                                                                                                         |
+| Options chain + Greeks (GEX/DEX, OI, etc.) | **Tradier API**    | Webull OpenAPI does not expose option Greeks, implied volatility, open interest, or full chain detail beyond contract price and volume. |
 
 So a typical flow looks like: Webull for placing/cancelling orders and chart candles, Tradier for picking strikes and viewing Greeks.
 
@@ -159,4 +159,4 @@ Real secrets live only in `.env`, which is gitignored. Never commit credentials.
 
 ## License
 
-[Add your license here.]
+MIT License — see [LICENSE](LICENSE).

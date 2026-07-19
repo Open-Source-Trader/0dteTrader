@@ -435,9 +435,9 @@ describe('WebullBrokerGateway', () => {
       selection: { mode: 'auto_otm', optionType: 'call' },
     };
 
-    it('derives a deterministic MD5 client_order_id and maps the option body', async () => {
+    it('derives a deterministic user-scoped MD5 client_order_id and maps the option body', async () => {
       const result = await gateway.placeOrder('u1', order, 'idem-key-1');
-      const expectedId = createHash('md5').update('idem-key-1').digest('hex');
+      const expectedId = createHash('md5').update('u1:idem-key-1').digest('hex');
       expect(result.orderId).toBe(expectedId);
       expect(result.status).toBe('submitted');
 

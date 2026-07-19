@@ -473,22 +473,26 @@ describe('WebullClient resilience', () => {
 });
 
 describe('WebullClient error mapping (docs/WEBULL-INTEGRATION.md §6)', () => {
-  const cases: [number, unknown, string, number][] = [
-    [417, { code: 'INSUFFICIENT_BUYING_POWER', message: 'not enough buying power' }, 'INSUFFICIENT_BUYING_POWER', 400],
-    [417, { code: 'OPENAPI_NO_NIGHT_TRADING_TIME' }, 'MARKET_CLOSED', 400],
-    [417, { code: 'SOME_REJECT', message: 'bad order' }, 'ORDER_REJECTED', 400],
-    [400, { message: 'insufficient buying power' }, 'INSUFFICIENT_BUYING_POWER', 400],
-    [401, { code: 'UNAUTHORIZED' }, 'BROKER_AUTH_FAILED', 401],
-    [429, {}, 'BROKER_RATE_LIMITED', 503],
+  // Buying-power / order-rejected mappings only apply to /trade/ endpoints;
+  // the same body on a non-trade endpoint is a parameter problem and must
+  // fall through to BROKER_ERROR (last case pins that).
+  const cases: ['accountList' | 'orderPlace', number, unknown, string, number][] = [
+    ['orderPlace', 417, { code: 'INSUFFICIENT_BUYING_POWER', message: 'not enough buying power' }, 'INSUFFICIENT_BUYING_POWER', 400],
+    ['accountList', 417, { code: 'OPENAPI_NO_NIGHT_TRADING_TIME' }, 'MARKET_CLOSED', 400],
+    ['orderPlace', 417, { code: 'SOME_REJECT', message: 'bad order' }, 'ORDER_REJECTED', 400],
+    ['orderPlace', 400, { message: 'insufficient buying power' }, 'INSUFFICIENT_BUYING_POWER', 400],
+    ['accountList', 401, { code: 'UNAUTHORIZED' }, 'BROKER_AUTH_FAILED', 401],
+    ['accountList', 429, {}, 'BROKER_RATE_LIMITED', 503],
+    ['accountList', 417, { code: 'INSUFFICIENT_BUYING_POWER', message: 'not enough buying power' }, 'BROKER_ERROR', 400],
   ];
 
   it.each(cases)(
-    'maps %i %j → %s (%i)',
-    async (status, body, expectedCode, expectedHttp) => {
+    'maps %s %i %j → %s (%i)',
+    async (endpoint, status, body, expectedCode, expectedHttp) => {
       const { client } = makeHarness(
         withToken(() => ({ status, body, headers: { 'retry-after': '0' } })),
       );
-      await expect(client.request('accountList')).rejects.toMatchObject({
+      await expect(client.request(endpoint)).rejects.toMatchObject({
         code: expectedCode,
         httpStatus: expectedHttp,
       });

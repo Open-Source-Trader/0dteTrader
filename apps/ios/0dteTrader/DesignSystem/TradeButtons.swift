@@ -39,9 +39,9 @@ struct TradeActionButton: View {
             .shadow(color: color.opacity(0.6), radius: 6)
             .frame(maxWidth: .infinity, minHeight: 52)
             .contentShape(Rectangle())
-            .opacity(isEnabled ? 1 : AppOpacity.disabled)
+            .opacity(isEnabled ? 1 : AppOpacity.dimmedAction)
         }
-        .buttonStyle(HudActionButtonStyle(accent: color.opacity(isEnabled ? 1 : AppOpacity.disabled)))
+        .buttonStyle(HudActionButtonStyle(accent: color.opacity(isEnabled ? 1 : AppOpacity.dimmedAction)))
         .disabled(!isEnabled)
         .accessibilityLabel(title)
         .accessibilityHint(isEnabled

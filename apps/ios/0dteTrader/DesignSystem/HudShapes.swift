@@ -61,6 +61,7 @@ struct HudCardModifier: ViewModifier {
     var accent: Color = .hudStroke
     var chamfer: CGFloat = 10
     var glow: Bool = true
+    var ticks: Bool = true
 
     func body(content: Content) -> some View {
         content
@@ -81,8 +82,10 @@ struct HudCardModifier: ViewModifier {
                             .strokeBorder(accent, lineWidth: 1.5)
                     }
                     .overlay {
-                        HudCornerTicks(chamfer: chamfer)
-                            .stroke(accent.opacity(0.55), lineWidth: 1.2)
+                        if ticks {
+                            HudCornerTicks(chamfer: chamfer)
+                                .stroke(accent.opacity(0.55), lineWidth: 1.2)
+                        }
                     }
                     .compositingGroup()
                     .shadow(color: glow ? accent.opacity(0.5) : .clear, radius: 7)
@@ -91,8 +94,13 @@ struct HudCardModifier: ViewModifier {
 }
 
 extension View {
-    func hudCard(accent: Color = .hudStroke, chamfer: CGFloat = 10, glow: Bool = true) -> some View {
-        modifier(HudCardModifier(accent: accent, chamfer: chamfer, glow: glow))
+    func hudCard(
+        accent: Color = .hudStroke,
+        chamfer: CGFloat = 10,
+        glow: Bool = true,
+        ticks: Bool = true
+    ) -> some View {
+        modifier(HudCardModifier(accent: accent, chamfer: chamfer, glow: glow, ticks: ticks))
     }
 }
 

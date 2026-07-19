@@ -34,6 +34,9 @@ enum AppMotion {
 enum AppOpacity {
     /// Uniform dim for disabled controls — dims fill and label together.
     static let disabled: Double = 0.35
+    /// Softer dim for disabled SELL/BUY — the mockup keeps them clearly
+    /// visible (desktop `.hud-btn:disabled` parity).
+    static let dimmedAction: Double = 0.55
 }
 
 /// Shared press feedback: slight scale-down + dim on touch-down.

@@ -88,6 +88,11 @@ extension Color {
     static let hudAmber = Color(
         uiColor: UIColor(red: 1.0, green: 0.773, blue: 0.239, alpha: 1)
     )
+    /// Card stroke for flat (glow-free) frames — matches the desktop
+    /// `--hud-src-flat` variant. #2E8FFF @ 0.55
+    static let hudStrokeDim = Color(
+        uiColor: UIColor(red: 0.180, green: 0.561, blue: 1.0, alpha: 0.55)
+    )
     /// Inner top-edge highlight for the 3D bevel feel.
     static let hudInnerHighlight = Color(
         uiColor: UIColor(red: 0.627, green: 0.824, blue: 1.0, alpha: 0.22)

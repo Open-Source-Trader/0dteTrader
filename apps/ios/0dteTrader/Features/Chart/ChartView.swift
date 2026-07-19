@@ -54,10 +54,23 @@ struct ChartView: View {
                     gexStale: viewModel.gexStale,
                     onVisibleRangeChange: { viewModel.visibleXRange = $0 }
                 )
-                // Drawing tools live on the canvas (the mockup header has no room).
+                // Permanent OHLC legend from the latest bar (mockup detail);
+                // the tap/drag marker still shows per-bar values.
+                if let last = viewModel.candles.last {
+                    Text("O \(Format.price(last.open))  H \(Format.price(last.high))  L \(Format.price(last.low))  C \(Format.price(last.close))")
+                        .font(.priceSmall)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                        .padding(.leading, 52)
+                        .padding(.top, AppSpacing.xs)
+                        .allowsHitTesting(false)
+                }
+                // Drawing tools live on the canvas (the mockup header has no
+                // room); below the OHLC legend line so the two never collide.
                 drawingToolsMenu
                     .padding(.leading, 52)
-                    .padding(.top, AppSpacing.xs)
+                    .padding(.top, 26)
                 if let banner = viewModel.twcRenderModel?.banner {
                     TwcBiasBannerView(banner: banner)
                 }
@@ -84,7 +97,7 @@ struct ChartView: View {
                 }
             }
             .clipShape(HudPanelShape(chamfer: 10))
-            .hudCard(glow: false)
+            .hudCard(accent: .hudStrokeDim, glow: false, ticks: false)
             .padding(.horizontal, AppSpacing.sm)
             .padding(.vertical, AppSpacing.xxs)
             .layoutPriority(1)
@@ -132,7 +145,7 @@ struct ChartView: View {
 
             if let stoch = viewModel.stochSeries {
                 hudPane(
-                    title: "Stoch",
+                    title: "Stoch (\(viewModel.indicatorSettings.stochKPeriod), \(viewModel.indicatorSettings.stochKSmooth), \(viewModel.indicatorSettings.stochDPeriod))",
                     readouts: [
                         readout(for: stoch.k, label: "%K", colorId: "stochK"),
                         readout(for: stoch.d, label: "%D", colorId: "stochD"),
@@ -236,7 +249,7 @@ struct ChartView: View {
             content()
                 .frame(height: paneHeight)
         }
-        .hudCard(glow: false)
+        .hudCard(accent: .hudStrokeDim, glow: false, ticks: false)
         .padding(.horizontal, AppSpacing.sm)
         .padding(.vertical, AppSpacing.xxs)
         .transition(.opacity.combined(with: .move(edge: .bottom)))
@@ -414,8 +427,11 @@ struct ChartView: View {
             }
             .accessibilityLabel("Indicator settings")
         }
-        .padding(.horizontal, AppSpacing.md)
+        .padding(.horizontal, AppSpacing.sm)
         .padding(.vertical, AppSpacing.xs)
+        .hudCard(accent: .hudStrokeDim, chamfer: 8, glow: false, ticks: false)
+        .padding(.horizontal, AppSpacing.sm)
+        .padding(.top, AppSpacing.xxs)
     }
 
     /// Amber PRACTICE / green LIVE badge — tap to switch (confirmed upstream).

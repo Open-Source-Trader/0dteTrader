@@ -123,7 +123,7 @@ paths:
         - { name: symbol, in: query, required: true, schema: { type: string } }
         - { name: interval, in: query, required: true, schema: { type: string, enum: [1m, 5m, 15m, 1h, 1d] } }
         - { name: from, in: query, schema: { type: string, format: date-time } }
-        - { name: to, in, query: query, schema: { type: string, format: date-time } }
+        - { name: to, in: query, schema: { type: string, format: date-time } }
       responses:
         '200': { description: OK, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Candle' } } } } }
   /market/options-chain:

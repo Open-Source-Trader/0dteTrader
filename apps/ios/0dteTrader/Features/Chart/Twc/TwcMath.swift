@@ -132,8 +132,9 @@ enum TwcMath {
     }()
 
     /// Session-anchored VWAP of hlc3 (Pine ta.vwap): accumulation resets on
-    /// each America/New_York calendar day for intraday data; plain cumulative
-    /// when the interval is a day or longer.
+    /// each America/New_York calendar day. On daily-and-larger intervals
+    /// every bar is its own session, so the VWAP collapses to that bar's
+    /// hlc3 — exactly why the Pine header flags VWAP-z as weak on D/W charts.
     static func sessionVwap(_ candles: [Candle], intervalSeconds: Int) -> [Double?] {
         var result = [Double?](repeating: nil, count: candles.count)
         let daily = intervalSeconds >= 86_400
@@ -142,7 +143,10 @@ enum TwcMath {
         var sessionDay: Int? = nil
         for i in 0..<candles.count {
             let c = candles[i]
-            if !daily {
+            if daily {
+                pv = 0
+                vol = 0
+            } else {
                 let day = nyCalendar.ordinality(of: .day, in: .era, for: c.time)
                 if day != sessionDay {
                     sessionDay = day

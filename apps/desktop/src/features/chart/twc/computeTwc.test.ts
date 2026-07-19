@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_TWC_SETTINGS, type TwcHeatmapSettings } from './twcSettings';
-import { mapConfirmedHtf, resampleHtf, resampleTo, supertrend, timeframeSeconds, type TwcCandle } from './twcMath';
+import {
+  mapConfirmedHtf,
+  resampleHtf,
+  resampleTo,
+  sessionVwap,
+  supertrend,
+  timeframeSeconds,
+  type TwcCandle,
+} from './twcMath';
 import { computeTwc } from './computeTwc';
 import { computeFib, fibDirectionSeries } from './twcFib';
 import { computeSmc } from './twcSmc';
@@ -179,6 +187,34 @@ describe('fib zigzag engine', () => {
     expect(dotted.length).toBeGreaterThanOrEqual(4); // 4 corners x 1 angle x squares
   });
 
+  it('never renders the 0.618–0.786 retracement band (Pine key-mismatch parity)', () => {
+    // Up swing 240 -> 320, then a gap-down retrace through the 0.618 level
+    // (289.4) WITHOUT ever revisiting fib 1 — TradingView draws no band here
+    // because the Pine script's band-0 line lookup silently fails.
+    const fixture: TwcCandle[] = [];
+    let price = 300;
+    let i = 0;
+    const leg = (bars: number, step: number): void => {
+      for (let k = 0; k < bars; k++) {
+        const open = price;
+        price += step;
+        fixture.push(candle(i++, open, Math.max(open, price) + 0.1, Math.min(open, price) - 0.1, price));
+      }
+    };
+    leg(60, -1); // 300 -> 240 (pivot low)
+    leg(80, 1); // -> 320 (pivot high)
+    // gap-down retrace: highs stay far below fib 1 (320)
+    price = 310;
+    for (let k = 0; k < 30; k++) {
+      const open = price;
+      price -= 1;
+      fixture.push(candle(i++, open, open + 0.1, price - 0.1, price));
+    }
+    const fib = computeFib(fixture, settings({ ptAlwaysShowFirst: false }), pineAtr(fixture, 14));
+    expect(fib.bands).toHaveLength(0);
+    expect(fib.labels.some((l) => l.text.startsWith('Profit Target'))).toBe(false);
+  });
+
   it('returns nothing when the fib engine is disabled', () => {
     const fib = computeFib(candles, settings({ showFibonacci: false }), atr14);
     expect(fib.segments).toHaveLength(0);
@@ -252,6 +288,25 @@ describe('confluence engine', () => {
     for (const m of on.markers.filter((mk) => mk.text === 'CL' || mk.text === 'CS')) {
       expect(['labelUp', 'labelDown']).toContain(m.shape);
     }
+  });
+});
+
+describe('session VWAP', () => {
+  it('collapses to per-bar hlc3 on daily intervals (each bar is its own session)', () => {
+    const candles = trend(20, 100, 1);
+    const vw = sessionVwap(candles, 86400);
+    for (let i = 0; i < candles.length; i++) {
+      const c = candles[i];
+      expect(vw[i]).toBeCloseTo((c.high + c.low + c.close) / 3, 10);
+    }
+  });
+
+  it('accumulates within the session on intraday intervals', () => {
+    const candles = trend(20, 100, 1);
+    const vw = sessionVwap(candles, 60);
+    // cumulative VWAP lags the rising per-bar typical price
+    const last = candles[candles.length - 1];
+    expect(vw[candles.length - 1]!).toBeLessThan((last.high + last.low + last.close) / 3);
   });
 });
 

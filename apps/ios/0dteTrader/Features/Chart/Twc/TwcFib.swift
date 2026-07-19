@@ -114,7 +114,6 @@ enum TwcFib {
         var finalHits = [Bool](repeating: false, count: 10)
         var finalAllowMaxPT = -1
         var finalMaxHitRange = 0
-        var finalBand0 = false
 
         for i in 0..<n {
             // ── 1. Swing detection ──
@@ -345,7 +344,6 @@ enum TwcFib {
             finalHits = hits
             finalAllowMaxPT = allowMaxPT
             finalMaxHitRange = maxHitRange
-            finalBand0 = hit0618Ret
         }
 
         guard finalHasSwing else { return .empty }
@@ -428,11 +426,13 @@ enum TwcFib {
             var ptN = 1
             for kk in 0...max(0, finalAllowMaxPT) {
                 if kk > finalAllowMaxPT { continue }
-                // band 0 (the 0.618–0.786 retracement shade) keeps its own hit
-                // gate, independent of 'Always show first target zone'
-                if kk == 0 && !finalBand0 { continue }
-                let rStart = round4(Double(kk) + (kk == 0 ? fib0618 : 0.618))
-                let rEnd = round4(Double(kk) + (kk == 0 ? fib0786 : 0.786))
+                // Pine parity: band 0 (the 0.618–0.786 retracement shade)
+                // NEVER renders on TradingView — the script looks up its
+                // 0.786 end line by the literal key "0.786" while the stored
+                // seed ratio rounds to 0.7862, so the lookup silently fails.
+                if kk == 0 { continue }
+                let rStart = round4(Double(kk) + 0.618)
+                let rEnd = round4(Double(kk) + 0.786)
                 guard let startEntry = ratios.first(where: { approxEqual($0.ratio, rStart) }),
                       let endEntry = ratios.first(where: { approxEqual($0.ratio, rEnd) })
                 else { continue }

@@ -162,8 +162,9 @@ const NY_DAY_FORMAT = new Intl.DateTimeFormat('en-US', {
 
 /**
  * Session-anchored VWAP of hlc3 (Pine ta.vwap): accumulation resets on each
- * America/New_York calendar day for intraday data; plain cumulative when the
- * interval is a day or longer (Pine itself flags VWAP-z as weak there).
+ * America/New_York calendar day. On daily-and-larger intervals every bar is
+ * its own session, so the VWAP collapses to that bar's hlc3 — exactly why
+ * the Pine header flags the VWAP z-score as weak on D/W charts.
  */
 export function sessionVwap(candles: TwcCandle[], intervalSeconds: number): (number | null)[] {
   const result: (number | null)[] = candles.map(() => null);
@@ -173,7 +174,10 @@ export function sessionVwap(candles: TwcCandle[], intervalSeconds: number): (num
   let sessionKey = '';
   for (let i = 0; i < candles.length; i++) {
     const c = candles[i];
-    if (!daily) {
+    if (daily) {
+      pv = 0;
+      vol = 0;
+    } else {
       const key = NY_DAY_FORMAT.format(c.time * 1000);
       if (key !== sessionKey) {
         sessionKey = key;

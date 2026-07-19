@@ -9,7 +9,6 @@ import {
   type LineData,
   type LineWidth,
   type UTCTimestamp,
-  type WhitespaceData,
 } from 'lightweight-charts';
 import type { CandleInterval } from '@0dtetrader/shared-types';
 import { useStore } from '../../core/observable';
@@ -28,7 +27,7 @@ export interface OverlaySeries {
   values: (number | null)[];
   /** 1..4 (lightweight-charts LineWidth); defaults to 1. */
   lineWidth?: number;
-  /** Render nulls as whitespace so the line breaks instead of bridging. */
+  /** Break the line at nulls (Pine linebr) instead of bridging across them. */
   gaps?: boolean;
 }
 
@@ -245,42 +244,73 @@ export function CandleChart({
     const chart = chartRef.current;
     if (!chart) return;
     const existing = overlaySeriesRef.current;
-    const wanted = new Set(overlays.map((overlay) => overlay.id));
 
+    // Gap-aware overlays (Pine linebr, e.g. the TWC supertrend split by
+    // direction) are expanded into ONE SERIES PER CONTIGUOUS RUN. A single
+    // lightweight-charts line series connects straight across missing
+    // points, which would bridge a supertrend's bull segments over bearish
+    // stretches with long diagonals instead of breaking the line.
+    interface ExpandedOverlay {
+      id: string;
+      color: string;
+      lineWidth: LineWidth;
+      data: LineData[];
+    }
+    const expanded: ExpandedOverlay[] = [];
+    for (const overlay of overlays) {
+      const lineWidth = (overlay.lineWidth ?? 1) as LineWidth;
+      if (!overlay.gaps) {
+        const data: LineData[] = [];
+        overlay.values.forEach((value, index) => {
+          const candle = candles[index];
+          if (value !== null && candle) {
+            data.push({ time: candle.time as UTCTimestamp, value });
+          }
+        });
+        expanded.push({ id: overlay.id, color: overlay.color, lineWidth, data });
+        continue;
+      }
+      let run: LineData[] = [];
+      let runIndex = 0;
+      const flushRun = (): void => {
+        if (run.length > 0) {
+          expanded.push({ id: `${overlay.id}#${runIndex}`, color: overlay.color, lineWidth, data: run });
+          runIndex += 1;
+          run = [];
+        }
+      };
+      overlay.values.forEach((value, index) => {
+        const candle = candles[index];
+        if (!candle) return;
+        if (value === null) flushRun();
+        else run.push({ time: candle.time as UTCTimestamp, value });
+      });
+      flushRun();
+    }
+
+    const wanted = new Set(expanded.map((entry) => entry.id));
     for (const [id, series] of existing) {
       if (!wanted.has(id)) {
         chart.removeSeries(series);
         existing.delete(id);
       }
     }
-    for (const overlay of overlays) {
-      const lineWidth = (overlay.lineWidth ?? 1) as LineWidth;
-      let series = existing.get(overlay.id);
+    for (const entry of expanded) {
+      let series = existing.get(entry.id);
       if (!series) {
         series = chart.addLineSeries({
-          color: overlay.color,
-          lineWidth,
+          color: entry.color,
+          lineWidth: entry.lineWidth,
           priceScaleId: 'left',
           priceLineVisible: false,
           lastValueVisible: false,
           crosshairMarkerVisible: false,
         });
-        existing.set(overlay.id, series);
+        existing.set(entry.id, series);
       } else {
-        series.applyOptions({ color: overlay.color, lineWidth });
+        series.applyOptions({ color: entry.color, lineWidth: entry.lineWidth });
       }
-      const data: (LineData | WhitespaceData)[] = [];
-      overlay.values.forEach((value, index) => {
-        const candle = candles[index];
-        if (!candle) return;
-        if (value !== null) {
-          data.push({ time: candle.time as UTCTimestamp, value });
-        } else if (overlay.gaps) {
-          // Whitespace point: keeps the slot but breaks the line (Pine linebr)
-          data.push({ time: candle.time as UTCTimestamp });
-        }
-      });
-      series.setData(data);
+      series.setData(entry.data);
     }
   }, [candles, overlays]);
 

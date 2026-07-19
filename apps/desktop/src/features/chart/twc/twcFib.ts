@@ -302,7 +302,6 @@ export function computeFib(
   const finalHits: boolean[] = new Array(10).fill(false); // finalHits[k] = hitK (1..9)
   let finalAllowMaxPT = -1;
   let finalMaxHitRange = 0;
-  let finalBand0 = false;
 
   for (let i = 0; i < n; i++) {
     // ── 1. Swing detection ──
@@ -545,7 +544,6 @@ export function computeFib(
     for (let k = 1; k <= 9; k++) finalHits[k] = hits[k];
     finalAllowMaxPT = allowMaxPT;
     finalMaxHitRange = maxHitRange;
-    finalBand0 = hit0618Ret;
   }
 
   if (!finalHasSwing) return empty;
@@ -625,11 +623,13 @@ export function computeFib(
     let ptN = 1;
     for (let kk = 0; kk <= Math.max(0, finalAllowMaxPT); kk++) {
       if (kk > finalAllowMaxPT) continue;
-      // band 0 (the 0.618–0.786 retracement shade) keeps its own hit gate,
-      // independent of 'Always show first target zone'
-      if (kk === 0 && !finalBand0) continue;
-      const rStart = round4(kk + (kk === 0 ? FIB_0618 : 0.618));
-      const rEnd = round4(kk + (kk === 0 ? FIB_0786 : 0.786));
+      // Pine parity: band 0 (the 0.618–0.786 retracement shade) NEVER
+      // renders on TradingView — the script looks up its 0.786 end line by
+      // the literal key "0.786" while the stored seed ratio rounds to
+      // 0.7862, so the map lookup silently fails. Reproduce that exactly.
+      if (kk === 0) continue;
+      const rStart = round4(kk + 0.618);
+      const rEnd = round4(kk + 0.786);
       const startEntry = ratios.find((e) => approxEqual(e.ratio, rStart));
       const endEntry = ratios.find((e) => approxEqual(e.ratio, rEnd));
       if (!startEntry || !endEntry) continue;

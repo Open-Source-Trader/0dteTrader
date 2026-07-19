@@ -57,6 +57,8 @@ interface CandleChartProps {
   gexStale?: boolean;
   /** Fires on pan/zoom/snap so sub-panes can mirror the x-range. */
   onVisibleRangeChange?: (range: VisibleRange | null) => void;
+  /** Incoming visible range from sub-pane zoom/pan — keeps main chart in sync. */
+  visibleRange?: VisibleRange | null;
 }
 
 const VISIBLE_CANDLES = 120;
@@ -90,6 +92,7 @@ export function CandleChart({
   gexSettings = null,
   gexStale = false,
   onVisibleRangeChange,
+  visibleRange = null,
 }: CandleChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -255,6 +258,13 @@ export function CandleChart({
     lastFirstTimeRef.current = firstTime;
     lastBarRef.current = candles.length > 0 ? candles[candles.length - 1] : null;
   }, [candles, candleColors]);
+
+  // Sync from sub-pane zoom/pan back to the main chart.
+  useEffect(() => {
+    const chart = chartRef.current;
+    if (!chart || !visibleRange) return;
+    chart.timeScale().setVisibleLogicalRange(visibleRange);
+  }, [visibleRange]);
 
   // Overlay lines: recreate the series set when ids change, reset data otherwise.
   useEffect(() => {

@@ -168,7 +168,7 @@ struct CandleChartRepresentable: UIViewRepresentable {
         chart.highlightPerDragEnabled = true
         chart.dragEnabled = true
         chart.pinchZoomEnabled = true
-        chart.setScaleMinima(10, scaleY: 1)
+        chart.scaleYEnabled = false
 
         let rangeCallback = onVisibleRangeChange
         context.coordinator.onVisibleRange = { range in rangeCallback?(range) }
@@ -385,10 +385,7 @@ struct CandleChartRepresentable: UIViewRepresentable {
         // Keep the latest candle in view on first load and when a new candle
         // forms, but never fight the user's manual pan/zoom on ticks.
         if previousCount != candles.count {
-            chart.setVisibleXRangeMaximum(visibleCount)
             chart.moveViewToX(Double(candles.count - 1))
-            // Publish the initial window so the indicator panes match from
-            // the first load, before any user gesture.
             context.coordinator.emit(chart)
         }
     }

@@ -24,6 +24,7 @@ struct IndicatorPaneRepresentable: UIViewRepresentable {
     /// The main chart's visible x-range; when set, the pane pins its window
     /// to it so indicator values align with the candles above.
     var visibleRange: ClosedRange<Double>?
+    var onVisibleRangeChange: ((ClosedRange<Double>) -> Void)?
 
     func makeUIView(context: Context) -> CombinedChartView {
         let chart = CombinedChartView()
@@ -36,10 +37,12 @@ struct IndicatorPaneRepresentable: UIViewRepresentable {
         chart.backgroundColor = .clear
         chart.doubleTapToZoomEnabled = false
         chart.highlightPerTapEnabled = false
-        chart.dragEnabled = false
-        chart.pinchZoomEnabled = false
-        chart.scaleXEnabled = false
+        chart.dragEnabled = true
+        chart.pinchZoomEnabled = true
+        chart.scaleXEnabled = true
         chart.scaleYEnabled = false
+
+        chart.delegate = context.coordinator
 
         let xAxis = chart.xAxis
         xAxis.drawLabelsEnabled = false
@@ -130,5 +133,29 @@ struct IndicatorPaneRepresentable: UIViewRepresentable {
             leftAxis.resetCustomAxisMax()
         }
         chart.notifyDataSetChanged()
+
+        context.coordinator.onVisibleRange = onVisibleRangeChange
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    final class Coordinator: NSObject, ChartViewDelegate {
+        var onVisibleRange: ((ClosedRange<Double>) -> Void)?
+
+        func emit(_ chart: ChartViewBase) {
+            guard let combined = chart as? CombinedChartView else { return }
+            let low = combined.lowestVisibleX
+            let high = combined.highestVisibleX
+            guard low < high else { return }
+            onVisibleRange?(low...high)
+        }
+
+        func chartTranslated(_ chartView: ChartViewBase, dX: CGFloat, dY: CGFloat) {
+            emit(chartView)
+        }
+
+        func chartScaled(_ chartView: ChartViewBase, scaleX: CGFloat, scaleY: CGFloat) {
+            emit(chartView)
+        }
     }
 }

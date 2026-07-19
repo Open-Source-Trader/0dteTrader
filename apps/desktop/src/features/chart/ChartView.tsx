@@ -402,6 +402,7 @@ export function ChartView({
             gexSettings={gexSettings.enabled ? gexSettings : null}
             gexStale={gex.stale}
             onVisibleRangeChange={setVisibleRange}
+            visibleRange={visibleRange}
           />
           {twcModel?.banner ? <TwcBiasBanner banner={twcModel.banner} /> : null}
           {gex.errorMessage ? (
@@ -498,6 +499,7 @@ export function ChartView({
             guideLines={[30, 70]}
             yRange={[0, 100]}
             visibleRange={visibleRange}
+            onVisibleRangeChange={setVisibleRange}
           />
         </PaneCard>
       ) : null}
@@ -515,6 +517,7 @@ export function ChartView({
             candles={candles}
             series={macdSeries}
             visibleRange={visibleRange}
+            onVisibleRangeChange={setVisibleRange}
           />
         </PaneCard>
       ) : null}
@@ -530,6 +533,7 @@ export function ChartView({
             guideLines={[20, 80]}
             yRange={[0, 100]}
             visibleRange={visibleRange}
+            onVisibleRangeChange={setVisibleRange}
           />
         </PaneCard>
       ) : null}
@@ -543,6 +547,7 @@ export function ChartView({
             candles={candles}
             series={atrSeries}
             visibleRange={visibleRange}
+            onVisibleRangeChange={setVisibleRange}
           />
         </PaneCard>
       ) : null}

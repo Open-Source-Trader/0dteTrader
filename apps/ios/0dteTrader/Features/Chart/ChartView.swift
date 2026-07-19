@@ -96,7 +96,8 @@ struct ChartView: View {
                         guideLines: [30, 70],
                         yRange: 0...100,
                         xValueCount: viewModel.candles.count,
-                        visibleRange: viewModel.visibleXRange
+                        visibleRange: viewModel.visibleXRange,
+                        onVisibleRangeChange: { viewModel.visibleXRange = $0 }
                     )
                 }
             }
@@ -121,7 +122,8 @@ struct ChartView: View {
                             "macdSignal": ChartStyle.paneColors["macdSignal"]!,
                         ],
                         xValueCount: viewModel.candles.count,
-                        visibleRange: viewModel.visibleXRange
+                        visibleRange: viewModel.visibleXRange,
+                        onVisibleRangeChange: { viewModel.visibleXRange = $0 }
                     )
                 }
             }
@@ -148,7 +150,8 @@ struct ChartView: View {
                         guideLines: [20, 80],
                         yRange: 0...100,
                         xValueCount: viewModel.candles.count,
-                        visibleRange: viewModel.visibleXRange
+                        visibleRange: viewModel.visibleXRange,
+                        onVisibleRangeChange: { viewModel.visibleXRange = $0 }
                     )
                 }
             }
@@ -162,7 +165,8 @@ struct ChartView: View {
                         series: [.init(id: atr.id, kind: .line, values: atr.values)],
                         colors: ["atr": ChartStyle.paneColors["atr"]!],
                         xValueCount: viewModel.candles.count,
-                        visibleRange: viewModel.visibleXRange
+                        visibleRange: viewModel.visibleXRange,
+                        onVisibleRangeChange: { viewModel.visibleXRange = $0 }
                     )
                 }
             }

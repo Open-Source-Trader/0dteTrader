@@ -32,12 +32,13 @@ interface IndicatorPaneProps {
   yRange?: [number, number];
   /** Main chart's visible x-range; keeps the pane aligned while panning. */
   visibleRange?: VisibleRange | null;
+  /** Called when the user zooms/pans this pane directly. */
+  onVisibleRangeChange?: (range: VisibleRange) => void;
 }
 
 /**
- * Non-interactive sub-pane (IndicatorPaneRepresentable analog): no pan/zoom,
- * no time axis — matching iOS. Mirrors the main chart's visible x-range when
- * provided; otherwise shows the full candle range (fitContent).
+ * Sub-pane for indicators (RSI, MACD, etc.). Mirrors the main chart's visible
+ * x-range and also allows independent zoom/pan, broadcasting changes back.
  */
 export function IndicatorPane({
   height,
@@ -46,8 +47,11 @@ export function IndicatorPane({
   guideLines,
   yRange,
   visibleRange,
+  onVisibleRangeChange,
 }: IndicatorPaneProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const onVisibleRangeChangeRef = useRef(onVisibleRangeChange);
+  onVisibleRangeChangeRef.current = onVisibleRangeChange;
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<Map<string, ISeriesApi<'Line' | 'Histogram'>>>(new Map());
   const yRangeRef = useRef(yRange);
@@ -76,11 +80,16 @@ export function IndicatorPane({
         vertLine: { visible: false, labelVisible: false },
         horzLine: { visible: false, labelVisible: false },
       },
-      handleScroll: false,
-      handleScale: false,
+      handleScroll: true,
+      handleScale: true,
       autoSize: true,
     });
     chartRef.current = chart;
+
+    chart.timeScale().subscribeVisibleLogicalRangeChange((range) => {
+      if (range) onVisibleRangeChangeRef.current?.({ from: range.from, to: range.to });
+    });
+
     return () => {
       chart.remove();
       chartRef.current = null;

@@ -62,10 +62,13 @@ struct CandleChartRepresentable: UIViewRepresentable {
 
     /// Publishes the main chart's visible x-range and keeps the annotation
     /// overlay's time/price-anchored shapes in sync on pan/zoom.
-    final class Coordinator: NSObject, ChartViewDelegate {
+    final class Coordinator: NSObject, ChartViewDelegate, UIGestureRecognizerDelegate {
+        weak var chart: CombinedChartView?
         var onVisibleRange: ((ClosedRange<Double>) -> Void)?
         var onTransform: (() -> Void)?
         var lastResetToken: Int = 0
+        private var lastXDist: CGFloat = 0
+        private var lastYDist: CGFloat = 0
 
         func chartTranslated(_ chartView: ChartViewBase, dX: CGFloat, dY: CGFloat) {
             emit(chartView)
@@ -80,6 +83,49 @@ struct CandleChartRepresentable: UIViewRepresentable {
         func emit(_ chartView: ChartViewBase) {
             guard let barLine = chartView as? BarLineChartViewBase else { return }
             onVisibleRange?(barLine.lowestVisibleX...barLine.highestVisibleX)
+        }
+
+        // TradingView pinch semantics: horizontal finger spread zooms the
+        // time axis, vertical spread zooms the price axis, diagonal zooms
+        // both. DGCharts' built-in pinch can't do this (it locks to one axis
+        // per gesture), so the spread is decomposed here and applied to the
+        // viewport matrix directly.
+        @objc func handleDirectionalPinch(_ recognizer: UIPinchGestureRecognizer) {
+            guard let chart, recognizer.numberOfTouches >= 2 else { return }
+            let p1 = recognizer.location(ofTouch: 0, in: chart)
+            let p2 = recognizer.location(ofTouch: 1, in: chart)
+            let xDist = abs(p1.x - p2.x)
+            let yDist = abs(p1.y - p2.y)
+            switch recognizer.state {
+            case .began:
+                chart.stopDeceleration()
+                lastXDist = xDist
+                lastYDist = yDist
+            case .changed:
+                // Axes with under 30pt of finger spread stay put — the ratio
+                // of two tiny distances amplifies touch noise into jitter.
+                let scaleX = lastXDist > 30 && xDist > 0 ? xDist / lastXDist : 1
+                let scaleY = lastYDist > 30 && yDist > 0 ? yDist / lastYDist : 1
+                let center = CGPoint(x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2)
+                var matrix = CGAffineTransform(translationX: center.x, y: center.y)
+                    .scaledBy(x: scaleX, y: scaleY)
+                    .translatedBy(x: -center.x, y: -center.y)
+                matrix = chart.viewPortHandler.touchMatrix.concatenating(matrix)
+                _ = chart.viewPortHandler.refresh(newMatrix: matrix, chart: chart, invalidate: true)
+                lastXDist = xDist
+                lastYDist = yDist
+                emit(chart)
+                onTransform?()
+            default:
+                break
+            }
+        }
+
+        func gestureRecognizer(
+            _ gestureRecognizer: UIGestureRecognizer,
+            shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
+        ) -> Bool {
+            true
         }
     }
 
@@ -104,8 +150,10 @@ struct CandleChartRepresentable: UIViewRepresentable {
         chart.highlightPerTapEnabled = false
         chart.highlightPerDragEnabled = false
         chart.dragEnabled = true
+        // Built-in pinch is fully disabled in favor of the coordinator's
+        // directional pinch (horizontal → time, vertical → price, diagonal → both).
         chart.pinchZoomEnabled = false
-        chart.scaleXEnabled = true
+        chart.scaleXEnabled = false
         chart.scaleYEnabled = false
         chart.isMultipleTouchEnabled = true
 
@@ -117,6 +165,14 @@ struct CandleChartRepresentable: UIViewRepresentable {
             container?.gexOverlay.setNeedsDisplay()
         }
         chart.delegate = context.coordinator
+        context.coordinator.chart = chart
+
+        let pinch = UIPinchGestureRecognizer(
+            target: context.coordinator,
+            action: #selector(Coordinator.handleDirectionalPinch(_:))
+        )
+        pinch.delegate = context.coordinator
+        chart.addGestureRecognizer(pinch)
 
         let xAxis = chart.xAxis
         xAxis.labelPosition = .bottom
@@ -312,19 +368,38 @@ struct CandleChartRepresentable: UIViewRepresentable {
             chart.accessibilityValue = "\(candles.count) candles, last close \(Format.price(last.close))"
         }
 
-        // Keep the latest candle in view on first load and when a new candle
-        // forms, but never fight the user's manual pan/zoom on ticks.
+        // 12 bars of empty space past the newest candle (TradingView right
+        // offset). Scale 1 = the entire history, so pinching out from the
+        // default 120-bar window has the full range to travel through.
+        chart.xAxis.axisMinimum = -0.5
+        chart.xAxis.axisMaximum = Double(candles.count - 1) + 12
+
+        // Snap to the default view on first load; on live appends just keep
+        // the newest candle in view without fighting the user's pan/zoom.
         if previousCount != candles.count {
-            chart.moveViewToX(Double(candles.count - 1))
+            if previousCount == 0 {
+                snapToDefaultView(chart)
+            } else {
+                chart.moveViewToX(Double(candles.count - 1))
+            }
             context.coordinator.emit(chart)
         }
 
         if resetToken != context.coordinator.lastResetToken {
             context.coordinator.lastResetToken = resetToken
-            chart.fitScreen()
-            chart.moveViewToX(Double(candles.count - 1))
+            snapToDefaultView(chart)
             context.coordinator.emit(chart)
         }
+    }
+
+    /// Default view: the newest ~120 candles with the right-offset gap,
+    /// price axis reset to fit. Used on first load and by the "A" button.
+    private func snapToDefaultView(_ chart: CombinedChartView) {
+        chart.fitScreen()
+        let totalRange = Double(candles.count) + 12
+        let scale = max(1, totalRange / visibleCount)
+        chart.zoom(scaleX: CGFloat(scale), scaleY: 1, x: chart.bounds.width, y: 0)
+        chart.moveViewToX(Double(candles.count - 1))
     }
 
     /// X-axis labels, deduped so adjacent candles in the same minute/day

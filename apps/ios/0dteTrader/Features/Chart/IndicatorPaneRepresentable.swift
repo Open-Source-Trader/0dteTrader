@@ -35,12 +35,22 @@ struct IndicatorPaneRepresentable: UIViewRepresentable {
         chart.doubleTapToZoomEnabled = false
         chart.highlightPerTapEnabled = false
         chart.dragEnabled = true
+        // Built-in pinch is fully disabled in favor of the coordinator's
+        // directional pinch (horizontal → time, vertical → price, diagonal → both).
         chart.pinchZoomEnabled = false
-        chart.scaleXEnabled = true
+        chart.scaleXEnabled = false
         chart.scaleYEnabled = false
         chart.isMultipleTouchEnabled = true
 
         chart.delegate = context.coordinator
+        context.coordinator.chart = chart
+
+        let pinch = UIPinchGestureRecognizer(
+            target: context.coordinator,
+            action: #selector(Coordinator.handleDirectionalPinch(_:))
+        )
+        pinch.delegate = context.coordinator
+        chart.addGestureRecognizer(pinch)
 
         let xAxis = chart.xAxis
         xAxis.drawLabelsEnabled = false
@@ -122,15 +132,71 @@ struct IndicatorPaneRepresentable: UIViewRepresentable {
         }
         chart.notifyDataSetChanged()
 
+        // Snap to the default window on first data arrival; after that the
+        // pane keeps its own zoom (fully independent of the main chart).
+        if context.coordinator.lastCount == 0 && xValueCount > 0 {
+            snapToDefaultView(chart)
+        }
+        context.coordinator.lastCount = xValueCount
+
         if resetToken != context.coordinator.lastResetToken {
             context.coordinator.lastResetToken = resetToken
-            chart.fitScreen()
+            snapToDefaultView(chart)
         }
+    }
+
+    /// Default view: the newest ~120 bars, y reset to fit. Used on first
+    /// load and by the pane's "A" button.
+    private func snapToDefaultView(_ chart: CombinedChartView) {
+        chart.fitScreen()
+        let scale = max(1, Double(xValueCount) / ChartMetrics.visibleCandles)
+        chart.zoom(scaleX: CGFloat(scale), scaleY: 1, x: chart.bounds.width, y: 0)
+        chart.moveViewToX(Double(xValueCount - 1))
     }
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
-    final class Coordinator: NSObject, ChartViewDelegate {
+    final class Coordinator: NSObject, ChartViewDelegate, UIGestureRecognizerDelegate {
+        weak var chart: CombinedChartView?
         var lastResetToken: Int = 0
+        var lastCount: Int = 0
+        private var lastXDist: CGFloat = 0
+        private var lastYDist: CGFloat = 0
+
+        // Same directional pinch as the main chart: horizontal spread zooms
+        // the x-axis, vertical spread zooms y, diagonal zooms both.
+        @objc func handleDirectionalPinch(_ recognizer: UIPinchGestureRecognizer) {
+            guard let chart, recognizer.numberOfTouches >= 2 else { return }
+            let p1 = recognizer.location(ofTouch: 0, in: chart)
+            let p2 = recognizer.location(ofTouch: 1, in: chart)
+            let xDist = abs(p1.x - p2.x)
+            let yDist = abs(p1.y - p2.y)
+            switch recognizer.state {
+            case .began:
+                chart.stopDeceleration()
+                lastXDist = xDist
+                lastYDist = yDist
+            case .changed:
+                let scaleX = lastXDist > 30 && xDist > 0 ? xDist / lastXDist : 1
+                let scaleY = lastYDist > 30 && yDist > 0 ? yDist / lastYDist : 1
+                let center = CGPoint(x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2)
+                var matrix = CGAffineTransform(translationX: center.x, y: center.y)
+                    .scaledBy(x: scaleX, y: scaleY)
+                    .translatedBy(x: -center.x, y: -center.y)
+                matrix = chart.viewPortHandler.touchMatrix.concatenating(matrix)
+                _ = chart.viewPortHandler.refresh(newMatrix: matrix, chart: chart, invalidate: true)
+                lastXDist = xDist
+                lastYDist = yDist
+            default:
+                break
+            }
+        }
+
+        func gestureRecognizer(
+            _ gestureRecognizer: UIGestureRecognizer,
+            shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
+        ) -> Bool {
+            true
+        }
     }
 }

@@ -14,6 +14,7 @@ import { DrawToolsMenu } from './DrawingToolbar';
 import type { DrawingsStore } from './drawings';
 import { useGexLevels } from './gex/useGexLevels';
 import { IndicatorPane, type PaneSeries } from './IndicatorPane';
+import { PaneCard, type PaneReadout } from './PaneCard';
 import * as engine from './indicatorEngine';
 import { enabledSubPanes, type SubPaneKey } from './indicatorSettings';
 import { computeTwc } from './twc/computeTwc';
@@ -238,34 +239,47 @@ export function ChartView({ store, drawingsStore, apiClient, onSymbolSearch, onI
     <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
       {/* Header */}
       <div
+        className="hud-chip hud-card--flat"
         style={{
           display: 'flex',
           alignItems: 'center',
-          gap: 12,
-          padding: '8px 16px',
+          gap: 8,
+          margin: '3px 8px 0',
+          padding: '4px 6px',
           flex: 'none',
         }}
       >
         <button
-          style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '10px 8px' }}
+          className="hud-chip"
+          style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '5px 6px' }}
           onClick={onSymbolSearch}
           aria-label={`Symbol ${symbol}. Change symbol`}
         >
-          <span style={{ fontSize: 'var(--fs-headline)', fontWeight: 600 }}>{symbol}</span>
-          <span aria-hidden="true" style={{ display: 'flex' }}>
+          <span
+            style={{
+              fontFamily: 'var(--font-display)',
+              fontSize: 'var(--fs-subheadline)',
+              fontWeight: 700,
+              letterSpacing: '0.03em',
+            }}
+          >
+            {symbol}
+          </span>
+          <span aria-hidden="true" style={{ display: 'flex', color: 'var(--app-accent)' }}>
             <ChevronDownIcon size={12} />
           </span>
         </button>
 
         {quote ? (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
             <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <span
                 style={{
                   fontFamily: 'var(--font-mono)',
-                  fontSize: 'var(--fs-body)',
-                  fontWeight: 500,
+                  fontSize: 18,
+                  fontWeight: 600,
                   fontVariantNumeric: 'tabular-nums',
+                  textShadow: '0 0 8px var(--hud-glow)',
                 }}
               >
                 {Format.price(quote.last)}
@@ -283,37 +297,39 @@ export function ChartView({ store, drawingsStore, apiClient, onSymbolSearch, onI
               ) : null}
             </span>
             <span
-              className="text-secondary"
               style={{
                 fontFamily: 'var(--font-mono)',
                 fontSize: 'var(--fs-caption2)',
                 fontVariantNumeric: 'tabular-nums',
+                display: 'flex',
+                gap: 10,
               }}
             >
-              B {Format.price(quote.bid)}&nbsp;&nbsp;A {Format.price(quote.ask)}
+              <span>
+                <span style={{ color: 'var(--buy-green)', fontWeight: 600 }}>BID </span>
+                <span style={{ color: 'var(--buy-green)' }}>{Format.price(quote.bid)}</span>
+              </span>
+              <span>
+                <span style={{ color: 'var(--sell-red)', fontWeight: 600 }}>ASK </span>
+                <span style={{ color: 'var(--sell-red)' }}>{Format.price(quote.ask)}</span>
+              </span>
             </span>
           </div>
         ) : null}
 
-        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 12 }}>
+        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
           <button
+            className={tradingMode === 'live' ? 'hud-badge hud-badge--live' : 'hud-badge'}
             onClick={onToggleMode}
             aria-label={`Trading mode ${tradingMode === 'live' ? 'LIVE' : 'PRACTICE'}. Switch mode`}
-            style={{
-              fontSize: 'var(--fs-caption2)',
-              color: tradingMode === 'live' ? 'var(--pnl-positive)' : '#ff9f0a',
-              fontWeight: 700,
-              letterSpacing: '0.04em',
-            }}
           >
             {tradingMode === 'live' ? 'LIVE' : 'PRACTICE'}
           </button>
-          <DrawToolsMenu store={drawingsStore} />
           <Menu
             trigger={
               <button
                 className="quick-chip"
-                style={{ minHeight: 36 }}
+                style={{ minHeight: 32, padding: '6px 10px' }}
                 aria-label={`Chart interval ${interval}`}
                 aria-haspopup="menu"
               >
@@ -350,8 +366,18 @@ export function ChartView({ store, drawingsStore, apiClient, onSymbolSearch, onI
         </div>
       </div>
 
-      {/* Chart area */}
-      <div style={{ flex: 1, minHeight: 100, position: 'relative' }}>
+      {/* Chart area: HUD card wrapping a chamfer-clipped canvas region. The
+          glow is baked into the card raster — never a CSS filter here. */}
+      <div
+        className="hud-card hud-card--flat"
+        style={{ flex: 1, minHeight: 100, margin: '3px 8px', padding: 0, display: 'flex' }}
+      >
+        <div className="hud-clip" style={{ flex: 1, minHeight: 0, position: 'relative' }}>
+        {/* Drawing tools live on the canvas (the mockup header has no room);
+            below the OHLC legend line so the two never collide. */}
+        <div style={{ position: 'absolute', top: 26, left: 56, zIndex: 4 }}>
+          <DrawToolsMenu store={drawingsStore} />
+        </div>
         <CandleChart
           candles={candles}
           overlays={twcLineOverlays.length > 0 ? [...overlays, ...twcLineOverlays] : overlays}
@@ -446,36 +472,82 @@ export function ChartView({ store, drawingsStore, apiClient, onSymbolSearch, onI
             </div>
           </div>
         ) : null}
+        </div>
       </div>
 
       {rsiSeries && visiblePanes.has('rsiEnabled') ? (
-        <IndicatorPane
-          height={72}
-          candles={candles}
-          series={rsiSeries}
-          guideLines={[30, 70]}
-          yRange={[0, 100]}
-          visibleRange={visibleRange}
-        />
+        <PaneCard
+          title={`RSI (${indicatorSettings.rsiPeriod})`}
+          readouts={paneReadouts(rsiSeries, { rsi: '' })}
+        >
+          <IndicatorPane
+            height={68}
+            candles={candles}
+            series={rsiSeries}
+            guideLines={[30, 70]}
+            yRange={[0, 100]}
+            visibleRange={visibleRange}
+          />
+        </PaneCard>
       ) : null}
       {macdSeries && visiblePanes.has('macdEnabled') ? (
-        <IndicatorPane height={80} candles={candles} series={macdSeries} visibleRange={visibleRange} />
+        <PaneCard
+          title={`MACD (${indicatorSettings.macdFastPeriod}, ${indicatorSettings.macdSlowPeriod}, ${indicatorSettings.macdSignalPeriod})`}
+          readouts={paneReadouts(macdSeries, {
+            macd: 'MACD',
+            macdSignal: 'Sig',
+            macdHistogram: 'Hist',
+          })}
+        >
+          <IndicatorPane height={72} candles={candles} series={macdSeries} visibleRange={visibleRange} />
+        </PaneCard>
       ) : null}
       {stochSeries && visiblePanes.has('stochEnabled') ? (
-        <IndicatorPane
-          height={72}
-          candles={candles}
-          series={stochSeries}
-          guideLines={[20, 80]}
-          yRange={[0, 100]}
-          visibleRange={visibleRange}
-        />
+        <PaneCard
+          title={`Stoch (${indicatorSettings.stochKPeriod}, ${indicatorSettings.stochKSmooth}, ${indicatorSettings.stochDPeriod})`}
+          readouts={paneReadouts(stochSeries, { stochK: '%K', stochD: '%D' })}
+        >
+          <IndicatorPane
+            height={68}
+            candles={candles}
+            series={stochSeries}
+            guideLines={[20, 80]}
+            yRange={[0, 100]}
+            visibleRange={visibleRange}
+          />
+        </PaneCard>
       ) : null}
       {atrSeries && visiblePanes.has('atrEnabled') ? (
-        <IndicatorPane height={72} candles={candles} series={atrSeries} visibleRange={visibleRange} />
+        <PaneCard
+          title={`ATR (${indicatorSettings.atrPeriod})`}
+          readouts={paneReadouts(atrSeries, { atr: '' })}
+        >
+          <IndicatorPane height={68} candles={candles} series={atrSeries} visibleRange={visibleRange} />
+        </PaneCard>
       ) : null}
     </div>
   );
+}
+
+/** Live value readouts for a pane card: last non-null of each labeled series,
+ *  in label order. Histogram series get their sign color (green/red). */
+function paneReadouts(
+  series: PaneSeries[],
+  labels: Record<string, string>,
+): PaneReadout[] {
+  const readouts: PaneReadout[] = [];
+  for (const [id, label] of Object.entries(labels)) {
+    const spec = series.find((candidate) => candidate.id === id);
+    if (!spec) continue;
+    const value = engine.lastValue(spec.values);
+    if (value === null) continue;
+    const color =
+      spec.kind === 'histogram'
+        ? (value >= 0 ? spec.positiveColor : spec.negativeColor) ?? 'var(--label-secondary)'
+        : spec.color ?? 'var(--label-secondary)';
+    readouts.push({ label, value: value.toFixed(2), color });
+  }
+  return readouts;
 }
 
 const BANNER_FONT_SIZES: Record<string, number> = {

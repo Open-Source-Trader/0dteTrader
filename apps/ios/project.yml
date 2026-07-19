@@ -43,6 +43,14 @@ targets:
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
         NSFaceIDUsageDescription: 0dteTrader uses Face ID to unlock the app.
+        # Resources are copied flat into the bundle, so bare filenames here.
+        UIAppFonts:
+          - Orbitron-Medium.ttf
+          - Orbitron-Bold.ttf
+          - Rajdhani-Medium.ttf
+          - Rajdhani-SemiBold.ttf
+          - JetBrainsMono-Regular.ttf
+          - JetBrainsMono-SemiBold.ttf
         ITSAppUsesNonExemptEncryption: false
         # Debug builds target http://localhost:3000 (and optionally a LAN IP).
         # ATS stays on otherwise — no arbitrary loads (docs/SECURITY.md §5).

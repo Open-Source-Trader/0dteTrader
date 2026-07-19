@@ -252,3 +252,12 @@ export function bollingerBands(
   }
   return { upper, middle, lower };
 }
+
+/** Last non-null value of a series (pane-card readouts). */
+export function lastValue(values: (number | null)[]): number | null {
+  for (let i = values.length - 1; i >= 0; i--) {
+    const value = values[i];
+    if (value !== null) return value;
+  }
+  return null;
+}

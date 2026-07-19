@@ -8,21 +8,28 @@ struct ChartView: View {
     @ObservedObject var drawings: ChartDrawingsModel
     let onSymbolSearch: () -> Void
     let onIndicatorSettings: () -> Void
+    /// Practice/live badge state; nil hides the badge (pre-fetch).
+    let tradingMode: TradingMode?
+    let onToggleMode: () -> Void
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var showClearConfirm = false
 
-    private let paneHeight: CGFloat = 72
+    private let paneHeight: CGFloat = 68
 
     init(
         viewModel: ChartViewModel,
         onSymbolSearch: @escaping () -> Void,
-        onIndicatorSettings: @escaping () -> Void
+        onIndicatorSettings: @escaping () -> Void,
+        tradingMode: TradingMode? = nil,
+        onToggleMode: @escaping () -> Void = {}
     ) {
         _viewModel = ObservedObject(wrappedValue: viewModel)
         _drawings = ObservedObject(wrappedValue: viewModel.drawings)
         self.onSymbolSearch = onSymbolSearch
         self.onIndicatorSettings = onIndicatorSettings
+        self.tradingMode = tradingMode
+        self.onToggleMode = onToggleMode
     }
 
     var body: some View {
@@ -33,7 +40,7 @@ struct ChartView: View {
                 staleDataBanner(errorMessage)
             }
 
-            ZStack {
+            ZStack(alignment: .topLeading) {
                 CandleChartRepresentable(
                     candles: viewModel.candles,
                     overlays: viewModel.priceOverlays,
@@ -47,6 +54,10 @@ struct ChartView: View {
                     gexStale: viewModel.gexStale,
                     onVisibleRangeChange: { viewModel.visibleXRange = $0 }
                 )
+                // Drawing tools live on the canvas (the mockup header has no room).
+                drawingToolsMenu
+                    .padding(.leading, 52)
+                    .padding(.top, AppSpacing.xs)
                 if let banner = viewModel.twcRenderModel?.banner {
                     TwcBiasBannerView(banner: banner)
                 }
@@ -72,67 +83,90 @@ struct ChartView: View {
                     selectionBar
                 }
             }
+            .clipShape(HudPanelShape(chamfer: 10))
+            .hudCard(glow: false)
+            .padding(.horizontal, AppSpacing.sm)
+            .padding(.vertical, AppSpacing.xxs)
             .layoutPriority(1)
 
             if let rsi = viewModel.rsiSeries {
-                IndicatorPaneRepresentable(
-                    series: [.init(id: rsi.id, kind: .line, values: rsi.values)],
-                    colors: ["rsi": .systemYellow],
-                    guideLines: [30, 70],
-                    yRange: 0...100,
-                    xValueCount: viewModel.candles.count,
-                    visibleRange: viewModel.visibleXRange
-                )
-                .frame(height: paneHeight)
-                .transition(.opacity.combined(with: .move(edge: .bottom)))
+                hudPane(
+                    title: "RSI (\(viewModel.indicatorSettings.rsiPeriod))",
+                    readouts: [readout(for: rsi, label: "", colorId: "rsi")]
+                ) {
+                    IndicatorPaneRepresentable(
+                        series: [.init(id: rsi.id, kind: .line, values: rsi.values)],
+                        colors: ["rsi": ChartStyle.paneColors["rsi"]!],
+                        guideLines: [30, 70],
+                        yRange: 0...100,
+                        xValueCount: viewModel.candles.count,
+                        visibleRange: viewModel.visibleXRange
+                    )
+                }
             }
 
             if let macd = viewModel.macdSeries {
-                IndicatorPaneRepresentable(
-                    series: [
-                        .init(id: macd.histogram.id, kind: .histogram, values: macd.histogram.values),
-                        .init(id: macd.macd.id, kind: .line, values: macd.macd.values),
-                        .init(id: macd.signal.id, kind: .line, values: macd.signal.values),
-                    ],
-                    colors: [
-                        "macd": .systemBlue,
-                        "macdSignal": .systemOrange,
-                    ],
-                    xValueCount: viewModel.candles.count,
-                    visibleRange: viewModel.visibleXRange
-                )
-                .frame(height: paneHeight)
-                .transition(.opacity.combined(with: .move(edge: .bottom)))
+                hudPane(
+                    title: "MACD (12, 26, 9)",
+                    readouts: [
+                        readout(for: macd.macd, label: "MACD", colorId: "macd"),
+                        readout(for: macd.signal, label: "Sig", colorId: "macdSignal"),
+                        histogramReadout(for: macd.histogram, label: "Hist"),
+                    ]
+                ) {
+                    IndicatorPaneRepresentable(
+                        series: [
+                            .init(id: macd.histogram.id, kind: .histogram, values: macd.histogram.values),
+                            .init(id: macd.macd.id, kind: .line, values: macd.macd.values),
+                            .init(id: macd.signal.id, kind: .line, values: macd.signal.values),
+                        ],
+                        colors: [
+                            "macd": ChartStyle.paneColors["macd"]!,
+                            "macdSignal": ChartStyle.paneColors["macdSignal"]!,
+                        ],
+                        xValueCount: viewModel.candles.count,
+                        visibleRange: viewModel.visibleXRange
+                    )
+                }
             }
 
             if let stoch = viewModel.stochSeries {
-                IndicatorPaneRepresentable(
-                    series: [
-                        .init(id: stoch.k.id, kind: .line, values: stoch.k.values),
-                        .init(id: stoch.d.id, kind: .line, values: stoch.d.values),
-                    ],
-                    colors: [
-                        "stochK": .systemBlue,
-                        "stochD": .systemOrange,
-                    ],
-                    guideLines: [20, 80],
-                    yRange: 0...100,
-                    xValueCount: viewModel.candles.count,
-                    visibleRange: viewModel.visibleXRange
-                )
-                .frame(height: paneHeight)
-                .transition(.opacity.combined(with: .move(edge: .bottom)))
+                hudPane(
+                    title: "Stoch",
+                    readouts: [
+                        readout(for: stoch.k, label: "%K", colorId: "stochK"),
+                        readout(for: stoch.d, label: "%D", colorId: "stochD"),
+                    ]
+                ) {
+                    IndicatorPaneRepresentable(
+                        series: [
+                            .init(id: stoch.k.id, kind: .line, values: stoch.k.values),
+                            .init(id: stoch.d.id, kind: .line, values: stoch.d.values),
+                        ],
+                        colors: [
+                            "stochK": ChartStyle.paneColors["stochK"]!,
+                            "stochD": ChartStyle.paneColors["stochD"]!,
+                        ],
+                        guideLines: [20, 80],
+                        yRange: 0...100,
+                        xValueCount: viewModel.candles.count,
+                        visibleRange: viewModel.visibleXRange
+                    )
+                }
             }
 
             if let atr = viewModel.atrSeries {
-                IndicatorPaneRepresentable(
-                    series: [.init(id: atr.id, kind: .line, values: atr.values)],
-                    colors: ["atr": .systemTeal],
-                    xValueCount: viewModel.candles.count,
-                    visibleRange: viewModel.visibleXRange
-                )
-                .frame(height: paneHeight)
-                .transition(.opacity.combined(with: .move(edge: .bottom)))
+                hudPane(
+                    title: "ATR (\(viewModel.indicatorSettings.atrPeriod))",
+                    readouts: [readout(for: atr, label: "", colorId: "atr")]
+                ) {
+                    IndicatorPaneRepresentable(
+                        series: [.init(id: atr.id, kind: .line, values: atr.values)],
+                        colors: ["atr": ChartStyle.paneColors["atr"]!],
+                        xValueCount: viewModel.candles.count,
+                        visibleRange: viewModel.visibleXRange
+                    )
+                }
             }
         }
         .background(Color.appBackground)
@@ -141,6 +175,71 @@ struct ChartView: View {
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: viewModel.isLoading)
         .animation(reduceMotion ? nil : AppMotion.standard, value: drawings.tool)
         .animation(reduceMotion ? nil : AppMotion.standard, value: drawings.selectedId)
+    }
+
+    // MARK: - Sub-pane HUD cards
+
+    private struct PaneReadout: Identifiable {
+        let id = UUID()
+        let label: String
+        let value: String
+        let color: Color
+    }
+
+    private func lastValue(_ values: [Double?]) -> Double? {
+        for value in values.reversed() {
+            if let value { return value }
+        }
+        return nil
+    }
+
+    private func readout(for series: IndicatorSeries, label: String, colorId: String) -> PaneReadout {
+        PaneReadout(
+            label: label,
+            value: lastValue(series.values).map { String(format: "%.2f", $0) } ?? "—",
+            color: ChartStyle.paneColor(for: colorId)
+        )
+    }
+
+    /// Histogram readout: sign color (green/red) instead of a line color.
+    private func histogramReadout(for series: IndicatorSeries, label: String) -> PaneReadout {
+        let value = lastValue(series.values)
+        return PaneReadout(
+            label: label,
+            value: value.map { String(format: "%.2f", $0) } ?? "—",
+            color: (value ?? 0) >= 0 ? .pnlPositive : .pnlNegative
+        )
+    }
+
+    /// Chamfered card around a sub-pane with name + live readouts in the
+    /// header (mockup: `RSI (14) 46.21`). `glow: false` — panes re-render on
+    /// every candle tick.
+    private func hudPane(
+        title: String,
+        readouts: [PaneReadout],
+        @ViewBuilder content: () -> some View
+    ) -> some View {
+        VStack(spacing: 0) {
+            HStack(alignment: .firstTextBaseline, spacing: AppSpacing.md) {
+                Text(title)
+                    .foregroundStyle(Color.appAccent)
+                    .fontWeight(.semibold)
+                ForEach(readouts) { readout in
+                    Text(readout.label.isEmpty ? readout.value : "\(readout.label) \(readout.value)")
+                        .foregroundStyle(readout.color)
+                }
+                Spacer(minLength: 0)
+            }
+            .font(.priceSmall)
+            .padding(.horizontal, AppSpacing.sm)
+            .padding(.top, AppSpacing.xxs)
+            content()
+                .frame(height: paneHeight)
+        }
+        .hudCard(glow: false)
+        .padding(.horizontal, AppSpacing.sm)
+        .padding(.vertical, AppSpacing.xxs)
+        .transition(.opacity.combined(with: .move(edge: .bottom)))
     }
 
     // MARK: - State overlays
@@ -238,19 +337,29 @@ struct ChartView: View {
     // MARK: - Header
 
     private var header: some View {
-        HStack(spacing: AppSpacing.lg) {
+        HStack(spacing: AppSpacing.sm) {
             Button {
                 Haptics.selection()
                 onSymbolSearch()
             } label: {
                 HStack(spacing: AppSpacing.xs) {
                     Text(viewModel.symbol)
-                        .font(.headline)
+                        .font(.hudButton)
                     Image(systemName: "chevron.down")
                         .font(.caption2.weight(.bold))
+                        .foregroundStyle(Color.appAccent)
                 }
                 .foregroundStyle(.primary)
-                .frame(minHeight: 44)
+                .padding(.horizontal, AppSpacing.sm)
+                .frame(minHeight: 36)
+                .background {
+                    HudPanelShape(chamfer: 6)
+                        .fill(Color.hudPanel)
+                        .overlay {
+                            HudPanelShape(chamfer: 6)
+                                .strokeBorder(Color.hudStroke.opacity(0.6), lineWidth: 1.2)
+                        }
+                }
                 .contentShape(Rectangle())
             }
             .accessibilityLabel("Change symbol")
@@ -259,7 +368,8 @@ struct ChartView: View {
                 VStack(alignment: .leading, spacing: 1) {
                     HStack(spacing: AppSpacing.xs) {
                         Text(Format.price(quote.last))
-                            .font(.priceMedium)
+                            .font(.priceMedium.weight(.semibold))
+                            .shadow(color: .hudGlow, radius: 6)
                         if let dayChange = viewModel.dayChange {
                             Text("\(Format.signedPrice(dayChange.change)) (\(String(format: "%+.2f", dayChange.percent))%)")
                                 .font(.priceSmall.weight(.medium))
@@ -269,15 +379,21 @@ struct ChartView: View {
                                     : "Down \(Format.price(abs(dayChange.change))) today")
                         }
                     }
-                    Text("Bid \(Format.price(quote.bid))  Ask \(Format.price(quote.ask))")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+                    HStack(spacing: AppSpacing.sm) {
+                        Text("BID \(Format.price(quote.bid))")
+                            .foregroundStyle(Color.buyGreen)
+                        Text("ASK \(Format.price(quote.ask))")
+                            .foregroundStyle(Color.sellRed)
+                    }
+                    .font(.caption2.monospacedDigit())
                 }
             }
 
             Spacer()
 
-            drawingToolsMenu
+            if let tradingMode {
+                modeBadge(tradingMode)
+            }
 
             intervalMenu
 
@@ -287,16 +403,47 @@ struct ChartView: View {
             } label: {
                 Image(systemName: "slider.horizontal.3")
                     .font(.subheadline)
-                    .foregroundStyle(.primary)
-                    .frame(width: 44, height: 44)
-                    .background(Color.appSurfaceElevated)
-                    .clipShape(Circle())
+                    .foregroundStyle(Color.appAccent)
+                    .frame(width: 36, height: 36)
+                    .background {
+                        Circle()
+                            .fill(Color.hudPanel)
+                            .overlay { Circle().strokeBorder(Color.hudStroke.opacity(0.35), lineWidth: 1) }
+                    }
                     .contentShape(Circle())
             }
             .accessibilityLabel("Indicator settings")
         }
-        .padding(.horizontal, AppSpacing.lg)
-        .padding(.vertical, AppSpacing.sm)
+        .padding(.horizontal, AppSpacing.md)
+        .padding(.vertical, AppSpacing.xs)
+    }
+
+    /// Amber PRACTICE / green LIVE badge — tap to switch (confirmed upstream).
+    private func modeBadge(_ mode: TradingMode) -> some View {
+        Button {
+            Haptics.selection()
+            onToggleMode()
+        } label: {
+            Text(mode == .live ? "LIVE" : "PRACTICE")
+                .font(.custom("Orbitron-Bold", size: 11, relativeTo: .caption2))
+                .kerning(1)
+                .foregroundStyle(mode == .live ? Color.buyGreen : Color.hudAmber)
+                .padding(.horizontal, AppSpacing.sm)
+                .padding(.vertical, AppSpacing.xs)
+                .background {
+                    HudPanelShape(chamfer: 5)
+                        .fill(Color.hudPanel)
+                        .overlay {
+                            HudPanelShape(chamfer: 5)
+                                .strokeBorder(
+                                    mode == .live ? Color.buyGreen : Color.hudAmber,
+                                    lineWidth: 1
+                                )
+                        }
+                }
+                .contentShape(Rectangle())
+        }
+        .accessibilityLabel("Trading mode \(mode == .live ? "live" : "practice"). Switch mode")
     }
 
     private var intervalMenu: some View {
@@ -310,11 +457,18 @@ struct ChartView: View {
         } label: {
             Text(viewModel.interval.rawValue)
                 .font(.chipLabel)
+                .foregroundStyle(Color.appAccent)
                 .padding(.horizontal, AppSpacing.md)
-                .frame(minHeight: 44)
-                .background(Color.appSurfaceElevated)
-                .clipShape(Capsule())
-                .contentShape(Capsule())
+                .frame(minHeight: 36)
+                .background {
+                    HudPanelShape(chamfer: 6)
+                        .fill(Color.hudPanel)
+                        .overlay {
+                            HudPanelShape(chamfer: 6)
+                                .strokeBorder(Color.hudStroke.opacity(0.35), lineWidth: 1)
+                        }
+                }
+                .contentShape(Rectangle())
         }
         .accessibilityLabel("Chart interval")
         .accessibilityValue(viewModel.interval.rawValue)

@@ -9,15 +9,14 @@ struct FloatingTradeButtons: View {
 
     var body: some View {
         VStack(spacing: AppSpacing.sm) {
+            // Glow is baked into the buttons' HUD frames — no extra shadows.
             HStack(spacing: AppSpacing.lg) {
-                TradeActionButton(title: "SELL", color: .sellRedFill, isEnabled: isEnabled) {
+                TradeActionButton(title: "SELL", color: .sellRed, isEnabled: isEnabled) {
                     onSide(.sell)
                 }
-                .shadow(color: AppElevation.toast.color, radius: AppElevation.toast.radius, y: AppElevation.toast.y)
-                TradeActionButton(title: "BUY", color: .buyGreenFill, isEnabled: isEnabled) {
+                TradeActionButton(title: "BUY", color: .buyGreen, isEnabled: isEnabled) {
                     onSide(.buy)
                 }
-                .shadow(color: AppElevation.toast.color, radius: AppElevation.toast.radius, y: AppElevation.toast.y)
             }
             .padding(.horizontal, AppSpacing.xl)
 

@@ -86,7 +86,7 @@
   display: inline-block;
   height: 17px;
   border-radius: 4px;
-  background: rgba(235, 235, 245, 0.08);
+  background: rgba(160, 190, 235, 0.1);
 }
 .profile-view .skeleton.skeleton-label {
   width: 56px;

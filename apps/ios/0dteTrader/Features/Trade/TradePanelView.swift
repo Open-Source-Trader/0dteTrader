@@ -21,10 +21,10 @@ struct TradePanelView: View {
                 orderTypeRow
 
                 HStack(spacing: AppSpacing.md) {
-                    TradeActionButton(title: "SELL", color: .sellRedFill, isEnabled: canTrade) {
+                    TradeActionButton(title: "SELL", color: .sellRed, isEnabled: canTrade) {
                         onArm(.sell)
                     }
-                    TradeActionButton(title: "BUY", color: .buyGreenFill, isEnabled: canTrade) {
+                    TradeActionButton(title: "BUY", color: .buyGreen, isEnabled: canTrade) {
                         onArm(.buy)
                     }
                 }
@@ -51,18 +51,20 @@ struct TradePanelView: View {
             }
 
             HStack(spacing: AppSpacing.sm) {
-                Picker("Option type", selection: $chainViewModel.optionType) {
-                    Text("Call").tag(OptionType.call)
-                    Text("Put").tag(OptionType.put)
-                }
-                .pickerStyle(.segmented)
+                HudSegmentedControl(
+                    options: [
+                        .init(OptionType.call, "Call", accent: .buyGreen),
+                        .init(OptionType.put, "Put", accent: .sellRed),
+                    ],
+                    selection: $chainViewModel.optionType
+                )
+                .accessibilityLabel("Option type")
 
-                Toggle(isOn: $chainViewModel.isAutoMode) {
-                    Text("AUTO")
-                        .font(.chipLabel)
-                }
-                .toggleStyle(.button)
-                .tint(.appAccent)
+                HudToggleChip(
+                    title: "AUTO",
+                    isOn: $chainViewModel.isAutoMode,
+                    accent: .appAccent
+                )
                 .accessibilityLabel("Auto +1 OTM selection")
             }
 
@@ -144,8 +146,14 @@ struct TradePanelView: View {
         }
         .frame(maxWidth: .infinity, minHeight: 34)
         .padding(.horizontal, 10)
-        .background(Color.appSurface)
-        .clipShape(RoundedRectangle(cornerRadius: AppRadius.sm, style: .continuous))
+        .background {
+            HudPanelShape(chamfer: 6)
+                .fill(Color.appSurface)
+                .overlay {
+                    HudPanelShape(chamfer: 6)
+                        .strokeBorder(Color.hudStroke.opacity(0.35), lineWidth: 1)
+                }
+        }
     }
 
     // MARK: - Quantity & order type
@@ -162,7 +170,15 @@ struct TradePanelView: View {
             } label: {
                 Image(systemName: "minus")
                     .frame(width: 44, height: 44)
-                    .background(Circle().fill(Color.appSurfaceElevated).frame(width: 32, height: 32))
+                    .background {
+                        HudPanelShape(chamfer: 5)
+                            .fill(Color.hudPanel)
+                            .overlay {
+                                HudPanelShape(chamfer: 5)
+                                    .strokeBorder(Color.hudStroke.opacity(0.35), lineWidth: 1)
+                            }
+                            .frame(width: 34, height: 34)
+                    }
                     .contentShape(Rectangle())
             }
             .buttonStyle(AppPressStyle())
@@ -170,6 +186,7 @@ struct TradePanelView: View {
 
             Text("\(tradeViewModel.quantity)")
                 .font(.priceMedium)
+                .shadow(color: .hudGlow, radius: 6)
                 .frame(minWidth: 36)
                 .accessibilityLabel("Quantity")
                 .accessibilityValue("\(tradeViewModel.quantity)")
@@ -187,7 +204,15 @@ struct TradePanelView: View {
             } label: {
                 Image(systemName: "plus")
                     .frame(width: 44, height: 44)
-                    .background(Circle().fill(Color.appSurfaceElevated).frame(width: 32, height: 32))
+                    .background {
+                        HudPanelShape(chamfer: 5)
+                            .fill(Color.hudPanel)
+                            .overlay {
+                                HudPanelShape(chamfer: 5)
+                                    .strokeBorder(Color.hudStroke.opacity(0.35), lineWidth: 1)
+                            }
+                            .frame(width: 34, height: 34)
+                    }
                     .contentShape(Rectangle())
             }
             .buttonStyle(AppPressStyle())
@@ -203,11 +228,14 @@ struct TradePanelView: View {
 
     private var orderTypeRow: some View {
         HStack(spacing: AppSpacing.md) {
-            Picker("Order type", selection: $tradeViewModel.orderType) {
-                Text("Mid").tag(OrderType.mid)
-                Text("Market").tag(OrderType.market)
-            }
-            .pickerStyle(.segmented)
+            HudSegmentedControl(
+                options: [
+                    .init(OrderType.mid, "Mid"),
+                    .init(OrderType.market, "Market"),
+                ],
+                selection: $tradeViewModel.orderType
+            )
+            .accessibilityLabel("Order type")
 
             if let line = quoteLine {
                 Text(line)
@@ -255,8 +283,16 @@ struct TradePanelView: View {
         }
         .padding(.horizontal, AppSpacing.md)
         .padding(.vertical, AppSpacing.sm)
-        .background(Color.appSurface)
-        .clipShape(RoundedRectangle(cornerRadius: AppRadius.sm, style: .continuous))
+        .background {
+            HudPanelShape(chamfer: 6)
+                .fill(Color.appSurface)
+                .overlay {
+                    HudPanelShape(chamfer: 6)
+                        .strokeBorder(Color.sellRed, lineWidth: 1)
+                }
+                .compositingGroup()
+                .shadow(color: Color.sellRed.opacity(0.35), radius: 5)
+        }
     }
 
     private func chipLabel(
@@ -278,7 +314,13 @@ struct TradePanelView: View {
         .padding(.horizontal, AppSpacing.md)
         .padding(.vertical, 11)
         .frame(maxWidth: fillWidth ? .infinity : nil, minHeight: 44)
-        .background(Color.appSurfaceElevated)
-        .clipShape(RoundedRectangle(cornerRadius: AppRadius.sm, style: .continuous))
+        .background {
+            HudPanelShape(chamfer: 6)
+                .fill(Color.hudPanel)
+                .overlay {
+                    HudPanelShape(chamfer: 6)
+                        .strokeBorder(Color.hudStroke.opacity(0.35), lineWidth: 1)
+                }
+        }
     }
 }

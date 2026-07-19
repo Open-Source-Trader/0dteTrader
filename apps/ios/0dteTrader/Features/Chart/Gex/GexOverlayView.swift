@@ -161,7 +161,7 @@ final class GexOverlayView: UIView {
         let dexSize = dexText.size(withAttributes: attributes)
         let boxWidth = max(gexSize.width, dexSize.width) + 16
         let box = CGRect(x: content.maxX - boxWidth - 6, y: content.minY + 6, width: boxWidth, height: 34)
-        context.setFillColor(UIColor(white: 0.11, alpha: 0.82).cgColor)
+        context.setFillColor(UIColor(red: 0.031, green: 0.063, blue: 0.125, alpha: 0.82).cgColor)
         context.fill(box)
         let gexColor = stale
             ? GexPresentation.premiumColor

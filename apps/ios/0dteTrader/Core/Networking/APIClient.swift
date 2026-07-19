@@ -114,6 +114,13 @@ struct APIClient: @unchecked Sendable {
         try await request(Endpoint(method: .get, path: "v1/me"))
     }
 
+    /// Switch practice/live trading (server re-inits broker sessions).
+    @discardableResult
+    func updateTradingMode(_ mode: TradingMode) async throws -> MeDTO {
+        let endpoint = Endpoint(method: .patch, path: "v1/me")
+        return try await request(endpoint, body: encode(UpdateTradingModeDTO(tradingMode: mode)))
+    }
+
     @discardableResult
     func putWebullCredentials(_ credentials: WebullCredentialsInputDTO) async throws -> WebullConfiguredResponseDTO {
         let endpoint = Endpoint(method: .put, path: "v1/me/webull-credentials")

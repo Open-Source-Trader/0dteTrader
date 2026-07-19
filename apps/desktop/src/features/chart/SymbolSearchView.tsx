@@ -64,7 +64,7 @@ export function SymbolSearchView({ currentSymbol, onSelect, onDismiss }: SymbolS
 
   const activeStyle = (symbol: string) =>
     rowIndex.get(symbol) === activeIndex
-      ? { background: 'rgba(118, 118, 128, 0.16)' }
+      ? { background: 'rgba(46, 143, 255, 0.12)' }
       : undefined;
 
   return (

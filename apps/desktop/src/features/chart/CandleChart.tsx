@@ -126,7 +126,7 @@ export function CandleChart({
         textColor: colors.axisLabel,
         fontSize: 11,
         fontFamily:
-          "ui-monospace, 'SF Mono', 'Cascadia Mono', 'JetBrains Mono', 'DejaVu Sans Mono', Menlo, monospace",
+          "'JetBrains Mono', ui-monospace, 'SF Mono', 'Cascadia Mono', 'DejaVu Sans Mono', Menlo, monospace",
       },
       leftPriceScale: { visible: true, borderColor: colors.border },
       rightPriceScale: { visible: false },
@@ -154,7 +154,12 @@ export function CandleChart({
       borderUpColor: colors.candleUp,
       borderDownColor: colors.candleDown,
       priceScaleId: 'left',
-      priceLineVisible: false,
+      // Dashed accent line at the last price + axis tag (mockup's glowing
+      // price tag; canvas-drawn, so a bright tag stands in for true glow).
+      priceLineVisible: true,
+      priceLineColor: colors.accent,
+      priceLineStyle: 2,
+      priceLineWidth: 1,
       lastValueVisible: true,
     });
     chartRef.current = chart;
@@ -247,6 +252,9 @@ export function CandleChart({
     lastLengthRef.current = candles.length;
     lastFirstTimeRef.current = firstTime;
     lastBarRef.current = candles.length > 0 ? candles[candles.length - 1] : null;
+    // Keep the OHLC legend live without waiting for a crosshair event —
+    // the mockup shows it permanently.
+    setLegend(lastBarRef.current ? legendText(lastBarRef.current) : null);
   }, [candles, candleColors]);
 
   // Overlay lines: recreate the series set when ids change, reset data otherwise.
@@ -329,7 +337,8 @@ export function CandleChart({
   return (
     <div
       ref={containerRef}
-      style={{ position: 'absolute', inset: 0 }}
+      // 4px top inset keeps the topmost price label clear of the card edge.
+      style={{ position: 'absolute', inset: '4px 0 0 0' }}
       role="img"
       aria-label={
         lastBar

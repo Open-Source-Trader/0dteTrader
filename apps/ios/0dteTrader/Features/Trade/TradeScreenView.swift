@@ -20,6 +20,9 @@ struct TradeScreenView: View {
     @State private var showIndicatorSettings = false
     @State private var showProfile = false
     @State private var showHistory = false
+    // 'nil' until /v1/me answers; the server value wins (desktop parity).
+    @State private var tradingMode: TradingMode?
+    @State private var showModeConfirmation = false
     @GestureState private var isDraggingDivider = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -51,6 +54,12 @@ struct TradeScreenView: View {
                 .animation(AppMotion.standard, value: tradeViewModel.toast)
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
+                    ToolbarItem(placement: .principal) {
+                        Text("0dteTrader")
+                            .font(.hudTitle)
+                            .foregroundStyle(Color.appAccent)
+                            .shadow(color: .hudGlow, radius: 8)
+                    }
                     ToolbarItem(placement: .topBarLeading) {
                         Button {
                             showProfile = true
@@ -104,6 +113,26 @@ struct TradeScreenView: View {
         }
         .task {
             await chartViewModel.start()
+        }
+        .task {
+            if let me = try? await container.apiClient.me() {
+                tradingMode = me.tradingMode ?? .practice
+            }
+        }
+        .confirmationDialog(
+            "Switch to \(tradingMode == .live ? "practice" : "LIVE") trading?",
+            isPresented: $showModeConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button(
+                tradingMode == .live ? "Switch to Practice" : "Switch to LIVE",
+                role: tradingMode == .live ? nil : .destructive
+            ) {
+                Task { await switchTradingMode() }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Orders will route to the \(tradingMode == .live ? "practice" : "LIVE") Webull environment.")
         }
         .task {
             await tradeViewModel.refreshTradingData()
@@ -223,8 +252,27 @@ struct TradeScreenView: View {
         ChartView(
             viewModel: chartViewModel,
             onSymbolSearch: { showSymbolSearch = true },
-            onIndicatorSettings: { showIndicatorSettings = true }
+            onIndicatorSettings: { showIndicatorSettings = true },
+            tradingMode: tradingMode,
+            onToggleMode: { showModeConfirmation = true }
         )
+    }
+
+    /// PATCH the mode, then re-init every data flow against the new
+    /// environment (the desktop clone reloads the page; here we re-run the
+    /// startup routines).
+    private func switchTradingMode() async {
+        guard let current = tradingMode else { return }
+        let next: TradingMode = current == .live ? .practice : .live
+        do {
+            let me = try await container.apiClient.updateTradingMode(next)
+            tradingMode = me.tradingMode ?? next
+            await chartViewModel.start()
+            await tradeViewModel.refreshTradingData()
+            await chainViewModel.load(underlying: chartViewModel.symbol)
+        } catch {
+            tradeViewModel.showToast("Mode switch failed. Try again.", style: .error)
+        }
     }
 
     private var positionsStrip: PositionsStripView {
@@ -247,13 +295,13 @@ struct TradeScreenView: View {
 
     private func divider(totalHeight: CGFloat) -> some View {
         RoundedRectangle(cornerRadius: 2.5)
-            .fill(isDraggingDivider ? Color.appAccent : Color(uiColor: .tertiaryLabel))
+            .fill(isDraggingDivider ? Color.appAccent : Color.hudStroke.opacity(0.5))
             .frame(width: 36, height: 5)
             .scaleEffect(isDraggingDivider ? 1.15 : 1)
             .animation(AppMotion.quick, value: isDraggingDivider)
             .frame(maxWidth: .infinity)
             .frame(height: dividerHeight)
-            .background(Color.appSurface)
+            .background(Color.appBackground)
             // Visual stays 18pt; the hit area expands to the 44pt HIG minimum.
             .contentShape(Rectangle().inset(by: -13))
             .gesture(

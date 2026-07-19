@@ -379,7 +379,7 @@ export function IndicatorSettingsView({
 
               <div className="grouped-row">
                 <span>
-                  <SeriesDot color="#ffd60a" />
+                  <SeriesDot color="var(--hud-amber)" />
                   GEX / DEX Levels
                 </span>
                 <span className="row-value">

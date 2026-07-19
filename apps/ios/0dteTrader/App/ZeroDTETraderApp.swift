@@ -8,6 +8,8 @@ struct ZeroDTETraderApp: App {
         WindowGroup {
             RootView(container: container)
                 .tint(.appAccent)
+                // The HUD theme has no light variant.
+                .preferredColorScheme(.dark)
         }
     }
 }

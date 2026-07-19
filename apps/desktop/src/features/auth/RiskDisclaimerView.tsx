@@ -29,11 +29,13 @@ export function RiskDisclaimerView({ store }: { store: AuthStore }) {
       }}
     >
       <h1
+        className="hud-title"
         style={{
-          fontSize: 'var(--fs-title)',
-          fontWeight: 700,
+          fontSize: 'var(--fs-title3)',
           textAlign: 'center',
           animation: ENTRANCE,
+          color: 'var(--hud-amber)',
+          textShadow: '0 0 6px rgba(255, 197, 61, 0.5), 0 0 18px rgba(255, 197, 61, 0.3)',
         }}
       >
         Risk Disclosure

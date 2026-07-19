@@ -2,9 +2,11 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { AppContainer, ContainerProvider } from './app/container';
 import { RootView } from './RootView';
+import './design/fonts.css';
 import './design/tokens.css';
 import './design/base.css';
 import './design/components/components.css';
+import './design/hud.css';
 
 // Scale the fixed 430x932 phone frame to fit the window (up or down).
 function updateScale() {

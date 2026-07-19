@@ -92,17 +92,7 @@ export function TradePanel({ tradeStore, chainStore, onArm, density = 'roomy' }:
             onChange={(value) => chainStore.setOptionType(value)}
           />
           <button
-            style={{
-              fontSize: 'var(--fs-caption)',
-              fontWeight: 600,
-              padding: '10px 14px',
-              borderRadius: 999,
-              background: chain.isAutoMode ? 'var(--app-accent)' : 'var(--app-surface-elevated)',
-              color: chain.isAutoMode ? '#0b0c10' : 'var(--label-primary)',
-              display: 'flex',
-              alignItems: 'center',
-              gap: 4,
-            }}
+            className={chain.isAutoMode ? 'hud-toggle-chip on' : 'hud-toggle-chip'}
             onClick={() => chainStore.setAutoMode(!chain.isAutoMode)}
             aria-label="Auto +1 OTM selection"
             aria-pressed={chain.isAutoMode}
@@ -146,6 +136,10 @@ export function TradePanel({ tradeStore, chainStore, onArm, density = 'roomy' }:
                 gap: 8,
                 padding: '0 10px',
                 background: 'var(--app-surface)',
+                border: chain.errorMessage
+                  ? '1px solid var(--sell-red)'
+                  : '1px solid var(--hud-stroke-dim)',
+                boxShadow: chain.errorMessage ? '0 0 8px rgba(255, 59, 78, 0.35)' : undefined,
                 borderRadius: 'var(--radius-chip)',
               }}
             >
@@ -161,7 +155,9 @@ export function TradePanel({ tradeStore, chainStore, onArm, density = 'roomy' }:
                   onClick={() => void chainStore.load(chain.underlying)}
                   aria-label={`Chain failed to load: ${chain.errorMessage}. Activate to retry`}
                 >
-                  <span style={{ color: 'var(--pnl-negative)' }}>Chain unavailable — Retry</span>
+                  <span style={{ color: 'var(--pnl-negative)' }}>
+                    Chain unavailable — <u>Retry</u>
+                  </span>
                 </button>
               ) : chain.isLoading ? (
                 <Spinner size={14} />
@@ -230,6 +226,7 @@ export function TradePanel({ tradeStore, chainStore, onArm, density = 'roomy' }:
             fontWeight: 500,
             minWidth: 40,
             textAlign: 'center',
+            textShadow: '0 0 8px var(--hud-glow)',
           }}
         >
           {trade.quantity}

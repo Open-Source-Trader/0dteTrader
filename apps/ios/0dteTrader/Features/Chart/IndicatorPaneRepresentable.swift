@@ -48,9 +48,9 @@ struct IndicatorPaneRepresentable: UIViewRepresentable {
 
         chart.rightAxis.enabled = false
         let leftAxis = chart.leftAxis
-        leftAxis.labelTextColor = .secondaryLabel
-        leftAxis.labelFont = .monospacedDigitSystemFont(ofSize: 9, weight: .regular)
-        leftAxis.gridColor = UIColor.separator.withAlphaComponent(0.25)
+        leftAxis.labelTextColor = .hudAxisLabel
+        leftAxis.labelFont = UIFont(name: "JetBrainsMono-Regular", size: 9) ?? .monospacedDigitSystemFont(ofSize: 9, weight: .regular)
+        leftAxis.gridColor = UIColor.hudStroke.withAlphaComponent(0.1)
         leftAxis.drawLimitLinesBehindDataEnabled = true
 
         return chart
@@ -117,7 +117,7 @@ struct IndicatorPaneRepresentable: UIViewRepresentable {
         leftAxis.removeAllLimitLines()
         for limit in guideLines {
             let line = ChartLimitLine(limit: limit)
-            line.lineColor = UIColor.secondaryLabel
+            line.lineColor = UIColor.hudStroke.withAlphaComponent(0.5)
             line.lineWidth = 0.5
             line.lineDashLengths = [4, 3]
             leftAxis.addLimitLine(line)

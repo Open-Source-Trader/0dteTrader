@@ -66,7 +66,7 @@ export function IndicatorPane({
         textColor: colors.axisLabel,
         fontSize: 10,
         fontFamily:
-          "ui-monospace, 'SF Mono', 'Cascadia Mono', 'JetBrains Mono', 'DejaVu Sans Mono', Menlo, monospace",
+          "'JetBrains Mono', ui-monospace, 'SF Mono', 'Cascadia Mono', 'DejaVu Sans Mono', Menlo, monospace",
       },
       leftPriceScale: { visible: true, borderVisible: false },
       rightPriceScale: { visible: false },

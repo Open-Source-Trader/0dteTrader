@@ -15,7 +15,9 @@ struct RiskDisclaimerView: View {
                 .accessibilityHidden(true)
 
             Text("Risk Disclosure")
-                .font(.title.bold())
+                .font(.custom("Orbitron-Bold", size: 22, relativeTo: .title))
+                .foregroundStyle(Color.hudAmber)
+                .shadow(color: Color.hudAmber.opacity(0.4), radius: 8)
                 .accessibilityAddTraits(.isHeader)
                 .padding(.top, AppSpacing.lg)
 
@@ -40,14 +42,14 @@ struct RiskDisclaimerView: View {
                 viewModel.acceptDisclaimer()
             } label: {
                 Text("I Understand and Accept")
-                    .font(.headline)
-                    .foregroundStyle(.white)
+                    .font(.hudButton)
+                    .kerning(1)
+                    .foregroundStyle(Color.appAccent)
+                    .shadow(color: .hudGlow, radius: 6)
                     .frame(maxWidth: .infinity, minHeight: 52)
-                    .background(Color.appAccentFill)
-                    .clipShape(RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous))
                     .contentShape(Rectangle())
             }
-            .buttonStyle(AppPressStyle())
+            .buttonStyle(HudActionButtonStyle(accent: .appAccent))
             .accessibilityHint("Accepts the risk disclosure and continues to sign in")
             .padding(.top, AppSpacing.lg)
             .padding(.bottom, AppSpacing.sm)

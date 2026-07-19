@@ -3,20 +3,25 @@
    base.css (all animation durations collapse to 1ms). */
 
 /* Circular header icon buttons (drawing tools, indicator settings):
-   40px hit area with hover/press feedback. */
+   compact HUD rings with hover/press feedback. */
 .chart-icon-button {
-  width: 40px;
-  height: 40px;
+  width: 32px;
+  height: 32px;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--app-surface-elevated);
+  color: var(--app-accent-text);
+  background: var(--hud-panel-fill);
+  border: 1px solid var(--hud-stroke-dim);
   border-radius: 50%;
-  transition: background var(--dur-fast) var(--ease-out);
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out);
 }
 
 .chart-icon-button:hover {
-  background: #31343f; /* one step above --app-surface-elevated */
+  border-color: var(--hud-stroke);
+  background: rgba(46, 143, 255, 0.1);
 }
 
 .chart-icon-button:active {
@@ -24,8 +29,10 @@
 }
 
 .chart-icon-button.active {
-  background: var(--app-accent);
+  background: var(--app-accent-fill);
+  border-color: var(--hud-stroke);
   color: #fff;
+  box-shadow: 0 0 8px var(--hud-glow);
 }
 
 /* Empty-chart loading skeleton: chart-shaped bars instead of a bare spinner,

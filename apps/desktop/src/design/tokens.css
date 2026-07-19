@@ -1,56 +1,72 @@
-/* Design tokens extracted from apps/ios DesignSystem (dark variants — the app
-   is dark-first and the clone forces dark). */
+/* Design tokens — "neon HUD" theme (mirrored in apps/ios DesignSystem;
+   the app is dark-only). */
 :root {
   color-scheme: dark;
 
-  /* AppColors.swift (dark) */
-  --app-background: #0b0c10;
-  --app-surface: #1a1c24;
-  --app-surface-elevated: #282b35;
-  --buy-green: #19b85b;
-  --sell-red: #e13a43;
-  --app-accent: #568ff7;
-  --app-border: rgba(84, 84, 88, 0.65);
-  --pnl-positive: #30d158;
-  --pnl-negative: #ff453a;
+  /* AppColors.swift (HUD palette) */
+  --app-background: #050a14;
+  --app-surface: #081020;
+  --app-surface-elevated: #0c1830;
+  --buy-green: #22e06a;
+  --sell-red: #ff3b4e;
+  --app-accent: #3b9eff;
+  --app-border: rgba(46, 143, 255, 0.45);
+  --pnl-positive: #22e06a;
+  --pnl-negative: #ff3b4e;
 
   /* AA-passing fills for white-text action buttons (bright hues above stay
      for text/borders on dark backgrounds). */
-  --buy-green-fill: #0e7c3a; /* white text: 5.30:1 */
-  --sell-red-fill: #c62830; /* white text: 5.60:1 */
-  --app-accent-fill: #2f6be0; /* white text: 4.88:1 */
+  --buy-green-fill: #0f7c3e; /* white text: 5.1:1 */
+  --sell-red-fill: #c21f30; /* white text: 5.9:1 */
+  --app-accent-fill: #1f6fe0; /* white text: 4.9:1 */
 
-  /* AA-passing text variants for elevated surfaces (#282b35 cards). */
-  --app-accent-text: #6b9ff8; /* 5.34:1 on elevated, 7.39:1 on bg */
-  --pnl-negative-text: #ff6961; /* 5.01:1 on elevated, 6.93:1 on bg */
+  /* AA-passing text variants for elevated surfaces (#0c1830 cards). */
+  --app-accent-text: #6fb4ff;
+  --pnl-negative-text: #ff6b77;
 
-  --label-primary: #ffffff;
-  --label-secondary: rgba(235, 235, 245, 0.6);
+  --label-primary: #eaf2ff;
+  --label-secondary: rgba(160, 190, 235, 0.65);
 
-  /* Chart series colors (ChartView.overlayColors / panes, iOS dark values) */
-  --chart-sma: #ff9f0a;
+  /* HUD chrome */
+  --hud-panel-fill: rgba(8, 16, 32, 0.92);
+  --hud-stroke: #2e8fff;
+  --hud-stroke-dim: rgba(46, 143, 255, 0.35);
+  --hud-glow: rgba(46, 143, 255, 0.35);
+  --hud-glow-strong: rgba(59, 158, 255, 0.65);
+  --hud-amber: #ffc53d;
+  --hud-inner-highlight: rgba(160, 210, 255, 0.22);
+  --hud-chamfer: 10px;
+
+  /* Chart series colors (shared with iOS ChartStyle.swift) */
+  --chart-sma: #3b9eff;
   --chart-ema: #64d2ff;
-  --chart-vwap: #bf5af2;
-  --chart-bb-outer: #8e8e93;
+  --chart-vwap: #b14cf0;
+  --chart-bb-outer: #4a6fa5;
   --chart-bb-middle: #40cbe0;
-  --chart-rsi: #ffd60a;
-  --chart-macd: #0a84ff;
+  --chart-rsi: #ffc53d;
+  --chart-macd: #3b9eff;
   --chart-macd-signal: #ff9f0a;
-  --chart-candle-up: #30d158;
-  --chart-candle-down: #ff453a;
-  --chart-axis-label: rgba(235, 235, 245, 0.6);
-  --chart-grid: rgba(84, 84, 88, 0.25);
-  --warning-orange: #ff9f0a;
+  --chart-candle-up: #22e06a;
+  --chart-candle-down: #ff3b4e;
+  --chart-axis-label: rgba(140, 180, 235, 0.7);
+  --chart-grid: rgba(46, 143, 255, 0.1);
+  --chart-volume-up: rgba(34, 224, 106, 0.45);
+  --chart-volume-down: rgba(255, 59, 78, 0.45);
+  --chart-crosshair: rgba(111, 180, 255, 0.4);
+  --chart-guide: rgba(90, 130, 190, 0.6);
+  --chart-rect-fill: rgba(59, 158, 255, 0.12);
+  --warning-orange: #ffc53d;
 
-  /* iOS segmented control (dark) */
-  --segmented-track: rgba(118, 118, 128, 0.24);
-  --segmented-knob: #636366;
+  /* Segmented control (HUD) */
+  --segmented-track: rgba(46, 143, 255, 0.1);
+  --segmented-knob: #1f6fe0;
 
-  /* AppTypography.swift at default Dynamic Type (pt = px) */
-  --font-sans: system-ui, -apple-system, 'SF Pro Text', 'Segoe UI', Roboto, 'Helvetica Neue',
+  /* Typography (bundled HUD fonts, see fonts.css) */
+  --font-sans: 'Rajdhani', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue',
     Arial, sans-serif;
-  --font-mono: ui-monospace, 'SF Mono', 'Cascadia Mono', 'JetBrains Mono', 'DejaVu Sans Mono',
+  --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', 'Cascadia Mono', 'DejaVu Sans Mono',
     Menlo, monospace;
+  --font-display: 'Orbitron', 'Rajdhani', system-ui, sans-serif;
 
   --fs-large-title: 34px;
   --fs-title: 28px;
@@ -73,10 +89,10 @@
   --space-8: 32px;
 
   /* Elevation */
-  --shadow-knob: 0 1px 4px rgba(0, 0, 0, 0.25);
-  --shadow-knob-lg: 0 2px 5px rgba(0, 0, 0, 0.3);
-  --shadow-overlay: 0 10px 40px rgba(0, 0, 0, 0.55);
-  --shadow-toast: 0 0 6px rgba(0, 0, 0, 0.45);
+  --shadow-knob: 0 0 6px rgba(46, 143, 255, 0.25);
+  --shadow-knob-lg: 0 0 9px rgba(46, 143, 255, 0.3);
+  --shadow-overlay: 0 10px 40px rgba(0, 0, 0, 0.65);
+  --shadow-toast: 0 0 10px rgba(46, 143, 255, 0.3);
 
   /* Stacking order (menus stay below alerts) */
   --z-chrome: 5;
@@ -93,13 +109,13 @@
 
   --disabled-opacity: 0.35;
   --border-hairline: 0.5px;
-  --chrome-background: #000; /* page chrome behind the phone frame */
+  --chrome-background: #02050c; /* page chrome behind the phone frame */
 
-  /* Geometry from the SwiftUI views */
-  --radius-input: 10px;
-  --radius-button: 12px;
-  --radius-chip: 8px;
-  --radius-card: 10px;
+  /* Geometry — HUD cards are chamfered, not rounded; residual radii square off */
+  --radius-input: 4px;
+  --radius-button: 4px;
+  --radius-chip: 4px;
+  --radius-card: 4px;
   --h-button: 50px;
   --h-trade-button: 52px;
   --h-navbar: 44px;

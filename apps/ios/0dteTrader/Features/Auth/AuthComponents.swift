@@ -9,13 +9,14 @@ struct AuthFieldStyle: ViewModifier {
     func body(content: Content) -> some View {
         content
             .padding(AppSpacing.md)
-            .background(Color.appSurface, in: RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous))
+            .background(Color.appSurface, in: HudPanelShape(chamfer: 8))
             .overlay(
-                RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+                HudPanelShape(chamfer: 8)
                     .strokeBorder(
                         isFocused ? Color.appAccent : Color.appBorder,
                         lineWidth: isFocused ? 1.5 : 1
                     )
+                    .shadow(color: isFocused ? .hudGlow : .clear, radius: 5)
             )
     }
 }
@@ -66,13 +67,14 @@ struct AuthPasswordField<Field: Hashable>: View {
             .accessibilityLabel(isVisible ? "Hide password" : "Show password")
         }
         .padding(.leading, AppSpacing.md)
-        .background(Color.appSurface, in: RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous))
+        .background(Color.appSurface, in: HudPanelShape(chamfer: 8))
         .overlay(
-            RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+            HudPanelShape(chamfer: 8)
                 .strokeBorder(
                     focused.wrappedValue == field ? Color.appAccent : Color.appBorder,
                     lineWidth: focused.wrappedValue == field ? 1.5 : 1
                 )
+                .shadow(color: focused.wrappedValue == field ? .hudGlow : .clear, radius: 5)
         )
     }
 }
@@ -100,15 +102,15 @@ struct AuthPrimaryButton: View {
                     Text(title)
                 }
             }
-            .font(.headline)
-            .foregroundStyle(isEnabled ? Color.white : Color.white.opacity(0.5))
+            .font(.hudButton)
+            .kerning(1)
+            .foregroundStyle(Color.appAccent.opacity(isEnabled ? 1 : AppOpacity.disabled))
+            .shadow(color: .hudGlow, radius: 6)
             .frame(maxWidth: .infinity, minHeight: 52)
-            .background(Color.appAccentFill.opacity(isEnabled ? 1 : AppOpacity.disabled))
-            .clipShape(RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous))
             .contentShape(Rectangle())
             .animation(AppMotion.quick, value: isEnabled)
         }
-        .buttonStyle(AppPressStyle())
+        .buttonStyle(HudActionButtonStyle(accent: Color.appAccent.opacity(isEnabled ? 1 : AppOpacity.disabled)))
         .disabled(!isEnabled || isLoading)
         .accessibilityIdentifier(accessibilityID)
     }

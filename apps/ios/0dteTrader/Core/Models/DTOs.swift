@@ -31,6 +31,12 @@ struct AuthTokensDTO: Decodable, Equatable, Sendable {
 
 // MARK: - Profile & credentials
 
+/// Practice/live trading environment (server-persisted; `PATCH /v1/me`).
+enum TradingMode: String, Codable, Equatable, Sendable {
+    case practice
+    case live
+}
+
 struct MeDTO: Decodable, Equatable, Sendable {
     let id: String
     let email: String
@@ -39,6 +45,12 @@ struct MeDTO: Decodable, Equatable, Sendable {
     /// Auto-discovered via Webull account/list; nil until the first
     /// successful connection (and on older servers).
     let webullAccountId: String?
+    /// nil on older servers that predate mode switching.
+    let tradingMode: TradingMode?
+}
+
+struct UpdateTradingModeDTO: Encodable, Sendable {
+    let tradingMode: TradingMode
 }
 
 struct WebullCredentialsInputDTO: Encodable, Sendable {

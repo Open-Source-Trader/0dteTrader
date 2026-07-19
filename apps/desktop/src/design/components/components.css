@@ -67,9 +67,15 @@
   position: absolute;
   left: 50%;
   transform: translateX(-50%);
+  font-family: var(--font-display);
   font-size: var(--fs-headline);
-  font-weight: 600;
+  font-weight: 700;
+  letter-spacing: 0.04em;
   white-space: nowrap;
+  color: var(--app-accent);
+  text-shadow:
+    0 0 6px var(--hud-glow-strong),
+    0 0 18px var(--hud-glow);
 }
 
 .navbar .navbar-leading {
@@ -114,8 +120,8 @@
 .spinner {
   display: inline-block;
   border-radius: 50%;
-  border: 2px solid rgba(235, 235, 245, 0.25);
-  border-top-color: var(--label-secondary);
+  border: 2px solid rgba(46, 143, 255, 0.2);
+  border-top-color: var(--app-accent);
   animation: spinner-rotate 0.8s linear infinite;
 }
 
@@ -144,7 +150,16 @@
   right: 0;
   bottom: 0;
   background: var(--app-surface);
-  border-radius: 10px 10px 0 0;
+  border-top: 1px solid var(--hud-stroke);
+  box-shadow: 0 -6px 24px rgba(46, 143, 255, 0.18);
+  clip-path: polygon(
+    10px 0,
+    calc(100% - 10px) 0,
+    100% 10px,
+    100% 100%,
+    0 100%,
+    0 10px
+  );
   animation: sheet-up var(--sheet-anim);
   z-index: calc(var(--z-sheet) + 1);
   display: flex;
@@ -180,9 +195,8 @@
 
 .alert-card {
   width: 270px;
-  background: color-mix(in srgb, var(--app-surface-elevated) 96%, transparent);
-  border-radius: 14px;
-  overflow: hidden;
+  border: 8px solid transparent;
+  border-image: var(--hud-src-accent) 28 fill / 24px / 6px stretch;
   text-align: center;
 }
 
@@ -207,11 +221,11 @@
 }
 
 .alert-card .alert-button:hover {
-  background: rgba(118, 118, 128, 0.12);
+  background: rgba(46, 143, 255, 0.1);
 }
 
 .alert-card .alert-button:active {
-  background: rgba(118, 118, 128, 0.24);
+  background: rgba(46, 143, 255, 0.2);
 }
 
 .alert-card .alert-button.destructive {
@@ -235,11 +249,11 @@
   min-width: 200px;
   max-height: 320px;
   overflow-y: auto;
-  background: color-mix(in srgb, var(--app-surface-elevated) 98%, transparent);
-  border-radius: 13px;
+  border: 6px solid transparent;
+  border-image: var(--hud-src-flat) 28 fill / 16px / 4px stretch;
   box-shadow: var(--shadow-overlay);
   z-index: var(--z-menu);
-  padding: 4px 0;
+  padding: 2px 0;
 }
 
 .menu-dropdown.up {
@@ -264,19 +278,19 @@
 }
 
 .menu-item:hover {
-  background: rgba(118, 118, 128, 0.12);
+  background: rgba(46, 143, 255, 0.1);
 }
 
 .menu-item:active {
-  background: rgba(118, 118, 128, 0.24);
+  background: rgba(46, 143, 255, 0.2);
 }
 
 /* --- Segmented control --- */
 .segmented {
   display: flex;
-  background: var(--segmented-track);
-  border-radius: 9px;
-  padding: 2px;
+  border: 5px solid transparent;
+  border-image: var(--hud-src-flat) 28 fill / 14px / 4px stretch;
+  gap: 2px;
   height: 36px;
   flex: 1;
   min-width: 0;
@@ -284,22 +298,27 @@
 
 .segmented .segment {
   flex: 1;
-  border-radius: 7px;
+  border-radius: 3px;
+  font-family: var(--font-sans);
   font-size: var(--fs-footnote);
-  font-weight: 500;
-  color: var(--label-primary);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--label-secondary);
   display: flex;
   align-items: center;
   justify-content: center;
 }
 
 .segmented .segment:hover:not(.selected) {
-  background: rgba(118, 118, 128, 0.12);
+  background: rgba(46, 143, 255, 0.1);
 }
 
 .segmented .segment.selected {
-  background: var(--segmented-knob);
-  box-shadow: var(--shadow-knob);
+  background: rgba(46, 143, 255, 0.18);
+  box-shadow:
+    inset 0 0 0 1px var(--hud-stroke),
+    0 0 8px var(--hud-glow);
+  color: var(--app-accent-text);
   font-weight: 600;
 }
 
@@ -322,7 +341,8 @@
 }
 
 .toggle.on {
-  background: var(--pnl-positive);
+  background: var(--app-accent-fill);
+  box-shadow: 0 0 8px var(--hud-glow);
 }
 
 .toggle .knob {
@@ -350,8 +370,8 @@
   display: flex;
   width: 94px;
   height: 36px;
-  background: var(--app-surface-elevated);
-  border-radius: 8px;
+  border: 5px solid transparent;
+  border-image: var(--hud-src-flat) 28 fill / 14px / 4px stretch;
   flex: none;
 }
 
@@ -372,35 +392,30 @@
 }
 
 .stepper button:hover:not(:disabled) {
-  background: rgba(118, 118, 128, 0.12);
+  background: rgba(46, 143, 255, 0.1);
 }
 
 .stepper button:disabled {
   opacity: var(--disabled-opacity);
 }
 
-.stepper button:first-child {
-  border-right: 1px solid rgba(84, 84, 88, 0.4);
-  border-top-left-radius: 8px;
-  border-bottom-left-radius: 8px;
+.stepper button {
+  color: var(--app-accent-text);
 }
 
-.stepper button:last-child {
-  border-top-right-radius: 8px;
-  border-bottom-right-radius: 8px;
+.stepper button:first-child {
+  border-right: 1px solid var(--hud-stroke-dim);
 }
 
 /* --- Trade action buttons --- */
 .trade-action-button {
   flex: 1;
   min-height: var(--h-trade-button);
-  border-radius: var(--radius-button);
-  color: #fff;
   font-size: var(--fs-headline);
-  font-weight: 600;
   display: flex;
   align-items: center;
   justify-content: center;
+  gap: 8px;
 }
 
 .trade-action-button:hover:not(:disabled) {
@@ -418,15 +433,18 @@
 }
 
 .quick-chip {
+  font-family: var(--font-mono);
   font-size: var(--fs-caption);
   font-weight: 600;
   padding: 8px 14px;
-  background: var(--app-surface-elevated);
-  border-radius: 999px;
+  color: var(--app-accent-text);
+  border: 5px solid transparent;
+  border-image: var(--hud-src-flat) 28 fill / 14px / 4px stretch;
 }
 
 .quick-chip:hover {
-  background: color-mix(in srgb, var(--app-surface-elevated) 70%, var(--label-primary) 6%);
+  --hud-border-src: var(--hud-src-accent);
+  border-image-source: var(--hud-src-accent);
 }
 
 .quick-chip:active {
@@ -443,8 +461,8 @@
   flex: 1;
   min-width: 0;
   padding: 8px 10px;
-  background: var(--app-surface-elevated);
-  border-radius: var(--radius-chip);
+  border: 5px solid transparent;
+  border-image: var(--hud-src-flat) 28 fill / 14px / 4px stretch;
   font-size: var(--fs-caption);
   font-weight: 600;
 }
@@ -456,7 +474,7 @@
 }
 
 .chip-button:hover {
-  background: color-mix(in srgb, var(--app-surface-elevated) 70%, var(--label-primary) 6%);
+  border-image-source: var(--hud-src-accent);
 }
 
 .chip-button:active {
@@ -487,9 +505,8 @@
 }
 
 .grouped-section .section-card {
-  background: var(--app-surface-elevated);
-  border-radius: var(--radius-card);
-  overflow: hidden;
+  border: 6px solid transparent;
+  border-image: var(--hud-src-flat) 28 fill / 16px / 4px stretch;
 }
 
 .grouped-row {
@@ -508,11 +525,11 @@
 }
 
 .grouped-row:is(button):hover {
-  background: rgba(118, 118, 128, 0.12);
+  background: rgba(46, 143, 255, 0.1);
 }
 
 .grouped-row:is(button):active {
-  background: rgba(118, 118, 128, 0.24);
+  background: rgba(46, 143, 255, 0.2);
 }
 
 .grouped-row .row-value {
@@ -551,10 +568,18 @@
   align-items: center;
   gap: 6px;
   padding: 10px 14px;
-  background: var(--app-surface-elevated);
-  border-radius: 999px;
+  background: var(--hud-panel-fill);
   border: 1px solid;
-  box-shadow: var(--shadow-toast);
+  clip-path: polygon(
+    8px 0,
+    calc(100% - 8px) 0,
+    100% 8px,
+    100% calc(100% - 8px),
+    calc(100% - 8px) 100%,
+    8px 100%,
+    0 calc(100% - 8px),
+    0 8px
+  );
   font-size: var(--fs-footnote);
   font-weight: 500;
 }

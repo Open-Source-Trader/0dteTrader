@@ -39,9 +39,12 @@ body {
   position: relative;
   width: 100%;
   height: 100%;
-  background: var(--app-background);
-  border: 1px solid var(--app-border);
+  background:
+    radial-gradient(120% 80% at 50% 0%, rgba(46, 143, 255, 0.06), transparent 60%),
+    var(--app-background);
+  border: 1px solid var(--hud-stroke-dim);
   border-radius: 24px;
+  box-shadow: 0 0 24px rgba(46, 143, 255, 0.18);
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -82,7 +85,7 @@ input::placeholder {
 
 /* Visible keyboard focus (replaces the default-less outline: none above). */
 :focus-visible {
-  outline: 2px solid var(--app-accent);
+  outline: 2px solid var(--hud-glow-strong);
   outline-offset: 2px;
   border-radius: inherit;
 }
@@ -104,28 +107,47 @@ input:focus-visible {
   color: var(--label-secondary);
 }
 
-/* Shared text-field style (Login/Register, 12px pad, surface bg, radius 10) */
+/* Shared text-field style (Login/Register): chamfered outline + focus glow. */
 .field {
   display: block;
   width: 100%;
   padding: 12px;
   background: var(--app-surface);
-  border-radius: var(--radius-input);
+  border: 1px solid var(--hud-stroke-dim);
+  clip-path: polygon(
+    8px 0,
+    calc(100% - 8px) 0,
+    100% 8px,
+    100% calc(100% - 8px),
+    calc(100% - 8px) 100%,
+    8px 100%,
+    0 calc(100% - 8px),
+    0 8px
+  );
   font-size: var(--fs-body);
 }
 
-/* Primary 50px filled accent button (Login / Register / Accept) */
+.field:focus-visible {
+  border-color: var(--hud-stroke);
+  box-shadow: inset 0 0 8px rgba(46, 143, 255, 0.25);
+}
+
+/* Primary 50px HUD accent button (Login / Register / Accept) */
 .button-primary {
   display: flex;
   align-items: center;
   justify-content: center;
   width: 100%;
   min-height: var(--h-button);
-  background: var(--app-accent-fill);
-  color: #fff;
+  border: 8px solid transparent;
+  border-image: var(--hud-src-accent) 28 fill / 24px / 6px stretch;
+  color: var(--app-accent-text);
+  font-family: var(--font-display);
   font-size: var(--fs-headline);
-  font-weight: 600;
-  border-radius: var(--radius-button);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  text-shadow: 0 0 8px var(--hud-glow);
 }
 
 .button-primary.dimmed {

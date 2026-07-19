@@ -67,8 +67,17 @@ struct OrderConfirmSheet: View {
                 .animation(.easeInOut(duration: 0.2), value: tradeViewModel.isPreviewLoading)
                 .padding()
                 .frame(maxWidth: .infinity)
-                .background(Color.appSurface)
-                .clipShape(RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous))
+                .background {
+                    HudPanelShape(chamfer: 8)
+                        .fill(Color.appSurface)
+                        .overlay {
+                            HudPanelShape(chamfer: 8)
+                                .strokeBorder(
+                                    (ticket.side == .buy ? Color.buyGreen : Color.sellRed).opacity(0.55),
+                                    lineWidth: 1
+                                )
+                        }
+                }
 
                 HStack(spacing: AppSpacing.md) {
                     Button("Cancel") {
@@ -91,13 +100,18 @@ struct OrderConfirmSheet: View {
                             }
                         }
                         .animation(.easeInOut(duration: 0.15), value: tradeViewModel.isSubmitting)
-                        .foregroundStyle(confirmEnabled ? .white : .secondary)
+                        .font(.hudButton)
+                        .foregroundStyle(confirmEnabled
+                            ? (ticket.side == .buy ? Color.buyGreen : Color.sellRed)
+                            : .secondary)
                         .frame(maxWidth: .infinity, minHeight: 52)
-                        .background(confirmEnabled ? Color.appAccentFill : Color.appSurfaceElevated)
-                        .clipShape(RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous))
                         .contentShape(Rectangle())
                     }
-                    .buttonStyle(AppPressStyle())
+                    .buttonStyle(HudActionButtonStyle(
+                        accent: confirmEnabled
+                            ? (ticket.side == .buy ? Color.buyGreen : Color.sellRed)
+                            : Color.hudStroke.opacity(0.35)
+                    ))
                     .disabled(!confirmEnabled)
                     .accessibilityLabel(tradeViewModel.isSubmitting
                         ? "Submitting order"

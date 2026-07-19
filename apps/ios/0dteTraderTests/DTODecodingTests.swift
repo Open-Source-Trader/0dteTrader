@@ -43,6 +43,20 @@ final class DTODecodingTests: XCTestCase {
         XCTAssertEqual(me.webullAccountId, "ACC-9")
     }
 
+    func testMe_decodesTradingMode() throws {
+        let me = try decode(MeDTO.self, """
+        {"id":"u-1","email":"dev@example.com","tradingDisabled":false,"webullConfigured":true,"tradingMode":"live"}
+        """)
+        XCTAssertEqual(me.tradingMode, .live)
+    }
+
+    func testMe_tradingModeNilOnOlderServers() throws {
+        let me = try decode(MeDTO.self, """
+        {"id":"u-1","email":"dev@example.com","tradingDisabled":false,"webullConfigured":true}
+        """)
+        XCTAssertNil(me.tradingMode)
+    }
+
     func testAPIErrorEnvelope_decodes() throws {
         let envelope = try decode(APIErrorEnvelope.self, """
         {"error":{"code":"TRADING_DISABLED","message":"Trading is disabled for this user"}}

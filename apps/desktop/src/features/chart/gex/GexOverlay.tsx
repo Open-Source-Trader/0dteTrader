@@ -15,13 +15,13 @@ interface GexOverlayProps {
 }
 
 const COLORS = {
-  gammaFlip: '#ffd60a',
-  callWall: '#30d158',
-  putWall: '#ff453a',
+  gammaFlip: '#ffc53d',
+  callWall: '#22e06a',
+  putWall: '#ff3b4e',
   magnet: '#64d2ff',
   premium: '255, 159, 10', // orange rgb, alpha scaled per band
-  zonePositive: '48, 209, 88',
-  zoneNegative: '255, 69, 58',
+  zonePositive: '34, 224, 106',
+  zoneNegative: '255, 59, 78',
 };
 
 function formatDollars(value: number): string {
@@ -188,15 +188,15 @@ export function GexOverlay({ chart, series, levels, settings, candles, stale }: 
       const gexWidth = ctx.measureText(gexText).width;
       const dexWidth = ctx.measureText(dexText).width;
       const boxWidth = Math.max(gexWidth, dexWidth) + 16;
-      ctx.fillStyle = 'rgba(28, 28, 30, 0.82)';
+      ctx.fillStyle = 'rgba(8, 16, 32, 0.82)';
       ctx.fillRect(pane.width - boxWidth - 6, 6, boxWidth, 34);
       ctx.fillStyle = staleRef.current
-        ? '#ff9f0a'
+        ? '#ffc53d'
         : data.netGex >= 0
           ? COLORS.callWall
           : COLORS.putWall;
       ctx.fillText(gexText, pane.width - boxWidth + 2, 19);
-      ctx.fillStyle = 'rgba(235, 235, 245, 0.6)';
+      ctx.fillStyle = 'rgba(160, 190, 235, 0.65)';
       ctx.fillText(dexText, pane.width - boxWidth + 2, 33);
 
       // ── Hover tooltip: OI + premium breakdown for the band under the cursor ──
@@ -210,18 +210,18 @@ export function GexOverlay({ chart, series, levels, settings, candles, stale }: 
             `Calls: ${formatDollars(level.callPremium).replace('+', '')} (OI ${level.callOi.toLocaleString()})`,
             `Puts: ${formatDollars(level.putPremium).replace('+', '')} (OI ${level.putOi.toLocaleString()})`,
           ];
-          ctx.font = '10px ui-monospace, "SF Mono", Menlo, monospace';
+          ctx.font = '10px "JetBrains Mono", ui-monospace, Menlo, monospace';
           const tipWidth = Math.max(...lines.map((line) => ctx.measureText(line).width)) + 16;
           const tipHeight = lines.length * 14 + 10;
           const tipX = Math.min(mouse.x + 12, pane.width - tipWidth - 4);
           const tipY = Math.min(Math.max(mouse.y - tipHeight - 8, 4), pane.height - tipHeight - 4);
-          ctx.fillStyle = 'rgba(28, 28, 30, 0.92)';
+          ctx.fillStyle = 'rgba(8, 16, 32, 0.92)';
           ctx.fillRect(tipX, tipY, tipWidth, tipHeight);
           ctx.strokeStyle = `rgba(${COLORS.premium}, 0.8)`;
           ctx.lineWidth = 1;
           ctx.strokeRect(tipX + 0.5, tipY + 0.5, tipWidth - 1, tipHeight - 1);
           lines.forEach((line, index) => {
-            ctx.fillStyle = index === 0 ? `rgba(${COLORS.premium}, 0.95)` : 'rgba(235, 235, 245, 0.8)';
+            ctx.fillStyle = index === 0 ? `rgba(${COLORS.premium}, 0.95)` : 'rgba(190, 215, 245, 0.8)';
             ctx.fillText(line, tipX + 8, tipY + 16 + index * 14);
           });
         }

@@ -38,15 +38,15 @@ struct ToastView: View {
         .frame(minHeight: 44)
         .background {
             ZStack {
-                Color.appSurfaceElevated
+                Color.hudPanel
                 tint.opacity(0.15)
             }
         }
-        .clipShape(Capsule())
-        .overlay(Capsule().stroke(tint.opacity(0.9), lineWidth: 1))
-        .shadow(color: AppElevation.toast.color, radius: AppElevation.toast.radius, y: AppElevation.toast.y)
+        .clipShape(HudPanelShape(chamfer: 8))
+        .overlay(HudPanelShape(chamfer: 8).strokeBorder(tint.opacity(0.9), lineWidth: 1))
+        .shadow(color: tint.opacity(0.4), radius: 8)
         .padding(.horizontal, AppSpacing.lg)
-        .contentShape(Capsule())
+        .contentShape(HudPanelShape(chamfer: 8))
         .onTapGesture { onDismiss?() }
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isStaticText)

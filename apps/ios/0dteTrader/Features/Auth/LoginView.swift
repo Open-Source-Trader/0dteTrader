@@ -23,9 +23,11 @@ struct LoginView: View {
 
                 VStack(spacing: AppSpacing.sm) {
                     Text("0dteTrader")
-                        .font(.largeTitle.bold())
+                        .font(.custom("Orbitron-Bold", size: 30, relativeTo: .largeTitle))
+                        .foregroundStyle(Color.appAccent)
+                        .shadow(color: .hudGlow, radius: 10)
                     Text("Rapid options trading")
-                        .font(.subheadline)
+                        .font(.panelLabel)
                         .foregroundStyle(.secondary)
                 }
 

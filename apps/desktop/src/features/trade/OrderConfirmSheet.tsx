@@ -96,6 +96,8 @@ export function OrderConfirmSheet({ tradeStore, ticket }: OrderConfirmSheetProps
             gap: 12,
             padding: 16,
             background: 'var(--app-surface)',
+            border: `1px solid color-mix(in srgb, ${sideColor} 55%, transparent)`,
+            boxShadow: `0 0 10px color-mix(in srgb, ${sideColor} 25%, transparent)`,
             borderRadius: 'var(--radius-button)',
           }}
         >

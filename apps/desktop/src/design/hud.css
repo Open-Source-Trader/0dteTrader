@@ -1,0 +1,213 @@
+/* HUD primitives: chamfered neon cards, badges, and action buttons.
+ *
+ * Cards use a border-image 9-slice SVG with the stroke, corner ticks, outer
+ * glow (feGaussianBlur), dark fill, and top-edge highlight all baked in — a
+ * single cached raster per variant, no runtime filters. This matters around
+ * the streaming chart canvases: a CSS `filter` on an ancestor would force the
+ * subtree to re-rasterize on every tick. Reserve `drop-shadow` for elements
+ * that repaint rarely (button hover states).
+ *
+ * Geometry: SVG master is 96x96 with an 8px glow margin and 10px chamfer;
+ * slice 28 = margin + chamfer + 10px of straight edge. `outset 8px` pushes
+ * the baked glow outside the border box so the visible stroke lands exactly
+ * on the element edge.
+ *
+ * Regenerate variants with `node scripts/gen-hud-svg.mjs` if geometry changes.
+ */
+
+.hud-card {
+  --hud-border-src: var(--hud-src-accent);
+  border: 10px solid transparent;
+  border-image: var(--hud-border-src) 28 fill / 28px / 8px stretch;
+}
+
+/* Chip-scale card: corners render at 3/4 scale (7.5px chamfer, 6px glow) so
+   slices never overlap on short elements (<56px tall) while matching the
+   full-scale card frames closely. */
+.hud-chip {
+  --hud-border-src: var(--hud-src-accent);
+  border: 7px solid transparent;
+  border-image: var(--hud-border-src) 28 fill / 21px / 6px stretch;
+}
+
+/* Chamfered clipping (chart canvas corners, tinted fills). box-shadow and
+   the baked border-image glow are cut by clip-path — glow must come from a
+   non-clipped ancestor wherever this is used. */
+.hud-clip {
+  clip-path: polygon(
+    var(--hud-chamfer) 0,
+    calc(100% - var(--hud-chamfer)) 0,
+    100% var(--hud-chamfer),
+    100% calc(100% - var(--hud-chamfer)),
+    calc(100% - var(--hud-chamfer)) 100%,
+    var(--hud-chamfer) 100%,
+    0 calc(100% - var(--hud-chamfer)),
+    0 var(--hud-chamfer)
+  );
+}
+
+/* Glowing display text (titles, the 0dteTrader logo). */
+.hud-title {
+  font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--app-accent);
+  text-shadow:
+    0 0 6px var(--hud-glow-strong),
+    0 0 18px var(--hud-glow);
+}
+
+/* Mode badge (PRACTICE amber / LIVE green). */
+.hud-badge {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: var(--fs-caption2);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 3px 8px 2px;
+  color: var(--hud-amber);
+  border: 1px solid currentColor;
+  background: var(--hud-panel-fill);
+  clip-path: polygon(
+    5px 0,
+    calc(100% - 5px) 0,
+    100% 5px,
+    100% calc(100% - 5px),
+    calc(100% - 5px) 100%,
+    5px 100%,
+    0 calc(100% - 5px),
+    0 5px
+  );
+}
+.hud-badge--live {
+  color: var(--buy-green);
+}
+
+/* Trade action button: chamfered double frame + tinted fill + baked glow.
+   Label content must sit above the ::after tint layer. */
+.hud-btn {
+  --hud-border-src: var(--hud-src-accent);
+  position: relative;
+  border: 8px solid transparent;
+  border-image: var(--hud-border-src) 28 fill / 24px / 6px stretch;
+  background: none;
+  font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.hud-btn::before {
+  /* inner frame */
+  content: '';
+  position: absolute;
+  inset: 1px;
+  pointer-events: none;
+  border: 4px solid transparent;
+  border-image: var(--hud-border-src) 28 / 12px / 0 stretch;
+  opacity: 0.7;
+}
+.hud-btn::after {
+  /* accent tint fill */
+  content: '';
+  position: absolute;
+  inset: 2px;
+  pointer-events: none;
+  background: var(--hud-btn-tint, transparent);
+  clip-path: polygon(
+    8px 0,
+    calc(100% - 8px) 0,
+    100% 8px,
+    100% calc(100% - 8px),
+    calc(100% - 8px) 100%,
+    8px 100%,
+    0 calc(100% - 8px),
+    0 8px
+  );
+}
+.hud-btn > * {
+  position: relative;
+  z-index: 1;
+}
+.hud-btn--buy {
+  --hud-border-src: var(--hud-src-buy);
+  --hud-btn-tint: rgba(34, 224, 106, 0.14);
+  color: var(--buy-green);
+  text-shadow: 0 0 8px rgba(34, 224, 106, 0.6);
+}
+.hud-btn--sell {
+  --hud-border-src: var(--hud-src-sell);
+  --hud-btn-tint: rgba(255, 59, 78, 0.14);
+  color: var(--sell-red);
+  text-shadow: 0 0 8px rgba(255, 59, 78, 0.6);
+}
+.hud-btn:active:not(:disabled) {
+  transform: scale(var(--press-scale));
+}
+.hud-btn:disabled {
+  /* Single dim only — the mockup keeps disabled SELL/BUY clearly visible
+     (overrides .trade-action-button's opacity + saturate double-dim). */
+  opacity: 0.55;
+  filter: none;
+  cursor: default;
+}
+
+/* Decorative side chevrons inside SELL/BUY (mockup detail). */
+.hud-btn .hud-chevrons {
+  font-size: 10px;
+  letter-spacing: -1px;
+  opacity: 0.55;
+}
+
+/* AUTO chip: chamfered toggle, accent glow when on. Height matches the
+   36px segmented control it sits beside. */
+.hud-toggle-chip {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  height: 36px;
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: var(--fs-caption);
+  letter-spacing: 0.06em;
+  padding: 0 14px;
+  color: var(--label-secondary);
+  border: 5px solid transparent;
+  border-image: var(--hud-src-flat) 28 fill / 14px / 4px stretch;
+}
+.hud-toggle-chip.on {
+  color: var(--app-accent-text);
+  border-image-source: var(--hud-src-accent);
+  text-shadow: 0 0 6px var(--hud-glow);
+}
+
+/* ── Accent variants (generated data-URIs) ─────────────────────────────── */
+:root {
+  --hud-src-accent: url("data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%2796%27 height=%2796%27%3E%3Cfilter id=%27b%27 x=%27-30%25%27 y=%27-30%25%27 width=%27160%25%27 height=%27160%25%27%3E%3CfeGaussianBlur stdDeviation=%273.2%27/%3E%3C/filter%3E%3CclipPath id=%27c%27%3E%3Cpath d=%27M18 8 H78 L88 18 V78 L78 88 H18 L8 78 V18 Z%27/%3E%3C/clipPath%3E%3ClinearGradient id=%27h%27 x1=%270%27 y1=%270%27 x2=%270%27 y2=%271%27%3E%3Cstop offset=%270%27 stop-color=%27%23a0d2ff38%27/%3E%3Cstop offset=%271%27 stop-color=%27%23a0d2ff38%27 stop-opacity=%270%27/%3E%3C/linearGradient%3E%3Cpath d=%27M18 8 H78 L88 18 V78 L78 88 H18 L8 78 V18 Z%27 fill=%27none%27 stroke=%27%233b9eff%27 stroke-width=%272.5%27 opacity=%270.85%27 filter=%27url(%23b)%27/%3E%3Cpath d=%27M18 8 H78 L88 18 V78 L78 88 H18 L8 78 V18 Z%27 fill=%27%23081020eb%27/%3E%3Crect x=%278%27 y=%278%27 width=%2780%27 height=%2718%27 fill=%27url(%23h)%27 clip-path=%27url(%23c)%27/%3E%3Cpath d=%27M18 8 H78 L88 18 V78 L78 88 H18 L8 78 V18 Z%27 fill=%27none%27 stroke=%27%232e8fff%27 stroke-width=%271.5%27/%3E%3Cpath d=%27M19.5 5.5 L5.5 19.5 M76.5 5.5 L90.5 19.5 M90.5 76.5 L76.5 90.5 M5.5 76.5 L19.5 90.5%27 fill=%27none%27 stroke=%27%232e8fff%27 stroke-width=%271.2%27 opacity=%270.55%27/%3E%3C/svg%3E");
+  --hud-src-buy: url("data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%2796%27 height=%2796%27%3E%3Cfilter id=%27b%27 x=%27-30%25%27 y=%27-30%25%27 width=%27160%25%27 height=%27160%25%27%3E%3CfeGaussianBlur stdDeviation=%273.2%27/%3E%3C/filter%3E%3CclipPath id=%27c%27%3E%3Cpath d=%27M18 8 H78 L88 18 V78 L78 88 H18 L8 78 V18 Z%27/%3E%3C/clipPath%3E%3ClinearGradient id=%27h%27 x1=%270%27 y1=%270%27 x2=%270%27 y2=%271%27%3E%3Cstop offset=%270%27 stop-color=%27%23a0d2ff38%27/%3E%3Cstop offset=%271%27 stop-color=%27%23a0d2ff38%27 stop-opacity=%270%27/%3E%3C/linearGradient%3E%3Cpath d=%27M18 8 H78 L88 18 V78 L78 88 H18 L8 78 V18 Z%27 fill=%27none%27 stroke=%27%2322e06a%27 stroke-width=%272.5%27 opacity=%270.8%27 filter=%27url(%23b)%27/%3E%3Cpath d=%27M18 8 H78 L88 18 V78 L78 88 H18 L8 78 V18 Z%27 fill=%27%23081020eb%27/%3E%3Crect x=%278%27 y=%278%27 width=%2780%27 height=%2718%27 fill=%27url(%23h)%27 clip-path=%27url(%23c)%27/%3E%3Cpath d=%27M18 8 H78 L88 18 V78 L78 88 H18 L8 78 V18 Z%27 fill=%27none%27 stroke=%27%2322e06a%27 stroke-width=%271.5%27/%3E%3Cpath d=%27M19.5 5.5 L5.5 19.5 M76.5 5.5 L90.5 19.5 M90.5 76.5 L76.5 90.5 M5.5 76.5 L19.5 90.5%27 fill=%27none%27 stroke=%27%2322e06a%27 stroke-width=%271.2%27 opacity=%270.55%27/%3E%3C/svg%3E");
+  --hud-src-sell: url("data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%2796%27 height=%2796%27%3E%3Cfilter id=%27b%27 x=%27-30%25%27 y=%27-30%25%27 width=%27160%25%27 height=%27160%25%27%3E%3CfeGaussianBlur stdDeviation=%273.2%27/%3E%3C/filter%3E%3CclipPath id=%27c%27%3E%3Cpath d=%27M18 8 H78 L88 18 V78 L78 88 H18 L8 78 V18 Z%27/%3E%3C/clipPath%3E%3ClinearGradient id=%27h%27 x1=%270%27 y1=%270%27 x2=%270%27 y2=%271%27%3E%3Cstop offset=%270%27 stop-color=%27%23a0d2ff38%27/%3E%3Cstop offset=%271%27 stop-color=%27%23a0d2ff38%27 stop-opacity=%270%27/%3E%3C/linearGradient%3E%3Cpath d=%27M18 8 H78 L88 18 V78 L78 88 H18 L8 78 V18 Z%27 fill=%27none%27 stroke=%27%23ff3b4e%27 stroke-width=%272.5%27 opacity=%270.8%27 filter=%27url(%23b)%27/%3E%3Cpath d=%27M18 8 H78 L88 18 V78 L78 88 H18 L8 78 V18 Z%27 fill=%27%23081020eb%27/%3E%3Crect x=%278%27 y=%278%27 width=%2780%27 height=%2718%27 fill=%27url(%23h)%27 clip-path=%27url(%23c)%27/%3E%3Cpath d=%27M18 8 H78 L88 18 V78 L78 88 H18 L8 78 V18 Z%27 fill=%27none%27 stroke=%27%23ff3b4e%27 stroke-width=%271.5%27/%3E%3Cpath d=%27M19.5 5.5 L5.5 19.5 M76.5 5.5 L90.5 19.5 M90.5 76.5 L76.5 90.5 M5.5 76.5 L19.5 90.5%27 fill=%27none%27 stroke=%27%23ff3b4e%27 stroke-width=%271.2%27 opacity=%270.55%27/%3E%3C/svg%3E");
+  --hud-src-warn: url("data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%2796%27 height=%2796%27%3E%3Cfilter id=%27b%27 x=%27-30%25%27 y=%27-30%25%27 width=%27160%25%27 height=%27160%25%27%3E%3CfeGaussianBlur stdDeviation=%273.2%27/%3E%3C/filter%3E%3CclipPath id=%27c%27%3E%3Cpath d=%27M18 8 H78 L88 18 V78 L78 88 H18 L8 78 V18 Z%27/%3E%3C/clipPath%3E%3ClinearGradient id=%27h%27 x1=%270%27 y1=%270%27 x2=%270%27 y2=%271%27%3E%3Cstop offset=%270%27 stop-color=%27%23a0d2ff38%27/%3E%3Cstop offset=%271%27 stop-color=%27%23a0d2ff38%27 stop-opacity=%270%27/%3E%3C/linearGradient%3E%3Cpath d=%27M18 8 H78 L88 18 V78 L78 88 H18 L8 78 V18 Z%27 fill=%27none%27 stroke=%27%23ffc53d%27 stroke-width=%272.5%27 opacity=%270.75%27 filter=%27url(%23b)%27/%3E%3Cpath d=%27M18 8 H78 L88 18 V78 L78 88 H18 L8 78 V18 Z%27 fill=%27%23081020eb%27/%3E%3Crect x=%278%27 y=%278%27 width=%2780%27 height=%2718%27 fill=%27url(%23h)%27 clip-path=%27url(%23c)%27/%3E%3Cpath d=%27M18 8 H78 L88 18 V78 L78 88 H18 L8 78 V18 Z%27 fill=%27none%27 stroke=%27%23ffc53d%27 stroke-width=%271.5%27/%3E%3Cpath d=%27M19.5 5.5 L5.5 19.5 M76.5 5.5 L90.5 19.5 M90.5 76.5 L76.5 90.5 M5.5 76.5 L19.5 90.5%27 fill=%27none%27 stroke=%27%23ffc53d%27 stroke-width=%271.2%27 opacity=%270.55%27/%3E%3C/svg%3E");
+  --hud-src-flat: url("data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%2796%27 height=%2796%27%3E%3CclipPath id=%27c%27%3E%3Cpath d=%27M18 8 H78 L88 18 V78 L78 88 H18 L8 78 V18 Z%27/%3E%3C/clipPath%3E%3ClinearGradient id=%27h%27 x1=%270%27 y1=%270%27 x2=%270%27 y2=%271%27%3E%3Cstop offset=%270%27 stop-color=%27%23a0d2ff38%27/%3E%3Cstop offset=%271%27 stop-color=%27%23a0d2ff38%27 stop-opacity=%270%27/%3E%3C/linearGradient%3E%3Cpath d=%27M18 8 H78 L88 18 V78 L78 88 H18 L8 78 V18 Z%27 fill=%27%23081020eb%27/%3E%3Crect x=%278%27 y=%278%27 width=%2780%27 height=%2718%27 fill=%27url(%23h)%27 clip-path=%27url(%23c)%27/%3E%3Cpath d=%27M18 8 H78 L88 18 V78 L78 88 H18 L8 78 V18 Z%27 fill=%27none%27 stroke=%27%232e8fff8c%27 stroke-width=%271.3%27/%3E%3C/svg%3E");
+}
+
+.hud-card--accent {
+  --hud-border-src: var(--hud-src-accent);
+}
+
+.hud-card--buy {
+  --hud-border-src: var(--hud-src-buy);
+}
+
+.hud-card--sell {
+  --hud-border-src: var(--hud-src-sell);
+}
+
+.hud-card--warn {
+  --hud-border-src: var(--hud-src-warn);
+}
+
+.hud-card--flat {
+  --hud-border-src: var(--hud-src-flat);
+}
+

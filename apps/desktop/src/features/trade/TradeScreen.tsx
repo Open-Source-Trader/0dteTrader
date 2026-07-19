@@ -207,6 +207,7 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
   return (
     <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', position: 'relative' }}>
       <NavBar
+        title="0dteTrader"
         leading={
           <>
             <button className="navbar-icon-button" onClick={() => setShowProfile(true)} aria-label="Profile">
@@ -303,7 +304,7 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
             {/* Static hairline between chart and panel */}
             <div
               aria-hidden
-              style={{ height: DIVIDER_HEIGHT, flex: 'none', background: 'var(--app-surface)' }}
+              style={{ height: DIVIDER_HEIGHT, flex: 'none', background: 'var(--hud-stroke-dim)' }}
             />
 
             <div

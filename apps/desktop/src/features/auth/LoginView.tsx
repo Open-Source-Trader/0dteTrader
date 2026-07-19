@@ -52,14 +52,15 @@ export function LoginView({ store }: { store: AuthStore }) {
       >
         <div
           aria-hidden="true"
+          className="hud-clip"
           style={{
             width: 56,
             height: 56,
-            borderRadius: 14,
             background: 'linear-gradient(135deg, var(--app-accent), var(--app-accent-fill))',
+            boxShadow: 'inset 0 0 12px rgba(5, 10, 20, 0.6)',
           }}
         />
-        <h1 style={{ fontSize: 'var(--fs-large-title)', fontWeight: 700, letterSpacing: '-0.4px' }}>
+        <h1 className="hud-title" style={{ fontSize: 'var(--fs-title)' }}>
           0dteTrader
         </h1>
         <span className="text-secondary" style={{ fontSize: 'var(--fs-subheadline)' }}>

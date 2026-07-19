@@ -85,7 +85,7 @@ final class DrawingOverlayView: UIView {
 
     // Dynamic token twin from DesignSystem/AppColors.swift (dark + light).
     private let accentColor: UIColor = .appAccent
-    private let alertColor = UIColor.systemOrange
+    private let alertColor = UIColor.appWarning
     /// Handle fill contrasts the chart surface in both themes.
     private let handleFillColor = UIColor { traits in
         traits.userInterfaceStyle == .dark

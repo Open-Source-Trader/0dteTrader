@@ -49,9 +49,9 @@ enum GexPresentation {
         min(0.15 + max(intensity, 0) * cap, cap)
     }
 
-    static let gammaFlipColor = UIColor(red: 1, green: 214 / 255, blue: 10 / 255, alpha: 1)
-    static let callWallColor = UIColor(red: 48 / 255, green: 209 / 255, blue: 88 / 255, alpha: 1)
-    static let putWallColor = UIColor(red: 1, green: 69 / 255, blue: 58 / 255, alpha: 1)
+    static let gammaFlipColor = UIColor(red: 1, green: 197 / 255, blue: 61 / 255, alpha: 1)
+    static let callWallColor = UIColor(red: 34 / 255, green: 224 / 255, blue: 106 / 255, alpha: 1)
+    static let putWallColor = UIColor(red: 1, green: 59 / 255, blue: 78 / 255, alpha: 1)
     static let magnetColor = UIColor(red: 100 / 255, green: 210 / 255, blue: 1, alpha: 1)
     static let premiumColor = UIColor(red: 1, green: 159 / 255, blue: 10 / 255, alpha: 1)
 }

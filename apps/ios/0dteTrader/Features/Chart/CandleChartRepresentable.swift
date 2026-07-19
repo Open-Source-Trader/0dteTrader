@@ -12,7 +12,7 @@ final class ChartMarkerView: MarkerView {
 
     private let textLabel: UILabel = {
         let label = UILabel()
-        label.font = .monospacedDigitSystemFont(ofSize: 10, weight: .medium)
+        label.font = UIFont(name: "JetBrainsMono-Regular", size: 10) ?? .monospacedDigitSystemFont(ofSize: 10, weight: .medium)
         label.textColor = .white
         label.numberOfLines = 1
         return label
@@ -181,10 +181,10 @@ struct CandleChartRepresentable: UIViewRepresentable {
 
         let xAxis = chart.xAxis
         xAxis.labelPosition = .bottom
-        xAxis.labelTextColor = .secondaryLabel
-        xAxis.labelFont = .monospacedDigitSystemFont(ofSize: 10, weight: .regular)
-        xAxis.gridColor = UIColor.separator.withAlphaComponent(0.25)
-        xAxis.axisLineColor = UIColor.separator
+        xAxis.labelTextColor = .hudAxisLabel
+        xAxis.labelFont = UIFont(name: "JetBrainsMono-Regular", size: 10) ?? .monospacedDigitSystemFont(ofSize: 10, weight: .regular)
+        xAxis.gridColor = UIColor.hudStroke.withAlphaComponent(0.1)
+        xAxis.axisLineColor = UIColor.hudStroke.withAlphaComponent(0.35)
         xAxis.granularity = 1
         xAxis.setLabelCount(6, force: false)
 
@@ -198,9 +198,9 @@ struct CandleChartRepresentable: UIViewRepresentable {
         rightAxis.axisMinimum = 0
 
         let leftAxis = chart.leftAxis
-        leftAxis.labelTextColor = .secondaryLabel
-        leftAxis.labelFont = .monospacedDigitSystemFont(ofSize: 10, weight: .regular)
-        leftAxis.gridColor = UIColor.separator.withAlphaComponent(0.25)
+        leftAxis.labelTextColor = .hudAxisLabel
+        leftAxis.labelFont = UIFont(name: "JetBrainsMono-Regular", size: 10) ?? .monospacedDigitSystemFont(ofSize: 10, weight: .regular)
+        leftAxis.gridColor = UIColor.hudStroke.withAlphaComponent(0.1)
         leftAxis.axisLineColor = .clear
 
         return container
@@ -232,6 +232,18 @@ struct CandleChartRepresentable: UIViewRepresentable {
             return
         }
         let previousCount = chart.data?.candleData?.entryCount ?? 0
+
+        // Dashed accent line + axis tag at the last price (mockup's glowing
+        // price tag; CoreGraphics can't bloom, so a bright tag stands in).
+        chart.leftAxis.removeAllLimitLines()
+        if let lastClose = candles.last?.close {
+            let priceLine = ChartLimitLine(limit: lastClose)
+            priceLine.lineColor = UIColor.appAccent.withAlphaComponent(0.7)
+            priceLine.lineWidth = 0.75
+            priceLine.lineDashLengths = [4, 3]
+            priceLine.drawLabelEnabled = false
+            chart.leftAxis.addLimitLine(priceLine)
+        }
 
         let candleEntries = candles.enumerated().map { index, candle in
             CandleChartDataEntry(
@@ -270,7 +282,7 @@ struct CandleChartRepresentable: UIViewRepresentable {
         candleSet.barSpace = ChartMetrics.barSpace
         candleSet.drawValuesEnabled = false
         candleSet.axisDependency = .left
-        candleSet.highlightColor = UIColor.separator
+        candleSet.highlightColor = UIColor.hudStroke.withAlphaComponent(0.5)
         candleSet.highlightLineWidth = 0.5
         candleSet.highlightLineDashLengths = [4, 3]
         candleSet.drawHorizontalHighlightIndicatorEnabled = true

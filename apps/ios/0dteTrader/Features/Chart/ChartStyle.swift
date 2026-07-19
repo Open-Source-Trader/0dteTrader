@@ -19,17 +19,34 @@ enum ChartStyle {
     /// Fixed colors for price overlays, shared by the chart lines and the
     /// indicator-settings legend swatches so they never drift.
     static let overlayColors: [String: UIColor] = [
-        "sma": .systemOrange,
-        "ema": .systemCyan,
-        "vwap": .systemPurple,
-        "bollingerUpper": .systemGray,
-        "bollingerMiddle": .systemTeal,
-        "bollingerLower": .systemGray,
+        "sma": UIColor(red: 0.231, green: 0.620, blue: 1.0, alpha: 1), // #3B9EFF
+        "ema": UIColor(red: 0.392, green: 0.824, blue: 1.0, alpha: 1), // #64D2FF
+        "vwap": UIColor(red: 0.694, green: 0.298, blue: 0.941, alpha: 1), // #B14CF0
+        "bollingerUpper": UIColor(red: 0.290, green: 0.435, blue: 0.647, alpha: 1), // #4A6FA5
+        "bollingerMiddle": UIColor(red: 0.251, green: 0.796, blue: 0.878, alpha: 1), // #40CBE0
+        "bollingerLower": UIColor(red: 0.290, green: 0.435, blue: 0.647, alpha: 1), // #4A6FA5
+    ]
+
+    /// Sub-pane series colors, shared with the pane renderables so the
+    /// legend swatches and lines never drift. Values mirror the desktop
+    /// `--chart-*` tokens (RSI amber, MACD blue/orange).
+    static let paneColors: [String: UIColor] = [
+        "rsi": UIColor(red: 1.0, green: 0.773, blue: 0.239, alpha: 1), // #FFC53D
+        "macd": UIColor(red: 0.231, green: 0.620, blue: 1.0, alpha: 1), // #3B9EFF
+        "macdSignal": UIColor(red: 1.0, green: 0.624, blue: 0.039, alpha: 1), // #FF9F0A
+        "stochK": UIColor(red: 0.231, green: 0.620, blue: 1.0, alpha: 1), // #3B9EFF
+        "stochD": UIColor(red: 1.0, green: 0.624, blue: 0.039, alpha: 1), // #FF9F0A
+        "atr": UIColor(red: 0.251, green: 0.796, blue: 0.878, alpha: 1), // #40CBE0
     ]
 
     /// SwiftUI twin of an overlay color (settings-sheet legend swatches).
     static func overlayColor(for id: String) -> Color {
         Color(uiColor: overlayColors[id] ?? .systemOrange)
+    }
+
+    /// SwiftUI twin of a sub-pane color.
+    static func paneColor(for id: String) -> Color {
+        Color(uiColor: paneColors[id] ?? .systemOrange)
     }
 }
 

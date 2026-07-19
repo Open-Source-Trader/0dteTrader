@@ -198,5 +198,41 @@ export function IndicatorPane({
     }
   }, [visibleRange]);
 
-  return <div ref={containerRef} style={{ height, flex: 'none', position: 'relative' }} />;
+  const resetView = () => {
+    const chart = chartRef.current;
+    if (!chart) return;
+    chart.timeScale().fitContent();
+  };
+
+  return (
+    <div style={{ height, flex: 'none', position: 'relative' }}>
+      <div ref={containerRef} style={{ position: 'absolute', inset: 0 }} />
+      <button
+        onClick={resetView}
+        aria-label="Reset pane view"
+        style={{
+          position: 'absolute',
+          bottom: 4,
+          right: 8,
+          zIndex: 5,
+          width: 20,
+          height: 20,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          border: '1px solid var(--hud-stroke-dim)',
+          borderRadius: 3,
+          background: 'var(--app-surface)',
+          color: 'var(--label-secondary)',
+          fontSize: 9,
+          fontWeight: 600,
+          fontFamily: 'var(--font-mono)',
+          cursor: 'pointer',
+          opacity: 0.7,
+        }}
+      >
+        A
+      </button>
+    </div>
+  );
 }

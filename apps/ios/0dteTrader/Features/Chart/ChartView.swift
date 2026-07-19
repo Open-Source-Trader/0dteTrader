@@ -14,6 +14,8 @@ struct ChartView: View {
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var showClearConfirm = false
+    @State private var chartResetToken = 0
+    @State private var paneResetTokens: [String: Int] = [:]
 
     private let paneHeight: CGFloat = 68
 
@@ -52,8 +54,10 @@ struct ChartView: View {
                     gexModel: viewModel.gexSettings.enabled ? viewModel.gexLevels : nil,
                     gexSettings: viewModel.gexSettings,
                     gexStale: viewModel.gexStale,
-                    onVisibleRangeChange: { viewModel.visibleXRange = $0 }
+                    onVisibleRangeChange: { viewModel.visibleXRange = $0 },
+                    resetToken: chartResetToken
                 )
+                resetButton { chartResetToken += 1 }
                 if let banner = viewModel.twcRenderModel?.banner {
                     TwcBiasBannerView(banner: banner)
                 }
@@ -88,18 +92,21 @@ struct ChartView: View {
             if let rsi = viewModel.rsiSeries {
                 hudPane(
                     title: "RSI (\(viewModel.indicatorSettings.rsiPeriod))",
-                    readouts: [readout(for: rsi, label: "", colorId: "rsi")]
-                ) {
-                    IndicatorPaneRepresentable(
-                        series: [.init(id: rsi.id, kind: .line, values: rsi.values)],
-                        colors: ["rsi": ChartStyle.paneColors["rsi"]!],
-                        guideLines: [30, 70],
-                        yRange: 0...100,
-                        xValueCount: viewModel.candles.count,
-                        visibleRange: viewModel.visibleXRange,
-                        onVisibleRangeChange: { viewModel.visibleXRange = $0 }
-                    )
-                }
+                    readouts: [readout(for: rsi, label: "", colorId: "rsi")],
+                    onReset: { paneResetTokens["rsi", default: 0] += 1 },
+                    content: {
+                        IndicatorPaneRepresentable(
+                            series: [.init(id: rsi.id, kind: .line, values: rsi.values)],
+                            colors: ["rsi": ChartStyle.paneColors["rsi"]!],
+                            guideLines: [30, 70],
+                            yRange: 0...100,
+                            xValueCount: viewModel.candles.count,
+                            visibleRange: viewModel.visibleXRange,
+                            onVisibleRangeChange: { viewModel.visibleXRange = $0 },
+                            resetToken: paneResetTokens["rsi", default: 0]
+                        )
+                    }
+                )
             }
 
             if let macd = viewModel.macdSeries {
@@ -109,23 +116,26 @@ struct ChartView: View {
                         readout(for: macd.macd, label: "MACD", colorId: "macd"),
                         readout(for: macd.signal, label: "Sig", colorId: "macdSignal"),
                         histogramReadout(for: macd.histogram, label: "Hist"),
-                    ]
-                ) {
-                    IndicatorPaneRepresentable(
-                        series: [
-                            .init(id: macd.histogram.id, kind: .histogram, values: macd.histogram.values),
-                            .init(id: macd.macd.id, kind: .line, values: macd.macd.values),
-                            .init(id: macd.signal.id, kind: .line, values: macd.signal.values),
-                        ],
-                        colors: [
-                            "macd": ChartStyle.paneColors["macd"]!,
-                            "macdSignal": ChartStyle.paneColors["macdSignal"]!,
-                        ],
-                        xValueCount: viewModel.candles.count,
-                        visibleRange: viewModel.visibleXRange,
-                        onVisibleRangeChange: { viewModel.visibleXRange = $0 }
-                    )
-                }
+                    ],
+                    onReset: { paneResetTokens["macd", default: 0] += 1 },
+                    content: {
+                        IndicatorPaneRepresentable(
+                            series: [
+                                .init(id: macd.histogram.id, kind: .histogram, values: macd.histogram.values),
+                                .init(id: macd.macd.id, kind: .line, values: macd.macd.values),
+                                .init(id: macd.signal.id, kind: .line, values: macd.signal.values),
+                            ],
+                            colors: [
+                                "macd": ChartStyle.paneColors["macd"]!,
+                                "macdSignal": ChartStyle.paneColors["macdSignal"]!,
+                            ],
+                            xValueCount: viewModel.candles.count,
+                            visibleRange: viewModel.visibleXRange,
+                            onVisibleRangeChange: { viewModel.visibleXRange = $0 },
+                            resetToken: paneResetTokens["macd", default: 0]
+                        )
+                    }
+                )
             }
 
             if let stoch = viewModel.stochSeries {
@@ -136,39 +146,45 @@ struct ChartView: View {
                     readouts: [
                         readout(for: stoch.k, label: "%K", colorId: "stochK"),
                         readout(for: stoch.d, label: "%D", colorId: "stochD"),
-                    ]
-                ) {
-                    IndicatorPaneRepresentable(
-                        series: [
-                            .init(id: stoch.k.id, kind: .line, values: stoch.k.values),
-                            .init(id: stoch.d.id, kind: .line, values: stoch.d.values),
-                        ],
-                        colors: [
-                            "stochK": ChartStyle.paneColors["stochK"]!,
-                            "stochD": ChartStyle.paneColors["stochD"]!,
-                        ],
-                        guideLines: [20, 80],
-                        yRange: 0...100,
-                        xValueCount: viewModel.candles.count,
-                        visibleRange: viewModel.visibleXRange,
-                        onVisibleRangeChange: { viewModel.visibleXRange = $0 }
-                    )
-                }
+                    ],
+                    onReset: { paneResetTokens["stoch", default: 0] += 1 },
+                    content: {
+                        IndicatorPaneRepresentable(
+                            series: [
+                                .init(id: stoch.k.id, kind: .line, values: stoch.k.values),
+                                .init(id: stoch.d.id, kind: .line, values: stoch.d.values),
+                            ],
+                            colors: [
+                                "stochK": ChartStyle.paneColors["stochK"]!,
+                                "stochD": ChartStyle.paneColors["stochD"]!,
+                            ],
+                            guideLines: [20, 80],
+                            yRange: 0...100,
+                            xValueCount: viewModel.candles.count,
+                            visibleRange: viewModel.visibleXRange,
+                            onVisibleRangeChange: { viewModel.visibleXRange = $0 },
+                            resetToken: paneResetTokens["stoch", default: 0]
+                        )
+                    }
+                )
             }
 
             if let atr = viewModel.atrSeries {
                 hudPane(
                     title: "ATR (\(viewModel.indicatorSettings.atrPeriod))",
-                    readouts: [readout(for: atr, label: "", colorId: "atr")]
-                ) {
-                    IndicatorPaneRepresentable(
-                        series: [.init(id: atr.id, kind: .line, values: atr.values)],
-                        colors: ["atr": ChartStyle.paneColors["atr"]!],
-                        xValueCount: viewModel.candles.count,
-                        visibleRange: viewModel.visibleXRange,
-                        onVisibleRangeChange: { viewModel.visibleXRange = $0 }
-                    )
-                }
+                    readouts: [readout(for: atr, label: "", colorId: "atr")],
+                    onReset: { paneResetTokens["atr", default: 0] += 1 },
+                    content: {
+                        IndicatorPaneRepresentable(
+                            series: [.init(id: atr.id, kind: .line, values: atr.values)],
+                            colors: ["atr": ChartStyle.paneColors["atr"]!],
+                            xValueCount: viewModel.candles.count,
+                            visibleRange: viewModel.visibleXRange,
+                            onVisibleRangeChange: { viewModel.visibleXRange = $0 },
+                            resetToken: paneResetTokens["atr", default: 0]
+                        )
+                    }
+                )
             }
         }
         .background(Color.appBackground)
@@ -219,6 +235,7 @@ struct ChartView: View {
     private func hudPane(
         title: String,
         readouts: [PaneReadout],
+        onReset: (() -> Void)? = nil,
         @ViewBuilder content: () -> some View
     ) -> some View {
         VStack(spacing: 0) {
@@ -235,8 +252,26 @@ struct ChartView: View {
             .font(.priceSmall)
             .padding(.horizontal, AppSpacing.sm)
             .padding(.top, AppSpacing.xxs)
-            content()
-                .frame(height: paneHeight)
+            ZStack(alignment: .bottomTrailing) {
+                content()
+                    .frame(height: paneHeight)
+                if let onReset {
+                    Button {
+                        Haptics.impact(.light)
+                        onReset()
+                    } label: {
+                        Text("A")
+                            .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 20, height: 20)
+                            .background(Color.appSurface, in: RoundedRectangle(cornerRadius: 3))
+                            .overlay(RoundedRectangle(cornerRadius: 3).strokeBorder(Color.hudStroke.opacity(0.5), lineWidth: 1))
+                    }
+                    .opacity(0.7)
+                    .padding(.trailing, AppSpacing.sm)
+                    .padding(.bottom, AppSpacing.xs)
+                }
+            }
         }
         .hudCard(accent: .hudStrokeDim, glow: false, ticks: false)
         .padding(.horizontal, AppSpacing.sm)
@@ -334,6 +369,24 @@ struct ChartView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
         .padding(.bottom, AppSpacing.md)
         .transition(.move(edge: .bottom).combined(with: .opacity))
+    }
+
+    private func resetButton(action: @escaping () -> Void) -> some View {
+        Button {
+            Haptics.impact(.light)
+            action()
+        } label: {
+            Text("A")
+                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                .foregroundStyle(.secondary)
+                .frame(width: 24, height: 24)
+                .background(Color.appSurface, in: RoundedRectangle(cornerRadius: 4))
+                .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(Color.hudStroke.opacity(0.5), lineWidth: 1))
+        }
+        .opacity(0.7)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+        .padding(.trailing, AppSpacing.sm)
+        .padding(.bottom, 28)
     }
 
     // MARK: - Header

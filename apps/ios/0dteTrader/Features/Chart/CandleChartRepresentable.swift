@@ -24,6 +24,7 @@ struct CandleChartRepresentable: UIViewRepresentable {
     /// Called with the main chart's visible x-range whenever the user pans or
     /// zooms, so non-interactive indicator panes can track the same window.
     var onVisibleRangeChange: ((ClosedRange<Double>) -> Void)?
+    var resetToken: Int = 0
 
     /// Hosts the chart plus the annotation overlay at identical frames so the
     /// overlay can reuse the chart's pixel coordinate space directly.
@@ -64,6 +65,7 @@ struct CandleChartRepresentable: UIViewRepresentable {
     final class Coordinator: NSObject, ChartViewDelegate {
         var onVisibleRange: ((ClosedRange<Double>) -> Void)?
         var onTransform: (() -> Void)?
+        var lastResetToken: Int = 0
 
         func chartTranslated(_ chartView: ChartViewBase, dX: CGFloat, dY: CGFloat) {
             emit(chartView)
@@ -312,6 +314,13 @@ struct CandleChartRepresentable: UIViewRepresentable {
         // Keep the latest candle in view on first load and when a new candle
         // forms, but never fight the user's manual pan/zoom on ticks.
         if previousCount != candles.count {
+            chart.moveViewToX(Double(candles.count - 1))
+            context.coordinator.emit(chart)
+        }
+
+        if resetToken != context.coordinator.lastResetToken {
+            context.coordinator.lastResetToken = resetToken
+            chart.fitScreen()
             chart.moveViewToX(Double(candles.count - 1))
             context.coordinator.emit(chart)
         }

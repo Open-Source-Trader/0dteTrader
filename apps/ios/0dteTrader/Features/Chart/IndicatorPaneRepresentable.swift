@@ -25,6 +25,7 @@ struct IndicatorPaneRepresentable: UIViewRepresentable {
     /// to it so indicator values align with the candles above.
     var visibleRange: ClosedRange<Double>?
     var onVisibleRangeChange: ((ClosedRange<Double>) -> Void)?
+    var resetToken: Int = 0
 
     func makeUIView(context: Context) -> CombinedChartView {
         let chart = CombinedChartView()
@@ -135,12 +136,18 @@ struct IndicatorPaneRepresentable: UIViewRepresentable {
         chart.notifyDataSetChanged()
 
         context.coordinator.onVisibleRange = onVisibleRangeChange
+
+        if resetToken != context.coordinator.lastResetToken {
+            context.coordinator.lastResetToken = resetToken
+            chart.fitScreen()
+        }
     }
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
     final class Coordinator: NSObject, ChartViewDelegate {
         var onVisibleRange: ((ClosedRange<Double>) -> Void)?
+        var lastResetToken: Int = 0
 
         func emit(_ chart: ChartViewBase) {
             guard let combined = chart as? CombinedChartView else { return }

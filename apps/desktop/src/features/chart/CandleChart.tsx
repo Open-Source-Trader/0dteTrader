@@ -354,6 +354,15 @@ export function CandleChart({
     }
   }, [candles, overlays]);
 
+  const resetView = () => {
+    const chart = chartRef.current;
+    if (!chart || candles.length === 0) return;
+    chart.timeScale().setVisibleLogicalRange({
+      from: Math.max(0, candles.length - VISIBLE_CANDLES),
+      to: candles.length + 12,
+    });
+  };
+
   const lastBar = candles.length > 0 ? candles[candles.length - 1] : null;
 
   return (
@@ -368,6 +377,32 @@ export function CandleChart({
           : `${symbol} chart, no data`
       }
     >
+      <button
+        onClick={resetView}
+        aria-label="Reset chart view"
+        style={{
+          position: 'absolute',
+          bottom: 28,
+          right: 8,
+          zIndex: 5,
+          width: 24,
+          height: 24,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          border: '1px solid var(--hud-stroke-dim)',
+          borderRadius: 4,
+          background: 'var(--app-surface)',
+          color: 'var(--label-secondary)',
+          fontSize: 11,
+          fontWeight: 600,
+          fontFamily: 'var(--font-mono)',
+          cursor: 'pointer',
+          opacity: 0.7,
+        }}
+      >
+        A
+      </button>
       {apis && candles.length > 0 && twcModel ? (
         <TwcOverlay chart={apis.chart} series={apis.series} model={twcModel} candles={candles} />
       ) : null}

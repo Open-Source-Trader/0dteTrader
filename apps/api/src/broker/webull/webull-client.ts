@@ -378,20 +378,23 @@ export class WebullClient {
   private mapError(status: number, payload: unknown, path: string): BrokerError {
     const { code, message } = parseErrorBody(payload);
     const haystack = `${code ?? ''} ${message ?? ''}`.toUpperCase();
+    const isTradeEndpoint = path.includes('/trade/');
+
+    // Quote-subscription denials ("Insufficient permission, please subscribe
+    // to X quotes") are entitlements on the Webull app, not credential/token
+    // failures and never a buying-power problem — regardless of the status
+    // they arrive with, keep the token and surface the actionable message.
+    if (
+      haystack.includes('INSUFFICIENT PERMISSION') ||
+      haystack.includes('SUBSCRIBE')
+    ) {
+      return brokerErrors.permissionDenied(
+        `Webull market-data permission missing — ${sanitize(message)} ` +
+          '(enable it for your app in the Webull OpenAPI console)',
+      );
+    }
 
     if (status === 401 || status === 403) {
-      // Quote-subscription 401s ("Insufficient permission, please subscribe to
-      // X quotes") are entitlements on the Webull app, not credential/token
-      // failures — keep the token and surface the actionable message.
-      if (
-        haystack.includes('INSUFFICIENT PERMISSION') ||
-        haystack.includes('SUBSCRIBE')
-      ) {
-        return brokerErrors.permissionDenied(
-          `Webull market-data permission missing — ${sanitize(message)} ` +
-            '(enable it for your app in the Webull OpenAPI console)',
-        );
-      }
       // A 401 may mean the cached token died — drop it so the next call
       // re-authenticates.
       this.clearToken();
@@ -404,7 +407,12 @@ export class WebullClient {
         `Webull rate limit persisted after retries (${path})`,
       );
     }
-    if (haystack.includes('BUYING_POWER') || haystack.includes('INSUFFICIENT')) {
+    // Buying-power failures only make sense on order endpoints; a 400 from
+    // /market-data/* mentioning "insufficient" is a parameter problem.
+    if (
+      isTradeEndpoint &&
+      (haystack.includes('BUYING_POWER') || haystack.includes('INSUFFICIENT'))
+    ) {
       return brokerErrors.insufficientBuyingPower(sanitize(message));
     }
     if (
@@ -417,7 +425,7 @@ export class WebullClient {
     ) {
       return brokerErrors.marketClosed(sanitize(message));
     }
-    if (status === 400 || status === 417 || status === 422) {
+    if (isTradeEndpoint && (status === 400 || status === 417 || status === 422)) {
       return brokerErrors.orderRejected(
         sanitize(message ?? (code ? `Webull error ${code}` : '')),
       );

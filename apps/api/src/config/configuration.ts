@@ -14,7 +14,7 @@ export interface AppConfig {
   webull: {
     /** Practice (sandbox) overrides; default to the sandbox hosts. */
     apiBaseUrl: string;
-    /** Falls back to apiBaseUrl when unset. */
+    /** Falls back to the api.* → data-api.* derivation of apiBaseUrl. */
     marketDataBaseUrl: string;
     /** Live (production) overrides; default to the prod hosts. */
     liveApiBaseUrl: string;
@@ -62,13 +62,12 @@ export default (): AppConfig => ({
       process.env.WEBULL_API_BASE_URL || 'https://api.sandbox.webull.com',
     marketDataBaseUrl:
       process.env.WEBULL_MARKET_DATA_BASE_URL ||
-      process.env.WEBULL_API_BASE_URL ||
-      'https://api.sandbox.webull.com',
+      dataHostOf(process.env.WEBULL_API_BASE_URL || 'https://api.sandbox.webull.com'),
     liveApiBaseUrl:
       process.env.WEBULL_LIVE_API_BASE_URL || 'https://api.webull.com',
     liveMarketDataBaseUrl:
       process.env.WEBULL_LIVE_MARKET_DATA_BASE_URL ||
-      liveDataHost(process.env.WEBULL_LIVE_API_BASE_URL),
+      dataHostOf(process.env.WEBULL_LIVE_API_BASE_URL),
     practiceAppKey: process.env.WEBULL_PRACTICE_APP_KEY ?? '',
     practiceAppSecret: process.env.WEBULL_PRACTICE_APP_SECRET ?? '',
     practiceAccountId: process.env.WEBULL_PRACTICE_ACCOUNT_ID ?? '',
@@ -80,9 +79,9 @@ export default (): AppConfig => ({
   },
 });
 
-/** Derives the live market-data host (api.* → data-api.*) from the API host. */
-function liveDataHost(liveApiBaseUrl: string | undefined): string {
-  const api = liveApiBaseUrl || 'https://api.webull.com';
+/** Derives the market-data host (api.* → data-api.*) from an API host. */
+function dataHostOf(apiBaseUrl: string | undefined): string {
+  const api = apiBaseUrl || 'https://api.webull.com';
   return api.replace(/^https:\/\/api\./, 'https://data-api.');
 }
 
@@ -96,7 +95,12 @@ export function validateEnv(config: Record<string, unknown>): Record<string, unk
   if (nodeEnv === 'production') {
     for (const name of ['JWT_ACCESS_SECRET', 'JWT_REFRESH_SECRET']) {
       const value = process.env[name];
-      if (!value || value.length < 32 || value.startsWith('change-me')) {
+      if (
+        !value ||
+        value.length < 32 ||
+        value.includes('change-me') ||
+        value.startsWith('dev-only')
+      ) {
         throw new Error(
           `${name} must be set to a strong secret (>= 32 chars) in production`,
         );

@@ -123,7 +123,7 @@ paths:
         - { name: symbol, in: query, required: true, schema: { type: string } }
         - { name: interval, in: query, required: true, schema: { type: string, enum: [1m, 5m, 15m, 1h, 1d] } }
         - { name: from, in: query, schema: { type: string, format: date-time } }
-        - { name: to, in: query, schema: { type: string, format: date-time } }
+        - { name: to, in, query: query, schema: { type: string, format: date-time } }
       responses:
         '200': { description: OK, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Candle' } } } } }
   /market/options-chain:
@@ -135,6 +135,18 @@ paths:
         - { name: expiration, in: query, schema: { type: string, format: date } }
       responses:
         '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/OptionsChain' } } } }
+  /market/gex:
+    get:
+      tags: [market]
+      security: [{ bearerAuth: [] }]
+      description: Dealer GEX/DEX level structure + premium heat map for one underlying (Tradier-backed). OI is the static intraday baseline; prices/Greeks refresh per request.
+      parameters:
+        - { name: symbol, in: query, required: true, schema: { type: string } }
+        - { name: expiration, in: query, schema: { type: string, format: date, description: 'Defaults to 0DTE when today is an expiration, else the nearest' } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/GexLevels' } } } }
+        '400': { description: Unknown expiration or invalid symbol }
+        '503': { description: Tradier not configured or unreachable (and no last-good cache) }
   /orders/preview:
     post:
       tags: [trading]
@@ -160,11 +172,19 @@ paths:
       responses:
         '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/OrderResult' } } } }
         '403': { description: Trading disabled (kill switch) }
+        '409': { description: An order with this idempotency key is already being placed }
     get:
       tags: [trading]
       security: [{ bearerAuth: [] }]
       responses:
         '200': { description: OK, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/OrderResult' } } } } }
+  /orders/history:
+    get:
+      tags: [trading]
+      security: [{ bearerAuth: [] }]
+      description: Every order, newest first, with per-fill realized P/L (average-cost, multiplier-aware) and the net realized total.
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/TradeHistory' } } } }
   /orders/{orderId}:
     delete:
       tags: [trading]
@@ -288,7 +308,19 @@ components:
         orderType: { type: string }
         limitPrice: { type: number }
         filledPrice: { type: number }
+        filledQuantity: { type: number, description: Broker-reported executed quantity (partial fills); absent when the broker gives only the order quantity }
         timestamp: { type: string, format: date-time }
+    TradeHistoryEntry:
+      allOf:
+        - $ref: '#/components/schemas/OrderResult'
+        - type: object
+          properties:
+            realizedPnl: { type: [number, 'null'], description: Realized P/L for closing fills; null for opening fills and non-fills }
+    TradeHistory:
+      type: object
+      properties:
+        entries: { type: array, items: { $ref: '#/components/schemas/TradeHistoryEntry' }, description: Newest first }
+        totalRealizedPnl: { type: number }
     Position:
       type: object
       properties:
@@ -298,3 +330,29 @@ components:
         avgPrice: { type: number }
         markPrice: { type: number }
         unrealizedPnl: { type: number }
+        multiplier: { type: number, description: Contract multiplier (options: 100) for client-side live P/L }
+    GexPremiumLevel:
+      type: object
+      properties:
+        strike: { type: number }
+        totalPremium: { type: number }
+        callPremium: { type: number }
+        putPremium: { type: number }
+        callOi: { type: integer }
+        putOi: { type: integer }
+    GexLevels:
+      type: object
+      properties:
+        symbol: { type: string }
+        expiration: { type: string, format: date }
+        isZeroDte: { type: boolean }
+        spot: { type: number }
+        asOf: { type: string, format: date-time }
+        stale: { type: boolean, description: Served from the last-good cache after a Tradier failure }
+        netGex: { type: number }
+        netDex: { type: number }
+        gammaFlip: { type: [number, 'null'], description: Spot where net GEX crosses zero }
+        callWall: { type: [number, 'null'] }
+        putWall: { type: [number, 'null'] }
+        magnet: { type: [number, 'null'], description: Highest total-OI strike (0DTE pin target) }
+        topPremium: { type: array, items: { $ref: '#/components/schemas/GexPremiumLevel' } }

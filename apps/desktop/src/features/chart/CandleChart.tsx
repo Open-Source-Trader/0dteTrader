@@ -373,7 +373,6 @@ export function CandleChart({
           series={apis.series}
           store={drawingsStore}
           candles={candles}
-          firstTime={candles[0].time}
           intervalSec={intervalSeconds(interval)}
         />
       ) : null}

@@ -2,71 +2,6 @@ import DGCharts
 import SwiftUI
 import UIKit
 
-/// Compact OHLC marker shown while tap/drag-highlighting the candle chart.
-final class ChartMarkerView: MarkerView {
-    var candles: [Candle] = []
-    var intervalSeconds: TimeInterval = 60
-
-    private let paddingH: CGFloat = 8
-    private let paddingV: CGFloat = 6
-
-    private let textLabel: UILabel = {
-        let label = UILabel()
-        label.font = UIFont(name: "JetBrainsMono-Regular", size: 10) ?? .monospacedDigitSystemFont(ofSize: 10, weight: .medium)
-        label.textColor = .white
-        label.numberOfLines = 1
-        return label
-    }()
-
-    override init(frame: CGRect) {
-        super.init(frame: frame)
-        backgroundColor = UIColor(Color.appSurfaceElevated)
-        layer.cornerRadius = 8
-        addSubview(textLabel)
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) is not supported")
-    }
-
-    override func refreshContent(entry: ChartDataEntry, highlight: Highlight) {
-        let index = Int(entry.x.rounded())
-        guard candles.indices.contains(index) else { return }
-        let candle = candles[index]
-        let time = ChartTimeFormat.string(for: candle.time, intervalSeconds: intervalSeconds)
-        textLabel.text = """
-        \(time)  O \(Format.price(candle.open))  H \(Format.price(candle.high)) \
-        L \(Format.price(candle.low))  C \(Format.price(candle.close))
-        """
-        textLabel.sizeToFit()
-        let contentSize = textLabel.bounds.size
-        bounds = CGRect(
-            x: 0, y: 0,
-            width: contentSize.width + paddingH * 2,
-            height: contentSize.height + paddingV * 2
-        )
-        textLabel.frame = CGRect(
-            x: paddingH, y: paddingV,
-            width: contentSize.width, height: contentSize.height
-        )
-    }
-
-    override func offsetForDrawing(atPoint point: CGPoint) -> CGPoint {
-        guard let chart = chartView else { return self.offset }
-        var offset = CGPoint(x: -bounds.width / 2, y: -bounds.height - 12)
-        if point.x + offset.x < 0 {
-            offset.x = -point.x + 4
-        } else if point.x + offset.x + bounds.width > chart.bounds.width {
-            offset.x = chart.bounds.width - point.x - bounds.width - 4
-        }
-        if point.y + offset.y < 0 {
-            offset.y = 12
-        }
-        return offset
-    }
-}
-
 /// Candlestick chart with indicator line overlays, optional volume bars, and
 /// the drawing-annotation overlay, backed by DanielGindi/Charts
 /// `CombinedChartView` (bars behind candles, indicator lines on top).
@@ -164,10 +99,11 @@ struct CandleChartRepresentable: UIViewRepresentable {
         chart.noDataText = ""
         chart.backgroundColor = .clear
         chart.doubleTapToZoomEnabled = false
-        chart.highlightPerTapEnabled = true
-        chart.highlightPerDragEnabled = true
+        chart.highlightPerTapEnabled = false
+        chart.highlightPerDragEnabled = false
         chart.dragEnabled = true
-        chart.pinchZoomEnabled = true
+        chart.pinchZoomEnabled = false
+        chart.scaleXEnabled = true
         chart.scaleYEnabled = false
 
         let rangeCallback = onVisibleRangeChange
@@ -178,10 +114,6 @@ struct CandleChartRepresentable: UIViewRepresentable {
             container?.gexOverlay.setNeedsDisplay()
         }
         chart.delegate = context.coordinator
-
-        let marker = ChartMarkerView()
-        marker.chartView = chart
-        chart.marker = marker
 
         let xAxis = chart.xAxis
         xAxis.labelPosition = .bottom
@@ -221,11 +153,6 @@ struct CandleChartRepresentable: UIViewRepresentable {
         container.gexOverlay.model = gexModel
         container.gexOverlay.settings = gexSettings
         container.gexOverlay.stale = gexStale
-
-        if let marker = chart.marker as? ChartMarkerView {
-            marker.candles = candles
-            marker.intervalSeconds = intervalSeconds
-        }
 
         guard !candles.isEmpty else {
             chart.data = nil

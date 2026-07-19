@@ -38,7 +38,7 @@ struct IndicatorPaneRepresentable: UIViewRepresentable {
         chart.doubleTapToZoomEnabled = false
         chart.highlightPerTapEnabled = false
         chart.dragEnabled = true
-        chart.pinchZoomEnabled = true
+        chart.pinchZoomEnabled = false
         chart.scaleXEnabled = true
         chart.scaleYEnabled = false
 

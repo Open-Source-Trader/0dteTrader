@@ -228,6 +228,7 @@ struct CandleChartRepresentable: UIViewRepresentable {
             chart.notifyDataSetChanged()
             chart.accessibilityValue = nil
             container.overlay.setNeedsDisplay()
+            container.gexOverlay.setNeedsDisplay()
             return
         }
         let previousCount = chart.data?.candleData?.entryCount ?? 0
@@ -356,6 +357,9 @@ struct CandleChartRepresentable: UIViewRepresentable {
         chart.xAxis.valueFormatter = IndexAxisValueFormatter(values: timeLabels)
         chart.notifyDataSetChanged()
         container.overlay.setNeedsDisplay()
+        // Candle changes shift the price↔pixel transform; the GEX overlay's
+        // didSet hooks only fire on model/settings changes, so repaint here.
+        container.gexOverlay.setNeedsDisplay()
 
         if let last = candles.last {
             chart.accessibilityLabel = "Price chart"

@@ -53,10 +53,11 @@ model WebullCredential {
   @@map("webull_credentials")
 }
 
-// Cached Webull OpenAPI access token per user (~15-day rolling validity).
-// Persisted so restarts do not force token re-creation, which in production
-// triggers SMS re-verification in the user's Webull app. encToken is an
-// AES-256-GCM blob like the WebullCredential fields.
+// RESERVED for a follow-up: persisting Webull OpenAPI access tokens so
+// restarts don't force token re-creation (which in production triggers SMS
+// re-verification in the user's Webull app). Today the token cache is
+// in-memory only — nothing reads or writes this table yet. When implemented
+// it also needs per-(user, environment) rows, not userId @unique.
 model WebullApiToken {
   id        String   @id @default(uuid()) @db.Uuid
   userId    String   @unique @db.Uuid
@@ -95,6 +96,9 @@ model TradeOrder {
   environment    String   @default("live")
   side           String
   quantity       Float
+  // Broker-reported executed quantity (partial fills); null when the broker
+  // gives only the order quantity.
+  filledQuantity Float?
   orderType      String
   limitPrice     Float?
   filledPrice    Float?

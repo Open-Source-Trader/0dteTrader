@@ -171,6 +171,9 @@ export interface OrderResult {
   orderType: OrderType;
   limitPrice?: number;
   filledPrice?: number;
+  /** Executed quantity when the broker reports it (partial fills). Absent
+   *  when the broker gives only the order quantity. */
+  filledQuantity?: number;
   /** ISO-8601 date-time. */
   timestamp: string;
 }

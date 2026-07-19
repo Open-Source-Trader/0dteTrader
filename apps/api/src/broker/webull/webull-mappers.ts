@@ -155,6 +155,10 @@ export interface WebullOrder {
   filled_price?: unknown;
   avg_filled_price?: unknown;
   quantity?: unknown;
+  /** Filled-quantity field name variants [best-effort — verify live]. */
+  filled_quantity?: unknown;
+  cum_quantity?: unknown;
+  filled_qty?: unknown;
   place_time_at?: unknown;
   contract_month?: string;
   legs?: WebullOrderLeg[];
@@ -182,6 +186,10 @@ export function contractSymbolOf(order: {
 export function toOrderResult(order: WebullOrder): OrderResult {
   const limitPrice = num(order.limit_price, NaN);
   const filledPrice = num(order.filled_price ?? order.avg_filled_price, NaN);
+  const filledQuantity = num(
+    order.filled_quantity ?? order.cum_quantity ?? order.filled_qty,
+    NaN,
+  );
   return {
     orderId: order.client_order_id ?? order.order_id ?? '',
     status: mapOrderStatus(order.status ?? order.order_status),
@@ -192,6 +200,7 @@ export function toOrderResult(order: WebullOrder): OrderResult {
     orderType: (order.order_type ?? '').toUpperCase() === 'MARKET' ? 'market' : 'mid',
     ...(Number.isFinite(limitPrice) ? { limitPrice } : {}),
     ...(Number.isFinite(filledPrice) ? { filledPrice } : {}),
+    ...(Number.isFinite(filledQuantity) ? { filledQuantity } : {}),
     timestamp: isoFrom(order.place_time_at),
   };
 }

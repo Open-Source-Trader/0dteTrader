@@ -4,6 +4,7 @@ import { Stepper } from '../../design/components/Stepper';
 import { Toggle } from '../../design/components/Toggle';
 import { Format } from '../../design/format';
 import { SlidersIcon } from '../../design/icons';
+import type { GexSettings } from './gex/gexSettings';
 import type { IndicatorSettings } from './indicatorSettings';
 import { DEFAULT_INDICATOR_SETTINGS } from './indicatorSettings';
 
@@ -14,6 +15,8 @@ interface IndicatorSettingsViewProps {
   twcEnabled: boolean;
   onToggleTwc: (on: boolean) => void;
   onOpenTwcSettings: () => void;
+  gexSettings: GexSettings;
+  onChangeGex: (settings: GexSettings) => void;
 }
 
 /** Series-color cue mapping a settings row to its chart line. */
@@ -41,8 +44,11 @@ export function IndicatorSettingsView({
   twcEnabled,
   onToggleTwc,
   onOpenTwcSettings,
+  gexSettings,
+  onChangeGex,
 }: IndicatorSettingsViewProps) {
   const patch = (partial: Partial<IndicatorSettings>) => onChange({ ...settings, ...partial });
+  const patchGex = (partial: Partial<GexSettings>) => onChangeGex({ ...gexSettings, ...partial });
 
   return (
     <Sheet detent="large" onDismiss={onDismiss}>
@@ -343,6 +349,66 @@ export function IndicatorSettingsView({
                   <Toggle on={twcEnabled} onChange={onToggleTwc} />
                 </span>
               </div>
+
+              <div className="grouped-row">
+                <span>
+                  <SeriesDot color="#ffd60a" />
+                  GEX / DEX Levels
+                </span>
+                <span className="row-value">
+                  <Toggle
+                    on={gexSettings.enabled}
+                    onChange={(on) => patchGex({ enabled: on })}
+                  />
+                </span>
+              </div>
+              {gexSettings.enabled ? (
+                <>
+                  <div className="grouped-row param-row">
+                    <span>Level Lines</span>
+                    <span className="row-value">
+                      <Toggle
+                        on={gexSettings.showLevels}
+                        onChange={(on) => patchGex({ showLevels: on })}
+                      />
+                    </span>
+                  </div>
+                  <div className="grouped-row param-row">
+                    <span>Premium Heat Map</span>
+                    <span className="row-value">
+                      <Toggle
+                        on={gexSettings.showPremium}
+                        onChange={(on) => patchGex({ showPremium: on })}
+                      />
+                    </span>
+                  </div>
+                  {gexSettings.showPremium ? (
+                    <div className="grouped-row param-row">
+                      <span>Heat Strikes: {gexSettings.maxPremiumStrikes}</span>
+                      <span className="row-value">
+                        <Stepper
+                          value={gexSettings.maxPremiumStrikes}
+                          min={3}
+                          max={10}
+                          onChange={(value) => patchGex({ maxPremiumStrikes: value })}
+                        />
+                      </span>
+                    </div>
+                  ) : null}
+                  <div className="grouped-row param-row">
+                    <span>Refresh: {gexSettings.refreshSeconds}s</span>
+                    <span className="row-value">
+                      <Stepper
+                        value={gexSettings.refreshSeconds}
+                        min={15}
+                        max={120}
+                        step={15}
+                        onChange={(value) => patchGex({ refreshSeconds: value })}
+                      />
+                    </span>
+                  </div>
+                </>
+              ) : null}
             </div>
           </div>
 

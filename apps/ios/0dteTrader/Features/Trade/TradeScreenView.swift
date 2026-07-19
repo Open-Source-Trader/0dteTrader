@@ -165,7 +165,8 @@ struct TradeScreenView: View {
         }
         .onChange(of: chartViewModel.alertNotice) { _, notice in
             if let notice {
-                tradeViewModel.showToast(notice.message, style: .info)
+                let style: Toast.Style = notice.message.lowercased().contains("credentials") ? .error : .info
+                tradeViewModel.showToast(notice.message, style: style)
             }
         }
         .onChange(of: chartViewModel.quote) { _, quote in

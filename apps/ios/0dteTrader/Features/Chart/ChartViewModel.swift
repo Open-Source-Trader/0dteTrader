@@ -131,7 +131,12 @@ final class ChartViewModel: ObservableObject {
             let dtos = try await apiClient.candles(symbol: symbol, interval: interval.rawValue, from: from)
             candles = dtos.map(Candle.init(dto:))
         } catch let error as APIError {
-            errorMessage = error.userMessage
+            if case let .server(_, message, _) = error,
+               message.lowercased().contains("credentials") {
+                alertNotice = ChartAlertNotice(id: UUID(), message: message)
+            } else {
+                errorMessage = error.userMessage
+            }
             Haptics.error()
         } catch {
             errorMessage = error.localizedDescription

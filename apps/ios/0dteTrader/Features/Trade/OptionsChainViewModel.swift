@@ -111,7 +111,9 @@ final class OptionsChainViewModel: ObservableObject {
             }
         } catch let error as APIError {
             guard gen == loadGeneration else { return }
-            errorMessage = error.userMessage
+            if !Self.isCredentialError(error) {
+                errorMessage = error.userMessage
+            }
         } catch {
             guard gen == loadGeneration else { return }
             errorMessage = error.localizedDescription
@@ -195,11 +197,20 @@ final class OptionsChainViewModel: ObservableObject {
             }
         } catch let error as APIError {
             guard gen == loadGeneration else { return }
-            errorMessage = error.userMessage
+            if !Self.isCredentialError(error) {
+                errorMessage = error.userMessage
+            }
         } catch {
             guard gen == loadGeneration else { return }
             errorMessage = error.localizedDescription
         }
+    }
+
+    private static func isCredentialError(_ error: APIError) -> Bool {
+        if case let .server(_, message, _) = error {
+            return message.lowercased().contains("credentials")
+        }
+        return false
     }
 
     private func fetchContracts(underlying: String, expiration: String) async throws -> [OptionContract]? {

@@ -24,6 +24,7 @@ final class SettingsStore: @unchecked Sendable {
         static let splitFraction = "settings.splitFraction"
         static let indicatorSettings = "settings.indicatorSettings"
         static let twcSettings = "settings.twcSettings"
+        static let gexSettings = "settings.gexSettings"
         static let riskDisclaimerAccepted = "settings.riskDisclaimerAccepted"
         static let lastSymbol = "settings.lastSymbol"
         static let appLockEnabled = "settings.appLockEnabled"
@@ -77,6 +78,22 @@ final class SettingsStore: @unchecked Sendable {
         set {
             if let data = try? encoder.encode(newValue) {
                 defaults.set(data, forKey: Keys.twcSettings)
+            }
+        }
+    }
+
+    var gexSettings: GexSettings {
+        get {
+            guard let data = defaults.data(forKey: Keys.gexSettings),
+                  let settings = try? decoder.decode(GexSettings.self, from: data)
+            else {
+                return .default
+            }
+            return settings
+        }
+        set {
+            if let data = try? encoder.encode(newValue) {
+                defaults.set(data, forKey: Keys.gexSettings)
             }
         }
     }

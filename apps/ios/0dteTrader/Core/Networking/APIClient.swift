@@ -156,6 +156,15 @@ struct APIClient: @unchecked Sendable {
         return try await request(Endpoint(method: .get, path: "v1/market/options-chain", query: query))
     }
 
+    /// Dealer GEX/DEX levels + premium heat map (Tradier-backed, server-side).
+    func gexLevels(symbol: String, expiration: String? = nil) async throws -> GexLevelsDTO {
+        var query = [URLQueryItem(name: "symbol", value: symbol)]
+        if let expiration {
+            query.append(URLQueryItem(name: "expiration", value: expiration))
+        }
+        return try await request(Endpoint(method: .get, path: "v1/market/gex", query: query))
+    }
+
     func futures(root: String) async throws -> [FuturesContractDTO] {
         let endpoint = Endpoint(
             method: .get,

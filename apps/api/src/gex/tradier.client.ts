@@ -33,7 +33,8 @@ type FetchImpl = (url: string, init: Record<string, unknown>) => Promise<{
  * the FIRST chain fetch of the day establishes the OI baseline; later
  * fetches refresh prices/Greeks only and the baseline OI is overlaid back
  * onto each contract (a contract absent from the baseline keeps its fresh
- * OI, e.g. a series that listed intraday).
+ * OI, e.g. a series that listed intraday). Baselines from prior days are
+ * pruned so the map can't grow without bound.
  */
 @Injectable()
 export class TradierClient {
@@ -112,7 +113,11 @@ export class TradierClient {
     const day = new Date().toISOString().slice(0, 10);
     let baseline = this.oiBaseline.get(key);
     if (!baseline || baseline.day !== day) {
-      // First fetch of the day: this IS the baseline.
+      // First fetch of the day: this IS the baseline. Prune prior days so
+      // the map holds at most one day of baselines.
+      for (const [k, entry] of this.oiBaseline) {
+        if (entry.day !== day) this.oiBaseline.delete(k);
+      }
       baseline = {
         day,
         oi: new Map(list.map((option) => [option.symbol, option.open_interest ?? 0])),

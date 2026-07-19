@@ -69,6 +69,11 @@ function midPrice(option: ChainOption): number | null {
 export function yearsToExpiration(expiration: string, now = new Date()): number {
   // Expirations settle at 16:00 ET ≈ 20:00/21:00 UTC; 21:00 covers EDT.
   const expiryMs = Date.parse(`${expiration}T21:00:00Z`);
+  if (!Number.isFinite(expiryMs)) {
+    // Untrusted external input (the expiration comes from the data
+    // provider): fail loudly instead of propagating NaN through every level.
+    throw new Error(`Malformed expiration date: ${expiration}`);
+  }
   const ms = Math.max(expiryMs - now.getTime(), 120_000);
   return ms / (365 * 24 * 3600 * 1000);
 }

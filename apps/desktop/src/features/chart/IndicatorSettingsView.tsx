@@ -3,6 +3,7 @@ import { Sheet } from '../../design/components/Sheet';
 import { Stepper } from '../../design/components/Stepper';
 import { Toggle } from '../../design/components/Toggle';
 import { Format } from '../../design/format';
+import { SlidersIcon } from '../../design/icons';
 import type { IndicatorSettings } from './indicatorSettings';
 import { DEFAULT_INDICATOR_SETTINGS } from './indicatorSettings';
 
@@ -10,6 +11,9 @@ interface IndicatorSettingsViewProps {
   settings: IndicatorSettings;
   onChange: (settings: IndicatorSettings) => void;
   onDismiss: () => void;
+  twcEnabled: boolean;
+  onToggleTwc: (on: boolean) => void;
+  onOpenTwcSettings: () => void;
 }
 
 /** Series-color cue mapping a settings row to its chart line. */
@@ -30,7 +34,14 @@ function SeriesDot({ color }: { color: string }) {
 }
 
 /** Indicator toggles and parameters; changes apply and persist immediately. */
-export function IndicatorSettingsView({ settings, onChange, onDismiss }: IndicatorSettingsViewProps) {
+export function IndicatorSettingsView({
+  settings,
+  onChange,
+  onDismiss,
+  twcEnabled,
+  onToggleTwc,
+  onOpenTwcSettings,
+}: IndicatorSettingsViewProps) {
   const patch = (partial: Partial<IndicatorSettings>) => onChange({ ...settings, ...partial });
 
   return (
@@ -309,6 +320,29 @@ export function IndicatorSettingsView({ settings, onChange, onDismiss }: Indicat
                   </span>
                 </div>
               ) : null}
+            </div>
+          </div>
+
+          <div className="grouped-section">
+            <div className="section-header">Scripts</div>
+            <div className="section-card">
+              <div className="grouped-row">
+                <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <SeriesDot color="var(--chart-vwap)" />
+                  TWC Heatmap V5
+                  <button
+                    className="icon-button"
+                    aria-label="TWC Heatmap V5 settings"
+                    onClick={onOpenTwcSettings}
+                    style={{ display: 'inline-flex', alignItems: 'center', padding: 4 }}
+                  >
+                    <SlidersIcon size={14} />
+                  </button>
+                </span>
+                <span className="row-value">
+                  <Toggle on={twcEnabled} onChange={onToggleTwc} />
+                </span>
+              </div>
             </div>
           </div>
 

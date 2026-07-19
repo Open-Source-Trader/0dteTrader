@@ -7,7 +7,9 @@ import {
   type IChartApi,
   type ISeriesApi,
   type LineData,
+  type LineWidth,
   type UTCTimestamp,
+  type WhitespaceData,
 } from 'lightweight-charts';
 import type { CandleInterval } from '@0dtetrader/shared-types';
 import { useStore } from '../../core/observable';
@@ -17,11 +19,17 @@ import type { ChartCandle } from './ChartStore';
 import { intervalSeconds } from './ChartStore';
 import { DrawingLayer } from './DrawingLayer';
 import type { DrawingsStore } from './drawings';
+import { TwcOverlay } from './TwcOverlay';
+import type { TwcRenderModel } from './twc/twcTypes';
 
 export interface OverlaySeries {
   id: string;
   color: string;
   values: (number | null)[];
+  /** 1..4 (lightweight-charts LineWidth); defaults to 1. */
+  lineWidth?: number;
+  /** Render nulls as whitespace so the line breaks instead of bridging. */
+  gaps?: boolean;
 }
 
 /** Logical visible range, mirrored to sub-panes so x-axes stay aligned. */
@@ -37,6 +45,10 @@ interface CandleChartProps {
   interval: CandleInterval;
   showVolume: boolean;
   drawingsStore: DrawingsStore;
+  /** Per-bar candle repaint colors (TWC regime candles); null = default. */
+  candleColors?: (string | null)[] | null;
+  /** TWC Heatmap render model for the read-only overlay canvas. */
+  twcModel?: TwcRenderModel | null;
   /** Fires on pan/zoom/snap so sub-panes can mirror the x-range. */
   onVisibleRangeChange?: (range: VisibleRange | null) => void;
 }
@@ -71,6 +83,8 @@ export function CandleChart({
   interval,
   showVolume,
   drawingsStore,
+  candleColors = null,
+  twcModel = null,
   onVisibleRangeChange,
 }: CandleChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -194,6 +208,9 @@ export function CandleChart({
   }, [tool]);
 
   // Candle data: full set + snap on structural change, cheap update on ticks.
+  // Regime-candle repaints (candleColors) always reset the full data set —
+  // per-bar colors can change across the whole array on any recompute.
+  const hadCandleColorsRef = useRef(false);
   useEffect(() => {
     const chart = chartRef.current;
     const series = candleSeriesRef.current;
@@ -202,24 +219,26 @@ export function CandleChart({
     const firstTime = candles.length > 0 ? candles[0].time : null;
     const structuralChange =
       candles.length !== lastLengthRef.current || firstTime !== lastFirstTimeRef.current;
+    const repaintAll = candleColors !== null || hadCandleColorsRef.current;
+    hadCandleColorsRef.current = candleColors !== null;
 
-    if (structuralChange) {
-      series.setData(candles.map(toCandleData));
+    if (structuralChange || repaintAll) {
+      series.setData(candles.map((candle, index) => toCandleData(candle, candleColors?.[index] ?? null)));
       volumeSeriesRef.current?.setData(candles.map(toVolumeData));
-      if (candles.length > 0) {
+      if (structuralChange && candles.length > 0) {
         chart.timeScale().setVisibleLogicalRange({
           from: Math.max(0, candles.length - VISIBLE_CANDLES),
           to: candles.length,
         });
       }
     } else if (candles.length > 0) {
-      series.update(toCandleData(candles[candles.length - 1]));
+      series.update(toCandleData(candles[candles.length - 1], null));
       volumeSeriesRef.current?.update(toVolumeData(candles[candles.length - 1]));
     }
     lastLengthRef.current = candles.length;
     lastFirstTimeRef.current = firstTime;
     lastBarRef.current = candles.length > 0 ? candles[candles.length - 1] : null;
-  }, [candles]);
+  }, [candles, candleColors]);
 
   // Overlay lines: recreate the series set when ids change, reset data otherwise.
   useEffect(() => {
@@ -235,23 +254,30 @@ export function CandleChart({
       }
     }
     for (const overlay of overlays) {
+      const lineWidth = (overlay.lineWidth ?? 1) as LineWidth;
       let series = existing.get(overlay.id);
       if (!series) {
         series = chart.addLineSeries({
           color: overlay.color,
-          lineWidth: 1,
+          lineWidth,
           priceScaleId: 'left',
           priceLineVisible: false,
           lastValueVisible: false,
           crosshairMarkerVisible: false,
         });
         existing.set(overlay.id, series);
+      } else {
+        series.applyOptions({ color: overlay.color, lineWidth });
       }
-      const data: LineData[] = [];
+      const data: (LineData | WhitespaceData)[] = [];
       overlay.values.forEach((value, index) => {
         const candle = candles[index];
-        if (value !== null && candle) {
+        if (!candle) return;
+        if (value !== null) {
           data.push({ time: candle.time as UTCTimestamp, value });
+        } else if (overlay.gaps) {
+          // Whitespace point: keeps the slot but breaks the line (Pine linebr)
+          data.push({ time: candle.time as UTCTimestamp });
         }
       });
       series.setData(data);
@@ -288,6 +314,9 @@ export function CandleChart({
           {legend}
         </div>
       ) : null}
+      {apis && candles.length > 0 && twcModel ? (
+        <TwcOverlay chart={apis.chart} series={apis.series} model={twcModel} candles={candles} />
+      ) : null}
       {apis && candles.length > 0 ? (
         <DrawingLayer
           chart={apis.chart}
@@ -302,14 +331,20 @@ export function CandleChart({
   );
 }
 
-function toCandleData(candle: ChartCandle): CandlestickData {
-  return {
+function toCandleData(candle: ChartCandle, color: string | null = null): CandlestickData {
+  const base: CandlestickData = {
     time: candle.time as UTCTimestamp,
     open: candle.open,
     high: candle.high,
     low: candle.low,
     close: candle.close,
   };
+  if (color !== null) {
+    base.color = color;
+    base.borderColor = color;
+    base.wickColor = color;
+  }
+  return base;
 }
 
 function toVolumeData(candle: ChartCandle): HistogramData {

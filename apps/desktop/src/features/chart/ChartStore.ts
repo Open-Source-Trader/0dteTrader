@@ -6,6 +6,7 @@ import { parseDateTime } from '../../core/models/dates';
 import { Store } from '../../core/observable';
 import type { SettingsStore } from '../../core/storage/SettingsStore';
 import type { IndicatorSettings } from './indicatorSettings';
+import type { TwcHeatmapSettings } from './twc/twcSettings';
 
 export const CHART_INTERVALS: CandleInterval[] = ['1m', '5m', '15m', '1h', '1d'];
 
@@ -44,6 +45,7 @@ interface ChartStoreState {
   /** Quote socket is not connected: displayed prices may be frozen. */
   isStale: boolean;
   indicatorSettings: IndicatorSettings;
+  twcSettings: TwcHeatmapSettings;
 }
 
 /** Upper bound on rendered candles so live appends stay cheap. */
@@ -68,6 +70,7 @@ export class ChartStore extends Store<ChartStoreState> {
       errorMessage: null,
       isStale: socket.getState().connectionState !== 'connected',
       indicatorSettings: settingsStore.indicatorSettings,
+      twcSettings: settingsStore.twcSettings,
     });
     socket.onQuote((quote) => this.handleLiveQuote(quote));
     // Mirror the socket's connection state so the header can flag frozen
@@ -126,6 +129,11 @@ export class ChartStore extends Store<ChartStoreState> {
   setIndicatorSettings(settings: IndicatorSettings): void {
     this.settingsStore.indicatorSettings = settings;
     this.set({ indicatorSettings: settings });
+  }
+
+  setTwcSettings(settings: TwcHeatmapSettings): void {
+    this.settingsStore.twcSettings = settings;
+    this.set({ twcSettings: settings });
   }
 
   // MARK: - Live updates

@@ -1,5 +1,7 @@
 import type { IndicatorSettings } from '../../features/chart/indicatorSettings';
 import { DEFAULT_INDICATOR_SETTINGS } from '../../features/chart/indicatorSettings';
+import type { TwcHeatmapSettings } from '../../features/chart/twc/twcSettings';
+import { DEFAULT_TWC_SETTINGS } from '../../features/chart/twc/twcSettings';
 
 export type TradeLayout = 'fullscreen' | 'split';
 
@@ -8,6 +10,7 @@ export class SettingsStore {
   private static keys = {
     layoutMode: 'settings.layoutMode',
     indicatorSettings: 'settings.indicatorSettings',
+    twcSettings: 'settings.twcSettings',
     riskDisclaimerAccepted: 'settings.riskDisclaimerAccepted',
     lastSymbol: 'settings.lastSymbol',
   };
@@ -33,6 +36,20 @@ export class SettingsStore {
 
   set indicatorSettings(value: IndicatorSettings) {
     localStorage.setItem(SettingsStore.keys.indicatorSettings, JSON.stringify(value));
+  }
+
+  get twcSettings(): TwcHeatmapSettings {
+    const raw = localStorage.getItem(SettingsStore.keys.twcSettings);
+    if (!raw) return DEFAULT_TWC_SETTINGS;
+    try {
+      return { ...DEFAULT_TWC_SETTINGS, ...(JSON.parse(raw) as Partial<TwcHeatmapSettings>) };
+    } catch {
+      return DEFAULT_TWC_SETTINGS;
+    }
+  }
+
+  set twcSettings(value: TwcHeatmapSettings) {
+    localStorage.setItem(SettingsStore.keys.twcSettings, JSON.stringify(value));
   }
 
   get hasAcceptedRiskDisclaimer(): boolean {

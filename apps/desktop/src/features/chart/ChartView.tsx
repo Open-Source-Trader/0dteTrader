@@ -13,6 +13,9 @@ import { DrawToolsMenu } from './DrawingToolbar';
 import type { DrawingsStore } from './drawings';
 import { IndicatorPane, type PaneSeries } from './IndicatorPane';
 import * as engine from './indicatorEngine';
+import { computeTwc } from './twc/computeTwc';
+import type { TwcBanner } from './twc/twcTypes';
+import { intervalSeconds } from './ChartStore';
 import './chart.css';
 
 interface ChartViewProps {
@@ -49,8 +52,17 @@ const SKELETON_BARS = [
 
 /** Chart surface: header, candle chart with overlays and drawing tools, sub-panes. */
 export function ChartView({ store, drawingsStore, onSymbolSearch, onIndicatorSettings, tradingMode, onToggleMode }: ChartViewProps) {
-  const { symbol, interval, candles, quote, isLoading, errorMessage, isStale, indicatorSettings } =
-    useStore(store);
+  const {
+    symbol,
+    interval,
+    candles,
+    quote,
+    isLoading,
+    errorMessage,
+    isStale,
+    indicatorSettings,
+    twcSettings,
+  } = useStore(store);
 
   // Main chart's visible x-range, mirrored into every sub-pane.
   const [visibleRange, setVisibleRange] = useState<VisibleRange | null>(null);
@@ -93,6 +105,24 @@ export function ChartView({ store, drawingsStore, onSymbolSearch, onIndicatorSet
     }
     return result;
   }, [candles, closes, indicatorSettings]);
+
+  const twcModel = useMemo(
+    () => computeTwc(candles, twcSettings, intervalSeconds(interval)),
+    [candles, twcSettings, interval],
+  );
+
+  // TWC line series ride the price scale like regular overlays (gap-aware).
+  const twcLineOverlays = useMemo<OverlaySeries[]>(
+    () =>
+      (twcModel?.lines ?? []).map((line) => ({
+        id: `twc-${line.id}`,
+        color: line.color,
+        values: line.values,
+        lineWidth: line.lineWidth,
+        gaps: true,
+      })),
+    [twcModel],
+  );
 
   const rsiSeries = useMemo<PaneSeries[] | null>(() => {
     if (!indicatorSettings.rsiEnabled) return null;
@@ -300,13 +330,16 @@ export function ChartView({ store, drawingsStore, onSymbolSearch, onIndicatorSet
       <div style={{ flex: 1, minHeight: 100, position: 'relative' }}>
         <CandleChart
           candles={candles}
-          overlays={overlays}
+          overlays={twcLineOverlays.length > 0 ? [...overlays, ...twcLineOverlays] : overlays}
           symbol={symbol}
           interval={interval}
           showVolume={indicatorSettings.volumeEnabled}
           drawingsStore={drawingsStore}
+          candleColors={twcModel?.candleColors ?? null}
+          twcModel={twcModel}
           onVisibleRangeChange={setVisibleRange}
         />
+        {twcModel?.banner ? <TwcBiasBanner banner={twcModel.banner} /> : null}
         {isLoading && candles.length === 0 ? (
           <div className="chart-skeleton" aria-hidden="true">
             {SKELETON_BARS.map((height, index) => (
@@ -400,4 +433,40 @@ export function ChartView({ store, drawingsStore, onSymbolSearch, onIndicatorSet
       ) : null}
     </div>
   );
+}
+
+const BANNER_FONT_SIZES: Record<string, number> = {
+  Tiny: 10,
+  Small: 12,
+  Normal: 14,
+  Large: 17,
+};
+
+/** TWC bias banner pinned to one of nine chart positions (Pine table analog). */
+function TwcBiasBanner({ banner }: { banner: TwcBanner }) {
+  const [vPos, hPos] = banner.position.split(' ') as [string, string];
+  // Pine renders the banner with a fully transparent background: text only.
+  const style: React.CSSProperties = {
+    position: 'absolute',
+    zIndex: 3,
+    pointerEvents: 'none',
+    padding: '3px 10px',
+    color: banner.color,
+    fontSize: BANNER_FONT_SIZES[banner.size] ?? 10,
+    fontWeight: 600,
+    whiteSpace: 'nowrap',
+  };
+  if (vPos === 'Top') style.top = 8;
+  else if (vPos === 'Bottom') style.bottom = 8;
+  else {
+    style.top = '50%';
+    style.transform = 'translateY(-50%)';
+  }
+  if (hPos === 'Left') style.left = 56;
+  else if (hPos === 'Right') style.right = 8;
+  else {
+    style.left = '50%';
+    style.transform = `${style.transform ?? ''} translateX(-50%)`.trim();
+  }
+  return <div style={style}>{banner.text}</div>;
 }

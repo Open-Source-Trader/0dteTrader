@@ -9,6 +9,7 @@ import { ClockIcon, LayoutFullIcon, LayoutSplitIcon, PersonCircleIcon } from '..
 import type { TradeLayout } from '../../core/storage/SettingsStore';
 import { ChartView } from '../chart/ChartView';
 import { IndicatorSettingsView } from '../chart/IndicatorSettingsView';
+import { TwcSettingsView } from '../chart/TwcSettingsView';
 import { SymbolSearchView } from '../chart/SymbolSearchView';
 import { ProfileView } from '../profile/ProfileView';
 import { FloatingTradeButtons } from './FloatingTradeButtons';
@@ -39,6 +40,7 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
   const [layout, setLayout] = useState<TradeLayout>(() => settingsStore.layoutMode);
   const [showSymbolSearch, setShowSymbolSearch] = useState(false);
   const [showIndicatorSettings, setShowIndicatorSettings] = useState(false);
+  const [showTwcSettings, setShowTwcSettings] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
 
@@ -335,6 +337,23 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
           settings={chart.indicatorSettings}
           onChange={(settings) => chartStore.setIndicatorSettings(settings)}
           onDismiss={() => setShowIndicatorSettings(false)}
+          twcEnabled={chart.twcSettings.enabled}
+          onToggleTwc={(on) => chartStore.setTwcSettings({ ...chart.twcSettings, enabled: on })}
+          onOpenTwcSettings={() => {
+            setShowIndicatorSettings(false);
+            setShowTwcSettings(true);
+          }}
+        />
+      ) : null}
+      {showTwcSettings ? (
+        <TwcSettingsView
+          settings={chart.twcSettings}
+          onChange={(settings) => chartStore.setTwcSettings(settings)}
+          onBack={() => {
+            setShowTwcSettings(false);
+            setShowIndicatorSettings(true);
+          }}
+          onDismiss={() => setShowTwcSettings(false)}
         />
       ) : null}
       {showProfile ? (

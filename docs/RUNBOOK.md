@@ -8,15 +8,15 @@
 
 ## First-time setup
 
-```bash
-cp .env.example .env
-# Generate a real encryption key and put it in .env:
-node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
+Run the automated setup script:
 
-npm install
-npm run db:up          # postgres + redis
-npm run db:migrate     # prisma migrate
+```bash
+npm run setup
 ```
+
+This verifies Node.js and Docker, creates `.env` from `.env.example`, generates a real `CRED_ENCRYPTION_KEY`, installs dependencies, starts Postgres and Redis, and applies Prisma migrations. It is idempotent, so you can re-run it safely.
+
+If you prefer to do it manually, see `package.json` and `.env.example` for the equivalent commands.
 
 ## Run the API
 
@@ -27,6 +27,10 @@ npm run dev            # http://localhost:3000 — Webull gateway (paper or live
 The API always talks to Webull — there is no mock/demo data. Without stored
 Webull credentials, market-data and trading calls fail with `AUTH_FAILED`;
 add practice credentials first (see "Switching to real Webull" below).
+The options chain and GEX/DEX endpoints need a `TRADIER_API_TOKEN` in `.env`
+(Webull does not expose option Greeks, open interest, or full chain detail).
+
+> **Note:** `CRED_ENCRYPTION_KEY` is generated automatically by `npm run setup`. You do not need to generate it by hand unless you are setting up production manually.
 
 Smoke test:
 
@@ -57,6 +61,30 @@ npm run test           # Jest unit + e2e
 
 iOS: `xcodebuild test -scheme 0dteTrader -destination 'platform=iOS Simulator,name=iPhone 15'`
 (or Cmd+U in Xcode).
+
+## Brokers and data sources
+
+Today the app uses a **hybrid broker/data model**:
+
+| Function | Provider | Why |
+|---|---|---|
+| Order execution | **Webull OpenAPI** | Sends real or paper trades. |
+| Candlestick / chart data | **Webull OpenAPI** | OHLCV bars and stock snapshots. |
+| Options chain + Greeks (GEX/DEX, OI, IV, etc.) | **Tradier API** | Webull OpenAPI does not expose option Greeks, implied volatility, open interest, or full chain detail beyond contract price and volume. |
+
+So the typical flow is: Webull for placing/cancelling orders and chart candles, Tradier for picking strikes and viewing Greeks.
+
+### Required credentials today
+
+- **Webull OpenAPI** app key + app secret + account ID (paper or live). Entered per-user in the app under Profile → Webull API and stored encrypted server-side.
+- **Tradier API token** (brokerage or paper). Set once in `.env` as `TRADIER_API_TOKEN`; the desktop/iOS app only calls `GET /v1/market/gex` on the backend. Get a token from Tradier → Settings → API Access.
+
+### Future plans
+
+- A **Tradier-only mode** so you can trade and get market data from a single broker.
+- Additional broker integrations that offer free API access and the required options data (Greeks, chain, etc.).
+
+If you only want the chart/trading pieces without options analytics, the Tradier token is only needed for the GEX/DEX and options-chain views.
 
 ## Webull setup (paper & live)
 
@@ -89,15 +117,33 @@ against the real sandbox. Credentials come from the shell env or the gitignored
 `.env` — never commit them.
 
 ```bash
-cd apps/api
 WEBULL_SMOKE_APP_KEY=<app key> WEBULL_SMOKE_APP_SECRET=<app secret> \
   npm run smoke:webull             # read-only: token, accounts, balance, quotes
+WEBULL_SMOKE_APP_KEY=<app key> WEBULL_SMOKE_APP_SECRET=<app secret> \
   npm run smoke:webull -- --trade  # also preview/place/cancel a far-OTM SPY order
 ```
 
 Use its output to confirm the response field shapes assumed in
 `src/broker/webull/webull-mappers.ts` (futures symbol year digits, order/position
 fields) — corrections belong in that one file.
+
+## Tradier setup
+
+To populate the options chain, GEX/DEX levels, and Greeks:
+
+1. Get a Tradier brokerage or paper account.
+2. Go to Tradier → **Settings → API Access** and create an API token.
+3. Set the token in `.env`:
+
+   ```bash
+   TRADIER_API_TOKEN=your_token_here
+   ```
+
+4. Optionally change `TRADIER_BASE_URL`:
+   - Paper: `https://sandbox.tradier.com`
+   - Live: `https://api.tradier.com` (default)
+
+The token stays server-side; the iOS and desktop apps never see it. The backend exposes it only through `GET /v1/market/gex`. If the token is missing, the options chain and GEX/DEX views will fail while chart and order functionality still works.
 
 ## Webull Cloud MCP (optional, for Claude Code)
 

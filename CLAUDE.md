@@ -2,8 +2,6 @@
 
 *A Short List of Rules, Earned by Watching the Same Mistakes Twice*
 
-Andrej Karpathy
-
 **Abstract.** *This file exists because language models make predictable mistakes when they write code. Not random mistakes, just the same ones, over and over, often enough that it was worth writing them down. What follows is not a set of suggestions but a set of rules. The throughline is the same in every section: the model is fast at generating plausible code and slow to notice that plausible is not the same as correct, so the discipline has to come from the process around it.*
 
 **Index Terms.** *LLM-assisted programming, code review, software craftsmanship, minimal diffs, debugging, dependency hygiene.*

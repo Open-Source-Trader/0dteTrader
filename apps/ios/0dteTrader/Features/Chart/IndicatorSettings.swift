@@ -43,6 +43,20 @@ struct IndicatorSettings: Codable, Equatable, Sendable {
     )
 }
 
+/// Sub-pane indicators that render below the candle chart, in display order.
+/// At most 2 show at once (chart real estate is bounded).
+extension IndicatorSettings {
+    static let maxSubPanes = 2
+
+    /// Number of enabled sub-pane indicators (RSI, MACD, Stoch, ATR), capped.
+    var enabledSubPaneCount: Int {
+        let enabled = [rsiEnabled, macdEnabled, stochEnabled, atrEnabled]
+            .filter { $0 }
+            .count
+        return min(enabled, Self.maxSubPanes)
+    }
+}
+
 /// Parameter ranges owned by the model so views don't carry magic numbers.
 extension IndicatorSettings {
     static let maPeriodRange = 2...200

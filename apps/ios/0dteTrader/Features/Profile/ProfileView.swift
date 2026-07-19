@@ -8,25 +8,38 @@ struct ProfileView: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                accountSection
-                webullSection
-                securitySection
-                sessionSection
+            ScrollView {
+                VStack(spacing: AppSpacing.xl) {
+                    accountCard
+                    webullCard
+                    securityCard
+                    logoutCard
+                }
+                .padding(.horizontal, AppSpacing.lg)
+                .padding(.top, AppSpacing.md)
+                .padding(.bottom, AppSpacing.xxxl)
             }
-            .scrollContentBackground(.hidden)
             .background(Color.appBackground)
-            .tint(Color.appAccent)
-            .navigationTitle("Profile")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .principal) {
+                    Text("Profile")
+                        .font(.hudTitle)
+                        .foregroundStyle(Color.appAccent)
+                        .shadow(color: .hudGlow, radius: 4)
+                }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") { dismiss() }
+                    Button {
+                        dismiss()
+                    } label: {
+                        Text("Done")
+                            .font(.panelLabel)
+                            .foregroundStyle(Color.appAccent)
+                    }
                 }
             }
+            .toolbarBackground(Color.appBackground, for: .navigationBar)
             .task {
-                // Skip the refetch (and the loading flash) when we already
-                // have account state from a previous open.
                 if viewModel.me == nil {
                     await viewModel.load()
                 }
@@ -46,102 +59,133 @@ struct ProfileView: View {
         }
     }
 
-    // MARK: - Sections
+    // MARK: - Cards
 
-    private var accountSection: some View {
-        Section {
+    private var accountCard: some View {
+        VStack(alignment: .leading, spacing: AppSpacing.md) {
+            sectionHeader("Account", icon: "person.circle")
+
             if let me = viewModel.me {
-                LabeledContent("Email", value: me.email)
-                    .textSelection(.enabled)
+                HStack {
+                    Text("Email")
+                        .font(.panelLabel)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Text(me.email)
+                        .font(.priceMedium)
+                        .foregroundStyle(.white)
+                        .textSelection(.enabled)
+                }
+                .padding(AppSpacing.md)
+                .background(Color.appSurface, in: HudPanelShape(chamfer: 6))
+                .overlay(
+                    HudPanelShape(chamfer: 6)
+                        .strokeBorder(Color.hudStrokeDim, lineWidth: 1)
+                )
+
                 if me.tradingDisabled {
-                    Label("Trading is disabled (kill switch active)", systemImage: "exclamationmark.triangle.fill")
-                        .foregroundStyle(Color.pnlNegative)
-                        .font(.footnote)
+                    HStack(spacing: AppSpacing.sm) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                        Text("Trading is disabled (kill switch active)")
+                            .font(.chipLabel)
+                    }
+                    .foregroundStyle(Color.pnlNegative)
+                    .padding(AppSpacing.md)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.pnlNegative.opacity(0.1), in: HudPanelShape(chamfer: 6))
+                    .overlay(
+                        HudPanelShape(chamfer: 6)
+                            .strokeBorder(Color.pnlNegative.opacity(0.5), lineWidth: 1)
+                    )
                 }
             } else if viewModel.isLoading {
-                ProgressView()
+                VStack(spacing: AppSpacing.sm) {
+                    SkeletonView().frame(height: 20)
+                    SkeletonView().frame(height: 20)
+                }
+                .padding(AppSpacing.md)
             } else {
-                Label("Account details unavailable", systemImage: "wifi.exclamationmark")
-                    .foregroundStyle(.secondary)
-                Button("Retry") { Task { await viewModel.load() } }
+                VStack(spacing: AppSpacing.md) {
+                    Label("Account details unavailable", systemImage: "wifi.exclamationmark")
+                        .font(.panelLabel)
+                        .foregroundStyle(.secondary)
+
+                    Button {
+                        Task { await viewModel.load() }
+                    } label: {
+                        Text("Retry")
+                            .font(.hudButton)
+                            .foregroundStyle(Color.appAccent)
+                            .frame(maxWidth: .infinity, minHeight: 40)
+                    }
+                    .buttonStyle(HudActionButtonStyle(accent: .appAccent, chamfer: 6))
+                }
+                .padding(AppSpacing.md)
             }
-        } header: {
-            Text("Account").font(.panelLabel).textCase(nil)
         }
+        .padding(AppSpacing.lg)
+        .hudCard(glow: false)
     }
 
-    private var webullSection: some View {
-        Section {
+    private var webullCard: some View {
+        VStack(alignment: .leading, spacing: AppSpacing.md) {
+            sectionHeader("Webull API", icon: "key.fill")
+
             if viewModel.isLoading && viewModel.me == nil {
-                // Skeleton rows matching SecureField row height, so configured
-                // users never see the empty entry form flash while /v1/me loads.
-                ForEach(0..<4, id: \.self) { _ in
-                    SkeletonView()
-                        .frame(height: 20)
-                        .padding(.vertical, AppSpacing.md)
-                }
-            } else if let me = viewModel.me, me.webullConfigured, !viewModel.isEditingCredentials {
-                Label("Configured", systemImage: "checkmark.circle.fill")
-                    .foregroundStyle(Color.pnlPositive)
-                LabeledContent("Account") {
-                    Text(me.webullAccountId ?? "detected after first connection")
-                        .foregroundStyle(.secondary)
-                }
-                Text("Credentials are stored encrypted on the server and are never displayed here.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                Button("Update Credentials") {
-                    viewModel.isEditingCredentials = true
-                }
-                Button {
-                    Task { await viewModel.reconnect() }
-                } label: {
-                    HStack(spacing: AppSpacing.sm) {
-                        if viewModel.isReconnecting {
-                            ProgressView().controlSize(.small)
-                        }
-                        Text("Reconnect to Webull")
+                VStack(spacing: AppSpacing.sm) {
+                    ForEach(0..<4, id: \.self) { _ in
+                        SkeletonView()
+                            .frame(height: 20)
+                            .padding(.vertical, AppSpacing.xs)
                     }
                 }
-                .disabled(viewModel.isReconnecting)
-                Button("Delete Credentials", role: .destructive) {
-                    showDeleteConfirmation = true
-                }
-                .disabled(viewModel.isDeletingCredentials)
-                .sensoryFeedback(.warning, trigger: showDeleteConfirmation)
+            } else if let me = viewModel.me, me.webullConfigured, !viewModel.isEditingCredentials {
+                configuredView(me: me)
             } else {
                 WebullCredentialsForm(viewModel: viewModel)
                 if viewModel.me?.webullConfigured == true {
-                    Button("Cancel Update") {
+                    Button {
                         viewModel.isEditingCredentials = false
+                    } label: {
+                        Text("Cancel Update")
+                            .font(.panelLabel)
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, minHeight: 40)
                     }
+                    .buttonStyle(AppPressStyle())
                 }
             }
 
             if let successMessage = viewModel.successMessage {
-                Label(successMessage, systemImage: "checkmark.circle.fill")
-                    .font(.footnote)
-                    .foregroundStyle(Color.pnlPositive)
-                    .accessibilityAddTraits(.isStaticText)
+                HStack(spacing: AppSpacing.sm) {
+                    Image(systemName: "checkmark.circle.fill")
+                    Text(successMessage)
+                        .font(.chipLabel)
+                }
+                .foregroundStyle(Color.pnlPositive)
+                .accessibilityAddTraits(.isStaticText)
             }
             if let errorMessage = viewModel.errorMessage {
-                Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
-                    .font(.footnote)
-                    .foregroundStyle(Color.pnlNegative)
+                HStack(spacing: AppSpacing.sm) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                    Text(errorMessage)
+                        .font(.chipLabel)
+                }
+                .foregroundStyle(Color.pnlNegative)
             }
-        } header: {
-            Text("Webull API").font(.panelLabel).textCase(nil)
-        } footer: {
+
             Text("Your app key, app secret, and account ID come from the Webull OpenAPI developer portal.")
+                .font(.chipLabel)
+                .foregroundStyle(.secondary)
         }
+        .padding(AppSpacing.lg)
+        .hudCard(glow: false)
         .animation(AppMotion.standard, value: viewModel.isLoading)
         .animation(AppMotion.standard, value: viewModel.me?.webullConfigured)
         .animation(AppMotion.standard, value: viewModel.isEditingCredentials)
         .sensoryFeedback(.success, trigger: viewModel.successMessage)
         .sensoryFeedback(.error, trigger: viewModel.errorMessage)
         .onChange(of: viewModel.successMessage) { _, message in
-            // Success feedback is transient — auto-expire so it doesn't go
-            // stale under the "Configured" state.
             guard let message else { return }
             Task {
                 try? await Task.sleep(for: .seconds(4))
@@ -152,23 +196,131 @@ struct ProfileView: View {
         }
     }
 
-    private var securitySection: some View {
-        Section {
-            Toggle("Require Face ID to open", isOn: Binding(
-                get: { viewModel.appLockEnabled },
-                set: { viewModel.setAppLockEnabled($0) }
-            ))
-        } header: {
-            Text("Security").font(.panelLabel).textCase(nil)
+    private func configuredView(me: ProfileViewModel.AccountInfo) -> some View {
+        VStack(alignment: .leading, spacing: AppSpacing.md) {
+            HStack(spacing: AppSpacing.sm) {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(Color.pnlPositive)
+                Text("Configured")
+                    .font(.panelLabel)
+                    .foregroundStyle(Color.pnlPositive)
+            }
+            .padding(AppSpacing.md)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.pnlPositive.opacity(0.08), in: HudPanelShape(chamfer: 6))
+            .overlay(
+                HudPanelShape(chamfer: 6)
+                    .strokeBorder(Color.pnlPositive.opacity(0.35), lineWidth: 1)
+            )
+
+            HStack {
+                Text("Account")
+                    .font(.panelLabel)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text(me.webullAccountId ?? "detected after first connection")
+                    .font(.priceSmall)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(AppSpacing.md)
+            .background(Color.appSurface, in: HudPanelShape(chamfer: 6))
+            .overlay(
+                HudPanelShape(chamfer: 6)
+                    .strokeBorder(Color.hudStrokeDim.opacity(0.5), lineWidth: 1)
+            )
+
+            Text("Credentials are stored encrypted on the server and are never displayed here.")
+                .font(.chipLabel)
+                .foregroundStyle(.secondary)
+
+            VStack(spacing: AppSpacing.sm) {
+                Button {
+                    viewModel.isEditingCredentials = true
+                } label: {
+                    Text("Update Credentials")
+                        .font(.panelLabel)
+                        .foregroundStyle(Color.appAccent)
+                        .frame(maxWidth: .infinity, minHeight: 40)
+                }
+                .buttonStyle(HudActionButtonStyle(accent: .appAccent, chamfer: 6))
+
+                Button {
+                    Task { await viewModel.reconnect() }
+                } label: {
+                    HStack(spacing: AppSpacing.sm) {
+                        if viewModel.isReconnecting {
+                            ProgressView().controlSize(.small).tint(Color.appAccent)
+                        }
+                        Text("Reconnect to Webull")
+                            .font(.panelLabel)
+                    }
+                    .foregroundStyle(Color.appAccent)
+                    .frame(maxWidth: .infinity, minHeight: 40)
+                }
+                .buttonStyle(HudActionButtonStyle(accent: .hudStrokeDim, chamfer: 6))
+                .disabled(viewModel.isReconnecting)
+
+                Button {
+                    showDeleteConfirmation = true
+                } label: {
+                    Text("Delete Credentials")
+                        .font(.panelLabel)
+                        .foregroundStyle(Color.pnlNegative)
+                        .frame(maxWidth: .infinity, minHeight: 40)
+                }
+                .buttonStyle(HudActionButtonStyle(accent: .pnlNegative.opacity(0.6), chamfer: 6))
+                .disabled(viewModel.isDeletingCredentials)
+                .sensoryFeedback(.warning, trigger: showDeleteConfirmation)
+            }
         }
     }
 
-    private var sessionSection: some View {
-        Section {
-            Button("Log Out", role: .destructive) {
-                showLogoutConfirmation = true
+    private var securityCard: some View {
+        VStack(alignment: .leading, spacing: AppSpacing.md) {
+            sectionHeader("Security", icon: "lock.shield")
+
+            HStack {
+                HStack(spacing: AppSpacing.sm) {
+                    Image(systemName: "faceid")
+                        .foregroundStyle(Color.appAccent)
+                    Text("Require Face ID to open")
+                        .font(.panelLabel)
+                        .foregroundStyle(.white)
+                }
+                Spacer()
+                Toggle("", isOn: Binding(
+                    get: { viewModel.appLockEnabled },
+                    set: { viewModel.setAppLockEnabled($0) }
+                ))
+                .labelsHidden()
+                .tint(Color.appAccent)
             }
+            .padding(AppSpacing.md)
+            .background(Color.appSurface, in: HudPanelShape(chamfer: 6))
+            .overlay(
+                HudPanelShape(chamfer: 6)
+                    .strokeBorder(Color.hudStrokeDim, lineWidth: 1)
+            )
         }
+        .padding(AppSpacing.lg)
+        .hudCard(glow: false)
+    }
+
+    private var logoutCard: some View {
+        Button {
+            showLogoutConfirmation = true
+        } label: {
+            HStack(spacing: AppSpacing.sm) {
+                Image(systemName: "rectangle.portrait.and.arrow.right")
+                Text("Log Out")
+                    .font(.hudButton)
+                    .kerning(0.5)
+            }
+            .foregroundStyle(Color.pnlNegative)
+            .shadow(color: Color.pnlNegative.opacity(0.4), radius: 4)
+            .frame(maxWidth: .infinity, minHeight: 48)
+        }
+        .buttonStyle(HudActionButtonStyle(accent: .pnlNegative.opacity(0.5)))
         .confirmationDialog(
             "Log out of 0dteTrader?",
             isPresented: $showLogoutConfirmation,
@@ -181,6 +333,20 @@ struct ProfileView: View {
                 }
             }
             Button("Cancel", role: .cancel) {}
+        }
+    }
+
+    // MARK: - Helpers
+
+    private func sectionHeader(_ title: String, icon: String) -> some View {
+        HStack(spacing: AppSpacing.sm) {
+            Image(systemName: icon)
+                .font(.caption)
+                .foregroundStyle(Color.appAccent)
+            Text(title)
+                .font(.panelLabel)
+                .foregroundStyle(Color.appAccent)
+                .shadow(color: .hudGlow, radius: 3)
         }
     }
 }

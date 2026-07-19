@@ -9,14 +9,17 @@
     "packages/shared-types"
   ],
   "scripts": {
+    "setup": "node scripts/setup.js",
     "dev": "npm run dev --workspace apps/api",
+    "dev:api": "npm run dev --workspace apps/api",
     "dev:desktop": "npm run dev --workspace apps/desktop",
     "build": "npm run build --workspace packages/shared-types && npm run build --workspace apps/api && npm run build --workspace apps/desktop",
     "test": "npm run test --workspaces --if-present",
     "lint": "npm run lint --workspaces --if-present",
     "db:up": "docker compose up -d",
     "db:down": "docker compose down",
-    "db:migrate": "npm run db:migrate --workspace apps/api"
+    "db:migrate": "npm run db:migrate --workspace apps/api",
+    "smoke:webull": "npm run smoke:webull --workspace apps/api"
   },
   "engines": {
     "node": ">=18.17"

@@ -1,16 +1,162 @@
 # 0dteTrader
 
-Rapid options quick-trade iOS app backed by the official Webull OpenAPI.
+Rapid options quick-trade iOS (and desktop) app backed by the official Webull OpenAPI for order execution and candlestick data, with options analytics (Greeks, open interest, etc.) sourced from Tradier.
 
 - `apps/ios` — SwiftUI iPhone app (iOS 17+)
+- `apps/desktop` — React + Electron desktop clone for local development on Linux/macOS/Windows
 - `apps/api` — NestJS + TypeScript backend (auth, encrypted credential vault, market data, trading proxy)
 - `packages/shared-types` — shared TypeScript contracts
-- `docs` — PRD, architecture, API spec, security, Webull integration, runbook, roadmap
+- `docs` — architecture, API spec, security model, Webull integration guide, runbook
 
-See **docs/RUNBOOK.md** to get running locally and **docs/ARCHITECTURE.md** for the system design.
+> **Risk warning:** Trading involves substantial risk of loss. This software places real orders when connected to a live brokerage account. Always validate against a paper (practice) account first.
 
-> Trading involves substantial risk of loss. This software places real orders when connected to a live
-> brokerage account. Always validate against a paper (practice) account first.
+## Quick start
 
-Webull OpenAPI credentials (App Key + App Secret) are entered per-user via
-`PUT /me/webull-credentials` and stored encrypted — never commit them to this repo or any file.
+```bash
+git clone https://github.com/TradeWithCash2025/0dteTrader.git
+cd 0dteTrader
+npm run setup
+npm run dev
+```
+
+`npm run setup` checks your environment, creates `.env` from `.env.example`, generates a credential-encryption key, installs dependencies, starts Postgres and Redis, and applies Prisma migrations.
+
+## Prerequisites
+
+- **Node.js >= 18.17** and **npm**
+- **Docker + Docker Compose** (Postgres 16 and Redis 7 run in containers)
+- **macOS + Xcode 15+** if you want to build the iOS app
+- **XcodeGen** (`brew install xcodegen`) for generating the iOS `.xcodeproj`
+
+## Data sources and broker support
+
+Today the app uses a **hybrid broker/data model**:
+
+| Function | Provider | Why |
+|---|---|---|
+| Order execution | **Webull OpenAPI** | Sends real or paper trades. |
+| Candlestick / chart data | **Webull OpenAPI** | OHLCV bars and stock snapshots. |
+| Options chain + Greeks (GEX/DEX, OI, etc.) | **Tradier API** | Webull OpenAPI does not expose option Greeks, implied volatility, open interest, or full chain detail beyond contract price and volume. |
+
+So a typical flow looks like: Webull for placing/cancelling orders and chart candles, Tradier for picking strikes and viewing Greeks.
+
+### Required credentials today
+
+- **Webull OpenAPI** app key + app secret + account ID (paper or live). Entered per-user in the app under Profile → Webull API and stored encrypted server-side.
+- **Tradier API token** (brokerage or paper). Set once in `.env` as `TRADIER_API_TOKEN`; the desktop/iOS app only calls `GET /v1/market/gex` on the backend.
+
+### Future plans
+
+- A **Tradier-only mode** so you can trade and get market data from a single broker.
+- Additional broker integrations that offer free API access and the required options data (Greeks, chain, etc.).
+
+If you only want the chart/trading pieces without options analytics, the Tradier token is only needed for the GEX/DEX and options-chain views.
+
+## What the setup script does
+
+Running `npm run setup`:
+
+1. Verifies Node.js >= 18.17 and that Docker is running.
+2. Copies `.env.example` → `.env` (if `.env` does not already exist).
+3. Generates a real `CRED_ENCRYPTION_KEY` in `.env` if it is still a placeholder.
+4. Runs `npm install`.
+5. Starts Postgres and Redis with `npm run db:up`.
+6. Waits for Postgres, then runs `npm run db:migrate`.
+
+The script is idempotent — you can run it again safely.
+
+## Run the API
+
+```bash
+npm run dev
+```
+
+The API starts at `http://localhost:3000`. It always talks to the real Webull OpenAPI; there is no mock data. Without stored Webull credentials, market-data and trading calls return `AUTH_FAILED` until you add practice credentials. The options chain and GEX/DEX endpoints also need a `TRADIER_API_TOKEN` in `.env`.
+
+Register a dev account:
+
+```bash
+curl -X POST http://localhost:3000/v1/auth/register \
+  -H 'content-type: application/json' \
+  -d '{"email":"dev@example.com","password":"password123"}'
+```
+
+## Run the iOS app
+
+```bash
+cd apps/ios
+xcodegen
+open 0dteTrader.xcodeproj
+```
+
+Run on the iOS simulator (⌘+R). The Debug build targets `http://localhost:3000` (configurable in `apps/ios/0dteTrader/App/AppConfig.swift`). Register the dev account you created above, then add Webull credentials under Profile → Webull API.
+
+## Run the desktop app
+
+The desktop app is a web/Electron clone of the iOS UI, useful for testing the backend without Xcode.
+
+```bash
+npm run dev:desktop
+```
+
+Then open the printed local URL (usually `http://localhost:5173`).
+
+## Tests and checks
+
+```bash
+npm run lint
+npm run build
+npm run test
+```
+
+iOS tests:
+
+```bash
+cd apps/ios
+xcodebuild test -scheme 0dteTrader -destination 'platform=iOS Simulator,name=iPhone 16'
+```
+
+## Connect to Webull and Tradier
+
+### Webull (order execution + chart data)
+
+The app needs a Webull OpenAPI developer account. High-level steps:
+
+1. Apply for Webull OpenAPI credentials at the Webull developer portal.
+2. Set `WEBULL_API_BASE_URL` in `.env`:
+   - Paper: `https://api.sandbox.webull.com`
+   - Live: `https://api.webull.com`
+3. In the app: Profile → Webull API → enter app key, app secret, and account ID.
+4. For live trading, the first API call triggers an SMS-verified approval in the Webull app.
+
+See [`docs/RUNBOOK.md`](docs/RUNBOOK.md) for the full walkthrough, including how to get sandbox credentials and run the Webull smoke test:
+
+```bash
+npm run smoke:webull
+```
+
+### Tradier (options chain + Greeks)
+
+To populate the options chain, GEX/DEX levels, and Greeks, set a Tradier token in `.env`:
+
+```bash
+TRADIER_API_TOKEN=your_token_here
+```
+
+Get a token from [Tradier](https://tradier.com) → Settings → API Access (a paper/brokerage account is required). The token is only used server-side; the mobile/desktop apps never see it.
+
+## Project secrets
+
+Real secrets live only in `.env`, which is gitignored. Never commit credentials. The repo contains only development/CI placeholders and a hardcoded dev-only encryption fallback that is rejected in production.
+
+## Documentation
+
+- [`docs/RUNBOOK.md`](docs/RUNBOOK.md) — local development, Webull setup, smoke tests, troubleshooting
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — system design and module overview
+- [`docs/SECURITY.md`](docs/SECURITY.md) — threat model, encryption, auth, operational security
+- [`docs/API-SPEC.md`](docs/API-SPEC.md) and [`docs/openapi.yaml`](docs/openapi.yaml) — backend API contract
+- [`docs/WEBULL-INTEGRATION.md`](docs/WEBULL-INTEGRATION.md) — Webull OpenAPI integration details
+
+## License
+
+[Add your license here.]

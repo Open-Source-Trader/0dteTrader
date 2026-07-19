@@ -2,9 +2,9 @@ import SwiftUI
 
 /// The main screen (PRD §3.3):
 /// - Layout A (fullscreen): chart fills the screen, floating Buy/Sell overlaid.
-/// - Layout B (split): chart on top, trade panel below; drag divider resizes
-///   the panel between 1/4 and 1/2 of screen height.
-/// Layout choice and split fraction persist (FR-12).
+/// - Layout B (split): chart on top, trade panel below; panel height auto-adjusts
+///   based on how many indicator sub-panes are enabled (desktop parity).
+/// Layout choice persists (FR-12).
 struct TradeScreenView: View {
     let container: AppContainer
     let onLogout: () async -> Void
@@ -14,8 +14,6 @@ struct TradeScreenView: View {
     @StateObject private var tradeViewModel: TradeViewModel
 
     @State private var layout: TradeLayout
-    @State private var splitFraction: Double
-    @State private var dragStartFraction: Double?
     @State private var showSymbolSearch = false
     @State private var showIndicatorSettings = false
     @State private var showProfile = false
@@ -23,7 +21,6 @@ struct TradeScreenView: View {
     // 'nil' until /v1/me answers; the server value wins (desktop parity).
     @State private var tradingMode: TradingMode?
     @State private var showModeConfirmation = false
-    @GestureState private var isDraggingDivider = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private let settingsStore: SettingsStore
@@ -35,7 +32,6 @@ struct TradeScreenView: View {
         _chainViewModel = StateObject(wrappedValue: container.makeOptionsChainViewModel())
         _tradeViewModel = StateObject(wrappedValue: container.makeTradeViewModel())
         _layout = State(initialValue: container.settingsStore.layoutMode)
-        _splitFraction = State(initialValue: container.settingsStore.splitFraction)
         self.settingsStore = container.settingsStore
     }
 
@@ -195,6 +191,16 @@ struct TradeScreenView: View {
 
     // MARK: - Layouts
 
+    /// Panel fraction driven by sub-pane count (desktop parity): the panel
+    /// shrinks as indicators appear so the chart keeps enough room. The panel
+    /// content compacts via its density tier — it never scrolls.
+    private static let panelFractions: [CGFloat] = [1.0 / 3.0, 0.30, 0.27]
+    private static let panelDensities: [TradePanelDensity] = [.roomy, .compact, .dense]
+
+    private var paneCount: Int {
+        chartViewModel.indicatorSettings.enabledSubPaneCount
+    }
+
     @ViewBuilder
     private var layoutContent: some View {
         switch layout {
@@ -217,25 +223,25 @@ struct TradeScreenView: View {
             }
 
         case .split:
-            // Layout B — FR-11 with draggable divider.
+            // Layout B — automatic sizing based on indicator count (desktop parity).
             GeometryReader { geometry in
                 let totalHeight = geometry.size.height
-                // One budget for both clamps: chart keeps >=100pt, divider 18pt,
-                // and the panel never drops below its scrollable floor.
-                let minPanelHeight: CGFloat = 200
-                let panelHeight = min(
-                    max((totalHeight * splitFraction).rounded(), minPanelHeight),
-                    max(totalHeight - dividerHeight - 100, minPanelHeight)
-                )
+                let fraction = Self.panelFractions[min(paneCount, Self.panelFractions.count - 1)]
+                let panelHeight = (totalHeight * fraction).rounded()
+                let chartHeight = max(totalHeight - panelHeight - 1, 96)
                 VStack(spacing: 0) {
                     chartView
-                        .frame(height: max(totalHeight - panelHeight - dividerHeight, 100))
-                    divider(totalHeight: totalHeight)
+                        .frame(height: chartHeight)
+                    // Static hairline divider
+                    Rectangle()
+                        .fill(Color.hudStroke.opacity(0.35))
+                        .frame(height: 1)
                     TradePanelView(
                         tradeViewModel: tradeViewModel,
                         chainViewModel: chainViewModel,
                         underlying: chartViewModel.symbol,
                         positionsStrip: positionsStrip,
+                        density: Self.panelDensities[min(paneCount, Self.panelDensities.count - 1)],
                         onArm: { side in
                             tradeViewModel.arm(side: side, underlying: chartViewModel.symbol, chainViewModel: chainViewModel)
                         }
@@ -244,6 +250,7 @@ struct TradeScreenView: View {
                     .clipped()
                 }
                 .frame(height: totalHeight)
+                .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: paneCount)
             }
         }
     }
@@ -289,53 +296,6 @@ struct TradeScreenView: View {
         )
     }
 
-    // MARK: - Divider (Layout B)
-
-    private let dividerHeight: CGFloat = 18
-
-    private func divider(totalHeight: CGFloat) -> some View {
-        RoundedRectangle(cornerRadius: 2.5)
-            .fill(isDraggingDivider ? Color.appAccent : Color.hudStroke.opacity(0.5))
-            .frame(width: 36, height: 5)
-            .scaleEffect(isDraggingDivider ? 1.15 : 1)
-            .animation(AppMotion.quick, value: isDraggingDivider)
-            .frame(maxWidth: .infinity)
-            .frame(height: dividerHeight)
-            .background(Color.appBackground)
-            // Visual stays 18pt; the hit area expands to the 44pt HIG minimum.
-            .contentShape(Rectangle().inset(by: -13))
-            .gesture(
-                DragGesture()
-                    .updating($isDraggingDivider) { _, state, _ in state = true }
-                    .onChanged { value in
-                        if dragStartFraction == nil {
-                            dragStartFraction = splitFraction
-                        }
-                        let start = dragStartFraction ?? splitFraction
-                        let delta = -value.translation.height / totalHeight
-                        // Clamp so the ticket can never be dragged below its
-                        // scrollable floor (PRD max remains 1/2 of screen height).
-                        splitFraction = min(0.5, max(0.32, start + delta))
-                    }
-                    .onEnded { _ in
-                        dragStartFraction = nil
-                        Haptics.selection()
-                        settingsStore.splitFraction = splitFraction
-                    }
-            )
-            .accessibilityLabel("Resize trade panel")
-            .accessibilityValue("\(Int((splitFraction * 100).rounded())) percent of screen")
-            .accessibilityAdjustableAction { direction in
-                let step = 0.05
-                switch direction {
-                case .increment: splitFraction = min(0.5, splitFraction + step)
-                case .decrement: splitFraction = max(0.32, splitFraction - step)
-                @unknown default: break
-                }
-                settingsStore.splitFraction = splitFraction
-                Haptics.selection()
-            }
-    }
 
     // MARK: - Helpers
 

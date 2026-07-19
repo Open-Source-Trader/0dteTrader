@@ -1,42 +1,84 @@
 import SwiftUI
 
+/// Density tiers matching the desktop (Electron) panel compaction:
+/// roomy (0 sub-panes), compact (1), dense (2). The panel's fixed height
+/// shrinks as sub-panes appear; content compacts to fit — it never scrolls.
+enum TradePanelDensity: Sendable {
+    case roomy, compact, dense
+
+    var spacing: CGFloat {
+        switch self {
+        case .roomy: return AppSpacing.sm
+        case .compact: return 6
+        case .dense: return 4
+        }
+    }
+
+    var verticalPadding: EdgeInsets {
+        switch self {
+        case .roomy: return EdgeInsets(top: AppSpacing.sm, leading: 0, bottom: AppSpacing.sm, trailing: 0)
+        case .compact: return EdgeInsets(top: 6, leading: 0, bottom: 8, trailing: 0)
+        case .dense: return EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0)
+        }
+    }
+
+    var stripMaxHeight: CGFloat {
+        switch self {
+        case .roomy: return 140
+        case .compact: return 100
+        case .dense: return 64
+        }
+    }
+
+    var buttonMinHeight: CGFloat {
+        switch self {
+        case .roomy: return 50
+        case .compact: return 44
+        case .dense: return 40
+        }
+    }
+}
+
 /// Layout B's bottom trade panel (FR-13..18): option type / expiration /
 /// strike / AUTO contract selection, quantity quick-steppers, mid/market
 /// toggle, and Buy/Sell arm buttons. Options-only.
+/// The panel is sized to fit its content at every density — it never scrolls.
 struct TradePanelView: View {
     @ObservedObject var tradeViewModel: TradeViewModel
     @ObservedObject var chainViewModel: OptionsChainViewModel
     let underlying: String
     let positionsStrip: PositionsStripView
+    var density: TradePanelDensity = .roomy
     let onArm: (OrderSide) -> Void
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        ScrollView(.vertical) {
-            VStack(spacing: AppSpacing.sm) {
-                positionsStrip
-                optionsSection
-                quantityRow
-                orderTypeRow
+        VStack(spacing: density.spacing) {
+            positionsStrip
+                .frame(maxHeight: density.stripMaxHeight)
+            optionsSection
+            quantityRow
+            orderTypeRow
 
-                HStack(spacing: AppSpacing.md) {
-                    TradeActionButton(title: "SELL", color: .sellRed, isEnabled: canTrade) {
-                        onArm(.sell)
-                    }
-                    TradeActionButton(title: "BUY", color: .buyGreen, isEnabled: canTrade) {
-                        onArm(.buy)
-                    }
+            Spacer(minLength: 0)
+
+            HStack(spacing: AppSpacing.md) {
+                TradeActionButton(title: "SELL", color: .sellRed, isEnabled: canTrade) {
+                    onArm(.sell)
                 }
+                .frame(minHeight: density.buttonMinHeight)
+                TradeActionButton(title: "BUY", color: .buyGreen, isEnabled: canTrade) {
+                    onArm(.buy)
+                }
+                .frame(minHeight: density.buttonMinHeight)
             }
-            .padding(.horizontal, AppSpacing.md)
-            .padding(.top, AppSpacing.xs)
-            .padding(.bottom, AppSpacing.sm)
-            .frame(maxWidth: .infinity)
-            .animation(reduceMotion ? nil : .snappy(duration: 0.22, extraBounce: 0), value: chainViewModel.isAutoMode)
         }
-        .scrollIndicators(.hidden)
-        .scrollBounceBehavior(.basedOnSize)
+        .padding(.horizontal, AppSpacing.md)
+        .padding(density.verticalPadding)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .clipped()
+        .animation(reduceMotion ? nil : .snappy(duration: 0.22, extraBounce: 0), value: chainViewModel.isAutoMode)
         .background(Color.appBackground)
     }
 

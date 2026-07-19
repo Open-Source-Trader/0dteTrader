@@ -47,7 +47,10 @@ struct PositionsStripView: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: { position in
-            Text("Submit a market \(position.quantity > 0 ? "sell" : "buy") order to close \(position.symbol)? Realizes \(Format.signedPrice(position.unrealizedPnl)) unrealized P&L.")
+            Text("""
+                Submit a market \(position.quantity > 0 ? "sell" : "buy") order to close \
+                \(position.symbol)? Realizes \(Format.signedPrice(position.unrealizedPnl)) unrealized P&L.
+                """)
         }
         .alert(
             "Cancel order?",
@@ -112,7 +115,10 @@ struct PositionsStripView: View {
         .buttonStyle(AppPressStyle())
         .disabled(isWorking)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Position \(position.symbol), quantity \(position.quantity), average price \(Format.price(position.avgPrice)), unrealized P&L \(Format.signedPrice(position.unrealizedPnl)) dollars")
+        .accessibilityLabel("""
+            Position \(position.symbol), quantity \(position.quantity), average price \
+            \(Format.price(position.avgPrice)), unrealized P&L \(Format.signedPrice(position.unrealizedPnl)) dollars
+            """)
         .accessibilityHint("Double-tap to flatten at market")
     }
 

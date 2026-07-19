@@ -122,7 +122,8 @@ struct TradePanelView: View {
     }
 
     private func expirationLabel(_ expiration: String) -> String {
-        if expiration == DateParsing.dayString(from: Date()) {
+        // 0DTE is an exchange-calendar concept: compare in New York time.
+        if expiration == DateParsing.marketDayString(from: Date()) {
             return "\(expiration) · 0DTE"
         }
         return expiration
@@ -310,13 +311,15 @@ struct TradePanelView: View {
         }
     }
 
-    /// Live `bid × ask` plus indicative mid and estimated notional (qty × mid)
-    /// for the selected contract.
+    /// Live `bid × ask` plus indicative mid and estimated notional for the
+    /// selected contract (mid × qty × contract multiplier — options: 100).
     private var quoteLine: String? {
         guard let pair = selectedQuotePair else { return nil }
         var line = "\(Format.price(pair.bid)) × \(Format.price(pair.ask))"
         if let mid = indicativeMid {
-            line += " · ≈ \(Format.price(mid)) · Est. \(Format.price(mid * Double(tradeViewModel.quantity)))"
+            let multiplier: Double = tradeViewModel.assetClass == .option ? 100 : 1
+            let notional = mid * Double(tradeViewModel.quantity) * multiplier
+            line += " · ≈ \(Format.price(mid)) · Est. \(Format.price(notional))"
         }
         return line
     }

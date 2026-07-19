@@ -88,16 +88,6 @@ struct OptionsChainDTO: Decodable, Equatable, Sendable {
     let contracts: [OptionContractDTO]
 }
 
-struct FuturesContractDTO: Decodable, Equatable, Sendable {
-    let symbol: String
-    let root: String
-    let expiration: String
-    let frontMonth: Bool
-    let bid: Double
-    let ask: Double
-    let last: Double
-}
-
 // MARK: - Trading
 
 struct OrderSelectionDTO: Encodable, Equatable, Sendable {
@@ -105,7 +95,6 @@ struct OrderSelectionDTO: Encodable, Equatable, Sendable {
     let optionType: String?
     let expiration: String?
     let strike: Double?
-    let contractSymbol: String?
 }
 
 struct OrderRequestDTO: Encodable, Equatable, Sendable {
@@ -147,7 +136,7 @@ struct PositionDTO: Decodable, Equatable, Sendable {
     let avgPrice: Double
     let markPrice: Double
     let unrealizedPnl: Double
-    /// Contract multiplier (options: 100; futures: per spec) for client-side live P/L.
+    /// Contract multiplier (options: 100) for client-side live P/L.
     let multiplier: Double
 }
 

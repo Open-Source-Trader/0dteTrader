@@ -2,9 +2,9 @@ import Foundation
 
 // MARK: - Shared enums (raw values match the API contract)
 
+/// The app is options-only; the backend rejects any other asset class.
 enum AssetClass: String, Codable, CaseIterable, Sendable {
     case option
-    case future
 }
 
 enum OrderSide: String, Codable, Sendable {
@@ -159,33 +159,6 @@ extension OptionsChain {
     }
 }
 
-struct FuturesContract: Equatable, Sendable, Identifiable {
-    var id: String { symbol }
-    let symbol: String
-    let root: String
-    let expiration: String
-    let frontMonth: Bool
-    let bid: Double
-    let ask: Double
-    let last: Double
-
-    var mid: Double? { PriceMath.midPrice(bid: bid, ask: ask) }
-}
-
-extension FuturesContract {
-    init(dto: FuturesContractDTO) {
-        self.init(
-            symbol: dto.symbol,
-            root: dto.root,
-            expiration: dto.expiration,
-            frontMonth: dto.frontMonth,
-            bid: dto.bid,
-            ask: dto.ask,
-            last: dto.last
-        )
-    }
-}
-
 struct OrderPreview: Equatable, Sendable {
     let contractSymbol: String
     let price: Double
@@ -241,7 +214,7 @@ struct Position: Equatable, Sendable, Identifiable {
     let avgPrice: Double
     var markPrice: Double
     var unrealizedPnl: Double
-    /// Contract multiplier (options: 100; futures: per spec) for live P/L math.
+    /// Contract multiplier (options: 100) for live P/L math.
     let multiplier: Double
 }
 

@@ -296,7 +296,6 @@ struct TradeScreenView: View {
         )
     }
 
-
     // MARK: - Helpers
 
     /// Contract symbols whose live quotes the screen needs: the selected

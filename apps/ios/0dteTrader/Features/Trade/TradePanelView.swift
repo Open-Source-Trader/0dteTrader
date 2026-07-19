@@ -54,15 +54,20 @@ struct TradePanelView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        VStack(spacing: density.spacing) {
-            positionsStrip
-                .frame(maxHeight: density.stripMaxHeight)
-            optionsSection
-            quantityRow
-            orderTypeRow
+        VStack(spacing: 0) {
+            // Upper content: clips if it exceeds available space (never scrolls).
+            VStack(spacing: density.spacing) {
+                positionsStrip
+                    .frame(maxHeight: density.stripMaxHeight)
+                optionsSection
+                quantityRow
+                orderTypeRow
+            }
+            .frame(maxHeight: .infinity, alignment: .top)
+            .clipped()
 
-            Spacer(minLength: 0)
-
+            // Action buttons pinned to the bottom — always visible regardless
+            // of how much content is above (desktop parity: marginTop: auto).
             HStack(spacing: AppSpacing.md) {
                 TradeActionButton(title: "SELL", color: .sellRed, isEnabled: canTrade) {
                     onArm(.sell)
@@ -77,7 +82,6 @@ struct TradePanelView: View {
         .padding(.horizontal, AppSpacing.md)
         .padding(density.verticalPadding)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .clipped()
         .animation(reduceMotion ? nil : .snappy(duration: 0.22, extraBounce: 0), value: chainViewModel.isAutoMode)
         .background(Color.appBackground)
     }

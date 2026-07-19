@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { CandleInterval, TradingMode } from '@0dtetrader/shared-types';
+import type { ApiClient } from '../../core/api/ApiClient';
 import { useStore } from '../../core/observable';
 import { Menu } from '../../design/components/Menu';
 import { Spinner } from '../../design/components/Spinner';
@@ -11,6 +12,7 @@ import { CandleChart, type OverlaySeries, type VisibleRange } from './CandleChar
 import { overlayPalette, panePalette } from './chartColors';
 import { DrawToolsMenu } from './DrawingToolbar';
 import type { DrawingsStore } from './drawings';
+import { useGexLevels } from './gex/useGexLevels';
 import { IndicatorPane, type PaneSeries } from './IndicatorPane';
 import * as engine from './indicatorEngine';
 import { computeTwc } from './twc/computeTwc';
@@ -21,6 +23,7 @@ import './chart.css';
 interface ChartViewProps {
   store: ChartStore;
   drawingsStore: DrawingsStore;
+  apiClient: ApiClient;
   onSymbolSearch: () => void;
   onIndicatorSettings: () => void;
   tradingMode: TradingMode;
@@ -51,7 +54,7 @@ const SKELETON_BARS = [
 ];
 
 /** Chart surface: header, candle chart with overlays and drawing tools, sub-panes. */
-export function ChartView({ store, drawingsStore, onSymbolSearch, onIndicatorSettings, tradingMode, onToggleMode }: ChartViewProps) {
+export function ChartView({ store, drawingsStore, apiClient, onSymbolSearch, onIndicatorSettings, tradingMode, onToggleMode }: ChartViewProps) {
   const {
     symbol,
     interval,
@@ -62,10 +65,14 @@ export function ChartView({ store, drawingsStore, onSymbolSearch, onIndicatorSet
     isStale,
     indicatorSettings,
     twcSettings,
+    gexSettings,
   } = useStore(store);
 
   // Main chart's visible x-range, mirrored into every sub-pane.
   const [visibleRange, setVisibleRange] = useState<VisibleRange | null>(null);
+
+  // GEX/DEX levels poll the API while the script is enabled.
+  const gex = useGexLevels(apiClient, symbol, gexSettings);
 
   const closes = useMemo(() => candles.map((c) => c.close), [candles]);
 
@@ -337,9 +344,28 @@ export function ChartView({ store, drawingsStore, onSymbolSearch, onIndicatorSet
           drawingsStore={drawingsStore}
           candleColors={twcModel?.candleColors ?? null}
           twcModel={twcModel}
+          gexLevels={gex.levels}
+          gexSettings={gexSettings.enabled ? gexSettings : null}
+          gexStale={gex.stale}
           onVisibleRangeChange={setVisibleRange}
         />
         {twcModel?.banner ? <TwcBiasBanner banner={twcModel.banner} /> : null}
+        {gex.errorMessage ? (
+          <div
+            role="status"
+            style={{
+              position: 'absolute',
+              bottom: 8,
+              left: 56,
+              fontSize: 'var(--fs-caption2)',
+              color: 'var(--warning-orange)',
+              pointerEvents: 'none',
+              zIndex: 3,
+            }}
+          >
+            GEX unavailable: {gex.errorMessage}
+          </div>
+        ) : null}
         {isLoading && candles.length === 0 ? (
           <div className="chart-skeleton" aria-hidden="true">
             {SKELETON_BARS.map((height, index) => (
@@ -429,7 +455,7 @@ export function ChartView({ store, drawingsStore, onSymbolSearch, onIndicatorSet
         />
       ) : null}
       {atrSeries ? (
-        <IndicatorPane height={72} candles={candles} series={atrSeries} visibleRange={visibleRange} />
+        <IndicatorPane height={72} candles={atrSeries ? candles : candles} series={atrSeries} visibleRange={visibleRange} />
       ) : null}
     </div>
   );

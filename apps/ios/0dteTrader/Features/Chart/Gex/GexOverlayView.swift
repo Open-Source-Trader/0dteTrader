@@ -101,7 +101,8 @@ final class GexOverlayView: UIView {
                 context.fill(CGRect(x: content.minX, y: yTop, width: content.width, height: yBottom - yTop))
                 // Only the top 3 get text; the rest stay quiet bands.
                 if index < 3 {
-                    let label = "$\(Format.price(level.strike)) — \(GexPresentation.dollarText(level.totalPremium).dropFirst()) premium" as NSString
+                    let notional = GexPresentation.dollarText(level.totalPremium)
+                    let label = "$\(Format.strike(level.strike)) — \(notional.dropFirst()) premium" as NSString
                     let attributes: [NSAttributedString.Key: Any] = [
                         .font: UIFont.systemFont(ofSize: 9, weight: .medium),
                         .foregroundColor: GexPresentation.premiumColor.withAlphaComponent(0.95),
@@ -129,23 +130,23 @@ final class GexOverlayView: UIView {
             if let putWall = model.putWall {
                 drawLine(in: context, rect: content, price: putWall,
                          color: GexPresentation.putWallColor,
-                         label: "Put Wall $" + Format.price(putWall))
+                         label: "Put Wall $" + Format.strike(putWall))
             }
             if let callWall = model.callWall {
                 drawLine(in: context, rect: content, price: callWall,
                          color: GexPresentation.callWallColor,
-                         label: "Call Wall $" + Format.price(callWall))
+                         label: "Call Wall $" + Format.strike(callWall))
             }
             if let gammaFlip = model.gammaFlip {
                 drawLine(in: context, rect: content, price: gammaFlip,
                          color: GexPresentation.gammaFlipColor,
-                         label: "Gamma Flip $" + Format.price(gammaFlip),
+                         label: "Gamma Flip $" + Format.price(gammaFlip, fractionDigits: 1),
                          dashed: true)
             }
             if let magnet = model.magnet {
                 drawLine(in: context, rect: content, price: magnet,
                          color: GexPresentation.magnetColor,
-                         label: "0DTE Magnet $" + Format.price(magnet),
+                         label: "0DTE Magnet $" + Format.strike(magnet),
                          dashed: true)
             }
         }

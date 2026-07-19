@@ -27,14 +27,19 @@ type FetchImpl = (url: string, init: Record<string, unknown>) => Promise<{
 
 /**
  * Thin Tradier REST client. The chain endpoint returns OI, bid/ask and
- * Greeks in one call, so no batching is needed. OI is static intraday —
- * chain responses are cached per (symbol, expiration, calendar day) and
- * only spot refreshes during the session.
+ * Greeks in one call, so no batching is needed.
+ *
+ * OI handling per spec: the OCC publishes open interest once per day, so
+ * the FIRST chain fetch of the day establishes the OI baseline; later
+ * fetches refresh prices/Greeks only and the baseline OI is overlaid back
+ * onto each contract (a contract absent from the baseline keeps its fresh
+ * OI, e.g. a series that listed intraday).
  */
 @Injectable()
 export class TradierClient {
   private readonly logger = new Logger(TradierClient.name);
-  private chainCache = new Map<string, { day: string; options: ChainOption[] }>();
+  /** OCC symbol -> OI baseline, keyed additionally by calendar day. */
+  private oiBaseline = new Map<string, { day: string; oi: Map<string, number> }>();
   private rateLimitRemaining: number | null = null;
 
   constructor(
@@ -91,16 +96,10 @@ export class TradierClient {
   }
 
   /**
-   * Full chain for one expiration. Cached per calendar day: OI (the bulk of
-   * the payload) is static intraday, and bid/ask/IV move slowly enough at
-   * the refresh cadence the service drives.
+   * Full chain for one expiration. Fetched fresh every call so Greeks and
+   * bid/ask track the market; OI is pinned to the day's baseline.
    */
   async getChain(symbol: string, expiration: string): Promise<ChainOption[]> {
-    const key = `${symbol}:${expiration}`;
-    const day = new Date().toISOString().slice(0, 10);
-    const cached = this.chainCache.get(key);
-    if (cached && cached.day === day) return cached.options;
-
     const body = await this.get<{
       chain?: { option?: TradierChainOption[] | TradierChainOption } | null;
     }>(
@@ -108,21 +107,33 @@ export class TradierClient {
     );
     const raw = body.chain?.option;
     const list = raw ? (Array.isArray(raw) ? raw : [raw]) : [];
-    const options: ChainOption[] = list.map((option) => ({
-      symbol: option.symbol,
-      strike: option.strike,
-      optionType: option.option_type,
-      openInterest: option.open_interest ?? 0,
-      bid: option.bid ?? null,
-      ask: option.ask ?? null,
-      last: option.last ?? null,
-      midIv: option.greeks?.mid_iv ?? null,
-      delta: option.greeks?.delta ?? null,
-      gamma: option.greeks?.gamma ?? null,
-    }));
 
-    // Fresh fetch today: drop stale entries for other days of the same key.
-    this.chainCache.set(key, { day, options });
-    return options;
+    const key = `${symbol}:${expiration}`;
+    const day = new Date().toISOString().slice(0, 10);
+    let baseline = this.oiBaseline.get(key);
+    if (!baseline || baseline.day !== day) {
+      // First fetch of the day: this IS the baseline.
+      baseline = {
+        day,
+        oi: new Map(list.map((option) => [option.symbol, option.open_interest ?? 0])),
+      };
+      this.oiBaseline.set(key, baseline);
+    }
+
+    return list.map((option) => {
+      const baselineOi = baseline.oi.get(option.symbol);
+      return {
+        symbol: option.symbol,
+        strike: option.strike,
+        optionType: option.option_type,
+        openInterest: baselineOi ?? option.open_interest ?? 0,
+        bid: option.bid ?? null,
+        ask: option.ask ?? null,
+        last: option.last ?? null,
+        midIv: option.greeks?.mid_iv ?? null,
+        delta: option.greeks?.delta ?? null,
+        gamma: option.greeks?.gamma ?? null,
+      };
+    });
   }
 }

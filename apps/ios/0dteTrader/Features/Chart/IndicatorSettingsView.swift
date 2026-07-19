@@ -5,6 +5,7 @@ import SwiftUI
 struct IndicatorSettingsView: View {
     @Binding var settings: IndicatorSettings
     @Binding var twcSettings: TwcHeatmapSettings
+    @Binding var gexSettings: GexSettings
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -126,6 +127,29 @@ struct IndicatorSettingsView: View {
                         .fixedSize()
                         .accessibilityLabel("TWC Heatmap V5 settings")
                     }
+
+                    Toggle(isOn: $gexSettings.enabled) {
+                        labelWithSwatch("GEX / DEX Levels", id: "gex")
+                    }
+                    if gexSettings.enabled {
+                        Toggle("Level Lines", isOn: $gexSettings.showLevels)
+                        Toggle("Premium Heat Map", isOn: $gexSettings.showPremium)
+                        if gexSettings.showPremium {
+                            Stepper("Heat Strikes: \(gexSettings.maxPremiumStrikes)",
+                                    value: $gexSettings.maxPremiumStrikes,
+                                    in: GexSettings.heatStrikeRange)
+                                .monospacedDigit()
+                                .accessibilityLabel("Premium heat strike count")
+                                .accessibilityValue("\(gexSettings.maxPremiumStrikes)")
+                        }
+                        Stepper("Refresh: \(gexSettings.refreshSeconds)s",
+                                value: $gexSettings.refreshSeconds,
+                                in: GexSettings.refreshRange,
+                                step: 15)
+                            .monospacedDigit()
+                            .accessibilityLabel("GEX refresh interval")
+                            .accessibilityValue("\(gexSettings.refreshSeconds) seconds")
+                    }
                 }
                 .listRowBackground(Color.appSurface)
             }
@@ -152,7 +176,7 @@ struct IndicatorSettingsView: View {
     private func labelWithSwatch(_ title: String, id: String) -> some View {
         HStack(spacing: AppSpacing.sm) {
             Circle()
-                .fill(ChartStyle.overlayColor(for: id))
+                .fill(id == "gex" ? Color(GexPresentation.gammaFlipColor) : ChartStyle.overlayColor(for: id))
                 .frame(width: 8, height: 8)
                 .accessibilityHidden(true)
             Text(title)

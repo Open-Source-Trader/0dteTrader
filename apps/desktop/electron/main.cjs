@@ -25,11 +25,21 @@ const MIME = {
 
 /** Serves the Vite build from ../dist on an ephemeral loopback port. */
 function serveDist() {
-  const root = path.join(__dirname, '../dist');
+  const root = path.resolve(path.join(__dirname, '../dist'));
   const server = http.createServer((req, res) => {
-    const urlPath = decodeURIComponent((req.url ?? '/').split('?')[0]);
-    const filePath = path.join(root, urlPath === '/' ? 'index.html' : urlPath);
-    if (!filePath.startsWith(root)) {
+    let urlPath;
+    try {
+      urlPath = decodeURIComponent((req.url ?? '/').split('?')[0]);
+    } catch {
+      // Malformed % escape — reject instead of crashing the main process.
+      res.writeHead(400).end();
+      return;
+    }
+    const filePath = path.resolve(path.join(root, urlPath === '/' ? 'index.html' : urlPath));
+    // Containment via path.relative: a raw prefix test would pass siblings
+    // that share the root's prefix (e.g. dist-anything/).
+    const relative = path.relative(root, filePath);
+    if (relative.startsWith('..') || path.isAbsolute(relative)) {
       res.writeHead(403).end();
       return;
     }

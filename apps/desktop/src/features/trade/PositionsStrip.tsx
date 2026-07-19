@@ -171,7 +171,14 @@ export function PositionsStrip({
             {
               label: `Flatten ${Math.abs(positionPendingFlatten.quantity)} @ Market`,
               role: 'destructive',
-              onSelect: () => onFlatten(positionPendingFlatten),
+              onSelect: () => {
+                // Re-resolve at confirm time: the size may have changed
+                // (fill / partial close) while the dialog was open.
+                const current =
+                  positions.find((p) => p.symbol === positionPendingFlatten.symbol) ??
+                  positionPendingFlatten;
+                onFlatten(current);
+              },
             },
             { label: 'Cancel', role: 'cancel' },
           ]}

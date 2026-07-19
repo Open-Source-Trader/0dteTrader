@@ -52,6 +52,8 @@ export function IndicatorPane({
   const seriesRef = useRef<Map<string, ISeriesApi<'Line' | 'Histogram'>>>(new Map());
   const yRangeRef = useRef(yRange);
   yRangeRef.current = yRange;
+  const guideLinesRef = useRef(guideLines);
+  guideLinesRef.current = guideLines;
 
   useEffect(() => {
     const container = containerRef.current;
@@ -86,6 +88,7 @@ export function IndicatorPane({
     };
   }, []);
 
+  // Data + series lifecycle: runs only when the data actually changes.
   useEffect(() => {
     const chart = chartRef.current;
     if (!chart) return;
@@ -124,8 +127,9 @@ export function IndicatorPane({
               });
         existing.set(spec.id, api);
 
-        if (!guidesDrawn && guideLines && spec.kind === 'line') {
-          for (const level of guideLines) {
+        const guides = guideLinesRef.current;
+        if (!guidesDrawn && guides && spec.kind === 'line') {
+          for (const level of guides) {
             api.createPriceLine({
               price: level,
               color: guideColor,
@@ -163,9 +167,16 @@ export function IndicatorPane({
         (api as ISeriesApi<'Line'>).setData(data);
       }
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [candles, series]);
+
+  // View sync: cheap range application while the user pans the main chart.
+  useEffect(() => {
+    const chart = chartRef.current;
+    if (!chart) return;
     if (visibleRange) chart.timeScale().setVisibleLogicalRange(visibleRange);
     else chart.timeScale().fitContent();
-  }, [candles, series, guideLines, visibleRange]);
+  }, [visibleRange]);
 
   return <div ref={containerRef} style={{ height, flex: 'none', position: 'relative' }} />;
 }

@@ -196,7 +196,7 @@ struct ProfileView: View {
         }
     }
 
-    private func configuredView(me: ProfileViewModel.AccountInfo) -> some View {
+    private func configuredView(me: MeDTO) -> some View {
         VStack(alignment: .leading, spacing: AppSpacing.md) {
             HStack(spacing: AppSpacing.sm) {
                 Image(systemName: "checkmark.circle.fill")

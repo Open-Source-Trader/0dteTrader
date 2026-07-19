@@ -48,8 +48,9 @@ xcodegen             # generates 0dteTrader.xcodeproj from project.yml
 open 0dteTrader.xcodeproj
 ```
 
-Run on the iOS 17 simulator. The app targets `http://localhost:3000` in Debug builds
-(configurable in `AppConfig.swift`).
+Run on the iOS 17 simulator. The app targets the Railway production backend by
+default (configurable in `AppConfig.swift`). For local dev, swap to
+`http://localhost:3000`.
 
 ## Tests & checks
 
@@ -66,11 +67,11 @@ iOS: `xcodebuild test -scheme 0dteTrader -destination 'platform=iOS Simulator,na
 
 Today the app uses a **hybrid broker/data model**:
 
-| Function | Provider | Why |
-|---|---|---|
-| Order execution | **Webull OpenAPI** | Sends real or paper trades. |
-| Candlestick / chart data | **Webull OpenAPI** | OHLCV bars and stock snapshots. |
-| Options chain + Greeks (GEX/DEX, OI, IV, etc.) | **Tradier API** | Webull OpenAPI does not expose option Greeks, implied volatility, open interest, or full chain detail beyond contract price and volume. |
+| Function                                       | Provider           | Why                                                                                                                                     |
+| ---------------------------------------------- | ------------------ | --------------------------------------------------------------------------------------------------------------------------------------- |
+| Order execution                                | **Webull OpenAPI** | Sends real or paper trades.                                                                                                             |
+| Candlestick / chart data                       | **Webull OpenAPI** | OHLCV bars and stock snapshots.                                                                                                         |
+| Options chain + Greeks (GEX/DEX, OI, IV, etc.) | **Tradier API**    | Webull OpenAPI does not expose option Greeks, implied volatility, open interest, or full chain detail beyond contract price and volume. |
 
 So the typical flow is: Webull for placing/cancelling orders and chart candles, Tradier for picking strikes and viewing Greeks.
 
@@ -160,9 +161,32 @@ accounts/capabilities to authorize — prefer read-only scopes: account info, or
 data). Note it targets the **production** account; app trading still goes through the sandbox
 gateway until verified.
 
+## Railway (production)
+
+The API, Postgres, and Redis run on Railway:
+
+- **Project:** `0dtetrader-api`
+- **API URL:** `https://caring-prosperity-production.up.railway.app`
+- **Health:** `GET /v1/health`
+- **Services:** caring-prosperity (API), Postgres, Redis-75yS
+
+Redeploy from the repo root:
+
+```bash
+railway service caring-prosperity
+railway up
+```
+
+Prisma migrations run automatically on container startup.
+
+Environment variables are set via `railway variables` / the Railway dashboard.
+Secrets (JWT keys, Webull credentials, Tradier token) mirror `.env` — update
+both when rotating.
+
 ## Troubleshooting
 
 - **Prisma can't reach Postgres** — `docker compose ps`; `npm run db:up` again.
 - **409 on register** — email exists; use login or a new email.
-- **iOS can't reach localhost API on a physical device** — use your machine's LAN IP in
-  `AppConfig.swift` and allow it through the firewall; Debug builds only.
+- **iOS can't reach the API** — production uses Railway
+  (`https://caring-prosperity-production.up.railway.app`). For local dev on a
+  physical device, set your machine's LAN IP in `AppConfig.swift`.

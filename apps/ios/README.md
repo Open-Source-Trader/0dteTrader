@@ -11,7 +11,7 @@ SwiftUI iPhone app for rapid 0DTE options trading against the
 
 - macOS with Xcode 15+
 - XcodeGen: `brew install xcodegen`
-- The backend running locally: `npm run dev` at the repo root (`http://localhost:3000`)
+- The backend — production on Railway (`https://caring-prosperity-production.up.railway.app`), or locally via `npm run dev` (`http://localhost:3000`)
 - SwiftLint: `brew install swiftlint` (lint runs automatically during Xcode builds and in CI)
 
 ## Generate, run, test
@@ -48,8 +48,8 @@ Configuration is in `.swiftlint.yml`. The rules are intentionally pragmatic for 
 
 All environment config lives in `0dteTrader/App/AppConfig.swift`:
 
-- `apiBaseURL` — defaults to `http://localhost:3000`. On a physical device, set
-  this to your Mac's LAN IP (see `../../docs/RUNBOOK.md` → Troubleshooting).
+- `apiBaseURL` — points at the Railway production deployment by default. For
+  local dev, swap to `http://localhost:3000` or your Mac's LAN IP.
 - `streamURL` — derived automatically (`ws`/`wss` + `/v1/stream`).
 - `pinnedPublicKeyHashes` — SPKI SHA-256 hashes (base64) for TLS public-key
   pinning (`Core/Networking/CertificatePinning.swift`). Empty disables pinning,

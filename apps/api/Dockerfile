@@ -1,7 +1,7 @@
 # ---- Stage 1: build ----
 FROM node:18-alpine AS builder
 
-RUN apk add --no-cache python3 make g++
+RUN apk add --no-cache python3 make g++ openssl
 
 WORKDIR /app
 
@@ -10,15 +10,14 @@ COPY package.json package-lock.json ./
 COPY apps/api/package.json apps/api/
 COPY packages/shared-types/package.json packages/shared-types/
 
+# Prisma schema must be present before npm ci (postinstall runs prisma generate)
+COPY apps/api/prisma/ apps/api/prisma/
+
 RUN npm ci
 
 # Build shared-types
 COPY packages/shared-types/ packages/shared-types/
 RUN npm run build --workspace packages/shared-types
-
-# Generate Prisma client
-COPY apps/api/prisma/ apps/api/prisma/
-RUN npx --workspace apps/api prisma generate
 
 # Build API
 COPY apps/api/src/ apps/api/src/
@@ -31,7 +30,7 @@ RUN npm ci --omit=dev && npx --workspace apps/api prisma generate
 # ---- Stage 2: production ----
 FROM node:18-alpine
 
-RUN apk add --no-cache tini
+RUN apk add --no-cache tini openssl
 
 WORKDIR /app
 

@@ -20,7 +20,6 @@ struct SymbolSearchView: View {
         SymbolSection(title: "Indices & ETFs", symbols: ["SPY", "QQQ", "SPX", "IWM", "DIA", "VXX"]),
         // Live 24/7 data from Coinbase via the backend's crypto data source.
         SymbolSection(title: "Crypto", symbols: ["BTC", "ETH", "SOL", "XRP", "DOGE", "ADA", "AVAX", "LINK", "LTC"]),
-        SymbolSection(title: "Futures Roots", symbols: ["MES", "ES", "MNQ", "NQ", "CL", "GC"]),
         SymbolSection(title: "Stocks", symbols: ["AAPL", "MSFT", "NVDA", "TSLA", "AMD", "AMZN", "META", "GOOGL", "AVGO", "SMCI"]),
     ]
 

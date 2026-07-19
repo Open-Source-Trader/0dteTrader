@@ -109,15 +109,14 @@ struct TradeScreenView: View {
             await tradeViewModel.refreshTradingData()
         }
         .task {
-            // Keep indicative chain/futures quotes fresh; paused while the
-            // confirm sheet is open so the armed ticket's context doesn't
-            // shift underneath it.
+            // Keep indicative chain quotes fresh; paused while the confirm
+            // sheet is open so the armed ticket's context doesn't shift
+            // underneath it.
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 30_000_000_000)
                 guard !Task.isCancelled else { break }
                 if tradeViewModel.armedTicket == nil {
                     await chainViewModel.refresh()
-                    await tradeViewModel.loadFuturesContracts(silent: true)
                 }
             }
         }
@@ -126,12 +125,10 @@ struct TradeScreenView: View {
                 chainViewModel.chain?.contracts.first { $0.symbol == symbol }
             }
             Task { await chainViewModel.load(underlying: chartViewModel.symbol) }
-            syncFuturesRoot(with: chartViewModel.symbol)
             container.quoteSocket.subscribe(symbols: watchedContractSymbols)
         }
         .onChange(of: chartViewModel.symbol) { _, newSymbol in
             Task { await chainViewModel.load(underlying: newSymbol) }
-            syncFuturesRoot(with: newSymbol)
         }
         .onChange(of: container.quoteSocket.lastOrderUpdate) { _, update in
             if let update {
@@ -150,7 +147,7 @@ struct TradeScreenView: View {
             }
         }
         .onChange(of: container.quoteSocket.lastQuote) { _, quote in
-            // Contract-symbol ticks: live option/futures quotes and position P/L.
+            // Contract-symbol ticks: live option quotes and position P/L.
             if let quote {
                 chainViewModel.applyContractQuote(quote)
                 tradeViewModel.applyContractQuote(quote)
@@ -292,12 +289,11 @@ struct TradeScreenView: View {
     // MARK: - Helpers
 
     /// Contract symbols whose live quotes the screen needs: the selected
-    /// option/futures contract and every open position. The chart's own
-    /// symbol is excluded — its subscription is owned by ChartViewModel.
+    /// option contract and every open position. The chart's own symbol is
+    /// excluded — its subscription is owned by ChartViewModel.
     private var watchedContractSymbols: [String] {
         var symbols = Set<String>()
         if let symbol = chainViewModel.selectedContract?.symbol { symbols.insert(symbol) }
-        if let symbol = tradeViewModel.selectedFutureSymbol { symbols.insert(symbol) }
         for position in tradeViewModel.positions { symbols.insert(position.symbol) }
         symbols.remove(chartViewModel.symbol)
         return symbols.sorted()
@@ -305,12 +301,7 @@ struct TradeScreenView: View {
 
     /// Same gate as the split-layout TradePanelView's Buy/Sell buttons.
     private var canTrade: Bool {
-        switch tradeViewModel.assetClass {
-        case .option:
-            return chainViewModel.selectedContract != nil
-        case .future:
-            return tradeViewModel.selectedFuture != nil
-        }
+        chainViewModel.selectedContract != nil
     }
 
     private func toggleLayout() {
@@ -319,11 +310,5 @@ struct TradeScreenView: View {
             layout = layout == .fullscreen ? .split : .fullscreen
         }
         settingsStore.layoutMode = layout
-    }
-
-    private func syncFuturesRoot(with symbol: String) {
-        if let root = FuturesRoots.root(for: symbol) {
-            Task { await tradeViewModel.setFuturesRoot(root) }
-        }
     }
 }

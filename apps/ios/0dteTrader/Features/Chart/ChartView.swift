@@ -53,7 +53,7 @@ struct ChartView: View {
                 if let gexError = viewModel.gexErrorMessage, viewModel.gexSettings.enabled {
                     Text("GEX unavailable: \(gexError)")
                         .font(.caption2)
-                        .foregroundStyle(Color.warningOrange)
+                        .foregroundStyle(Color.appWarning)
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
                         .padding(.leading, 52)
                         .padding(.bottom, AppSpacing.sm)

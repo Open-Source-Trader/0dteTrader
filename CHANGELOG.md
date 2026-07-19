@@ -12,8 +12,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Pre-commit hooks with husky and lint-staged
 - CONTRIBUTING.md, LICENSE, and CHANGELOG.md
 - `tasks/` directory for task tracking
+- React + Vite + Electron desktop app (`apps/desktop`) — phone-frame clone of the iOS UI
+- GEX/DEX indicator engine with Tradier API integration (`GET /v1/market/gex`)
+- TWC (Trade With Cash) heatmap indicator overlay (iOS + desktop)
+- Trade history with average-cost realized P/L (`GET /v1/orders/history`, `TradeOrder` model)
+- Webull token persistence (`WebullApiToken` model, AES-256-GCM encrypted at rest)
+- Live/practice dual credential sets and per-user trading mode switching
+- Crypto quotes and candles via Coinbase public API (BTC, ETH, etc.)
+- Health endpoint (`GET /v1/health`)
+- `POST /v1/me/webull-session/refresh` — reconnect escape hatch
+- Webull account ID auto-discovery via `GET /openapi/account/list`
+- Partial fill tracking (`filledQuantity` on orders)
 
-## [0.1.0] - 2025-07-19
+## [0.1.0] - 2026-07-19
 
 ### Added
 

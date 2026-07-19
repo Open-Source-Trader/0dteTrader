@@ -16,6 +16,7 @@ account management. A custom backend holds user accounts and encrypted Webull cr
 ## 3. Functional Requirements
 
 ### 3.1 Auth & Profile
+
 - FR-1 Email + password registration and login (JWT access + refresh).
 - FR-2 Profile screen with Webull credential form: app key, app secret, account ID
   (extended if Webull OpenAPI requires additional fields).
@@ -25,6 +26,7 @@ account management. A custom backend holds user accounts and encrypted Webull cr
 - FR-5 Optional FaceID app lock.
 
 ### 3.2 Chart
+
 - FR-6 Candlestick chart for any symbol (stocks/ETF underlyings, indices, futures).
 - FR-7 Indicators computed client-side: EMA, SMA, VWAP, RSI, MACD, Bollinger Bands;
   user-configurable and toggleable; presets persisted.
@@ -32,12 +34,14 @@ account management. A custom backend holds user accounts and encrypted Webull cr
 - FR-9 Symbol search/switcher.
 
 ### 3.3 Layouts
+
 - FR-10 **Layout A — Fullscreen:** chart fills the screen; floating Buy/Sell buttons overlaid.
 - FR-11 **Layout B — Split:** chart on top, trade panel in the bottom half; drag divider to
   resize between 1/4 and 1/2 of screen height.
 - FR-12 Layout choice persists across launches.
 
 ### 3.4 Options Quick Trade
+
 - FR-13 Trade panel defaults to the ticker currently on the chart.
 - FR-14 Manual contract selection: expiration picker → strike picker (from live options chain).
 - FR-15 **Auto mode:** one tap selects the contract +1 strike OTM from the underlying's last
@@ -49,16 +53,23 @@ account management. A custom backend holds user accounts and encrypted Webull cr
 - FR-19 Every order requires an explicit confirm (arm-then-confirm) to prevent fat-finger.
 - FR-20 Server re-validates contract selection and price before submission.
 
-### 3.5 Futures Quick Trade
+### 3.5 Futures Quick Trade (deferred — not in v1)
+
 - FR-21 Futures mode: front-month contract by default; explicit contract selector.
 - FR-22 Same Buy/Sell, qty, mid/market, confirm pipeline as options.
 
+> **Note:** Futures trading is deferred from v1. The current implementation is options-only
+> (`AssetClass = 'option'`). The backend has endpoint stubs and order-payload builders for
+> futures, but neither the iOS nor the desktop UI exposes futures trading.
+
 ### 3.6 Positions & Orders
+
 - FR-23 Positions strip on the trade screen: symbol, qty, avg price, unrealized P&L.
 - FR-24 Tap a position to flatten (with confirm).
 - FR-25 Open orders list with cancel.
 
 ### 3.7 Safety
+
 - FR-26 All order POSTs are idempotent (client-generated idempotency key).
 - FR-27 Server-side kill switch: per-user trading disable flag honored by every order endpoint.
 - FR-28 Full audit log of order actions.
@@ -79,8 +90,8 @@ account management. A custom backend holds user accounts and encrypted Webull cr
 4. Mid-price toggle: bid 1.20 / ask 1.28 → limit sent at 1.24.
 5. Double-tap on Buy submits exactly one order (idempotency).
 6. With kill switch on, order endpoints return 403 and audit-log the attempt.
-7. Futures mode on /ES chart: Buy auto-selects front-month MES/ES per user default.
+7. ~~Futures mode on /ES chart: Buy auto-selects front-month MES/ES per user default.~~ (deferred from v1)
 
 ## 6. Out of Scope (v1)
 
-Android, alerts/notifications, analytics, multi-broker, public App Store compliance work.
+Android, futures trading (see §3.5), alerts/notifications, analytics, multi-broker, public App Store compliance work.

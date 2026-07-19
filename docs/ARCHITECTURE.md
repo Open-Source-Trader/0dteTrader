@@ -3,32 +3,41 @@
 ## 1. System Overview
 
 ```
-┌────────────────────┐   HTTPS (REST, JWT)    ┌────────────────────┐   HTTPS/WS (user creds)   ┌──────────────────┐
-│  iOS App (SwiftUI) │ ◄────────────────────► │  Backend API       │ ◄───────────────────────► │  Webull OpenAPI  │
-│                    │   WSS (quotes, JWT)    │  NestJS + TS       │                           │                  │
-└────────────────────┘                        └───────┬────────────┘                           └──────────────────┘
-                                                      │
-                                              ┌───────▼────────┐  ┌──────────────┐
-                                              │  PostgreSQL    │  │  Redis       │
-                                              │  users, creds, │  │  rate limit, │
-                                              │  tokens, audit │  │  quote cache │
-                                              └────────────────┘  └──────────────┘
+┌────────────────────┐                     ┌────────────────────┐
+│  iOS App (SwiftUI) │ ◄──────────────┐    │  Webull OpenAPI    │
+└────────────────────┘  HTTPS + WSS   │    │  (orders, candles) │
+                        (REST, JWT)   │    └──────▲─────────────┘
+┌────────────────────┐                │           │ HTTPS/WS (user creds)
+│  Desktop App       │ ◄────────► ┌───┴───────────┴──┐
+│  React + Electron  │            │  Backend API      │
+└────────────────────┘            │  NestJS + TS      ├──────────► ┌──────────────────┐
+                                  └──┬────────────────┘            │  Tradier API     │
+                                     │          HTTPS (API token)  │  (chains, Greeks)│
+                              ┌──────▼─────────┐                   └──────────────────┘
+                              │  PostgreSQL     │
+                              │  users, creds,  │
+                              │  tokens, orders │
+                              └────────────────┘
 ```
 
 **Why a backend exists:** Webull OpenAPI app key/secret cannot ship in the app bundle — an
-extracted secret means account takeover. The iOS app authenticates to our backend (JWT) and the
-backend brokers every Webull call using the user's encrypted, server-side credentials.
+extracted secret means account takeover. Both client apps (iOS and desktop) authenticate to our
+backend (JWT) and the backend brokers every Webull call using the user's encrypted, server-side
+credentials. Options analytics (Greeks, open interest, GEX/DEX) come from Tradier, also
+server-side.
 
 ## 2. Backend Modules (apps/api, NestJS)
 
-| Module | Responsibility |
-|---|---|
-| `AuthModule` | Register/login/refresh/logout; Argon2id hashing; JWT access (15 min) + rotating refresh tokens |
-| `UsersModule` | Profile read/update; kill-switch flag |
-| `CredentialsModule` | Store/rotate/delete Webull creds; AES-256-GCM encrypt before persist; decrypt in-memory only |
-| `BrokerModule` | `BrokerGateway` interface; `WebullBrokerGateway` (the only implementation — no mock/demo data); per-user client factory with token caching |
-| `MarketDataModule` | REST: candles, quote, options chain; WS gateway streaming subscribed quotes |
-| `TradingModule` | Order preview/place/cancel/replace; positions; account summary; idempotency; server-side re-validation of Auto-OTM + mid price; audit log |
+| Module              | Responsibility                                                                                                                                            |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `AuthModule`        | Register/login/refresh/logout; Argon2id hashing; JWT access (15 min) + rotating refresh tokens                                                            |
+| `UsersModule`       | Profile read/update; kill-switch flag                                                                                                                     |
+| `CredentialsModule` | Store/rotate/delete Webull creds; AES-256-GCM encrypt before persist; decrypt in-memory only                                                              |
+| `BrokerModule`      | `BrokerGateway` interface; `WebullBrokerGateway` (the only implementation — no mock/demo data); per-user client factory with token caching                |
+| `MarketDataModule`  | REST: candles, quote, options chain; WS gateway streaming subscribed quotes                                                                               |
+| `TradingModule`     | Order preview/place/cancel/replace; positions; trade history with realized P/L; idempotency; server-side re-validation of Auto-OTM + mid price; audit log |
+| `GexModule`         | Dealer GEX/DEX levels + premium heat map; Tradier API client for chains/Greeks; pure-math engine (Black-Scholes, gamma/delta exposure, walls, magnet)     |
+| `HealthModule`      | `GET /v1/health` — DB connectivity check, uptime (public, no auth)                                                                                        |
 
 ### BrokerGateway interface (the key seam)
 
@@ -42,10 +51,11 @@ interface BrokerGateway {
   cancelOrder(userId: string, orderId: string): Promise<void>;
   getPositions(userId: string): Promise<Position[]>;
   getOpenOrders(userId: string): Promise<OrderResult[]>;
+  reauthenticate(userId: string): Promise<TradingMode>;
 }
 ```
 
-Implemented by `WebullBrokerGateway`. All iOS-facing endpoints depend only on the interface. Market data always comes from Webull; live vs practice only selects the live vs paper-trading (sandbox) OpenAPI hosts per user.
+Implemented by `WebullBrokerGateway`. All client-facing endpoints depend only on the interface. Market data always comes from Webull (options chain/Greeks come from Tradier via `GexModule`); live vs practice only selects the live vs paper-trading (sandbox) OpenAPI hosts per user. `reauthenticate` drops the cached Webull client/token and mints a fresh one — the "Reconnect" escape hatch when a token goes stale.
 
 ## 3. Order Flow (tap → fill)
 
@@ -59,9 +69,9 @@ Implemented by `WebullBrokerGateway`. All iOS-facing endpoints depend only on th
    `placeOrder` → audit log → result.
 4. Result pushed to app over the existing WS connection (and returned in the HTTP response).
 
-## 4. iOS App Structure (apps/ios)
+## 4. Client Apps
 
-Clean architecture, MVVM, feature folders:
+### 4a. iOS (apps/ios) — SwiftUI, MVVM
 
 ```
 App/                  entry point, DI container, coordinators
@@ -71,23 +81,31 @@ Core/
   Models/             DTOs + domain models
 DesignSystem/         colors, typography, buttons, haptics
 Features/
-  Auth/               LoginView, RegisterView, AuthViewModel
-  Profile/            ProfileView, WebullCredentialsForm
-  Chart/              ChartView (candles + indicator overlays), IndicatorEngine, SymbolSearch
+  Auth/               LoginView, RegisterView, AuthViewModel, RiskDisclaimerView
+  Profile/            ProfileView, WebullCredentialsForm, AppLockManager (FaceID)
+  Chart/              ChartView (candles + indicator overlays), IndicatorEngine, SymbolSearch,
+                      Gex/ (GEX/DEX overlay), Twc/ (TWC heatmap indicator)
   Trade/              TradePanelView, FloatingTradeButtons, OptionsChainViewModel,
-                      AutoContractSelector, OrderTicketView, PositionsStripView
+                      AutoContractSelector, OrderConfirmSheet, PositionsStripView,
+                      HistoryView, ToastView
 ```
 
-**Charting:** DanielGindi/Charts (SwiftPM) for v1 candlesticks + indicator overlays.
+**Charting:** DanielGindi/Charts (SwiftPM, v5 as `DGCharts`) for candlesticks + indicator overlays.
 
 **Indicators:** pure functions over `[Candle]` in `IndicatorEngine` — unit-testable, no UI deps.
 
+### 4b. Desktop (apps/desktop) — React + Vite + Electron
+
+Faithful web clone of the iOS UI for development/testing without Xcode. Fixed 430×932 phone frame with `--app-scale` CSS variable. Same feature structure: auth, chart (with GEX/TWC overlays), profile, trade. Shared indicator math ported between TypeScript and Swift.
+
 ## 5. Data Model (PostgreSQL)
 
-- `User(id uuid pk, email citext unique, password_hash, trading_disabled bool, created_at, updated_at)`
-- `WebullCredential(user_id pk fk, enc_app_key bytea, enc_app_secret bytea, enc_account_id bytea, iv bytea, auth_tag bytea, updated_at)`
-- `RefreshToken(id uuid pk, user_id fk, token_hash, expires_at, revoked_at, created_at)`
-- `OrderAudit(id uuid pk, user_id fk, idempotency_key unique, request jsonb, response jsonb, status, created_at)`
+- `User(id uuid pk, email unique, password_hash, trading_disabled bool, trading_mode 'live'|'practice', created_at, updated_at)`
+- `WebullCredential(id uuid pk, user_id fk, environment 'live'|'practice', enc_app_key bytea, enc_app_secret bytea, enc_account_id bytea?, created_at, updated_at)` — unique on `(user_id, environment)`. Each `enc_*` column is a self-contained blob (`iv ‖ authTag ‖ ciphertext`), not a shared IV/tag pair.
+- `WebullApiToken(id uuid pk, user_id fk, environment, enc_token bytea, expires_at, status, created_at, updated_at)` — encrypted-at-rest persistence of Webull access tokens so restarts reuse them instead of re-creating (avoiding SMS 2FA); unique on `(user_id, environment)`.
+- `RefreshToken(id uuid pk, user_id fk, token_hash unique, expires_at, revoked_at, created_at)`
+- `TradeOrder(id pk, user_id fk, contract_symbol, asset_class, environment, side, quantity, filled_quantity?, order_type, limit_price?, filled_price?, status, placed_at, updated_at)` — one row per broker order, kept current as order-update events arrive; feeds trade history with realized P/L.
+- `OrderAudit(id uuid pk, user_id fk, idempotency_key?, request jsonb, response jsonb, status, created_at)` — unique on `(user_id, idempotency_key)`.
 
 ## 6. Security Summary
 

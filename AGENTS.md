@@ -90,7 +90,7 @@ xcodebuild test -scheme 0dteTrader -destination 'platform=iOS Simulator,name=iPh
 
 ## Common Gotchas
 
-- The iOS build has a pre-existing error in `ProfileView.swift` (type reference issue) — unrelated to most feature work.
 - `npm run dev` (API) uses `node --watch` on the compiled output — changes require a rebuild (`tsc` runs on start).
 - The desktop Electron mode requires the Vite dev server running first (`npm run dev:desktop`, then `npm run electron` in `apps/desktop/`).
 - Docker must be running before `npm run dev` (Postgres + Redis are required).
+- The options chain and GEX/DEX endpoints need a `TRADIER_API_TOKEN` in `.env` — without it, chart and order functionality still works but options analytics fail.

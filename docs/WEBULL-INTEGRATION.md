@@ -18,16 +18,16 @@ authentication (official flow; a manual `accountId` override is still accepted o
 
 ## 2. Capability Mapping
 
-| 0dteTrader need | Webull OpenAPI capability | Confidence |
-|---|---|---|
-| User auth to broker | `POST /openapi/auth/token/create` (+ `/refresh`, `/check`), app key/secret signed; token cached, refreshed before expiry | verified (SDK + docs) |
-| Quotes | Snapshot endpoints: `GET /openapi/market-data/{stock,option,futures}/snapshot` | verified (SDK); option snapshot by OCC symbol |
-| Live streaming | MQTT/gRPC per docs — v1 polls REST at 1s; streaming upgrade is future work | verified it exists, not implemented |
-| Candles | Bars endpoints: `GET /openapi/market-data/{stock,option,futures}/bars` (timespan M1/M5/M15/M60/D) | verified (SDK) |
-| Options chain | **Does not exist in the official API** — chains synthesized by probing option snapshots (§8) | best-effort |
-| Futures contracts | `GET /openapi/instrument/futures/by-code` (code + contract_type=MONTHLY) | verified path (SDK); response fields best-effort |
-| Place/cancel order | Unified endpoints: `POST /openapi/trade/order/{preview,place,replace,cancel}` + `GET /openapi/trade/order/{open,detail}` | verified (changelog + SDK + trade-api guides) |
-| Positions/account | `GET /openapi/assets/{positions,balance}`, `GET /openapi/account/list` | verified (SDK + docs); response fields per mappers |
+| 0dteTrader need     | Webull OpenAPI capability                                                                                                | Confidence                                         |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------- |
+| User auth to broker | `POST /openapi/auth/token/create` (+ `/refresh`, `/check`), app key/secret signed; token cached, refreshed before expiry | verified (SDK + docs)                              |
+| Quotes              | Snapshot endpoints: `GET /openapi/market-data/{stock,option,futures}/snapshot`                                           | verified (SDK); option snapshot by OCC symbol      |
+| Live streaming      | MQTT/gRPC per docs — v1 polls REST at 1s; streaming upgrade is future work                                               | verified it exists, not implemented                |
+| Candles             | Bars endpoints: `GET /openapi/market-data/{stock,option,futures}/bars` (timespan M1/M5/M15/M60/D)                        | verified (SDK)                                     |
+| Options chain       | **Does not exist in the official API** — chains synthesized by probing option snapshots (§8)                             | best-effort                                        |
+| Futures contracts   | `GET /openapi/instrument/futures/by-code` (code + contract_type=MONTHLY)                                                 | verified path (SDK); response fields best-effort   |
+| Place/cancel order  | Unified endpoints: `POST /openapi/trade/order/{preview,place,replace,cancel}` + `GET /openapi/trade/order/{open,detail}` | verified (changelog + SDK + trade-api guides)      |
+| Positions/account   | `GET /openapi/assets/{positions,balance}`, `GET /openapi/account/list`                                                   | verified (SDK + docs); response fields per mappers |
 
 ## 3. Rate Limits & Quotas
 
@@ -77,14 +77,14 @@ per-request headers and no JWT changes.
 
 ## 6. Error Mapping
 
-| Webull condition | API error code |
-|---|---|
+| Webull condition                | API error code                                              |
+| ------------------------------- | ----------------------------------------------------------- |
 | Invalid/expired app credentials | `BROKER_AUTH_FAILED` (401 to app prompts re-entry of creds) |
-| Insufficient buying power | `INSUFFICIENT_BUYING_POWER` (400) |
-| Rejected order | `ORDER_REJECTED` (400, message passthrough sanitized) |
-| Rate limited | `BROKER_RATE_LIMITED` (503, retry-after) |
-| Market closed / halts | `MARKET_CLOSED` (400) |
-| Timeout / network failure | `BROKER_UNAVAILABLE` (503) |
+| Insufficient buying power       | `INSUFFICIENT_BUYING_POWER` (400)                           |
+| Rejected order                  | `ORDER_REJECTED` (400, message passthrough sanitized)       |
+| Rate limited                    | `BROKER_RATE_LIMITED` (503, retry-after)                    |
+| Market closed / halts           | `MARKET_CLOSED` (400)                                       |
+| Timeout / network failure       | `BROKER_UNAVAILABLE` (503)                                  |
 
 Observed live: sandbox error bodies use `error_code` (e.g. `UNAUTHORIZED`), not `code`; the
 client accepts both (`message`/`msg` likewise). Business errors arrive as HTTP 417 with codes like
@@ -97,16 +97,17 @@ client accepts both (`message`/`msg` likewise). Business errors arrive as HTTP 4
 Sandbox and production are **fully isolated** — separate portals, separate App Keys, separate
 accounts; production keys get 401 `UNAUTHORIZED` on sandbox hosts.
 
-| | Production | Sandbox (paper) |
-|---|---|---|
-| Trading/account API | `https://api.webull.com` | `https://api.sandbox.webull.com` |
-| Market data streaming | `data-api.webull.com` | `data-api.sandbox.webull.com` |
-| Portal | webull.com → Developer Tool | `portal.sandbox.webull.com/center` |
-| App approval | manual review, 1–2 business days | automatic, minutes |
-| Signature algorithm | HMAC-SHA1 + MD5 body hash (legacy host) | HMAC-SHA256 + SHA-256 body hash |
-| First token creation | SMS approval in the Webull app | `NORMAL` immediately, no 2FA |
+|                       | Production                              | Sandbox (paper)                    |
+| --------------------- | --------------------------------------- | ---------------------------------- |
+| Trading/account API   | `https://api.webull.com`                | `https://api.sandbox.webull.com`   |
+| Market data streaming | `data-api.webull.com`                   | `data-api.sandbox.webull.com`      |
+| Portal                | webull.com → Developer Tool             | `portal.sandbox.webull.com/center` |
+| App approval          | manual review, 1–2 business days        | automatic, minutes                 |
+| Signature algorithm   | HMAC-SHA1 + MD5 body hash (legacy host) | HMAC-SHA256 + SHA-256 body hash    |
+| First token creation  | SMS approval in the Webull app          | `NORMAL` immediately, no 2FA       |
 
 **Verified against live (2026-07-18):**
+
 - `data-api.webull.com` can hang (connection never completes); `api.webull.com` serves the
   same `/openapi/market-data/*` paths. Set `WEBULL_MARKET_DATA_BASE_URL=https://api.webull.com`
   in that case — the signer keys its algorithm off the request host, so it stays correct.
@@ -124,13 +125,13 @@ Sandbox credential creation steps live in docs/RUNBOOK.md ("Getting sandbox cred
 All Webull knowledge lives in `apps/api/src/broker/webull/` plus the gateway; nothing outside
 depends on Webull payload shapes.
 
-| File | Responsibility |
-|---|---|
-| `webull-signer.ts` | Per-request HMAC signing (ported from the official Python SDK). Verified against the official docs test vector (`kvlS6opdZDhEBo5jq40nHYXaLvM=`). Algorithm switches by host (§7) using the SDK's upgrade-host list (`api.webull.com` → HMAC-SHA1 + MD5 body hash; everything else, incl. `data-api.*` and sandbox hosts → HMAC-SHA256 + SHA-256 body hash). |
-| `webull-endpoints.ts` | **The single mapping file**: hosts, endpoint paths + versions, query params, order payload builders (`buildOptionOrder` / `buildFuturesOrder`), `toClientOrderId` (md5 hex of the idempotency key, 32 chars), `position_intent` derivation, and the small parsers not covered by the mappers (balance, place/preview results, futures instruments, error bodies). Header comment tracks per-entry verification status — corrections belong here only. |
-| `webull-client.ts` | `WebullClient` — per-user HTTP client: request signing, 10 s timeout, 429 → exponential backoff with jitter (4 retries, honors `Retry-After`), one 5xx retry, error mapping (§6), and the API-token lifecycle (create/refresh, in-memory cache, single-flight, refresh ~2 days before the ~15-day expiry, cleared on 401). Never logs headers/credentials. |
-| `webull-mappers.ts` | All response payload → DTO translation: quotes, candles (`1m→M1 … 1d→D`), order status map, futures symbol format (`ESZ6`+`contract_month` ↔ app `ESZ26`), OCC symbols for option legs/positions. Verified against the official MCP server's field usage. |
-| `../webull-broker.gateway.ts` | Implements `BrokerGateway`. Per-user client factory keyed on a credentials fingerprint, chain synthesis (below), contract resolution, order construction, post-place status polling (1 s × up to 60 → `OrderEventsService` → WS `orderUpdate`). |
+| File                          | Responsibility                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `webull-signer.ts`            | Per-request HMAC signing (ported from the official Python SDK). Verified against the official docs test vector (`kvlS6opdZDhEBo5jq40nHYXaLvM=`). Algorithm switches by host (§7) using the SDK's upgrade-host list (`api.webull.com` → HMAC-SHA1 + MD5 body hash; everything else, incl. `data-api.*` and sandbox hosts → HMAC-SHA256 + SHA-256 body hash).                                                                                           |
+| `webull-endpoints.ts`         | **The single mapping file**: hosts, endpoint paths + versions, query params, order payload builders (`buildOptionOrder` / `buildFuturesOrder`), `toClientOrderId` (md5 hex of the idempotency key, 32 chars), `position_intent` derivation, and the small parsers not covered by the mappers (balance, place/preview results, futures instruments, error bodies). Header comment tracks per-entry verification status — corrections belong here only. |
+| `webull-client.ts`            | `WebullClient` — per-user HTTP client: request signing, 10 s timeout, 429 → exponential backoff with jitter (4 retries, honors `Retry-After`), one 5xx retry, error mapping (§6), and the API-token lifecycle (create/refresh, in-memory cache, single-flight, refresh ~2 days before the ~15-day expiry, cleared on 401). Never logs headers/credentials.                                                                                            |
+| `webull-mappers.ts`           | All response payload → DTO translation: quotes, candles (`1m→M1 … 1d→D`), order status map, futures symbol format (`ESZ6`+`contract_month` ↔ app `ESZ26`), OCC symbols for option legs/positions. Verified against the official MCP server's field usage.                                                                                                                                                                                             |
+| `../webull-broker.gateway.ts` | Implements `BrokerGateway`. Per-user client factory keyed on a credentials fingerprint, chain synthesis (below), contract resolution, order construction, post-place status polling (1 s × up to 60 → `OrderEventsService` → WS `orderUpdate`).                                                                                                                                                                                                       |
 
 Key decisions:
 
@@ -155,9 +156,11 @@ Key decisions:
 - **Fills**: Webull streams order events over gRPC (not implemented in P4). The gateway emits
   `submitted` immediately, then polls `GET /openapi/trade/order/detail` once per second (max 60)
   until a terminal status and emits the final `orderUpdate` (incl. `filledPrice`).
-- **Token cache is in-memory.** A production restart re-creates tokens, which may require the user
-  to re-approve in the Webull app (SMS). Persisting tokens (encrypted) across restarts is a
-  planned follow-up — the `webull_api_tokens` table already exists in the schema for this.
+- **Token persistence.** Webull access tokens are persisted encrypted (AES-256-GCM) in the
+  `webull_api_tokens` table via `WebullTokenStore` (`webull-token-store.ts`), so backend
+  restarts reuse the existing token instead of re-creating one — every create on production
+  triggers SMS 2FA re-verification. The in-memory client cache loads from the store on first
+  use; store failures are logged and swallowed (persistence is an optimization, not a gate).
 
 **Verification status:** request signing (official docs test vector), module wiring, encrypted
 credential storage, order payload shapes, and error mapping are verified (unit tests with a

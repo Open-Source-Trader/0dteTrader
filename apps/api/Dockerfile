@@ -24,8 +24,8 @@ COPY apps/api/src/ apps/api/src/
 COPY apps/api/tsconfig.json apps/api/tsconfig.build.json apps/api/
 RUN npm run build --workspace apps/api
 
-# Prune to production dependencies
-RUN npm ci --omit=dev && npx --workspace apps/api prisma generate
+# Prune to production dependencies (avoids re-triggering lifecycle scripts)
+RUN npm prune --omit=dev
 
 # ---- Stage 2: production ----
 FROM node:18-alpine

@@ -22,7 +22,7 @@ src/
   auth/                    register/login/refresh/logout; Argon2id passwords;
                            JWT access (15 min) + rotating refresh tokens with
                            reuse detection; JwtAuthGuard (global, @Public() opts out)
-  users/                   GET /v1/me
+  users/                   GET/PATCH /v1/me
   credentials/             PUT/DELETE /v1/me/webull-credentials; AES-256-GCM
                            (12-byte random IV per field per write, blob =
                            iv‖authTag‖ciphertext); plaintext never logged
@@ -30,20 +30,23 @@ src/
                            WebullBrokerGateway (the only implementation — no
                            mock/demo data; see broker/webull/); OrderEventsService
                            (orderUpdate bus); contract-resolution.ts
-                           (auto-OTM / mid / OCC symbols)
+                           (auto-OTM / mid / OCC symbols); expiration-calendar.ts
   broker/webull/           P4 Webull OpenAPI stack: webull-endpoints.ts
                            (single path/payload mapping file), webull-signer.ts
                            (HMAC signing, official docs test vector),
                            webull-client.ts (per-user HTTP + token lifecycle +
                            429 backoff), webull-mappers.ts (response → DTO)
-  market-data/             REST: quote, candles, options-chain, futures;
-                           WS gateway at /v1/stream (1s quote ticks per symbol,
-                           orderUpdate fan-out)
+  market-data/             REST: quote, candles, options-chain; WS gateway at
+                           /v1/stream (1s quote ticks per symbol, orderUpdate
+                           fan-out); crypto-data.service (Coinbase public API)
+  gex/                     GET /v1/market/gex — dealer GEX/DEX levels + premium
+                           heat map; tradier.client.ts (chain fetch with the
+                           static-OI day baseline), gex.engine.ts (pure math)
   trading/                 preview / place (Idempotency-Key) / cancel / open
-                           orders / positions; kill switch; idempotent replay
-                           via OrderAudit; audit log
+                           orders / positions / history; kill switch;
+                           idempotency claims via OrderAudit; audit log
 prisma/
-  schema.prisma            User, WebullCredential, RefreshToken, OrderAudit
+  schema.prisma            User, WebullCredential, RefreshToken, OrderAudit, TradeOrder
   migrations/              generated SQL (prisma migrate dev)
 test/
   jest.setup.ts            test env vars (loaded via jest setupFiles)
@@ -100,9 +103,10 @@ Schema deviations from `docs/ARCHITECTURE.md` §5, both deliberate:
    iv+authTag+ciphertext" — and is nonce-reuse-safe.
 
 `OrderAudit.idempotencyKey` is nullable and unique together with `userId`
-(Postgres treats NULLs as distinct), so only successful order placements
-consume a key; previews, cancels, blocked and failed attempts are audited
-without one.
+(Postgres treats NULLs as distinct). Placement claims the key with a pending
+row *before* the broker call: concurrent duplicates get `ORDER_IN_FLIGHT`,
+failed executions free the key, and stale claims expire after 2 minutes.
+Previews, cancels, blocked and failed attempts are audited without one.
 
 ## Test strategy
 
@@ -122,22 +126,24 @@ unit + e2e together (`jest --runInBand`):
     defaulting/validation, mid-price calc incl. crossed-spread rejection, OCC
     symbol round-trip, buying-power math.
   - `trading/trading.service` — server-side auto-OTM normalization, mid limit
-    price, idempotent replay (gateway hit exactly once), kill switch 403 +
-    blocked audit row, audit coverage (against the in-spec stub gateway).
+    price, idempotent replay + in-flight claim + key freed on failure, kill
+    switch 403 + blocked audit row, audit coverage (in-spec stub gateway).
+  - `trading/orders.service` — average-cost realized P/L incl. partial fills
+    at the broker-reported filled quantity.
+  - `gex/gex.engine` — Black-Scholes sanity, exposure signs/magnitudes, walls,
+    0DTE magnet, premium ordering, gamma-flip bracketing.
   - `broker/webull/webull-signer` — HMAC signing against the official docs
     test vector, host→algorithm classification, percent-encoding.
-  - `broker/webull/webull-mappers` — string-number tolerance, futures symbol
-    translation (`ESZ6`+`contract_month` ↔ `ESZ26`), order status map, OCC
-    symbols from legs, position filtering.
+  - `broker/webull/webull-mappers` — string-number tolerance, order status
+    map, OCC symbols from legs, position filtering.
   - `broker/webull/webull-client` — token create/cache/refresh/clear-on-401,
     429 backoff (Retry-After + jitter) and exhaustion, 5xx retry, network
     failure → BROKER_UNAVAILABLE, §6 error mapping table.
   - `broker/webull-broker.gateway` — full gateway through a fake `fetchImpl`
     router: quote routing, chain snapshot-probe synthesis (±12 strikes),
-    futures instruments mapping, preview (broker estimate + local fallback),
-    option/futures place payloads (MD5 client_order_id, position_intent),
-    status-poll fill emission (fake timers), cancel, positions/open-orders
-    filtering. No live Webull calls in tests.
+    preview (broker estimate + local fallback), place payloads (user-scoped
+    MD5 client_order_id, position_intent), status-poll fill emission (fake
+    timers), cancel, positions/open-orders filtering. No live Webull calls.
 - **E2E** (`test/app.e2e-spec.ts`) boots the entire Nest app (real guards,
   pipes, filters, throttler module, WS adapter) with `PrismaService`
   overridden by the in-memory fake and `BROKER_GATEWAY` overridden by the

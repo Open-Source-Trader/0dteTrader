@@ -1,10 +1,10 @@
 # 0dteTrader iOS
 
-SwiftUI iPhone app for rapid 0DTE options and futures trading against the
+SwiftUI iPhone app for rapid 0DTE options trading against the
 0dteTrader backend (see `../../docs/PRD.md`, `../../docs/API-SPEC.md`).
 
 - iOS 17+, SwiftUI, Swift Concurrency (`async/await`, `@MainActor` view models)
-- Candlestick charts: [DanielGindi/Charts](https://github.com/danielgindi/Charts) (SwiftPM, pinned to major version 4)
+- Candlestick charts: [DanielGindi/Charts](https://github.com/danielgindi/Charts) (SwiftPM, pinned to major version 5)
 - Project generated with [XcodeGen](https://github.com/yonsm/XcodeGen) — **do not edit the `.xcodeproj` directly**; edit `project.yml` and regenerate
 
 ## Prerequisites
@@ -27,7 +27,7 @@ then register an account (e.g. `dev@example.com` / `password123`).
 Run the unit tests:
 
 ```bash
-xcodebuild test -scheme 0dteTrader -destination 'platform=iOS Simulator,name=iPhone 15'
+xcodebuild test -scheme 0dteTrader -destination 'platform=iOS Simulator,name=iPhone 16'
 ```
 
 (or Cmd+U in Xcode.)
@@ -65,11 +65,12 @@ Follows docs/ARCHITECTURE.md §4:
     Auth/               LoginView, RegisterView, AuthViewModel, RiskDisclaimerView
     Profile/            ProfileView, WebullCredentialsForm (write-only), AppLockManager (FaceID)
     Chart/              ChartView, ChartViewModel, CandleChartRepresentable, IndicatorPaneRepresentable,
-                        IndicatorEngine (pure functions), IndicatorSettingsView, SymbolSearchView
+                        IndicatorEngine (pure functions), IndicatorSettingsView, SymbolSearchView,
+                        Twc/ (TWC Heatmap V5 indicator), Gex/ (GEX/DEX level overlay)
     Trade/              TradeScreenView (Layout A/B + drag divider), TradePanelView, OrderConfirmSheet,
                         PositionsStripView, TradeViewModel, OptionsChainViewModel, AutoContractSelector,
-                        PriceMath, FuturesRoots, FloatingTradeButtons, ToastView
-0dteTraderTests/        IndicatorEngine, AutoContractSelector, mid-price, DTO decoding tests
+                        PriceMath, FloatingTradeButtons, ToastView
+0dteTraderTests/        IndicatorEngine, AutoContractSelector, mid-price, DTO decoding, GEX presentation tests
 ```
 
 ## Notes & assumptions
@@ -78,10 +79,10 @@ Follows docs/ARCHITECTURE.md §4:
   `0dteTrader`), but Swift module names cannot start with a digit — the
   generated module is `ZeroDTETrader` via `PRODUCT_MODULE_NAME`, and tests use
   `@testable import ZeroDTETrader`.
-- **Charts version**: pinned to `majorVersion: 4.1.0`. The code uses the v4 API
-  (`CombinedChartView`, `CandleChartDataSet(entries:label:)`, `import Charts`).
-  v5 renamed the module to `DGCharts` — do not upgrade without adapting
-  `CandleChartRepresentable.swift` / `IndicatorPaneRepresentable.swift`.
+- **Charts version**: pinned to `majorVersion: 5.1.0` (v5 renamed the module
+  to `DGCharts`; v4 does not compile on current toolchains).
+- **Options only**: the app trades options exclusively — no futures UI or code
+  (the backend is likewise options-only).
 - **Symbol search** is a curated watchlist + free text because the API has no
   search endpoint (FR-9 is satisfied client-side).
 - **Order flow**: Buy/Sell arms a ticket (idempotency key = UUID generated at

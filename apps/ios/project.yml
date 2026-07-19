@@ -61,7 +61,7 @@ targets:
           - JetBrainsMono-Regular.ttf
           - JetBrainsMono-SemiBold.ttf
         ITSAppUsesNonExemptEncryption: false
-        # Debug builds target http://localhost:3000 (and optionally a LAN IP).
+        # Production targets Railway (HTTPS). Local dev can use localhost:3000.
         # ATS stays on otherwise — no arbitrary loads (docs/SECURITY.md §5).
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true

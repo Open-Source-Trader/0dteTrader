@@ -48,4 +48,4 @@ USER appuser
 EXPOSE 3000
 
 ENTRYPOINT ["tini", "--"]
-CMD ["node", "apps/api/dist/main.js"]
+CMD ["sh", "-c", "npx prisma migrate deploy --schema apps/api/prisma/schema.prisma && node apps/api/dist/main.js"]

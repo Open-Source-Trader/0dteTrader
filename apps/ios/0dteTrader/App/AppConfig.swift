@@ -1,11 +1,11 @@
 import Foundation
 
-/// Environment configuration. The backend base URL defaults to a locally
-/// running API (`npm run dev` → http://localhost:3000, see docs/RUNBOOK.md).
+/// Environment configuration. The backend base URL points at the Railway
+/// production deployment. For local dev, swap to http://localhost:3000 or
+/// your machine's LAN IP.
 ///
-/// Physical device: change `apiBaseURL` to your machine's LAN IP.
-/// Production: point at the deployed HTTPS origin and populate
-/// `pinnedPublicKeyHashes` with the backend's SPKI SHA-256 hashes (base64).
+/// To enable certificate pinning, populate `pinnedPublicKeyHashes` with
+/// the backend's SPKI SHA-256 hashes (base64).
 enum AppConfig {
     static let apiBaseURL: URL = makeURL("https://caring-prosperity-production.up.railway.app")
 

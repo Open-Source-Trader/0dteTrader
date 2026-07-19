@@ -21,9 +21,12 @@ import { OrderRequestDto } from './dto/order-request.dto';
 
 type AuditAction = 'preview' | 'place' | 'cancel';
 
+/** A pending idempotency claim older than this is a crashed attempt. */
+const PENDING_CLAIM_TTL_MS = 2 * 60_000;
+
 /**
  * Order flow (docs/ARCHITECTURE.md §3, docs/SECURITY.md §4):
- *   rate limit (controller) → kill switch → idempotency lookup →
+ *   rate limit (controller) → kill switch → idempotency claim →
  *   server-side re-validation (auto-OTM strike and mid price recomputed from
  *   live data; client values are advisory only) → gateway → audit.
  */
@@ -54,40 +57,75 @@ export class TradingService {
   ): Promise<OrderResult> {
     await this.assertTradingEnabled(userId, 'place', { order: dto });
 
-    // Idempotent replay: a seen key returns the original result without
-    // re-submitting (docs/SECURITY.md §4.1).
-    const existing = await this.prisma.orderAudit.findUnique({
-      where: { userId_idempotencyKey: { userId, idempotencyKey } },
-    });
-    if (existing) {
-      return existing.response as unknown as OrderResult;
-    }
+    // Claim the key BEFORE the broker call: the pending audit row is the
+    // single-flight marker. (Previously the row was written after the broker
+    // call, so two concurrent same-key requests both submitted.)
+    const replay = await this.claimIdempotencyKey(userId, dto, idempotencyKey);
+    if (replay.result) return replay.result;
 
-    const normalized = await this.resolveAndValidate(userId, dto);
-    let result: OrderResult;
     try {
-      result = await this.gateway.placeOrder(userId, normalized, idempotencyKey);
+      const normalized = await this.resolveAndValidate(userId, dto);
+      const result = await this.gateway.placeOrder(userId, normalized, idempotencyKey);
+      await this.prisma.orderAudit.update({
+        where: { id: replay.pendingId },
+        data: { response: result as never, status: result.status },
+      });
+      return result;
     } catch (err) {
       // Failed executions do not consume the key: the client may fix the
       // cause and retry with the same key.
+      await this.prisma.orderAudit
+        .delete({ where: { id: replay.pendingId } })
+        .catch(() => undefined);
       await this.auditError(userId, 'place', { order: dto }, err);
       throw err;
     }
+  }
 
+  /**
+   * Inserts the pending claim row for (userId, key). Returns the pending
+   * row id on success, the original result on replay, and throws
+   * ORDER_IN_FLIGHT when a concurrent placement holds a fresh claim.
+   */
+  private async claimIdempotencyKey(
+    userId: string,
+    dto: OrderRequestDto,
+    idempotencyKey: string,
+  ): Promise<{ pendingId: string; result: null } | { pendingId: null; result: OrderResult }> {
+    const data = {
+      userId,
+      idempotencyKey,
+      request: { action: 'place', order: dto },
+      response: null,
+      status: 'pending',
+    };
     try {
-      await this.audit(userId, 'place', { order: dto }, result, result.status, idempotencyKey);
+      const pending = await this.prisma.orderAudit.create({ data });
+      return { pendingId: pending.id, result: null };
     } catch (err) {
-      if (isUniqueViolation(err)) {
-        // Lost a race against a concurrent submit with the same key — return
-        // the winner's result instead of double-submitting.
-        const prior = await this.prisma.orderAudit.findUnique({
-          where: { userId_idempotencyKey: { userId, idempotencyKey } },
-        });
-        if (prior) return prior.response as unknown as OrderResult;
-      }
-      throw err;
+      if (!isUniqueViolation(err)) throw err;
     }
-    return result;
+
+    const prior = await this.prisma.orderAudit.findUnique({
+      where: { userId_idempotencyKey: { userId, idempotencyKey } },
+    });
+    if (!prior) {
+      // Lost the row to a concurrent delete; safest to refuse.
+      throw errors.conflict('ORDER_IN_FLIGHT', 'Retry the order');
+    }
+    if (prior.status !== 'pending') {
+      return { pendingId: null, result: prior.response as unknown as OrderResult };
+    }
+    if (Date.now() - prior.createdAt.getTime() < PENDING_CLAIM_TTL_MS) {
+      throw errors.conflict(
+        'ORDER_IN_FLIGHT',
+        'An order with this idempotency key is already being placed',
+      );
+    }
+    // Stale pending row from a crashed attempt: remove and re-claim.
+    await this.prisma.orderAudit.delete({ where: { id: prior.id } });
+    const reclaimed = await this.prisma.orderAudit.create({ data });
+    return { pendingId: reclaimed.id, result: null };
   }
 
   async cancel(userId: string, orderId: string): Promise<void> {

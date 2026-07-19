@@ -55,8 +55,10 @@ export class CryptoDataService {
       bid: Number(ticker.bid),
       ask: Number(ticker.ask),
       last: Number(ticker.price),
-      bidSize: 1,
-      askSize: 1,
+      // The ticker carries no order-book sizes — report 0 rather than
+      // inventing liquidity that isn't there.
+      bidSize: 0,
+      askSize: 0,
       volume: Math.round(Number(ticker.volume)),
       timestamp: ticker.time ?? new Date().toISOString(),
     };

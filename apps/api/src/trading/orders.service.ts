@@ -53,6 +53,7 @@ export class OrdersService implements OnModuleDestroy {
         environment,
         side: order.side,
         quantity: order.quantity,
+        filledQuantity: order.filledQuantity ?? null,
         orderType: order.orderType,
         limitPrice: order.limitPrice ?? null,
         filledPrice: order.filledPrice ?? null,
@@ -62,6 +63,7 @@ export class OrdersService implements OnModuleDestroy {
       update: {
         status: order.status,
         filledPrice: order.filledPrice ?? null,
+        filledQuantity: order.filledQuantity ?? null,
       },
     });
   }
@@ -88,14 +90,24 @@ export class OrdersService implements OnModuleDestroy {
         timestamp: row.placedAt.toISOString(),
         realizedPnl: null,
       };
+      // Executed quantity: the broker-reported filled amount when present
+      // (a partial fill at the full order quantity would overstate both the
+      // position book and realized P/L). A cancelled order with a recorded
+      // filled quantity executed that portion before cancelling — it is a
+      // real fill for accounting purposes.
+      const filledQty = row.filledQuantity ?? row.quantity;
       const isFill =
-        (row.status === 'filled' || row.status === 'partially_filled') &&
-        row.filledPrice !== null;
+        row.filledPrice !== null &&
+        (row.status === 'filled' ||
+          row.status === 'partially_filled' ||
+          (row.status === 'cancelled' &&
+            row.filledQuantity !== null &&
+            row.filledQuantity > 0));
       if (!isFill) return entry;
 
       const multiplier = OPTION_MULTIPLIER;
       const position = book.get(row.contractSymbol) ?? { quantity: 0, avgPrice: 0 };
-      const signed = row.side === 'buy' ? row.quantity : -row.quantity;
+      const signed = row.side === 'buy' ? filledQty : -filledQty;
       const price = row.filledPrice as number;
 
       if (position.quantity === 0 || Math.sign(position.quantity) === Math.sign(signed)) {

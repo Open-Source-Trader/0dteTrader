@@ -77,6 +77,36 @@ describe('OrdersService', () => {
     expect(history.entries[0].realizedPnl).toBe(100); // (2.00-1.50) × 2 × 100
   });
 
+  it('accounts partial fills at the broker-reported filled quantity, not the order quantity', async () => {
+    // 10-lot buy only fills 2 before resting; history must book 2, not 10.
+    await orders.record(
+      USER,
+      fill({
+        side: 'buy',
+        quantity: 10,
+        filledPrice: 1.0,
+        status: 'partially_filled',
+        filledQuantity: 2,
+      }),
+    );
+    // The matching 10-lot sell fills 2 and is then cancelled — the executed
+    // portion is still a real closing fill.
+    await orders.record(
+      USER,
+      fill({
+        side: 'sell',
+        quantity: 10,
+        filledPrice: 1.5,
+        status: 'cancelled',
+        filledQuantity: 2,
+      }),
+    );
+
+    const history = await orders.history(USER);
+    expect(history.entries[0].realizedPnl).toBe(100); // (1.50-1.00) × 2 × 100
+    expect(history.totalRealizedPnl).toBe(100);
+  });
+
   it('realizes a loss when covering a short above the sale price', async () => {
     await orders.record(USER, fill({ side: 'sell', quantity: 1, filledPrice: 1.0 }));
     await orders.record(USER, fill({ side: 'buy', quantity: 1, filledPrice: 1.4 }));

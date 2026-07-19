@@ -37,8 +37,9 @@ enum AutoContractSelector {
     /// Nearest expiration on or after `today`; falls back to the latest known
     /// expiration when every listed date is in the past. ISO `yyyy-MM-dd`
     /// strings sort chronologically, so plain string comparison is valid.
+    /// `today` is the exchange-calendar (New York) date, not device-local.
     static func nearestExpiration(_ expirations: [String], today: Date = Date()) -> String? {
-        let todayString = DateParsing.dayString(from: today)
+        let todayString = DateParsing.marketDayString(from: today)
         let valid = expirations.filter { DateParsing.day($0) != nil }
         guard !valid.isEmpty else { return nil }
         return valid.filter { $0 >= todayString }.min() ?? valid.max()

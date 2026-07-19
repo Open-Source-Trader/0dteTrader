@@ -71,8 +71,11 @@ export function ChartView({ store, drawingsStore, apiClient, onSymbolSearch, onI
   // Main chart's visible x-range, mirrored into every sub-pane.
   const [visibleRange, setVisibleRange] = useState<VisibleRange | null>(null);
 
-  // GEX/DEX levels poll the API while the script is enabled.
+  // GEX/DEX levels poll the API while the script is enabled. Levels are
+  // symbol-keyed server-side: suppress a stale previous symbol's overlay
+  // while the new symbol's first fetch is in flight.
   const gex = useGexLevels(apiClient, symbol, gexSettings);
+  const gexLevels = gex.levels && gex.levels.symbol === symbol ? gex.levels : null;
 
   const closes = useMemo(() => candles.map((c) => c.close), [candles]);
 
@@ -344,7 +347,7 @@ export function ChartView({ store, drawingsStore, apiClient, onSymbolSearch, onI
           drawingsStore={drawingsStore}
           candleColors={twcModel?.candleColors ?? null}
           twcModel={twcModel}
-          gexLevels={gex.levels}
+          gexLevels={gexLevels}
           gexSettings={gexSettings.enabled ? gexSettings : null}
           gexStale={gex.stale}
           onVisibleRangeChange={setVisibleRange}

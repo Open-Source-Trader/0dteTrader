@@ -82,11 +82,20 @@ export class AuthService {
       throw errors.unauthorized('INVALID_REFRESH_TOKEN', 'Refresh token expired');
     }
 
-    // Rotate: revoke the presented token, issue a fresh pair.
-    await this.prisma.refreshToken.update({
-      where: { id: row.id },
+    // Rotate atomically: only the first concurrent request to revoke the row
+    // wins; the loser sees count 0, which means the token was just used —
+    // treat it exactly like reuse (family revoke), not a second rotation.
+    const revoked = await this.prisma.refreshToken.updateMany({
+      where: { id: row.id, revokedAt: null },
       data: { revokedAt: new Date() },
     });
+    if (revoked.count === 0) {
+      await this.revokeAllForUser(row.userId);
+      throw errors.unauthorized(
+        'REFRESH_TOKEN_REUSED',
+        'Refresh token was already used; all sessions for this user have been revoked',
+      );
+    }
     return this.issueTokens(row.userId);
   }
 

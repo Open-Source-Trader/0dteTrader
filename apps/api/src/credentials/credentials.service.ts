@@ -41,8 +41,11 @@ export class CredentialsService {
       await this.prisma.webullCredential.delete({
         where: { userId_environment: { userId, environment } },
       });
-    } catch {
-      // Already absent — DELETE is idempotent.
+    } catch (err) {
+      // Only P2025 (row already absent) is idempotent — anything else (DB
+      // outage, constraint error) must surface, or the user is told their
+      // credentials were deleted when they weren't.
+      if ((err as { code?: string }).code !== 'P2025') throw err;
     }
   }
 

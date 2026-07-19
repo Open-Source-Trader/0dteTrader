@@ -31,10 +31,19 @@ export class UsersService {
   }
 
   async setTradingMode(userId: string, mode: TradingMode): Promise<Me> {
-    await this.prisma.user.update({
-      where: { id: userId },
-      data: { tradingMode: mode },
-    });
+    try {
+      await this.prisma.user.update({
+        where: { id: userId },
+        data: { tradingMode: mode },
+      });
+    } catch (err) {
+      // P2025: the user was deleted after their JWT was issued — surface the
+      // same USER_NOT_FOUND as getMe instead of a 500.
+      if ((err as { code?: string }).code === 'P2025') {
+        throw errors.unauthorized('USER_NOT_FOUND', 'User no longer exists');
+      }
+      throw err;
+    }
     return this.getMe(userId);
   }
 }

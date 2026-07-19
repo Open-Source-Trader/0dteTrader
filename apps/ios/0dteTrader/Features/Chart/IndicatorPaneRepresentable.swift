@@ -21,10 +21,6 @@ struct IndicatorPaneRepresentable: UIViewRepresentable {
     var guideLines: [Double] = []
     var yRange: ClosedRange<Double>?
     var xValueCount: Int
-    /// The main chart's visible x-range; when set, the pane pins its window
-    /// to it so indicator values align with the candles above.
-    var visibleRange: ClosedRange<Double>?
-    var onVisibleRangeChange: ((ClosedRange<Double>) -> Void)?
     var resetToken: Int = 0
 
     func makeUIView(context: Context) -> CombinedChartView {
@@ -42,6 +38,7 @@ struct IndicatorPaneRepresentable: UIViewRepresentable {
         chart.pinchZoomEnabled = false
         chart.scaleXEnabled = true
         chart.scaleYEnabled = false
+        chart.isMultipleTouchEnabled = true
 
         chart.delegate = context.coordinator
 
@@ -107,16 +104,6 @@ struct IndicatorPaneRepresentable: UIViewRepresentable {
 
         chart.data = data
 
-        // Align the pane's x-range with the main chart's visible window when
-        // known, else fall back to the full series.
-        if let visibleRange {
-            chart.xAxis.axisMinimum = visibleRange.lowerBound
-            chart.xAxis.axisMaximum = visibleRange.upperBound
-        } else {
-            chart.xAxis.axisMinimum = -0.5
-            chart.xAxis.axisMaximum = Double(max(xValueCount, 1)) - 0.5
-        }
-
         let leftAxis = chart.leftAxis
         leftAxis.removeAllLimitLines()
         for limit in guideLines {
@@ -135,8 +122,6 @@ struct IndicatorPaneRepresentable: UIViewRepresentable {
         }
         chart.notifyDataSetChanged()
 
-        context.coordinator.onVisibleRange = onVisibleRangeChange
-
         if resetToken != context.coordinator.lastResetToken {
             context.coordinator.lastResetToken = resetToken
             chart.fitScreen()
@@ -146,23 +131,6 @@ struct IndicatorPaneRepresentable: UIViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator() }
 
     final class Coordinator: NSObject, ChartViewDelegate {
-        var onVisibleRange: ((ClosedRange<Double>) -> Void)?
         var lastResetToken: Int = 0
-
-        func emit(_ chart: ChartViewBase) {
-            guard let combined = chart as? CombinedChartView else { return }
-            let low = combined.lowestVisibleX
-            let high = combined.highestVisibleX
-            guard low < high else { return }
-            onVisibleRange?(low...high)
-        }
-
-        func chartTranslated(_ chartView: ChartViewBase, dX: CGFloat, dY: CGFloat) {
-            emit(chartView)
-        }
-
-        func chartScaled(_ chartView: ChartViewBase, scaleX: CGFloat, scaleY: CGFloat) {
-            emit(chartView)
-        }
     }
 }

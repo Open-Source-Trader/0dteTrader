@@ -54,7 +54,6 @@ struct ChartView: View {
                     gexModel: viewModel.gexSettings.enabled ? viewModel.gexLevels : nil,
                     gexSettings: viewModel.gexSettings,
                     gexStale: viewModel.gexStale,
-                    onVisibleRangeChange: { viewModel.visibleXRange = $0 },
                     resetToken: chartResetToken
                 )
                 resetButton { chartResetToken += 1 }
@@ -101,8 +100,6 @@ struct ChartView: View {
                             guideLines: [30, 70],
                             yRange: 0...100,
                             xValueCount: viewModel.candles.count,
-                            visibleRange: viewModel.visibleXRange,
-                            onVisibleRangeChange: { viewModel.visibleXRange = $0 },
                             resetToken: paneResetTokens["rsi", default: 0]
                         )
                     }
@@ -130,8 +127,6 @@ struct ChartView: View {
                                 "macdSignal": ChartStyle.paneColors["macdSignal"]!,
                             ],
                             xValueCount: viewModel.candles.count,
-                            visibleRange: viewModel.visibleXRange,
-                            onVisibleRangeChange: { viewModel.visibleXRange = $0 },
                             resetToken: paneResetTokens["macd", default: 0]
                         )
                     }
@@ -161,8 +156,6 @@ struct ChartView: View {
                             guideLines: [20, 80],
                             yRange: 0...100,
                             xValueCount: viewModel.candles.count,
-                            visibleRange: viewModel.visibleXRange,
-                            onVisibleRangeChange: { viewModel.visibleXRange = $0 },
                             resetToken: paneResetTokens["stoch", default: 0]
                         )
                     }
@@ -179,8 +172,6 @@ struct ChartView: View {
                             series: [.init(id: atr.id, kind: .line, values: atr.values)],
                             colors: ["atr": ChartStyle.paneColors["atr"]!],
                             xValueCount: viewModel.candles.count,
-                            visibleRange: viewModel.visibleXRange,
-                            onVisibleRangeChange: { viewModel.visibleXRange = $0 },
                             resetToken: paneResetTokens["atr", default: 0]
                         )
                     }

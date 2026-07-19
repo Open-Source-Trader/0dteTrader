@@ -9,7 +9,6 @@ import {
   type UTCTimestamp,
 } from 'lightweight-charts';
 import { chartPalette } from './chartColors';
-import type { VisibleRange } from './CandleChart';
 import type { ChartCandle } from './ChartStore';
 
 export interface PaneSeries {
@@ -30,28 +29,14 @@ interface IndicatorPaneProps {
   guideLines?: number[];
   /** Fixed y range (RSI 0–100). */
   yRange?: [number, number];
-  /** Main chart's visible x-range; keeps the pane aligned while panning. */
-  visibleRange?: VisibleRange | null;
-  /** Called when the user zooms/pans this pane directly. */
-  onVisibleRangeChange?: (range: VisibleRange) => void;
 }
 
 /**
  * Sub-pane for indicators (RSI, MACD, etc.). Mirrors the main chart's visible
  * x-range and also allows independent zoom/pan, broadcasting changes back.
  */
-export function IndicatorPane({
-  height,
-  candles,
-  series,
-  guideLines,
-  yRange,
-  visibleRange,
-  onVisibleRangeChange,
-}: IndicatorPaneProps) {
+export function IndicatorPane({ height, candles, series, guideLines, yRange }: IndicatorPaneProps) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const onVisibleRangeChangeRef = useRef(onVisibleRangeChange);
-  onVisibleRangeChangeRef.current = onVisibleRangeChange;
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<Map<string, ISeriesApi<'Line' | 'Histogram'>>>(new Map());
   const yRangeRef = useRef(yRange);
@@ -85,11 +70,6 @@ export function IndicatorPane({
       autoSize: true,
     });
     chartRef.current = chart;
-
-    chart.timeScale().subscribeVisibleLogicalRangeChange((range) => {
-      if (range) onVisibleRangeChangeRef.current?.({ from: range.from, to: range.to });
-    });
-
     return () => {
       chart.remove();
       chartRef.current = null;
@@ -178,25 +158,6 @@ export function IndicatorPane({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [candles, series]);
-
-  // View sync: cheap range application while the user pans the main chart.
-  // Guard against feedback loops from bidirectional sync.
-  useEffect(() => {
-    const chart = chartRef.current;
-    if (!chart) return;
-    if (visibleRange) {
-      const current = chart.timeScale().getVisibleLogicalRange();
-      if (
-        current &&
-        Math.abs(current.from - visibleRange.from) < 0.5 &&
-        Math.abs(current.to - visibleRange.to) < 0.5
-      )
-        return;
-      chart.timeScale().setVisibleLogicalRange(visibleRange);
-    } else {
-      chart.timeScale().fitContent();
-    }
-  }, [visibleRange]);
 
   const resetView = () => {
     const chart = chartRef.current;

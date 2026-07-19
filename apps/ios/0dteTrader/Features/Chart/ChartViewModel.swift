@@ -93,8 +93,6 @@ final class ChartViewModel: ObservableObject {
     @Published private(set) var isLoading = false
     @Published var errorMessage: String?
     @Published private(set) var alertNotice: ChartAlertNotice?
-    /// The main chart's visible candle-index window; indicator panes track it.
-    @Published var visibleXRange: ClosedRange<Double>?
 
     /// GEX/DEX level structure from the server (nil while disabled or before
     /// the first successful fetch for the current symbol).

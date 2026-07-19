@@ -107,6 +107,7 @@ struct CandleChartRepresentable: UIViewRepresentable {
         chart.pinchZoomEnabled = false
         chart.scaleXEnabled = true
         chart.scaleYEnabled = false
+        chart.isMultipleTouchEnabled = true
 
         let rangeCallback = onVisibleRangeChange
         context.coordinator.onVisibleRange = { range in rangeCallback?(range) }

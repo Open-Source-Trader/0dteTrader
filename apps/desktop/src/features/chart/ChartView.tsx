@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo } from 'react';
 import type { ChartInterval, TradingMode } from '@0dtetrader/shared-types';
 import type { ApiClient } from '../../core/api/ApiClient';
 import { useStore } from '../../core/observable';
@@ -8,7 +8,7 @@ import { Format } from '../../design/format';
 import { ChevronDownIcon, SlidersIcon } from '../../design/icons';
 import type { ChartStore } from './ChartStore';
 import { CHART_INTERVALS } from './ChartStore';
-import { CandleChart, type OverlaySeries, type VisibleRange } from './CandleChart';
+import { CandleChart, type OverlaySeries } from './CandleChart';
 import { overlayPalette, panePalette } from './chartColors';
 import { DrawToolsMenu } from './DrawingToolbar';
 import type { DrawingsStore } from './drawings';
@@ -86,7 +86,6 @@ export function ChartView({
   } = useStore(store);
 
   // Main chart's visible x-range, mirrored into every sub-pane.
-  const [visibleRange, setVisibleRange] = useState<VisibleRange | null>(null);
 
   // GEX/DEX levels poll the API while the script is enabled. Levels are
   // symbol-keyed server-side: suppress a stale previous symbol's overlay
@@ -401,8 +400,6 @@ export function ChartView({
             gexLevels={gexLevels}
             gexSettings={gexSettings.enabled ? gexSettings : null}
             gexStale={gex.stale}
-            onVisibleRangeChange={setVisibleRange}
-            visibleRange={visibleRange}
           />
           {twcModel?.banner ? <TwcBiasBanner banner={twcModel.banner} /> : null}
           {gex.errorMessage ? (
@@ -498,8 +495,6 @@ export function ChartView({
             series={rsiSeries}
             guideLines={[30, 70]}
             yRange={[0, 100]}
-            visibleRange={visibleRange}
-            onVisibleRangeChange={setVisibleRange}
           />
         </PaneCard>
       ) : null}
@@ -512,13 +507,7 @@ export function ChartView({
             macdHistogram: 'Hist',
           })}
         >
-          <IndicatorPane
-            height={72}
-            candles={candles}
-            series={macdSeries}
-            visibleRange={visibleRange}
-            onVisibleRangeChange={setVisibleRange}
-          />
+          <IndicatorPane height={72} candles={candles} series={macdSeries} />
         </PaneCard>
       ) : null}
       {stochSeries && visiblePanes.has('stochEnabled') ? (
@@ -532,8 +521,6 @@ export function ChartView({
             series={stochSeries}
             guideLines={[20, 80]}
             yRange={[0, 100]}
-            visibleRange={visibleRange}
-            onVisibleRangeChange={setVisibleRange}
           />
         </PaneCard>
       ) : null}
@@ -542,13 +529,7 @@ export function ChartView({
           title={`ATR (${indicatorSettings.atrPeriod})`}
           readouts={paneReadouts(atrSeries, { atr: '' })}
         >
-          <IndicatorPane
-            height={68}
-            candles={candles}
-            series={atrSeries}
-            visibleRange={visibleRange}
-            onVisibleRangeChange={setVisibleRange}
-          />
+          <IndicatorPane height={68} candles={candles} series={atrSeries} />
         </PaneCard>
       ) : null}
     </div>

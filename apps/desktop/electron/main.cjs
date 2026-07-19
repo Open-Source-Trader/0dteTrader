@@ -23,7 +23,15 @@ const MIME = {
   '.woff2': 'font/woff2',
 };
 
-/** Serves the Vite build from ../dist on an ephemeral loopback port. */
+/**
+ * Serves the Vite build from ../dist on a loopback port. A FIXED port is
+ * preferred so the origin stays stable across launches — localStorage is
+ * keyed by origin, and an ephemeral port would silently wipe the user's
+ * saved settings (indicators, layout, last symbol) on every start. Falls
+ * back to an ephemeral port only when the fixed one is taken.
+ */
+const DIST_PORT = 41730;
+
 function serveDist() {
   const root = path.resolve(path.join(__dirname, '../dist'));
   const server = http.createServer((req, res) => {
@@ -53,8 +61,16 @@ function serveDist() {
     });
   });
   return new Promise((resolve, reject) => {
-    server.once('error', reject);
-    server.listen(0, '127.0.0.1', () => resolve(server));
+    server.once('error', (err) => {
+      if (err.code === 'EADDRINUSE') {
+        // Another instance holds the fixed port — ephemeral fallback (its
+        // settings live under that instance's origin anyway).
+        server.listen(0, '127.0.0.1', () => resolve(server));
+      } else {
+        reject(err);
+      }
+    });
+    server.listen(DIST_PORT, '127.0.0.1', () => resolve(server));
   });
 }
 

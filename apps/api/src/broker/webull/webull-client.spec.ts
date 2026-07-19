@@ -113,12 +113,13 @@ describe('WebullClient token lifecycle', () => {
     ).toHaveLength(0);
   });
 
-  it('backs off token creation after failures instead of one attempt per call', async () => {
+  it('latches after an auth-class token failure — never auto-recreates', async () => {
     let nowMs = 1_000_000;
     const calls: { url: string }[] = [];
     const fetchImpl: FetchImpl = async (url) => {
       calls.push({ url });
       if (url.includes('/openapi/auth/token/create')) {
+        // e.g. 417 2FA_VERIFY_FAILED while a verification is outstanding
         return { status: 417, json: async () => ({ code: 'X', message: 'fail' }) };
       }
       return { status: 200, json: async () => ({ ok: true }) };
@@ -132,24 +133,55 @@ describe('WebullClient token lifecycle', () => {
     const creates = () =>
       calls.filter((c) => c.url.includes('/openapi/auth/token/create'));
 
-    // First failure hits the endpoint; subsequent calls short-circuit.
+    // First failure hits the endpoint once; every later call fails fast
+    // locally with the same auth error — no more creates, even after the
+    // old backoff window would have expired.
     await expect(client.request('accountList')).rejects.toMatchObject({
       code: 'BROKER_AUTH_FAILED',
     });
     await expect(client.request('accountList')).rejects.toMatchObject({
-      code: 'BROKER_RATE_LIMITED',
-    });
-    await expect(client.request('accountList')).rejects.toMatchObject({
-      code: 'BROKER_RATE_LIMITED',
+      code: 'BROKER_AUTH_FAILED',
     });
     expect(creates()).toHaveLength(1);
-
-    // After the backoff window, exactly one real retry goes through.
     nowMs += 61_000;
     await expect(client.request('accountList')).rejects.toMatchObject({
       code: 'BROKER_AUTH_FAILED',
     });
-    expect(creates()).toHaveLength(2);
+    expect(creates()).toHaveLength(1);
+  });
+
+  it('backs off TRANSIENT token-creation failures, then retries once', async () => {
+    let nowMs = 1_000_000;
+    let createAttempts = 0;
+    const calls: { url: string }[] = [];
+    const fetchImpl: FetchImpl = async (url) => {
+      calls.push({ url });
+      if (url.includes('/openapi/auth/token/create')) {
+        createAttempts += 1;
+        if (createAttempts === 1) throw new TypeError('fetch failed');
+        return { status: 200, json: async () => TOKEN_BODY };
+      }
+      return { status: 200, json: async () => ({ ok: true }) };
+    };
+    const client = new WebullClient(CREDS, {
+      hosts: HOSTS,
+      fetchImpl,
+      sleep: async () => {},
+      now: () => new Date(nowMs),
+    });
+
+    await expect(client.request('accountList')).rejects.toMatchObject({
+      code: 'BROKER_UNAVAILABLE',
+    });
+    // Inside the backoff window: fails fast without touching the endpoint.
+    await expect(client.request('accountList')).rejects.toMatchObject({
+      code: 'BROKER_RATE_LIMITED',
+    });
+    expect(createAttempts).toBe(1);
+    // After the window: exactly one real retry, which succeeds.
+    nowMs += 3_000;
+    await expect(client.request('accountList')).resolves.toEqual({ ok: true });
+    expect(createAttempts).toBe(2);
   });
 
   it('refreshes a token that is near expiry', async () => {
@@ -217,14 +249,14 @@ describe('WebullClient token lifecycle', () => {
     });
   });
 
-  it('clears the cached token after a 401 and re-creates it next call', async () => {
+  it('latches after a business-call 401 — no auto re-create; reauthenticate() recovers', async () => {
     let businessCalls = 0;
     const { client, calls } = makeHarness((url) => {
       if (url.includes('/openapi/auth/token/create')) {
         return { status: 200, body: TOKEN_BODY };
       }
       businessCalls += 1;
-      return businessCalls === 1
+      return businessCalls <= 2
         ? { status: 401, body: { code: 'UNAUTHORIZED' } }
         : { status: 200, body: { ok: 1 } };
     });
@@ -232,11 +264,93 @@ describe('WebullClient token lifecycle', () => {
       code: 'BROKER_AUTH_FAILED',
       httpStatus: 401,
     });
-    await client.request('accountList');
-    const tokenCalls = calls.filter((c) =>
-      c.url.includes('/openapi/auth/token/create'),
-    );
-    expect(tokenCalls).toHaveLength(2);
+    // Latched: the next call fails fast without a new token create.
+    await expect(client.request('accountList')).rejects.toMatchObject({
+      code: 'BROKER_AUTH_FAILED',
+    });
+    expect(
+      calls.filter((c) => c.url.includes('/openapi/auth/token/create')),
+    ).toHaveLength(1);
+
+    // The Reconnect button is the only path to a fresh token.
+    await client.reauthenticate();
+    await expect(client.request('accountList')).resolves.toEqual({ ok: 1 });
+    expect(
+      calls.filter((c) => c.url.includes('/openapi/auth/token/create')),
+    ).toHaveLength(2);
+  });
+
+  it('serves calls with a PENDING token and promotes it via token/check', async () => {
+    let nowMs = 1_000_000;
+    const calls: { url: string; init: { headers: Record<string, string> } }[] = [];
+    const fetchImpl: FetchImpl = async (url, init) => {
+      calls.push({ url, init });
+      if (url.includes('/openapi/auth/token/create')) {
+        return {
+          status: 200,
+          json: async () => ({ token: 'tok-p', expires: 9999999999, status: 'PENDING' }),
+        };
+      }
+      if (url.includes('/openapi/auth/token/check')) {
+        return { status: 200, json: async () => ({ status: 'NORMAL' }) };
+      }
+      return { status: 200, json: async () => ({ ok: 1 }) };
+    };
+    const client = new WebullClient(CREDS, {
+      hosts: HOSTS,
+      fetchImpl,
+      sleep: async () => {},
+      now: () => new Date(nowMs),
+    });
+
+    // First call: create (PENDING) + optimistic business call with tok-p.
+    await expect(client.request('accountList')).resolves.toEqual({ ok: 1 });
+    expect(calls[calls.length - 1].init.headers['x-access-token']).toBe('tok-p');
+
+    // The next call polls token/check once, learns NORMAL, keeps the token.
+    nowMs += 21_000;
+    await expect(client.request('accountList')).resolves.toEqual({ ok: 1 });
+    const creates = calls.filter((c) => c.url.includes('/openapi/auth/token/create'));
+    const checks = calls.filter((c) => c.url.includes('/openapi/auth/token/check'));
+    expect(creates).toHaveLength(1);
+    expect(checks).toHaveLength(1);
+
+    // Now NORMAL: no further creates or checks.
+    nowMs += 21_000;
+    await expect(client.request('accountList')).resolves.toEqual({ ok: 1 });
+    expect(
+      calls.filter((c) => c.url.includes('/openapi/auth/token/')),
+    ).toHaveLength(2);
+  });
+
+  it('latches when a PENDING token expires unverified (5-minute window)', async () => {
+    const { client, calls } = makeHarness((url) => {
+      if (url.includes('/openapi/auth/token/create')) {
+        return {
+          status: 200,
+          body: { token: 'tok-x', expires: 9999999999, status: 'PENDING' },
+        };
+      }
+      if (url.includes('/openapi/auth/token/check')) {
+        return { status: 200, body: { status: 'EXPIRED' } };
+      }
+      return { status: 200, body: { ok: 1 } };
+    });
+    // First call goes through with the PENDING token attached.
+    await expect(client.request('accountList')).resolves.toEqual({ ok: 1 });
+    // The status poll then learns EXPIRED: latch with Reconnect guidance.
+    await expect(client.request('accountList')).rejects.toMatchObject({
+      code: 'BROKER_AUTH_FAILED',
+    });
+    // Latched: fails fast, no HTTP at all on subsequent calls.
+    const count = calls.length;
+    await expect(client.request('accountList')).rejects.toMatchObject({
+      code: 'BROKER_AUTH_FAILED',
+    });
+    expect(calls).toHaveLength(count);
+    expect(
+      calls.filter((c) => c.url.includes('/openapi/auth/token/create')),
+    ).toHaveLength(1);
   });
 
   it('maps quote-subscription 401s to BROKER_PERMISSION_DENIED and keeps the token', async () => {

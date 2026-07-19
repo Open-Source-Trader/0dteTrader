@@ -7,6 +7,7 @@ import { NavBar } from '../../design/components/NavBar';
 import { Format } from '../../design/format';
 import { ClockIcon, LayoutFullIcon, LayoutSplitIcon, PersonCircleIcon } from '../../design/icons';
 import type { TradeLayout } from '../../core/storage/SettingsStore';
+import { enabledSubPanes } from '../chart/indicatorSettings';
 import { ChartView } from '../chart/ChartView';
 import { IndicatorSettingsView } from '../chart/IndicatorSettingsView';
 import { TwcSettingsView } from '../chart/TwcSettingsView';
@@ -35,7 +36,7 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
 
   const chart = useStore(chartStore);
   const trade = useStore(tradeStore);
-  useStore(chainStore); // re-render when the chain selection changes (canTrade below)
+  const chain = useStore(chainStore); // chain selection drives canTrade and the GEX expiration
 
   const [layout, setLayout] = useState<TradeLayout>(() => settingsStore.layoutMode);
   const [showSymbolSearch, setShowSymbolSearch] = useState(false);
@@ -181,17 +182,16 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
       ? 'Select an option contract to trade'
       : null;
 
-  // Fixed split: sub-pane indicators (RSI/MACD/Stoch/ATR) consume chart
-  // height, so the panel shrinks to 1/4 when any are on, else 1/3.
+  // Fixed split sized by sub-pane count (0/1/2): each pane takes chart
+  // height, so the panel shrinks and its content compacts to match — the
+  // panel never scrolls (see TradePanel density).
   // No pixel floor: at the phone frame's height the fraction lands under the
-  // old 300px floor and would never switch; the TradePanel scrolls instead.
-  const indicators = chart.indicatorSettings;
-  const hasPanes =
-    indicators.rsiEnabled ||
-    indicators.macdEnabled ||
-    indicators.stochEnabled ||
-    indicators.atrEnabled;
-  const panelHeight = Math.round(contentHeight * (hasPanes ? 0.25 : 1 / 3));
+  // old 300px floor and would never switch.
+  const paneCount = enabledSubPanes(chart.indicatorSettings).length;
+  const PANEL_FRACTIONS = [1 / 3, 0.3, 0.27] as const;
+  const PANEL_DENSITIES = ['roomy', 'compact', 'dense'] as const;
+  const panelHeight = Math.round(contentHeight * PANEL_FRACTIONS[paneCount]);
+  const panelDensity = PANEL_DENSITIES[paneCount];
   const chartHeight = Math.max(contentHeight - panelHeight - DIVIDER_HEIGHT, 96);
 
   const positionsStrip = (
@@ -242,6 +242,7 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
               onIndicatorSettings={() => setShowIndicatorSettings(true)}
               tradingMode={tradingMode}
               onToggleMode={() => setShowModeConfirmation(true)}
+              gexExpiration={chain.selectedExpiration}
             />
             {/* Scrim so the dock never lets chart content bleed through the buttons */}
             <div
@@ -295,6 +296,7 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
                 onIndicatorSettings={() => setShowIndicatorSettings(true)}
                 tradingMode={tradingMode}
                 onToggleMode={() => setShowModeConfirmation(true)}
+                gexExpiration={chain.selectedExpiration}
               />
             </div>
 
@@ -312,7 +314,7 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
                 transition: 'height 200ms cubic-bezier(0.32, 0.72, 0, 1)',
               }}
             >
-              <TradePanel tradeStore={tradeStore} chainStore={chainStore} onArm={arm} />
+              <TradePanel tradeStore={tradeStore} chainStore={chainStore} onArm={arm} density={panelDensity} />
             </div>
           </div>
         )}

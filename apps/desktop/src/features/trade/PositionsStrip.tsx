@@ -15,6 +15,9 @@ interface PositionsStripProps {
   /** Horizontal inset for the scrolling rows; aligns chips with the buttons
    *  in the fullscreen overlay and with the panel padding in Layout B. */
   rowPadding?: string;
+  /** Expanded height cap — smaller when the trade panel is in a compact
+   *  density so the strip can't push the SELL/BUY row out of view. */
+  maxHeight?: number;
 }
 
 const chipStyle: React.CSSProperties = {
@@ -43,6 +46,7 @@ export function PositionsStrip({
   onFlatten,
   onCancelOrder,
   rowPadding = '0 20px',
+  maxHeight = 140,
 }: PositionsStripProps) {
   const [positionPendingFlatten, setPositionPendingFlatten] = useState<Position | null>(null);
   const [orderPendingCancel, setOrderPendingCancel] = useState<OrderResult | null>(null);
@@ -58,7 +62,7 @@ export function PositionsStrip({
         flexDirection: 'column',
         gap: 8,
         overflow: 'hidden',
-        maxHeight: visible ? 140 : 0,
+        maxHeight: visible ? maxHeight : 0,
         opacity: visible ? 1 : 0,
         transition: 'max-height 200ms cubic-bezier(0.32, 0.72, 0, 1), opacity 150ms ease',
       }}

@@ -22,14 +22,26 @@ interface TradePanelProps {
   tradeStore: TradeStore;
   chainStore: ChainStore;
   onArm: (side: OrderSide) => void;
+  /**
+   * Spacing tier driven by how many chart sub-panes are showing (0/1/2):
+   * the panel's fixed height shrinks as panes appear, and the content
+   * compacts to fit — the panel never scrolls.
+   */
+  density?: 'roomy' | 'compact' | 'dense';
 }
+
+const DENSITY = {
+  roomy: { gap: 8, padding: '8px 16px 12px', stripMaxHeight: 140 },
+  compact: { gap: 6, padding: '6px 16px 8px', stripMaxHeight: 100 },
+  dense: { gap: 4, padding: '4px 16px 4px', stripMaxHeight: 64 },
+} as const;
 
 function expirationLabel(expiration: string): string {
   return expiration === dayString() ? `${expiration} · 0DTE` : expiration;
 }
 
 /** Layout B's bottom trade panel (TradePanelView.swift). */
-export function TradePanel({ tradeStore, chainStore, onArm }: TradePanelProps) {
+export function TradePanel({ tradeStore, chainStore, onArm, density = 'roomy' }: TradePanelProps) {
   const trade = useStore(tradeStore);
   const chain = useStore(chainStore);
 
@@ -42,18 +54,21 @@ export function TradePanel({ tradeStore, chainStore, onArm }: TradePanelProps) {
   const selectedQuote = selectedContract;
   const indicativeMid = selectedQuote ? midPrice(selectedQuote.bid, selectedQuote.ask) : null;
 
+  const d = DENSITY[density];
+
   return (
     <div
+      className={`trade-panel ${density}`}
       style={{
         display: 'flex',
         flexDirection: 'column',
-        gap: 8,
-        padding: '8px 16px 12px',
+        gap: d.gap,
+        padding: d.padding,
         background: 'var(--app-background)',
         height: '100%',
-        // Safety net: the SELL/BUY row must never be clipped away at small
-        // split heights; scroll instead of hiding content.
-        overflowY: 'auto',
+        // The panel is sized to fit its content at every density — it must
+        // never grow a scrollbar.
+        overflow: 'hidden',
       }}
     >
       <PositionsStrip
@@ -63,9 +78,10 @@ export function TradePanel({ tradeStore, chainStore, onArm }: TradePanelProps) {
         onFlatten={(position) => void tradeStore.flatten(position)}
         onCancelOrder={(order) => void tradeStore.cancel(order)}
         rowPadding="0"
+        maxHeight={d.stripMaxHeight}
       />
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: d.gap }}>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           <SegmentedControl
             options={[
@@ -253,8 +269,8 @@ export function TradePanel({ tradeStore, chainStore, onArm }: TradePanelProps) {
         </span>
       </div>
 
-      {/* Action row */}
-      <div style={{ display: 'flex', gap: 8 }}>
+      {/* Action row — pinned to the panel's bottom edge */}
+      <div style={{ display: 'flex', gap: 8, marginTop: 'auto' }}>
         <TradeActionButton
           title="SELL"
           color="var(--sell-red)"

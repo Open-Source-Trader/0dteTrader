@@ -6,7 +6,11 @@ import { Format } from '../../design/format';
 import { SlidersIcon } from '../../design/icons';
 import type { GexSettings } from './gex/gexSettings';
 import type { IndicatorSettings } from './indicatorSettings';
-import { DEFAULT_INDICATOR_SETTINGS } from './indicatorSettings';
+import {
+  DEFAULT_INDICATOR_SETTINGS,
+  enabledSubPanes,
+  MAX_SUB_PANES,
+} from './indicatorSettings';
 
 interface IndicatorSettingsViewProps {
   settings: IndicatorSettings;
@@ -49,6 +53,11 @@ export function IndicatorSettingsView({
 }: IndicatorSettingsViewProps) {
   const patch = (partial: Partial<IndicatorSettings>) => onChange({ ...settings, ...partial });
   const patchGex = (partial: Partial<GexSettings>) => onChangeGex({ ...gexSettings, ...partial });
+
+  // Sub-panes are capped: at the cap, toggles for the remaining panes are
+  // disabled until one is turned off.
+  const paneCapReached = enabledSubPanes(settings).length >= MAX_SUB_PANES;
+  const paneToggleDisabled = (enabled: boolean) => !enabled && paneCapReached;
 
   return (
     <Sheet detent="large" onDismiss={onDismiss}>
@@ -182,7 +191,7 @@ export function IndicatorSettingsView({
           </div>
 
           <div className="grouped-section">
-            <div className="section-header">Sub-Panes</div>
+            <div className="section-header">Sub-Panes (max {MAX_SUB_PANES})</div>
             <div className="section-card">
               <div className="grouped-row">
                 <span>
@@ -190,7 +199,11 @@ export function IndicatorSettingsView({
                   RSI
                 </span>
                 <span className="row-value">
-                  <Toggle on={settings.rsiEnabled} onChange={(on) => patch({ rsiEnabled: on })} />
+                  <Toggle
+                    on={settings.rsiEnabled}
+                    onChange={(on) => patch({ rsiEnabled: on })}
+                    disabled={paneToggleDisabled(settings.rsiEnabled)}
+                  />
                 </span>
               </div>
               {settings.rsiEnabled ? (
@@ -213,7 +226,11 @@ export function IndicatorSettingsView({
                   MACD
                 </span>
                 <span className="row-value">
-                  <Toggle on={settings.macdEnabled} onChange={(on) => patch({ macdEnabled: on })} />
+                  <Toggle
+                    on={settings.macdEnabled}
+                    onChange={(on) => patch({ macdEnabled: on })}
+                    disabled={paneToggleDisabled(settings.macdEnabled)}
+                  />
                 </span>
               </div>
               {settings.macdEnabled ? (
@@ -263,6 +280,7 @@ export function IndicatorSettingsView({
                   <Toggle
                     on={settings.stochEnabled}
                     onChange={(on) => patch({ stochEnabled: on })}
+                    disabled={paneToggleDisabled(settings.stochEnabled)}
                   />
                 </span>
               </div>
@@ -310,7 +328,11 @@ export function IndicatorSettingsView({
                   ATR
                 </span>
                 <span className="row-value">
-                  <Toggle on={settings.atrEnabled} onChange={(on) => patch({ atrEnabled: on })} />
+                  <Toggle
+                    on={settings.atrEnabled}
+                    onChange={(on) => patch({ atrEnabled: on })}
+                    disabled={paneToggleDisabled(settings.atrEnabled)}
+                  />
                 </span>
               </div>
               {settings.atrEnabled ? (
@@ -327,6 +349,11 @@ export function IndicatorSettingsView({
                 </div>
               ) : null}
             </div>
+            {paneCapReached ? (
+              <div className="section-footer">
+                Two sub-panes max — turn one off to enable another.
+              </div>
+            ) : null}
           </div>
 
           <div className="grouped-section">
@@ -391,6 +418,20 @@ export function IndicatorSettingsView({
                           min={3}
                           max={10}
                           onChange={(value) => patchGex({ maxPremiumStrikes: value })}
+                        />
+                      </span>
+                    </div>
+                  ) : null}
+                  {gexSettings.showPremium ? (
+                    <div className="grouped-row param-row">
+                      <span>Heat Opacity: {Math.round(gexSettings.opacityCap * 100)}%</span>
+                      <span className="row-value">
+                        <Stepper
+                          value={Math.round(gexSettings.opacityCap * 100)}
+                          min={20}
+                          max={80}
+                          step={5}
+                          onChange={(value) => patchGex({ opacityCap: value / 100 })}
                         />
                       </span>
                     </div>

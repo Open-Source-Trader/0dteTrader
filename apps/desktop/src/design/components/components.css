@@ -341,6 +341,10 @@
   transform: translateX(20px);
 }
 
+.toggle:disabled {
+  opacity: var(--disabled-opacity);
+}
+
 /* --- Stepper (94x36 two-segment iOS control) --- */
 .stepper {
   display: flex;
@@ -563,4 +567,44 @@
 .button-primary:active:not(:disabled) {
   transform: scale(var(--press-scale));
   transition: transform var(--dur-fast) var(--ease-out);
+}
+
+/* --- Trade panel density tiers (0/1/2 chart sub-panes → roomy/compact/dense).
+   The panel's fixed height shrinks as panes appear; controls compact to fit
+   so the panel never scrolls. --- */
+.trade-panel.compact .segmented {
+  height: 32px;
+}
+
+.trade-panel.compact .trade-action-button {
+  min-height: 44px;
+}
+
+.trade-panel.compact .chip-button {
+  padding: 6px 10px;
+}
+
+.trade-panel.compact .stepper {
+  height: 32px;
+}
+
+.trade-panel.dense .segmented {
+  height: 30px;
+}
+
+.trade-panel.dense .trade-action-button {
+  min-height: 40px;
+}
+
+.trade-panel.dense .chip-button {
+  padding: 5px 10px;
+}
+
+.trade-panel.dense .stepper {
+  height: 30px;
+  width: 84px;
+}
+
+.trade-panel.dense .quick-chip {
+  padding: 5px 10px;
 }

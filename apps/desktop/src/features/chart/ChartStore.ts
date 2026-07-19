@@ -7,6 +7,7 @@ import { Store } from '../../core/observable';
 import type { SettingsStore } from '../../core/storage/SettingsStore';
 import type { GexSettings } from './gex/gexSettings';
 import type { IndicatorSettings } from './indicatorSettings';
+import { capSubPanes } from './indicatorSettings';
 import type { TwcHeatmapSettings } from './twc/twcSettings';
 
 export const CHART_INTERVALS: CandleInterval[] = ['1m', '5m', '15m', '1h', '1d'];
@@ -67,6 +68,12 @@ export class ChartStore extends Store<ChartStoreState> {
     private readonly socket: QuoteSocket,
     private readonly settingsStore: SettingsStore,
   ) {
+    // Persisted settings from before the sub-pane cap may exceed it; clamp
+    // and write back so the stored state matches what's on screen.
+    const indicatorSettings = capSubPanes(settingsStore.indicatorSettings);
+    if (indicatorSettings !== settingsStore.indicatorSettings) {
+      settingsStore.indicatorSettings = indicatorSettings;
+    }
     super({
       symbol: settingsStore.lastSymbol ?? 'SPY',
       interval: '1m',
@@ -75,7 +82,7 @@ export class ChartStore extends Store<ChartStoreState> {
       isLoading: false,
       errorMessage: null,
       isStale: socket.getState().connectionState !== 'connected',
-      indicatorSettings: settingsStore.indicatorSettings,
+      indicatorSettings,
       twcSettings: settingsStore.twcSettings,
       gexSettings: settingsStore.gexSettings,
     });
@@ -145,8 +152,9 @@ export class ChartStore extends Store<ChartStoreState> {
   }
 
   setIndicatorSettings(settings: IndicatorSettings): void {
-    this.settingsStore.indicatorSettings = settings;
-    this.set({ indicatorSettings: settings });
+    const capped = capSubPanes(settings);
+    this.settingsStore.indicatorSettings = capped;
+    this.set({ indicatorSettings: capped });
   }
 
   setTwcSettings(settings: TwcHeatmapSettings): void {

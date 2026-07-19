@@ -15,6 +15,7 @@ import type { DrawingsStore } from './drawings';
 import { useGexLevels } from './gex/useGexLevels';
 import { IndicatorPane, type PaneSeries } from './IndicatorPane';
 import * as engine from './indicatorEngine';
+import { enabledSubPanes, type SubPaneKey } from './indicatorSettings';
 import { computeTwc } from './twc/computeTwc';
 import type { TwcBanner } from './twc/twcTypes';
 import { intervalSeconds } from './ChartStore';
@@ -28,6 +29,8 @@ interface ChartViewProps {
   onIndicatorSettings: () => void;
   tradingMode: TradingMode;
   onToggleMode: () => void;
+  /** Trade-ticket expiration for the GEX overlay; null = server default. */
+  gexExpiration: string | null;
 }
 
 // Interval hotkeys. 'H'/'D' are uppercase (shift held) so they don't collide
@@ -54,7 +57,7 @@ const SKELETON_BARS = [
 ];
 
 /** Chart surface: header, candle chart with overlays and drawing tools, sub-panes. */
-export function ChartView({ store, drawingsStore, apiClient, onSymbolSearch, onIndicatorSettings, tradingMode, onToggleMode }: ChartViewProps) {
+export function ChartView({ store, drawingsStore, apiClient, onSymbolSearch, onIndicatorSettings, tradingMode, onToggleMode, gexExpiration }: ChartViewProps) {
   const {
     symbol,
     interval,
@@ -74,8 +77,13 @@ export function ChartView({ store, drawingsStore, apiClient, onSymbolSearch, onI
   // GEX/DEX levels poll the API while the script is enabled. Levels are
   // symbol-keyed server-side: suppress a stale previous symbol's overlay
   // while the new symbol's first fetch is in flight.
-  const gex = useGexLevels(apiClient, symbol, gexSettings);
-  const gexLevels = gex.levels && gex.levels.symbol === symbol ? gex.levels : null;
+  const gex = useGexLevels(apiClient, symbol, gexSettings, gexExpiration);
+  const gexLevels =
+    gex.levels &&
+    gex.levels.symbol === symbol &&
+    (gexExpiration === null || gex.levels.expiration === gexExpiration)
+      ? gex.levels
+      : null;
 
   const closes = useMemo(() => candles.map((c) => c.close), [candles]);
 
@@ -145,6 +153,12 @@ export function ChartView({ store, drawingsStore, apiClient, onSymbolSearch, onI
       },
     ];
   }, [candles, indicatorSettings.rsiEnabled, indicatorSettings.rsiPeriod]);
+
+  // Sub-panes are capped (MAX_SUB_PANES); only panes inside the cap render.
+  const visiblePanes = useMemo<Set<SubPaneKey>>(
+    () => new Set(enabledSubPanes(indicatorSettings)),
+    [indicatorSettings],
+  );
 
   const macdSeries = useMemo<PaneSeries[] | null>(() => {
     if (!indicatorSettings.macdEnabled) return null;
@@ -434,7 +448,7 @@ export function ChartView({ store, drawingsStore, apiClient, onSymbolSearch, onI
         ) : null}
       </div>
 
-      {rsiSeries ? (
+      {rsiSeries && visiblePanes.has('rsiEnabled') ? (
         <IndicatorPane
           height={72}
           candles={candles}
@@ -444,10 +458,10 @@ export function ChartView({ store, drawingsStore, apiClient, onSymbolSearch, onI
           visibleRange={visibleRange}
         />
       ) : null}
-      {macdSeries ? (
+      {macdSeries && visiblePanes.has('macdEnabled') ? (
         <IndicatorPane height={80} candles={candles} series={macdSeries} visibleRange={visibleRange} />
       ) : null}
-      {stochSeries ? (
+      {stochSeries && visiblePanes.has('stochEnabled') ? (
         <IndicatorPane
           height={72}
           candles={candles}
@@ -457,7 +471,7 @@ export function ChartView({ store, drawingsStore, apiClient, onSymbolSearch, onI
           visibleRange={visibleRange}
         />
       ) : null}
-      {atrSeries ? (
+      {atrSeries && visiblePanes.has('atrEnabled') ? (
         <IndicatorPane height={72} candles={candles} series={atrSeries} visibleRange={visibleRange} />
       ) : null}
     </div>

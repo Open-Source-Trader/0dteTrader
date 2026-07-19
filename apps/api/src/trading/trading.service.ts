@@ -1,4 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import {
   OrderPreview,
   OrderRequest,
@@ -95,8 +96,8 @@ export class TradingService {
     const data = {
       userId,
       idempotencyKey,
-      request: { action: 'place', order: dto },
-      response: null,
+      request: JSON.parse(JSON.stringify({ action: 'place', order: dto })),
+      response: Prisma.DbNull,
       status: 'pending',
     };
     try {
@@ -280,7 +281,7 @@ export class TradingService {
       data: {
         userId,
         idempotencyKey: idempotencyKey ?? null,
-        request: { action, ...request },
+        request: JSON.parse(JSON.stringify({ action, ...request })),
         response: (response ?? null) as never,
         status,
       },

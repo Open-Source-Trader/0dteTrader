@@ -46,3 +46,35 @@ export const DEFAULT_INDICATOR_SETTINGS: IndicatorSettings = {
   atrEnabled: false,
   atrPeriod: 14,
 };
+
+/** Sub-pane indicators (rendered below the candle chart) in display order. */
+export type SubPaneKey = 'rsiEnabled' | 'macdEnabled' | 'stochEnabled' | 'atrEnabled';
+export const SUB_PANE_ORDER: SubPaneKey[] = [
+  'rsiEnabled',
+  'macdEnabled',
+  'stochEnabled',
+  'atrEnabled',
+];
+
+/** At most this many sub-panes show at once (chart real estate is bounded). */
+export const MAX_SUB_PANES = 2;
+
+/** Enabled sub-panes in display order, capped at MAX_SUB_PANES. */
+export function enabledSubPanes(settings: IndicatorSettings): SubPaneKey[] {
+  return SUB_PANE_ORDER.filter((key) => settings[key]).slice(0, MAX_SUB_PANES);
+}
+
+/** Turns off sub-panes beyond the cap (e.g. settings persisted before the
+ *  cap existed); overlays are untouched. Identity when already within cap. */
+export function capSubPanes(settings: IndicatorSettings): IndicatorSettings {
+  const allowed = new Set(enabledSubPanes(settings));
+  let changed = false;
+  const next = { ...settings };
+  for (const key of SUB_PANE_ORDER) {
+    if (next[key] && !allowed.has(key)) {
+      next[key] = false;
+      changed = true;
+    }
+  }
+  return changed ? next : settings;
+}

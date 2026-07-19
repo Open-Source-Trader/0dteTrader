@@ -13,18 +13,25 @@
     "dev": "npm run dev --workspace apps/api",
     "dev:api": "npm run dev --workspace apps/api",
     "dev:desktop": "npm run dev --workspace apps/desktop",
+    "dev:all": "concurrently -n api,web -c blue,green \"npm run dev:api\" \"npm run dev:desktop\"",
     "build": "npm run build --workspace packages/shared-types && npm run build --workspace apps/api && npm run build --workspace apps/desktop",
     "test": "npm run test --workspaces --if-present",
     "lint": "npm run lint --workspaces --if-present",
     "db:up": "docker compose up -d",
     "db:down": "docker compose down",
     "db:migrate": "npm run db:migrate --workspace apps/api",
-    "smoke:webull": "npm run smoke:webull --workspace apps/api"
+    "smoke:webull": "npm run smoke:webull --workspace apps/api",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
   },
   "engines": {
     "node": ">=18.17"
   },
   "dependencies": {
     "playwright-core": "^1.61.1"
+  },
+  "devDependencies": {
+    "concurrently": "^10.0.3",
+    "prettier": "^3.9.5"
   }
 }

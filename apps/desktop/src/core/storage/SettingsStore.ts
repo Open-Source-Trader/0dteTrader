@@ -7,6 +7,13 @@ import { DEFAULT_TWC_SETTINGS } from '../../features/chart/twc/twcSettings';
 
 export type TradeLayout = 'fullscreen' | 'split';
 
+/** Clamps a persisted number into [min, max]; non-finite values fall back to
+ *  the default (hand-edited or version-drifted localStorage stays safe). */
+function clampPersisted(value: number, min: number, max: number, fallback: number): number {
+  if (!Number.isFinite(value)) return fallback;
+  return Math.min(max, Math.max(min, Math.round(value)));
+}
+
 /** localStorage-backed app settings (SettingsStore.swift analog). */
 export class SettingsStore {
   private static keys = {
@@ -59,7 +66,17 @@ export class SettingsStore {
     const raw = localStorage.getItem(SettingsStore.keys.gexSettings);
     if (!raw) return DEFAULT_GEX_SETTINGS;
     try {
-      return { ...DEFAULT_GEX_SETTINGS, ...(JSON.parse(raw) as Partial<GexSettings>) };
+      const parsed = { ...DEFAULT_GEX_SETTINGS, ...(JSON.parse(raw) as Partial<GexSettings>) };
+      // Persisted values are user-editable: validate ranges so a corrupt
+      // entry can't create a tight poll loop or break the overlay.
+      return {
+        ...parsed,
+        refreshSeconds: clampPersisted(parsed.refreshSeconds, 15, 120, DEFAULT_GEX_SETTINGS.refreshSeconds),
+        maxPremiumStrikes: clampPersisted(parsed.maxPremiumStrikes, 3, 10, DEFAULT_GEX_SETTINGS.maxPremiumStrikes),
+        opacityCap: Number.isFinite(parsed.opacityCap)
+          ? Math.min(0.8, Math.max(0.2, parsed.opacityCap))
+          : DEFAULT_GEX_SETTINGS.opacityCap,
+      };
     } catch {
       return DEFAULT_GEX_SETTINGS;
     }

@@ -14,7 +14,10 @@ export interface GexState {
 /**
  * Polls GET /v1/market/gex while the indicator is enabled. The server
  * caches the option chain (OI is static intraday), so each poll is cheap.
- * On failure the last good levels stay on screen, flagged stale.
+ * On failure the last good levels stay on screen, flagged stale. State is
+ * per-symbol: switching symbols resets levels, stale flag, and any error,
+ * so the previous symbol's data can neither paint nor mask the new symbol's
+ * error surface.
  */
 export function useGexLevels(
   apiClient: ApiClient,
@@ -30,10 +33,8 @@ export function useGexLevels(
   settingsRef.current = settings;
 
   useEffect(() => {
-    if (!settings.enabled) {
-      setState({ levels: null, stale: false, errorMessage: null });
-      return;
-    }
+    setState({ levels: null, stale: false, errorMessage: null });
+    if (!settings.enabled) return;
     let cancelled = false;
     let timer = 0;
 

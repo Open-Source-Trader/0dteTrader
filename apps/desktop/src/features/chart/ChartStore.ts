@@ -58,6 +58,10 @@ const MAX_CANDLES = 600;
  * quotes via the socket, symbol/interval switching, indicator settings.
  */
 export class ChartStore extends Store<ChartStoreState> {
+  /** Invalidates in-flight candle loads when a newer one starts — the same
+   *  generation guard ChainStore uses for chain loads. */
+  private loadGeneration = 0;
+
   constructor(
     private readonly apiClient: ApiClient,
     private readonly socket: QuoteSocket,
@@ -91,24 +95,35 @@ export class ChartStore extends Store<ChartStoreState> {
   }
 
   async loadCandles(): Promise<void> {
+    const generation = ++this.loadGeneration;
     const { symbol, interval } = this.getState();
     this.set({ isLoading: true, errorMessage: null });
     try {
       const from = new Date(Date.now() - intervalSeconds(interval) * 400 * 1000);
       const dtos = await this.apiClient.candles(symbol, interval, from);
-      const candles: ChartCandle[] = dtos.map((dto) => ({
-        time: Math.floor((parseDateTime(dto.time) ?? 0) / 1000),
-        open: dto.open,
-        high: dto.high,
-        low: dto.low,
-        close: dto.close,
-        volume: dto.volume,
-      }));
+      // A symbol/interval switch started a newer load; discard this response.
+      if (generation !== this.loadGeneration) return;
+      const candles: ChartCandle[] = [];
+      for (const dto of dtos) {
+        const ms = parseDateTime(dto.time);
+        // Skip unparseable timestamps: an epoch-0 candle mid-array breaks the
+        // ascending-time invariant and crashes the chart's setData.
+        if (ms === null) continue;
+        candles.push({
+          time: Math.floor(ms / 1000),
+          open: dto.open,
+          high: dto.high,
+          low: dto.low,
+          close: dto.close,
+          volume: dto.volume,
+        });
+      }
       this.set({ candles });
     } catch (error) {
+      if (generation !== this.loadGeneration) return;
       this.set({ errorMessage: errorMessage(error) });
     } finally {
-      this.set({ isLoading: false });
+      if (generation === this.loadGeneration) this.set({ isLoading: false });
     }
   }
 

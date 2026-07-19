@@ -237,6 +237,7 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
             <ChartView
               store={chartStore}
               drawingsStore={drawingsStore}
+              apiClient={apiClient}
               onSymbolSearch={() => setShowSymbolSearch(true)}
               onIndicatorSettings={() => setShowIndicatorSettings(true)}
               tradingMode={tradingMode}
@@ -289,6 +290,7 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
               <ChartView
                 store={chartStore}
                 drawingsStore={drawingsStore}
+                apiClient={apiClient}
                 onSymbolSearch={() => setShowSymbolSearch(true)}
                 onIndicatorSettings={() => setShowIndicatorSettings(true)}
                 tradingMode={tradingMode}
@@ -343,6 +345,8 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
             setShowIndicatorSettings(false);
             setShowTwcSettings(true);
           }}
+          gexSettings={chart.gexSettings}
+          onChangeGex={(settings) => chartStore.setGexSettings(settings)}
         />
       ) : null}
       {showTwcSettings ? (

@@ -7,7 +7,7 @@ import Foundation
 /// Production: point at the deployed HTTPS origin and populate
 /// `pinnedPublicKeyHashes` with the backend's SPKI SHA-256 hashes (base64).
 enum AppConfig {
-    static let apiBaseURL: URL = makeURL("http://localhost:3000")
+    static let apiBaseURL: URL = makeURL("https://caring-prosperity-production.up.railway.app")
 
     /// WebSocket stream URL derived from `apiBaseURL` (http→ws, https→wss).
     static let streamURL: URL = makeStreamURL()

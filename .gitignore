@@ -12,6 +12,7 @@ coverage/
 # iOS
 apps/ios/build/
 apps/ios/DerivedData/
+apps/ios/0dteTrader.xcodeproj/
 xcuserdata/
 *.ipa
 *.dSYM.zip

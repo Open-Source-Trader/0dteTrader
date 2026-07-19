@@ -49,7 +49,7 @@ enum TwcSmc {
         return prevLeg
     }
 
-    // swiftlint:disable:next function_body_length cyclomatic_complexity
+    // swiftlint:disable:next function_body_length
     static func compute(candles: [Candle], settings: TwcHeatmapSettings) -> Result {
         let n = candles.count
         let highs = candles.map(\.high)

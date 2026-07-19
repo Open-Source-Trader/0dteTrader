@@ -42,10 +42,22 @@ struct ChartView: View {
                     intervalSeconds: viewModel.interval.seconds,
                     drawingsModel: drawings,
                     twcModel: viewModel.twcRenderModel,
+                    gexModel: viewModel.gexSettings.enabled ? viewModel.gexLevels : nil,
+                    gexSettings: viewModel.gexSettings,
+                    gexStale: viewModel.gexStale,
                     onVisibleRangeChange: { viewModel.visibleXRange = $0 }
                 )
                 if let banner = viewModel.twcRenderModel?.banner {
                     TwcBiasBannerView(banner: banner)
+                }
+                if let gexError = viewModel.gexErrorMessage, viewModel.gexSettings.enabled {
+                    Text("GEX unavailable: \(gexError)")
+                        .font(.caption2)
+                        .foregroundStyle(Color.warningOrange)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+                        .padding(.leading, 52)
+                        .padding(.bottom, AppSpacing.sm)
+                        .allowsHitTesting(false)
                 }
                 if viewModel.isLoading, viewModel.candles.isEmpty {
                     loadingState

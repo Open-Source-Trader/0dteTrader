@@ -1,0 +1,84 @@
+# SwiftLint configuration for 0dteTrader iOS
+# Run: cd apps/ios && swiftlint lint
+
+# Relaxed starting config that matches the existing codebase style.
+# We can tighten rules over time once the linter is green everywhere.
+
+disabled_rules:
+  - trailing_comma
+  - implicit_optional_initialization
+  - redundant_nil_coalescing
+
+opt_in_rules:
+  - empty_count
+  - overridden_super_call
+  - unused_import
+
+line_length:
+  warning: 160
+  error: 240
+
+identifier_name:
+  min_length:
+    warning: 1
+    error: 1
+  max_length:
+    warning: 40
+    error: 60
+  excluded:
+    - id
+    - x
+    - y
+    - i
+    - j
+    - k
+    - n
+    - f
+    - s
+    - t
+    - a
+    - b
+    - c
+    - d
+    - p
+    - q
+    - r
+    - to
+    - of
+    - in
+    - at
+    - as
+    - by
+    - up
+    - sm
+    - md
+    - lg
+    - xl
+    - xs
+    - st
+    - sd
+    - p2
+
+function_body_length:
+  warning: 100
+  error: 150
+
+type_body_length:
+  warning: 400
+  error: 600
+
+cyclomatic_complexity:
+  warning: 15
+  error: 25
+
+file_length:
+  warning: 700
+  error: 900
+
+excluded:
+  - build
+  - DerivedData
+  - '*.xcodeproj'
+  - '*.xcworkspace'
+
+reporter: "xcode"

@@ -33,6 +33,7 @@ enum AppCanvas {
 /// Touch routing: with a draw tool active the whole overlay owns touches;
 /// in cursor mode only touches near a shape are claimed (select/drag), and
 /// everything else falls through to the chart's own pan/zoom.
+// swiftlint:disable:next type_body_length
 final class DrawingOverlayView: UIView {
     weak var chart: CombinedChartView?
     var firstTime: TimeInterval = 0

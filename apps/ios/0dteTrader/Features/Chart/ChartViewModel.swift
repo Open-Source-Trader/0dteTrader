@@ -332,6 +332,7 @@ final class ChartViewModel: ObservableObject {
         )
     }
 
+    // swiftlint:disable:next large_tuple
     var macdSeries: (macd: IndicatorSeries, signal: IndicatorSeries, histogram: IndicatorSeries)? {
         guard indicatorSettings.macdEnabled else { return nil }
         let values = IndicatorEngine.macd(candles: candles)

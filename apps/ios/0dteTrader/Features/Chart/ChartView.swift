@@ -3,6 +3,7 @@ import UIKit
 
 /// Chart surface: header (symbol, last price, interval, indicator settings),
 /// candle chart with overlays, and optional RSI / MACD sub-panes.
+// swiftlint:disable:next type_body_length
 struct ChartView: View {
     @ObservedObject var viewModel: ChartViewModel
     @ObservedObject var drawings: ChartDrawingsModel
@@ -144,8 +145,10 @@ struct ChartView: View {
             }
 
             if let stoch = viewModel.stochSeries {
+                let settings = viewModel.indicatorSettings
+                let title = "Stoch (\(settings.stochKPeriod), \(settings.stochKSmooth), \(settings.stochDPeriod))"
                 hudPane(
-                    title: "Stoch (\(viewModel.indicatorSettings.stochKPeriod), \(viewModel.indicatorSettings.stochKSmooth), \(viewModel.indicatorSettings.stochDPeriod))",
+                    title: title,
                     readouts: [
                         readout(for: stoch.k, label: "%K", colorId: "stochK"),
                         readout(for: stoch.d, label: "%D", colorId: "stochD"),

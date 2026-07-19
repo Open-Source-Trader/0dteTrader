@@ -35,7 +35,10 @@ final class ChartMarkerView: MarkerView {
         guard candles.indices.contains(index) else { return }
         let candle = candles[index]
         let time = ChartTimeFormat.string(for: candle.time, intervalSeconds: intervalSeconds)
-        textLabel.text = "\(time)  O \(Format.price(candle.open))  H \(Format.price(candle.high))  L \(Format.price(candle.low))  C \(Format.price(candle.close))"
+        textLabel.text = """
+        \(time)  O \(Format.price(candle.open))  H \(Format.price(candle.high)) \
+        L \(Format.price(candle.low))  C \(Format.price(candle.close))
+        """
         textLabel.sizeToFit()
         let contentSize = textLabel.bounds.size
         bounds = CGRect(
@@ -207,6 +210,7 @@ struct CandleChartRepresentable: UIViewRepresentable {
         return container
     }
 
+    // swiftlint:disable:next function_body_length cyclomatic_complexity
     func updateUIView(_ container: ContainerView, context: Context) {
         let chart = container.chart
         container.overlay.model = drawingsModel

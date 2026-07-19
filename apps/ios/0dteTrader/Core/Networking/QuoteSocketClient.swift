@@ -150,8 +150,7 @@ final class QuoteSocketClient: ObservableObject {
                 do {
                     try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
                         self.webSocketTask?.sendPing { error in
-                            if let error { cont.resume(throwing: error) }
-                            else { cont.resume() }
+                            if let error { cont.resume(throwing: error) } else { cont.resume() }
                         }
                     }
                 } catch {

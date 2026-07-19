@@ -57,6 +57,7 @@ struct RiskDisclaimerView: View {
         .padding(AppSpacing.xxl)
     }
 
+    // swiftlint:disable line_length
     private var disclaimerText: String {
         """
         Trading securities, options, and futures involves substantial risk of loss and is not suitable for every investor. You may lose all of your invested capital.
@@ -68,4 +69,5 @@ struct RiskDisclaimerView: View {
         By tapping "I Understand and Accept" you acknowledge these risks and agree that you are solely responsible for every order submitted through this app.
         """
     }
+    // swiftlint:enable line_length
 }

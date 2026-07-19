@@ -19,6 +19,7 @@ struct TradeScreenView: View {
     @State private var showIndicatorSettings = false
     @State private var showProfile = false
     @State private var showHistory = false
+    @State private var showAIAnalysis = false
     // 'nil' until /v1/me answers; the server value wins (desktop parity).
     @State private var tradingMode: TradingMode?
     @State private var showModeConfirmation = false
@@ -75,6 +76,9 @@ struct TradeScreenView: View {
                         .accessibilityLabel("Trade history")
                     }
                     ToolbarItem(placement: .topBarTrailing) {
+                        AIAnalysisButton { showAIAnalysis = true }
+                    }
+                    ToolbarItem(placement: .topBarTrailing) {
                         Button {
                             toggleLayout()
                         } label: {
@@ -108,6 +112,16 @@ struct TradeScreenView: View {
         }
         .sheet(isPresented: $showHistory) {
             HistoryView(apiClient: container.apiClient)
+        }
+        .sheet(isPresented: $showAIAnalysis) {
+            #if canImport(FoundationModels)
+            if #available(iOS 26, *) {
+                AIAnalysisSheet(
+                    chartViewModel: chartViewModel,
+                    chainViewModel: chainViewModel
+                )
+            }
+            #endif
         }
         .task {
             await chartViewModel.start()

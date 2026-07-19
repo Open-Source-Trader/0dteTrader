@@ -10,28 +10,18 @@ final class TradeViewModelArmTests: XCTestCase {
         return (TradeViewModel(apiClient: apiClient), OptionsChainViewModel(apiClient: apiClient))
     }
 
-    /// The charted symbol may be a specific contract ("MESU26"); the order's
-    /// underlying must be the futures root the server can resolve.
-    func testArm_futures_sendsRootAsUnderlying() {
+    func testArm_autoOTM_encodesServerSideSelection() {
         let (tradeViewModel, chainViewModel) = makeViewModels()
-        tradeViewModel.assetClass = .future
-        tradeViewModel.setFuturesContractsForTesting([
-            FuturesContract(
-                symbol: "MESU26",
-                root: "MES",
-                expiration: "2026-09-18",
-                frontMonth: true,
-                bid: 6010.25,
-                ask: 6010.75,
-                last: 6010.50
-            ),
-        ])
-        tradeViewModel.selectedFutureSymbol = "MESU26"
+        chainViewModel.isAutoMode = true
 
-        tradeViewModel.arm(side: .buy, underlying: "MESU26", chainViewModel: chainViewModel)
+        tradeViewModel.arm(side: .buy, underlying: "SPY", chainViewModel: chainViewModel)
 
-        XCTAssertEqual(tradeViewModel.armedTicket?.request.underlying, "MES")
-        XCTAssertEqual(tradeViewModel.armedTicket?.request.selection.contractSymbol, "MESU26")
+        let request = tradeViewModel.armedTicket?.request
+        XCTAssertEqual(request?.underlying, "SPY")
+        XCTAssertEqual(request?.assetClass, "option")
+        XCTAssertEqual(request?.selection.mode, "auto_otm")
+        XCTAssertEqual(request?.selection.optionType, "call")
+        XCTAssertNil(request?.selection.strike)
     }
 
     func testSetQuantity_clampsToValidRange() {

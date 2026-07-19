@@ -20,7 +20,7 @@ final class MidPriceTests: XCTestCase {
     }
 
     func testMidPrice_customPrecision() throws {
-        // Futures tick at quarters: precision 3 keeps 1.0025 → 1.003.
+        // Sub-penny precision is available for finer-quoted instruments.
         XCTAssertEqual(try XCTUnwrap(PriceMath.midPrice(bid: 1.001, ask: 1.004, precision: 3)), 1.003, accuracy: accuracy)
     }
 
@@ -67,18 +67,5 @@ final class MidPriceTests: XCTestCase {
             last: 0
         )
         XCTAssertNil(contract.mid)
-    }
-
-    func testFuturesContract_mid_matchesPriceMath() throws {
-        let contract = FuturesContract(
-            symbol: "MESU26",
-            root: "MES",
-            expiration: "2026-09-18",
-            frontMonth: true,
-            bid: 6010.25,
-            ask: 6010.75,
-            last: 6010.50
-        )
-        XCTAssertEqual(try XCTUnwrap(contract.mid), 6010.5, accuracy: accuracy)
     }
 }

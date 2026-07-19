@@ -165,15 +165,6 @@ struct APIClient: @unchecked Sendable {
         return try await request(Endpoint(method: .get, path: "v1/market/gex", query: query))
     }
 
-    func futures(root: String) async throws -> [FuturesContractDTO] {
-        let endpoint = Endpoint(
-            method: .get,
-            path: "v1/market/futures",
-            query: [URLQueryItem(name: "root", value: root)]
-        )
-        return try await request(endpoint)
-    }
-
     func orderHistory() async throws -> TradeHistoryDTO {
         try await request(Endpoint(method: .get, path: "v1/orders/history"))
     }

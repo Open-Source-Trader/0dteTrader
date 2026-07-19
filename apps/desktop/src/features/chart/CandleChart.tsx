@@ -18,6 +18,9 @@ import type { ChartCandle } from './ChartStore';
 import { intervalSeconds } from './ChartStore';
 import { DrawingLayer } from './DrawingLayer';
 import type { DrawingsStore } from './drawings';
+import { GexOverlay } from './gex/GexOverlay';
+import type { GexSettings } from './gex/gexSettings';
+import type { GexLevels } from './gex/gexTypes';
 import { TwcOverlay } from './TwcOverlay';
 import type { TwcRenderModel } from './twc/twcTypes';
 
@@ -48,6 +51,10 @@ interface CandleChartProps {
   candleColors?: (string | null)[] | null;
   /** TWC Heatmap render model for the read-only overlay canvas. */
   twcModel?: TwcRenderModel | null;
+  /** GEX/DEX level structure for the read-only overlay canvas. */
+  gexLevels?: GexLevels | null;
+  gexSettings?: GexSettings | null;
+  gexStale?: boolean;
   /** Fires on pan/zoom/snap so sub-panes can mirror the x-range. */
   onVisibleRangeChange?: (range: VisibleRange | null) => void;
 }
@@ -84,6 +91,9 @@ export function CandleChart({
   drawingsStore,
   candleColors = null,
   twcModel = null,
+  gexLevels = null,
+  gexSettings = null,
+  gexStale = false,
   onVisibleRangeChange,
 }: CandleChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -346,6 +356,16 @@ export function CandleChart({
       ) : null}
       {apis && candles.length > 0 && twcModel ? (
         <TwcOverlay chart={apis.chart} series={apis.series} model={twcModel} candles={candles} />
+      ) : null}
+      {apis && candles.length > 0 && gexLevels && gexSettings ? (
+        <GexOverlay
+          chart={apis.chart}
+          series={apis.series}
+          levels={gexLevels}
+          settings={gexSettings}
+          candles={candles}
+          stale={gexStale}
+        />
       ) : null}
       {apis && candles.length > 0 ? (
         <DrawingLayer

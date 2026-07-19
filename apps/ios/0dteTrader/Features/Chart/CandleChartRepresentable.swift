@@ -78,6 +78,11 @@ struct CandleChartRepresentable: UIViewRepresentable {
     /// TWC Heatmap render model: candle repaints, extra line series, and the
     /// read-only geometry overlay (nil when the script indicator is off).
     var twcModel: TwcRenderModel?
+    /// GEX/DEX level structure for the read-only overlay (nil when disabled
+    /// or before the first successful fetch for the current symbol).
+    var gexModel: GexLevels?
+    var gexSettings: GexSettings = .default
+    var gexStale: Bool = false
     /// Called with the main chart's visible x-range whenever the user pans or
     /// zooms, so non-interactive indicator panes can track the same window.
     var onVisibleRangeChange: ((ClosedRange<Double>) -> Void)?
@@ -87,15 +92,18 @@ struct CandleChartRepresentable: UIViewRepresentable {
     final class ContainerView: UIView {
         let chart = CombinedChartView()
         let twcOverlay = TwcOverlayView()
+        let gexOverlay = GexOverlayView()
         let overlay = DrawingOverlayView()
 
         override init(frame: CGRect) {
             super.init(frame: frame)
             addSubview(chart)
-            // TWC geometry below the interactive drawing overlay.
+            // Read-only geometry overlays below the interactive drawing overlay.
             addSubview(twcOverlay)
+            addSubview(gexOverlay)
             addSubview(overlay)
             twcOverlay.chart = chart
+            gexOverlay.chart = chart
             overlay.chart = chart
         }
 
@@ -108,6 +116,7 @@ struct CandleChartRepresentable: UIViewRepresentable {
             super.layoutSubviews()
             chart.frame = bounds
             twcOverlay.frame = bounds
+            gexOverlay.frame = bounds
             overlay.frame = bounds
         }
     }
@@ -162,6 +171,7 @@ struct CandleChartRepresentable: UIViewRepresentable {
         context.coordinator.onTransform = { [weak container] in
             container?.overlay.setNeedsDisplay()
             container?.twcOverlay.setNeedsDisplay()
+            container?.gexOverlay.setNeedsDisplay()
         }
         chart.delegate = context.coordinator
 
@@ -204,6 +214,9 @@ struct CandleChartRepresentable: UIViewRepresentable {
         container.overlay.candles = candles
         container.twcOverlay.model = twcModel
         container.twcOverlay.candles = candles
+        container.gexOverlay.model = gexModel
+        container.gexOverlay.settings = gexSettings
+        container.gexOverlay.stale = gexStale
 
         if let marker = chart.marker as? ChartMarkerView {
             marker.candles = candles

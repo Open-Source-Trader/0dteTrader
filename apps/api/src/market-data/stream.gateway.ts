@@ -25,6 +25,10 @@ import { Subscription } from 'rxjs';
 import { CryptoDataService } from './crypto-data.service';
 
 const QUOTE_TICK_MS = 1000;
+/** Abuse guards: each subscribed symbol costs broker/API calls every second. */
+const MAX_SUBSCRIPTIONS_PER_CLIENT = 50;
+const MAX_TRACKED_SYMBOLS = 500;
+const SYMBOL_PATTERN = /^[A-Za-z0-9.\-]{1,32}$/;
 
 interface ClientState {
   userId: string;
@@ -49,6 +53,8 @@ export class StreamGateway
   private readonly clients = new Map<WebSocket, ClientState>();
   private readonly subscribers = new Map<string, Set<WebSocket>>();
   private readonly timers = new Map<string, NodeJS.Timeout>();
+  /** Symbols with a tick currently in flight — prevents interval stacking. */
+  private readonly inFlightTicks = new Set<string>();
   /** Last logged quote-tick warning per key — identical failures log once. */
   private readonly tickWarnings = new Map<string, string>();
   private readonly orderEventsSub: Subscription;
@@ -119,7 +125,9 @@ export class StreamGateway
     }
 
     const symbols = Array.isArray(msg.symbols)
-      ? msg.symbols.filter((s): s is string => typeof s === 'string')
+      ? msg.symbols.filter(
+          (s): s is string => typeof s === 'string' && SYMBOL_PATTERN.test(s),
+        )
       : [];
     const state = this.clients.get(client);
     if (!state) return;
@@ -145,6 +153,27 @@ export class StreamGateway
     state: ClientState,
   ): void {
     if (state.symbols.has(symbol)) return;
+    if (state.symbols.size >= MAX_SUBSCRIPTIONS_PER_CLIENT) {
+      this.send(client, {
+        type: 'error',
+        error: {
+          code: 'SUBSCRIPTION_LIMIT',
+          message: `At most ${MAX_SUBSCRIPTIONS_PER_CLIENT} symbols per connection`,
+        },
+      });
+      return;
+    }
+    const isNewSymbol = !this.subscribers.has(symbol);
+    if (isNewSymbol && this.subscribers.size >= MAX_TRACKED_SYMBOLS) {
+      this.send(client, {
+        type: 'error',
+        error: {
+          code: 'SUBSCRIPTION_LIMIT',
+          message: 'Server symbol capacity reached — try again later',
+        },
+      });
+      return;
+    }
     state.symbols.add(symbol);
     let set = this.subscribers.get(symbol);
     if (!set) {
@@ -176,46 +205,59 @@ export class StreamGateway
       const timer = this.timers.get(symbol);
       if (timer) clearInterval(timer);
       this.timers.delete(symbol);
+      // Drop the symbol's tick-warning memory (both crypto and per-user keys).
+      for (const key of [...this.tickWarnings.keys()]) {
+        if (key === symbol || key.endsWith(`:${symbol}`)) {
+          this.tickWarnings.delete(key);
+        }
+      }
     }
   }
 
   private async tickSymbol(symbol: string): Promise<void> {
+    // Skip if the previous tick for this symbol is still running (broker
+    // latency up to the 10s timeout would otherwise stack concurrent ticks).
+    if (this.inFlightTicks.has(symbol)) return;
     const set = this.subscribers.get(symbol);
     if (!set || set.size === 0) return;
-
-    // Crypto quotes are public and user-independent: one fetch for everyone.
-    if (this.crypto.isCryptoSymbol(symbol)) {
-      try {
-        this.broadcast(set, { type: 'quote', data: await this.crypto.getQuote(symbol) });
-        this.tickWarnings.delete(symbol);
-      } catch (err) {
-        this.warnTickOnce(symbol, `quote tick failed for ${symbol}: ${(err as Error).message}`);
+    this.inFlightTicks.add(symbol);
+    try {
+      // Crypto quotes are public and user-independent: one fetch for everyone.
+      if (this.crypto.isCryptoSymbol(symbol)) {
+        try {
+          this.broadcast(set, { type: 'quote', data: await this.crypto.getQuote(symbol) });
+          this.tickWarnings.delete(symbol);
+        } catch (err) {
+          this.warnTickOnce(symbol, `quote tick failed for ${symbol}: ${(err as Error).message}`);
+        }
+        return;
       }
-      return;
-    }
 
-    // Broker quotes are fetched per user: gateways use per-user credentials,
-    // so one subscriber's quote must never be served under another's account.
-    const byUser = new Map<string, WebSocket[]>();
-    for (const client of set) {
-      const state = this.clients.get(client);
-      if (!state) continue;
-      const list = byUser.get(state.userId);
-      if (list) list.push(client);
-      else byUser.set(state.userId, [client]);
-    }
-    for (const [userId, clients] of byUser) {
-      const key = `${userId}:${symbol}`;
-      try {
-        const quote = await this.broker.getQuote(userId, symbol);
-        for (const client of clients) this.send(client, { type: 'quote', data: quote });
-        this.tickWarnings.delete(key);
-      } catch (err) {
-        this.warnTickOnce(
-          key,
-          `quote tick failed for ${symbol} (user ${userId}): ${(err as Error).message}`,
-        );
+      // Broker quotes are fetched per user: gateways use per-user credentials,
+      // so one subscriber's quote must never be served under another's account.
+      const byUser = new Map<string, WebSocket[]>();
+      for (const client of set) {
+        const state = this.clients.get(client);
+        if (!state) continue;
+        const list = byUser.get(state.userId);
+        if (list) list.push(client);
+        else byUser.set(state.userId, [client]);
       }
+      for (const [userId, clients] of byUser) {
+        const key = `${userId}:${symbol}`;
+        try {
+          const quote = await this.broker.getQuote(userId, symbol);
+          for (const client of clients) this.send(client, { type: 'quote', data: quote });
+          this.tickWarnings.delete(key);
+        } catch (err) {
+          this.warnTickOnce(
+            key,
+            `quote tick failed for ${symbol} (user ${userId}): ${(err as Error).message}`,
+          );
+        }
+      }
+    } finally {
+      this.inFlightTicks.delete(symbol);
     }
   }
 

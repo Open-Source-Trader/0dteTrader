@@ -187,11 +187,13 @@ export type WebullNewOrderLeg = WebullOrderLeg;
 
 /**
  * Our idempotency key → Webull client_order_id: deterministic MD5 hex
- * (32 chars — exactly Webull's limit, always unique per key). MD5 is used
- * purely as an idempotency id, not for security.
+ * (32 chars — exactly Webull's limit). The user id is mixed in so two users
+ * presenting the same client key can never collide on an order id (which is
+ * also the trade_orders primary key and the status-poll map key). MD5 is
+ * used purely as an idempotency id, not for security.
  */
-export function toClientOrderId(idempotencyKey: string): string {
-  return createHash('md5').update(idempotencyKey).digest('hex');
+export function toClientOrderId(userId: string, idempotencyKey: string): string {
+  return createHash('md5').update(`${userId}:${idempotencyKey}`).digest('hex');
 }
 
 export interface ResolvedOptionTerms {

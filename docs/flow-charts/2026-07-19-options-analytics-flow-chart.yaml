@@ -1,0 +1,165 @@
+schema_version: 1
+template_id: event_driven_flow_chart.v1
+title: options-analytics-current-and-target-flow
+owner: 0dteTrader-engineering
+date: '2026-07-19'
+status: approved
+system: options-analytics
+source_plan: docs/plans/2026-07-19-options-analytics-snapshot-suite.yaml
+source_spec_sheet: docs/specs/2026-07-19-options-analytics-spec.md
+objective:
+  restated: Show the inaccurate current request path and the exact target request, capture, failure, and client-rendering paths.
+required_context_files_read_first:
+  - AGENTS.md
+  - docs/plans/plan-template.yaml
+  - docs/plans/checking_plan_plan-template.yaml
+  - docs/specs/2026-07-19-options-analytics-spec.md
+  - apps/api/src/gex/gex.service.ts
+  - apps/api/src/gex/gex.engine.ts
+current_flow:
+  nodes:
+    - { id: C1, label: client poll every 15-45 seconds, type: event }
+    - { id: C2, label: fetch expirations plus last spot plus selected chain, type: process }
+    - { id: C3, label: freeze first OI seen on UTC date, type: process }
+    - { id: C4, label: use provider Greeks or silent 20 percent IV, type: process }
+    - { id: C5, label: apply inconsistent GEX and DEX dealer signs, type: process }
+    - { id: C6, label: rank net walls and OI times mark premium, type: process }
+    - { id: C7, label: paint snapshot across historical chart without provenance, type: output }
+  edges:
+    - { from: C1, to: C2, condition: enabled }
+    - { from: C2, to: C3, condition: provider success }
+    - { from: C3, to: C4, condition: always }
+    - { from: C4, to: C5, condition: even when assumptions are stale }
+    - { from: C5, to: C6, condition: always }
+    - { from: C6, to: C7, condition: response accepted }
+target_flow:
+  nodes:
+    - { id: T1, label: API request or minute capture event, type: event }
+    - { id: T2, label: normalize symbol and require exact expiration, type: decision }
+    - { id: T3, label: fetch synchronized quote and complete chain fields, type: process }
+    - { id: T4, label: validate ages spreads multiplier feed and settlement, type: decision }
+    - {
+        id: T5,
+        label: derive forward and attempt local IV and Greeks with one kernel,
+        type: process,
+      }
+    - { id: T6, label: aggregate call put gross facts and optional proxy scenario, type: process }
+    - { id: T7, label: calculate walls roots implied range marked OI and liquidity, type: process }
+    - { id: T8, label: attach quality warnings version and exact cache state, type: process }
+    - { id: T9, label: persist idempotent minute snapshot when requested, type: output }
+    - { id: T10, label: return exact snapshot or explicit 404 or 503, type: output }
+    - {
+        id: T11,
+        label: client rejects obsolete key and renders current-session profile,
+        type: output,
+      }
+  edges:
+    - { from: T1, to: T2, condition: always }
+    - { from: T2, to: T3, condition: valid exact key }
+    - { from: T2, to: T10, condition: invalid or unavailable expiration }
+    - { from: T3, to: T4, condition: provider response }
+    - { from: T4, to: T5, condition: at least one quote-valid observed contract }
+    - { from: T4, to: T10, condition: no usable inputs and no valid exact cache }
+    - { from: T5, to: T6, condition: modeled or observed-only contracts exist }
+    - { from: T6, to: T7, condition: always }
+    - { from: T7, to: T8, condition: always }
+    - { from: T8, to: T9, condition: scheduled or viewed capture }
+    - { from: T8, to: T10, condition: API request }
+    - { from: T10, to: T11, condition: client key and generation still current }
+actual_events_by_step:
+  - {
+      step: 1,
+      event: authenticated exact-expiration request,
+      outcome: one fresh or exact-cache calculation,
+    }
+  - {
+      step: 2,
+      event: scheduled core capture during market session,
+      outcome: one idempotent record per minute key,
+    }
+  - {
+      step: 3,
+      event: active chart changes symbol or expiration,
+      outcome: obsolete request is cancelled and ignored,
+    }
+all_possible_events_by_step:
+  - step: request
+    possible_events:
+      [
+        fresh-success,
+        partial-success,
+        exact-cache-success,
+        expiration-missing,
+        provider-unavailable,
+      ]
+    outcomes: [200-complete, 200-partial, 200-cached, 404, 503]
+  - step: persistence
+    possible_events: [insert, duplicate, database-failure, compaction, retention-cleanup]
+    outcomes: [stored, deduplicated, logged-failure, compacted, deleted]
+failure_recovery_paths:
+  - failure: rate limit or transient provider failure
+    detection: HTTP status and documented rate-limit headers
+    retry_timeout_fallback: bounded exact-key cache only within hard age
+    terminal_outcome: partial/cached 200 or explicit 503
+  - failure: invalid or stale quote
+    detection: runtime validation and timestamp/spread rules
+    retry_timeout_fallback: exclude contract and reduce coverage
+    terminal_outcome: partial snapshot or 503 when none remain
+  - failure: local IV unavailable from a quote-valid contract
+    detection: bounded IV inversion has no admissible solution
+    retry_timeout_fallback: retain observed OI and liquidity and null only modeled fields
+    terminal_outcome: partial snapshot, including when every leg is observed-only
+  - failure: persistence unavailable
+    detection: Prisma exception
+    retry_timeout_fallback: log metric; do not fail an otherwise valid interactive response
+    terminal_outcome: response succeeds and capture failure is observable
+inputs_transformations_outputs_side_effects:
+  inputs: [symbol, expiration, clock, underlying quote, option chain, provider metadata]
+  transformations:
+    [
+      normalization,
+      validation,
+      settlement,
+      implied forward,
+      IV solve,
+      Greeks,
+      exposure aggregation,
+      roots,
+      range,
+      quality,
+    ]
+  outputs: [OptionsAnalyticsSnapshot, explicit API error, accessible client presentation]
+  side_effects: [provider calls, bounded cache update, snapshot insert, metrics and structured logs]
+invariants:
+  preconditions:
+    [
+      symbol is normalized,
+      expiration is exact when supplied,
+      settlement is after observation for modeled exposure,
+    ]
+  postconditions:
+    [
+      all numeric output is finite,
+      units and assumptions are explicit,
+      response expiration equals requested expiration,
+    ]
+  must_never_happen:
+    [
+      silent 20 percent IV,
+      wrong-expiration fallback,
+      actual-dealer claim,
+      OI-value called premium-flow,
+      obsolete response overwrite,
+    ]
+risk_review:
+  user_behavior_breaks: [rapid symbol and expiration changes can race without generation checks]
+  production_traffic_breaks:
+    [minute core capture can exceed provider limits without dedupe and staggering]
+  weird_data_breaks: [crossed markets sparse strikes nonstandard multiplier and stale timestamps]
+  concurrency_time_order_breaks:
+    [DST early close minute dedupe overlapping capture and late response]
+cleanup_requirements:
+  remove_dead_code: true
+  remove_backwards_compatibility_paths: true
+  update_related_files:
+    [API contracts, API implementation, Prisma, desktop, iOS, tests, OpenAPI, runbook]

@@ -1,18 +1,14 @@
 import type { IndicatorSettings } from '../../features/chart/indicatorSettings';
 import { DEFAULT_INDICATOR_SETTINGS } from '../../features/chart/indicatorSettings';
-import type { GexSettings } from '../../features/chart/gex/gexSettings';
-import { DEFAULT_GEX_SETTINGS } from '../../features/chart/gex/gexSettings';
+import type { OptionsAnalyticsSettings } from '../../features/chart/optionsAnalytics/optionsAnalyticsSettings';
+import {
+  decodeOptionsAnalyticsSettings,
+  DEFAULT_OPTIONS_ANALYTICS_SETTINGS,
+} from '../../features/chart/optionsAnalytics/optionsAnalyticsSettings';
 import type { TwcHeatmapSettings } from '../../features/chart/twc/twcSettings';
 import { DEFAULT_TWC_SETTINGS } from '../../features/chart/twc/twcSettings';
 
 export type TradeLayout = 'fullscreen' | 'split';
-
-/** Clamps a persisted number into [min, max]; non-finite values fall back to
- *  the default (hand-edited or version-drifted localStorage stays safe). */
-function clampPersisted(value: number, min: number, max: number, fallback: number): number {
-  if (!Number.isFinite(value)) return fallback;
-  return Math.min(max, Math.max(min, Math.round(value)));
-}
 
 /** localStorage-backed app settings (SettingsStore.swift analog). */
 export class SettingsStore {
@@ -20,7 +16,7 @@ export class SettingsStore {
     layoutMode: 'settings.layoutMode',
     indicatorSettings: 'settings.indicatorSettings',
     twcSettings: 'settings.twcSettings',
-    gexSettings: 'settings.gexSettings',
+    optionsAnalytics: 'settings.optionsAnalytics.v1',
     riskDisclaimerAccepted: 'settings.riskDisclaimerAccepted',
     lastSymbol: 'settings.lastSymbol',
   };
@@ -62,28 +58,18 @@ export class SettingsStore {
     localStorage.setItem(SettingsStore.keys.twcSettings, JSON.stringify(value));
   }
 
-  get gexSettings(): GexSettings {
-    const raw = localStorage.getItem(SettingsStore.keys.gexSettings);
-    if (!raw) return DEFAULT_GEX_SETTINGS;
+  get optionsAnalytics(): OptionsAnalyticsSettings {
+    const raw = localStorage.getItem(SettingsStore.keys.optionsAnalytics);
+    if (!raw) return DEFAULT_OPTIONS_ANALYTICS_SETTINGS;
     try {
-      const parsed = { ...DEFAULT_GEX_SETTINGS, ...(JSON.parse(raw) as Partial<GexSettings>) };
-      // Persisted values are user-editable: validate ranges so a corrupt
-      // entry can't create a tight poll loop or break the overlay.
-      return {
-        ...parsed,
-        refreshSeconds: clampPersisted(parsed.refreshSeconds, 15, 120, DEFAULT_GEX_SETTINGS.refreshSeconds),
-        maxPremiumStrikes: clampPersisted(parsed.maxPremiumStrikes, 3, 10, DEFAULT_GEX_SETTINGS.maxPremiumStrikes),
-        opacityCap: Number.isFinite(parsed.opacityCap)
-          ? Math.min(0.8, Math.max(0.2, parsed.opacityCap))
-          : DEFAULT_GEX_SETTINGS.opacityCap,
-      };
+      return decodeOptionsAnalyticsSettings(JSON.parse(raw));
     } catch {
-      return DEFAULT_GEX_SETTINGS;
+      return DEFAULT_OPTIONS_ANALYTICS_SETTINGS;
     }
   }
 
-  set gexSettings(value: GexSettings) {
-    localStorage.setItem(SettingsStore.keys.gexSettings, JSON.stringify(value));
+  set optionsAnalytics(value: OptionsAnalyticsSettings) {
+    localStorage.setItem(SettingsStore.keys.optionsAnalytics, JSON.stringify(value));
   }
 
   get hasAcceptedRiskDisclaimer(): boolean {

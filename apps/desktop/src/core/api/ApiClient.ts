@@ -7,6 +7,7 @@ import type {
   OrderPreview,
   OrderRequest,
   OrderResult,
+  OptionsAnalyticsSnapshot,
   Position,
   Quote,
   TradeHistory,
@@ -15,9 +16,9 @@ import type {
   WebullCredentialsSaved,
   WebullSessionRefreshed,
 } from '@0dtetrader/shared-types';
-import type { GexLevels } from '../../features/chart/gex/gexTypes';
 import { ApiError, parseErrorEnvelope } from './ApiError';
 import type { SessionStore } from './SessionStore';
+import { validateOptionsAnalyticsSnapshot } from '../../features/chart/optionsAnalytics/optionsAnalyticsValidation';
 
 interface Endpoint {
   method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
@@ -26,6 +27,11 @@ interface Endpoint {
   headers?: Record<string, string>;
   requiresAuth?: boolean;
   body?: unknown;
+  signal?: AbortSignal;
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === 'AbortError';
 }
 
 /**
@@ -58,9 +64,12 @@ export class ApiClient {
         method: endpoint.method,
         headers,
         body: endpoint.body !== undefined ? JSON.stringify(endpoint.body) : undefined,
-        signal: AbortSignal.timeout(15_000),
+        signal: endpoint.signal
+          ? AbortSignal.any([endpoint.signal, AbortSignal.timeout(15_000)])
+          : AbortSignal.timeout(15_000),
       });
     } catch (error) {
+      if (isAbortError(error)) throw error;
       throw new ApiError({
         kind: 'network',
         underlying: error instanceof Error ? error.message : String(error),
@@ -171,11 +180,18 @@ export class ApiClient {
     return this.request({ method: 'GET', path: 'v1/market/options-chain', query });
   }
 
-  /** Dealer GEX/DEX levels + premium heat map (Tradier-backed, server-side). */
-  gexLevels(symbol: string, expiration?: string): Promise<GexLevels> {
-    const query: Record<string, string> = { symbol };
-    if (expiration) query.expiration = expiration;
-    return this.request({ method: 'GET', path: 'v1/market/gex', query });
+  optionsAnalytics(
+    symbol: string,
+    expiration: string,
+    signal?: AbortSignal,
+  ): Promise<OptionsAnalyticsSnapshot> {
+    const normalizedSymbol = symbol.toUpperCase().trim();
+    return this.request<unknown>({
+      method: 'GET',
+      path: 'v1/market/options-analytics',
+      query: { symbol: normalizedSymbol, expiration },
+      signal,
+    }).then((value) => validateOptionsAnalyticsSnapshot(value, normalizedSymbol, expiration));
   }
 
   previewOrder(order: OrderRequest): Promise<OrderPreview> {

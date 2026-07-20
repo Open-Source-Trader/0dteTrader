@@ -35,9 +35,7 @@ export function addDays(d: Date, days: number): Date {
 }
 
 export function todayUtc(now: Date): Date {
-  return new Date(
-    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
-  );
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
 }
 
 /** Third Friday of the given month (options monthly cycle; month is 1-12). */
@@ -122,6 +120,113 @@ export function isTradingDay(d: Date): boolean {
   const weekday = d.getUTCDay();
   if (weekday === 0 || weekday === 6) return false;
   return !marketHolidays(d.getUTCFullYear()).has(ymd(d));
+}
+
+/** Previous full trading day, excluding the supplied date. */
+export function previousTradingDay(d: Date): Date {
+  let day = addDays(todayUtc(d), -1);
+  while (!isTradingDay(day)) day = addDays(day, -1);
+  return day;
+}
+
+/** Scheduled 13:00 ET equity-market closes relevant to PM-settled options. */
+export function isEarlyCloseTradingDay(d: Date): boolean {
+  if (!isTradingDay(d)) return false;
+  const month = d.getUTCMonth() + 1;
+  const day = d.getUTCDate();
+
+  // Day after Thanksgiving.
+  if (month === 11 && d.getUTCDay() === 5) {
+    const thanksgiving = nthWeekday(d.getUTCFullYear(), 11, 4, 4);
+    if (ymd(d) === ymd(addDays(thanksgiving, 1))) return true;
+  }
+
+  // Published U.S. market calendars schedule the pre-Independence-Day early
+  // close on July 3 only when July 3 is itself a trading day. It is not shifted
+  // to July 2 when July 3 is the observed holiday (2026) or when July 5 is the
+  // observed holiday (2027).
+  if (month === 7 && day === 3) return true;
+
+  // Christmas Eve closes early only when December 24 itself is a trading day;
+  // it is not shifted when December 24 is a weekend or the observed holiday.
+  return month === 12 && day === 24;
+}
+
+function zonedDateTime(date: string, hour: number, minute: number, timeZone: string): Date {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
+  if (!match) throw new Error(`Malformed expiration date: ${date}`);
+  const [, yearText, monthText, dayText] = match;
+  const year = Number(yearText);
+  const month = Number(monthText);
+  const day = Number(dayText);
+  const localAsUtc = Date.UTC(year, month - 1, day, hour, minute);
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(new Date(localAsUtc));
+  const value = (type: Intl.DateTimeFormatPartTypes): number =>
+    Number(parts.find((part) => part.type === type)?.value);
+  const representedAsUtc = Date.UTC(
+    value('year'),
+    value('month') - 1,
+    value('day'),
+    value('hour'),
+    value('minute'),
+    value('second'),
+  );
+  return new Date(localAsUtc - (representedAsUtc - localAsUtc));
+}
+
+/** Settlement instant for AM-settled SPX and PM-settled equity/ETF/SPXW options. */
+export function optionSettlementAt(
+  expiration: string,
+  underlying: string,
+  rootSymbol?: string,
+): Date {
+  const day = new Date(`${expiration}T12:00:00Z`);
+  if (!Number.isFinite(day.getTime()) || ymd(day) !== expiration) {
+    throw new Error(`Malformed expiration date: ${expiration}`);
+  }
+  if (!isTradingDay(day)) {
+    throw new Error(`Option expiration is not a trading day: ${expiration}`);
+  }
+
+  const normalizedUnderlying = underlying.trim().toUpperCase();
+  const normalizedRoot = rootSymbol?.trim().toUpperCase();
+  if (normalizedUnderlying === 'SPX' && normalizedRoot !== 'SPXW') {
+    return zonedDateTime(expiration, 9, 30, 'America/New_York');
+  }
+
+  const closeHour = isEarlyCloseTradingDay(day) ? 13 : 16;
+  return zonedDateTime(expiration, closeHour, 0, 'America/New_York');
+}
+
+/** True only during the regular New York cash session, excluding the close. */
+export function isRegularMarketSessionOpen(now: Date): boolean {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(now);
+  const text = (type: Intl.DateTimeFormatPartTypes): string =>
+    parts.find((part) => part.type === type)?.value ?? '';
+  const day = new Date(
+    Date.UTC(Number(text('year')), Number(text('month')) - 1, Number(text('day'))),
+  );
+  if (!isTradingDay(day)) return false;
+  const minutes = Number(text('hour')) * 60 + Number(text('minute'));
+  const closeMinutes = isEarlyCloseTradingDay(day) ? 13 * 60 : 16 * 60;
+  return minutes >= 9 * 60 + 30 && minutes < closeMinutes;
 }
 
 function precedingTradingDay(d: Date): Date {

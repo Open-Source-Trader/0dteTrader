@@ -1,0 +1,97 @@
+schema_version: 1
+template_id: event_driven_logic_map.v1
+title: '<system-name>-event-driven-logic-map'
+owner: '<team-or-owner>'
+date: 'YYYY-MM-DD'
+status: draft # draft | review | approved
+system: '<system-name>'
+source_plan: 'docs/plans/<YYYY-MM-DD>-<short-title>.yaml'
+source_spec_sheet: 'docs/specs/<spec-name>.md'
+
+objective:
+  restated: '<what this logic map exists to do and why>'
+
+required_context_files_read_first:
+  - 'AGENTS.md'
+  - 'docs/plans/plan-template.yaml'
+  - 'docs/plans/checking_plan_plan-template.yaml'
+  - 'docs/specs/<spec-name>.md'
+  - '<relevant source files>'
+
+scope:
+  in_scope:
+    - '<component/module/path>'
+  out_of_scope:
+    - '<explicitly excluded items>'
+
+event_inputs:
+  external_events:
+    - name: '<event-name>'
+      source: '<producer>'
+      payload_shape: '<schema/shape>'
+  internal_events:
+    - name: '<event-name>'
+      source: '<module>'
+      payload_shape: '<schema/shape>'
+
+state_model:
+  states:
+    - '<state-a>'
+    - '<state-b>'
+  initial_state: '<state-a>'
+  terminal_states:
+    - '<terminal-state>'
+
+transitions:
+  - id: T1
+    from_state: '<state-a>'
+    trigger_event: '<event-name>'
+    guard_conditions:
+      - '<condition>'
+    transformations:
+      - '<business/data transformation>'
+    to_state: '<state-b>'
+    outputs:
+      - '<output/event/command>'
+    side_effects:
+      - '<db write/network call/log/etc>'
+    failure_paths:
+      - failure: '<error type>'
+        handling: '<retry/fallback/abort>'
+        resulting_state: '<state>'
+
+actual_event_paths:
+  - '<step-by-step expected path in production>'
+all_possible_event_paths:
+  - '<alternate/edge path 1>'
+  - '<alternate/edge path 2>'
+
+invariants:
+  preconditions:
+    - '<must be true before processing>'
+  postconditions:
+    - '<must be true after processing>'
+  must_never_happen:
+    - '<forbidden state/behavior>'
+
+risk_review:
+  user_behavior_breaks:
+    - '<what user behavior could break and why>'
+  production_traffic_breaks:
+    - '<load/volume/ordering risks>'
+  weird_data_breaks:
+    - '<bad/partial/unexpected data risks>'
+  concurrency_time_order_breaks:
+    - '<race/time-ordering risks>'
+
+validation:
+  tests_required:
+    - '<unit/integration/e2e cases>'
+  observability_required:
+    - '<logs/metrics/traces/events>'
+
+cleanup_requirements:
+  remove_dead_code: true
+  remove_backwards_compatibility_paths: true
+  update_related_files:
+    - '<docs/specs/tests/code paths>'

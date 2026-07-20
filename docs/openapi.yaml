@@ -1,4 +1,4 @@
-openapi: 3.0.3
+openapi: 3.1.0
 info:
   title: 0dteTrader API
   version: 0.1.0
@@ -14,7 +14,11 @@ paths:
           application/json:
             schema: { $ref: '#/components/schemas/Credentials' }
       responses:
-        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/AuthTokens' } } } }
+        '200':
+          {
+            description: OK,
+            content: { application/json: { schema: { $ref: '#/components/schemas/AuthTokens' } } },
+          }
         '409': { description: Email already registered }
   /auth/login:
     post:
@@ -25,7 +29,11 @@ paths:
           application/json:
             schema: { $ref: '#/components/schemas/Credentials' }
       responses:
-        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/AuthTokens' } } } }
+        '200':
+          {
+            description: OK,
+            content: { application/json: { schema: { $ref: '#/components/schemas/AuthTokens' } } },
+          }
         '401': { description: Invalid credentials }
   /auth/refresh:
     post:
@@ -39,7 +47,11 @@ paths:
               required: [refreshToken]
               properties: { refreshToken: { type: string } }
       responses:
-        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/AuthTokens' } } } }
+        '200':
+          {
+            description: OK,
+            content: { application/json: { schema: { $ref: '#/components/schemas/AuthTokens' } } },
+          }
         '401': { description: Invalid or expired refresh token }
   /auth/logout:
     post:
@@ -59,7 +71,11 @@ paths:
       tags: [user]
       security: [{ bearerAuth: [] }]
       responses:
-        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Me' } } } }
+        '200':
+          {
+            description: OK,
+            content: { application/json: { schema: { $ref: '#/components/schemas/Me' } } },
+          }
     patch:
       tags: [user]
       security: [{ bearerAuth: [] }]
@@ -73,7 +89,11 @@ paths:
               properties:
                 tradingMode: { type: string, enum: [live, practice] }
       responses:
-        '200': { description: Updated, content: { application/json: { schema: { $ref: '#/components/schemas/Me' } } } }
+        '200':
+          {
+            description: Updated,
+            content: { application/json: { schema: { $ref: '#/components/schemas/Me' } } },
+          }
   /me/webull-credentials:
     put:
       tags: [user]
@@ -89,7 +109,11 @@ paths:
       tags: [user]
       security: [{ bearerAuth: [] }]
       parameters:
-        - { name: environment, in: query, schema: { type: string, enum: [live, practice], default: live } }
+        - {
+            name: environment,
+            in: query,
+            schema: { type: string, enum: [live, practice], default: live },
+          }
       responses:
         '204': { description: Deleted }
   /me/webull-session/refresh:
@@ -114,18 +138,35 @@ paths:
       parameters:
         - { name: symbol, in: query, required: true, schema: { type: string } }
       responses:
-        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Quote' } } } }
+        '200':
+          {
+            description: OK,
+            content: { application/json: { schema: { $ref: '#/components/schemas/Quote' } } },
+          }
   /market/candles:
     get:
       tags: [market]
       security: [{ bearerAuth: [] }]
       parameters:
         - { name: symbol, in: query, required: true, schema: { type: string } }
-        - { name: interval, in: query, required: true, schema: { type: string, enum: [1m, 5m, 15m, 1h, 1d] } }
+        - {
+            name: interval,
+            in: query,
+            required: true,
+            schema: { type: string, enum: [1m, 5m, 15m, 30m, 1h, 4h, 1d] },
+          }
         - { name: from, in: query, schema: { type: string, format: date-time } }
         - { name: to, in: query, schema: { type: string, format: date-time } }
       responses:
-        '200': { description: OK, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Candle' } } } } }
+        '200':
+          {
+            description: OK,
+            content:
+              {
+                application/json:
+                  { schema: { type: array, items: { $ref: '#/components/schemas/Candle' } } },
+              },
+          }
   /market/options-chain:
     get:
       tags: [market]
@@ -134,19 +175,45 @@ paths:
         - { name: symbol, in: query, required: true, schema: { type: string } }
         - { name: expiration, in: query, schema: { type: string, format: date } }
       responses:
-        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/OptionsChain' } } } }
-  /market/gex:
+        '200':
+          {
+            description: OK,
+            content:
+              { application/json: { schema: { $ref: '#/components/schemas/OptionsChain' } } },
+          }
+  /market/options-analytics:
     get:
       tags: [market]
       security: [{ bearerAuth: [] }]
-      description: Dealer GEX/DEX level structure + premium heat map for one underlying (Tradier-backed). OI is the static intraday baseline; prices/Greeks refresh per request.
+      description: >-
+        Fact-first options structure for one exact symbol/expiration. IV and
+        Greeks are derived locally from validated two-sided quotes. Call/put
+        gamma are unsigned magnitudes in USD delta change per 1% move; the
+        optional call-minus-put dealer proxy is an explicit assumption, not
+        observed inventory. Marked OI is not traded premium or flow.
       parameters:
         - { name: symbol, in: query, required: true, schema: { type: string } }
-        - { name: expiration, in: query, schema: { type: string, format: date, description: 'Defaults to 0DTE when today is an expiration, else the nearest' } }
+        - {
+            name: expiration,
+            in: query,
+            required: true,
+            schema: { type: string, format: date, description: 'Required exact-match expiration' },
+          }
       responses:
-        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/GexLevels' } } } }
-        '400': { description: Unknown expiration or invalid symbol }
-        '503': { description: Tradier not configured or unreachable (and no last-good cache) }
+        '200':
+          {
+            description: Complete,
+            partial,
+            or explicitly cached exact snapshot,
+            content:
+              {
+                application/json:
+                  { schema: { $ref: '#/components/schemas/OptionsAnalyticsSnapshot' } },
+              },
+          }
+        '400': { description: Invalid symbol or malformed expiration }
+        '404': { description: Exact expiration is not listed for the symbol }
+        '503': { description: No usable fresh or bounded exact-key analytics are available }
   /orders/preview:
     post:
       tags: [trading]
@@ -157,7 +224,12 @@ paths:
           application/json:
             schema: { $ref: '#/components/schemas/OrderRequest' }
       responses:
-        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/OrderPreview' } } } }
+        '200':
+          {
+            description: OK,
+            content:
+              { application/json: { schema: { $ref: '#/components/schemas/OrderPreview' } } },
+          }
   /orders:
     post:
       tags: [trading]
@@ -170,21 +242,38 @@ paths:
           application/json:
             schema: { $ref: '#/components/schemas/OrderRequest' }
       responses:
-        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/OrderResult' } } } }
+        '200':
+          {
+            description: OK,
+            content: { application/json: { schema: { $ref: '#/components/schemas/OrderResult' } } },
+          }
         '403': { description: Trading disabled (kill switch) }
         '409': { description: An order with this idempotency key is already being placed }
     get:
       tags: [trading]
       security: [{ bearerAuth: [] }]
       responses:
-        '200': { description: OK, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/OrderResult' } } } } }
+        '200':
+          {
+            description: OK,
+            content:
+              {
+                application/json:
+                  { schema: { type: array, items: { $ref: '#/components/schemas/OrderResult' } } },
+              },
+          }
   /orders/history:
     get:
       tags: [trading]
       security: [{ bearerAuth: [] }]
       description: Every order, newest first, with per-fill realized P/L (average-cost, multiplier-aware) and the net realized total.
       responses:
-        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/TradeHistory' } } } }
+        '200':
+          {
+            description: OK,
+            content:
+              { application/json: { schema: { $ref: '#/components/schemas/TradeHistory' } } },
+          }
   /orders/{orderId}:
     delete:
       tags: [trading]
@@ -198,7 +287,15 @@ paths:
       tags: [trading]
       security: [{ bearerAuth: [] }]
       responses:
-        '200': { description: OK, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Position' } } } } }
+        '200':
+          {
+            description: OK,
+            content:
+              {
+                application/json:
+                  { schema: { type: array, items: { $ref: '#/components/schemas/Position' } } },
+              },
+          }
 components:
   securitySchemes:
     bearerAuth: { type: http, scheme: bearer, bearerFormat: JWT }
@@ -224,15 +321,29 @@ components:
         tradingMode: { type: string, enum: [live, practice] }
         webullConfigured: { type: boolean, description: Live credentials stored }
         webullPracticeConfigured: { type: boolean, description: Practice credentials stored }
-        webullAccountId: { type: string, nullable: true, description: Live account id auto-discovered via Webull account/list }
-        webullPracticeAccountId: { type: string, nullable: true, description: Practice account id auto-discovered via Webull account/list }
+        webullAccountId:
+          {
+            type: string,
+            nullable: true,
+            description: Live account id auto-discovered via Webull account/list,
+          }
+        webullPracticeAccountId:
+          {
+            type: string,
+            nullable: true,
+            description: Practice account id auto-discovered via Webull account/list,
+          }
     WebullCredentialsInput:
       type: object
       required: [appKey, appSecret]
       properties:
         appKey: { type: string }
         appSecret: { type: string }
-        accountId: { type: string, description: 'Optional manual override; normally auto-discovered via account/list' }
+        accountId:
+          {
+            type: string,
+            description: 'Optional manual override; normally auto-discovered via account/list',
+          }
         environment: { type: string, enum: [live, practice], default: live }
     Quote:
       type: object
@@ -310,18 +421,31 @@ components:
         orderType: { type: string }
         limitPrice: { type: number }
         filledPrice: { type: number }
-        filledQuantity: { type: number, description: Broker-reported executed quantity (partial fills); absent when the broker gives only the order quantity }
+        filledQuantity:
+          {
+            type: number,
+            description: Broker-reported executed quantity (partial fills); absent when the broker gives only the order quantity,
+          }
         timestamp: { type: string, format: date-time }
     TradeHistoryEntry:
       allOf:
         - $ref: '#/components/schemas/OrderResult'
         - type: object
           properties:
-            realizedPnl: { type: [number, 'null'], description: Realized P/L for closing fills; null for opening fills and non-fills }
+            realizedPnl:
+              {
+                type: [number, 'null'],
+                description: Realized P/L for closing fills; null for opening fills and non-fills,
+              }
     TradeHistory:
       type: object
       properties:
-        entries: { type: array, items: { $ref: '#/components/schemas/TradeHistoryEntry' }, description: Newest first }
+        entries:
+          {
+            type: array,
+            items: { $ref: '#/components/schemas/TradeHistoryEntry' },
+            description: Newest first,
+          }
         totalRealizedPnl: { type: number }
     Position:
       type: object
@@ -332,29 +456,262 @@ components:
         avgPrice: { type: number }
         markPrice: { type: number }
         unrealizedPnl: { type: number }
-        multiplier: { type: number, description: 'Contract multiplier (options: 100) for client-side live P/L' }
-    GexPremiumLevel:
+        multiplier:
+          {
+            type: number,
+            description: 'Contract multiplier (options: 100) for client-side live P/L',
+          }
+    OptionsAnalyticsCoverage:
       type: object
+      required: [contractsTotal, contractsIncluded, ratio]
       properties:
-        strike: { type: number }
-        totalPremium: { type: number }
-        callPremium: { type: number }
-        putPremium: { type: number }
-        callOi: { type: integer }
-        putOi: { type: integer }
-    GexLevels:
+        contractsTotal: { type: integer, minimum: 0 }
+        contractsIncluded: { type: integer, minimum: 0 }
+        ratio: { type: number, minimum: 0, maximum: 1 }
+    OptionsAnalyticsQuality:
       type: object
+      required:
+        [
+          quoteAsOf,
+          greeksAsOf,
+          oiEffectiveDate,
+          feedMode,
+          coverage,
+          status,
+          warnings,
+          calculationVersion,
+          cacheStatus,
+        ]
       properties:
-        symbol: { type: string }
-        expiration: { type: string, format: date }
-        isZeroDte: { type: boolean }
-        spot: { type: number }
-        asOf: { type: string, format: date-time }
-        stale: { type: boolean, description: Served from the last-good cache after a Tradier failure }
-        netGex: { type: number }
-        netDex: { type: number }
-        gammaFlip: { type: [number, 'null'], description: Spot where net GEX crosses zero }
-        callWall: { type: [number, 'null'] }
-        putWall: { type: [number, 'null'] }
-        magnet: { type: [number, 'null'], description: Highest total-OI strike (pin target) for the selected expiration }
-        topPremium: { type: array, items: { $ref: '#/components/schemas/GexPremiumLevel' } }
+        quoteAsOf: { type: [string, 'null'], format: date-time }
+        greeksAsOf:
+          {
+            type: [string, 'null'],
+            format: date-time,
+            description: Conservative oldest quote time used by the locally derived Greeks; provider Greek timestamps remain diagnostic input provenance,
+          }
+        oiEffectiveDate: { type: [string, 'null'], format: date }
+        feedMode: { type: string, enum: [realtime, delayed, sandbox, unknown] }
+        coverage: { $ref: '#/components/schemas/OptionsAnalyticsCoverage' }
+        status: { type: string, enum: [complete, partial] }
+        warnings: { type: array, items: { type: string } }
+        calculationVersion: { type: string }
+        cacheStatus: { type: string, enum: [fresh, memory-cache, stale-fallback] }
+    OptionsAnalyticsStrikeLeg:
+      type: object
+      required:
+        [
+          openInterest,
+          volume,
+          impliedVolatility,
+          delta,
+          gamma,
+          gammaExposure,
+          deltaNotional,
+          markedOiValue,
+          relativeSpread,
+          roundTripCost,
+          bidSize,
+          askSize,
+          multiplier,
+        ]
+      properties:
+        openInterest: { type: integer, minimum: 0 }
+        volume: { type: integer, minimum: 0 }
+        impliedVolatility:
+          {
+            type: [number, 'null'],
+            exclusiveMinimum: 0,
+            description: Null when the quote cannot support local IV inversion,
+          }
+        delta: { type: [number, 'null'], minimum: -1, maximum: 1 }
+        gamma: { type: [number, 'null'], minimum: 0 }
+        gammaExposure:
+          {
+            type: [number, 'null'],
+            minimum: 0,
+            description: USD delta change per 1% underlying move; null when local Greeks are unavailable,
+          }
+        deltaNotional:
+          {
+            type: [number, 'null'],
+            description: Long-holder delta notional; null when local Greeks are unavailable,
+          }
+        markedOiValue:
+          {
+            type: [number, 'null'],
+            minimum: 0,
+            description: OI times current mark times multiplier; not traded premium,
+          }
+        relativeSpread: { type: [number, 'null'], minimum: 0 }
+        roundTripCost:
+          {
+            type: [number, 'null'],
+            minimum: 0,
+            description: Bid-ask spread times one contract multiplier,
+          }
+        bidSize: { type: integer, minimum: 0 }
+        askSize: { type: integer, minimum: 0 }
+        multiplier: { type: number, exclusiveMinimum: 0 }
+    OptionsAnalyticsStrike:
+      type: object
+      required: [strike, call, put, grossGammaExposure, totalOpenInterest]
+      properties:
+        strike: { type: number, exclusiveMinimum: 0 }
+        call:
+          { oneOf: [{ $ref: '#/components/schemas/OptionsAnalyticsStrikeLeg' }, { type: 'null' }] }
+        put:
+          { oneOf: [{ $ref: '#/components/schemas/OptionsAnalyticsStrikeLeg' }, { type: 'null' }] }
+        grossGammaExposure:
+          {
+            type: [number, 'null'],
+            minimum: 0,
+            description: Null only when no leg at the strike has locally modeled gamma,
+          }
+        totalOpenInterest: { type: integer, minimum: 0 }
+    OptionsAnalyticsSnapshot:
+      type: object
+      required: [scope, exposureUnit, quality, structure, scenarios, impliedRange, strikes]
+      properties:
+        scope:
+          type: object
+          required:
+            [
+              symbol,
+              rootSymbol,
+              settlementStyle,
+              expiration,
+              observedAt,
+              settlementAt,
+              spot,
+              forward,
+            ]
+          properties:
+            symbol: { type: string, pattern: '^[A-Z0-9.-]{1,12}$' }
+            rootSymbol:
+              {
+                type: string,
+                minLength: 1,
+                pattern: '^[A-Z0-9.-]+$',
+                description: 'Exact option product/root modeled, for example SPX or SPXW',
+              }
+            settlementStyle:
+              {
+                type: string,
+                enum: [am, pm],
+                description: 'Opening-print or market-close settlement',
+              }
+            expiration: { type: string, format: date }
+            observedAt: { type: string, format: date-time }
+            settlementAt: { type: string, format: date-time }
+            spot: { type: number, exclusiveMinimum: 0 }
+            forward: { type: number, exclusiveMinimum: 0 }
+        exposureUnit: { type: string, enum: ['$ delta change per 1% underlying move'] }
+        quality: { $ref: '#/components/schemas/OptionsAnalyticsQuality' }
+        structure:
+          type: object
+          required:
+            [
+              callGammaExposure,
+              putGammaExposure,
+              grossGammaExposure,
+              callDeltaNotional,
+              putDeltaNotional,
+              callWall,
+              putWall,
+              grossGammaConcentration,
+              maxOpenInterestStrike,
+            ]
+          properties:
+            callGammaExposure:
+              {
+                type: [number, 'null'],
+                minimum: 0,
+                description: Null when no call leg has locally modeled gamma,
+              }
+            putGammaExposure:
+              {
+                type: [number, 'null'],
+                minimum: 0,
+                description: Null when no put leg has locally modeled gamma,
+              }
+            grossGammaExposure:
+              {
+                type: [number, 'null'],
+                minimum: 0,
+                description: Null when no leg has locally modeled gamma,
+              }
+            callDeltaNotional:
+              {
+                type: [number, 'null'],
+                description: Null when no call leg has locally modeled delta,
+              }
+            putDeltaNotional:
+              {
+                type: [number, 'null'],
+                description: Null when no put leg has locally modeled delta,
+              }
+            callWall: { type: [number, 'null'], exclusiveMinimum: 0 }
+            putWall: { type: [number, 'null'], exclusiveMinimum: 0 }
+            grossGammaConcentration: { type: [number, 'null'], minimum: 0, maximum: 1 }
+            maxOpenInterestStrike: { type: [number, 'null'], exclusiveMinimum: 0 }
+        scenarios:
+          type: object
+          required: [callPutDealerProxy]
+          properties:
+            callPutDealerProxy:
+              oneOf:
+                - type: object
+                  required:
+                    [
+                      assumption,
+                      gammaExposure,
+                      deltaNotional,
+                      strikeGammaExposures,
+                      gammaRoots,
+                      primaryGammaRoot,
+                    ]
+                  properties:
+                    assumption: { type: string }
+                    gammaExposure: { type: number }
+                    deltaNotional: { type: number }
+                    strikeGammaExposures:
+                      type: array
+                      description: 'Strictly ascending per-strike call-minus-put scenario values; not observed dealer inventory'
+                      items:
+                        type: object
+                        required: [strike, gammaExposure]
+                        properties:
+                          strike: { type: number, exclusiveMinimum: 0 }
+                          gammaExposure:
+                            {
+                              type: [number, 'null'],
+                              description: Null when neither observed leg has locally modeled gamma,
+                            }
+                    gammaRoots:
+                      {
+                        type: array,
+                        items: { type: number, exclusiveMinimum: 0 },
+                        description: 'Strictly ascending unique roots',
+                      }
+                    primaryGammaRoot:
+                      {
+                        type: [number, 'null'],
+                        exclusiveMinimum: 0,
+                        description: 'When present, a member of gammaRoots nearest scope.spot',
+                      }
+                - { type: 'null' }
+        impliedRange:
+          oneOf:
+            - type: object
+              required: [lower, upper, confidence, label, atmIv, straddleLower, straddleUpper]
+              properties:
+                lower: { type: number, minimum: 0 }
+                upper: { type: number, exclusiveMinimum: 0 }
+                confidence: { type: number, enum: [0.68] }
+                label: { type: string, enum: ['model-implied 68% range'] }
+                atmIv: { type: number, exclusiveMinimum: 0 }
+                straddleLower: { type: number, minimum: 0 }
+                straddleUpper: { type: number, exclusiveMinimum: 0 }
+            - { type: 'null' }
+        strikes: { type: array, items: { $ref: '#/components/schemas/OptionsAnalyticsStrike' } }

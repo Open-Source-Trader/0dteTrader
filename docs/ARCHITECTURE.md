@@ -23,21 +23,22 @@
 **Why a backend exists:** Webull OpenAPI app key/secret cannot ship in the app bundle — an
 extracted secret means account takeover. Both client apps (iOS and desktop) authenticate to our
 backend (JWT) and the backend brokers every Webull call using the user's encrypted, server-side
-credentials. Options analytics (Greeks, open interest, GEX/DEX) come from Tradier, also
-server-side.
+credentials. Options quotes and open interest come from Tradier. The backend validates
+those inputs and derives local IV, Greeks, fact-first exposure structure, implied range,
+marked-OI value, and liquidity with visible source quality.
 
 ## 2. Backend Modules (apps/api, NestJS)
 
-| Module              | Responsibility                                                                                                                                            |
-| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `AuthModule`        | Register/login/refresh/logout; Argon2id hashing; JWT access (15 min) + rotating refresh tokens                                                            |
-| `UsersModule`       | Profile read/update; kill-switch flag                                                                                                                     |
-| `CredentialsModule` | Store/rotate/delete Webull creds; AES-256-GCM encrypt before persist; decrypt in-memory only                                                              |
-| `BrokerModule`      | `BrokerGateway` interface; `WebullBrokerGateway` (the only implementation — no mock/demo data); per-user client factory with token caching                |
-| `MarketDataModule`  | REST: candles, quote, options chain; WS gateway streaming subscribed quotes                                                                               |
-| `TradingModule`     | Order preview/place/cancel/replace; positions; trade history with realized P/L; idempotency; server-side re-validation of Auto-OTM + mid price; audit log |
-| `GexModule`         | Dealer GEX/DEX levels + premium heat map; Tradier API client for chains/Greeks; pure-math engine (Black-Scholes, gamma/delta exposure, walls, magnet)     |
-| `HealthModule`      | `GET /v1/health` — DB connectivity check, uptime (public, no auth)                                                                                        |
+| Module                   | Responsibility                                                                                                                                                                        |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `AuthModule`             | Register/login/refresh/logout; Argon2id hashing; JWT access (15 min) + rotating refresh tokens                                                                                        |
+| `UsersModule`            | Profile read/update; kill-switch flag                                                                                                                                                 |
+| `CredentialsModule`      | Store/rotate/delete Webull creds; AES-256-GCM encrypt before persist; decrypt in-memory only                                                                                          |
+| `BrokerModule`           | `BrokerGateway` interface; `WebullBrokerGateway` (the only implementation — no mock/demo data); per-user client factory with token caching                                            |
+| `MarketDataModule`       | REST: candles, quote, options chain; WS gateway streaming subscribed quotes                                                                                                           |
+| `TradingModule`          | Order preview/place/cancel/replace; positions; trade history with realized P/L; idempotency; server-side re-validation of Auto-OTM + mid price; audit log                             |
+| `OptionsAnalyticsModule` | Exact-expiration Tradier normalization; local IV/Greek engine; call/put/gross structure; explicit positioning scenarios; implied range; bounded cache; snapshot capture and retention |
+| `HealthModule`           | `GET /v1/health` — DB connectivity check, uptime (public, no auth)                                                                                                                    |
 
 ### BrokerGateway interface (the key seam)
 
@@ -55,7 +56,7 @@ interface BrokerGateway {
 }
 ```
 
-Implemented by `WebullBrokerGateway`. All client-facing endpoints depend only on the interface. Market data always comes from Webull (options chain/Greeks come from Tradier via `GexModule`); live vs practice only selects the live vs paper-trading (sandbox) OpenAPI hosts per user. `reauthenticate` drops the cached Webull client/token and mints a fresh one — the "Reconnect" escape hatch when a token goes stale.
+Implemented by `WebullBrokerGateway`. All client-facing endpoints depend only on the interface. General market data comes from Webull; options analytics use Tradier through `OptionsAnalyticsModule`. Live vs practice selects the live vs paper-trading Webull hosts per user. `reauthenticate` drops the cached Webull client/token and mints a fresh one — the "Reconnect" escape hatch when a token goes stale.
 
 ## 3. Order Flow (tap → fill)
 
@@ -84,7 +85,7 @@ Features/
   Auth/               LoginView, RegisterView, AuthViewModel, RiskDisclaimerView
   Profile/            ProfileView, WebullCredentialsForm, AppLockManager (FaceID)
   Chart/              ChartView (candles + indicator overlays), IndicatorEngine, SymbolSearch,
-                      Gex/ (GEX/DEX overlay), Twc/ (TWC heatmap indicator)
+                      OptionsAnalytics/ (Options Structure overlay), Twc/ (TWC heatmap indicator)
   Trade/              TradePanelView, FloatingTradeButtons, OptionsChainViewModel,
                       AutoContractSelector, OrderConfirmSheet, PositionsStripView,
                       HistoryView, ToastView
@@ -96,7 +97,7 @@ Features/
 
 ### 4b. Desktop (apps/desktop) — React + Vite + Electron
 
-Faithful web clone of the iOS UI for development/testing without Xcode. Fixed 430×932 phone frame with `--app-scale` CSS variable. Same feature structure: auth, chart (with GEX/TWC overlays), profile, trade. Shared indicator math ported between TypeScript and Swift.
+Faithful web clone of the iOS UI for development/testing without Xcode. Fixed 430×932 phone frame with `--app-scale` CSS variable. Same feature structure: auth, chart (with Options Structure/TWC overlays), profile, trade. Shared indicator behavior is tested for parity between TypeScript and Swift.
 
 ## 5. Data Model (PostgreSQL)
 
@@ -106,6 +107,16 @@ Faithful web clone of the iOS UI for development/testing without Xcode. Fixed 43
 - `RefreshToken(id uuid pk, user_id fk, token_hash unique, expires_at, revoked_at, created_at)`
 - `TradeOrder(id pk, user_id fk, contract_symbol, asset_class, environment, side, quantity, filled_quantity?, order_type, limit_price?, filled_price?, status, placed_at, updated_at)` — one row per broker order, kept current as order-update events arrive; feeds trade history with realized P/L.
 - `OrderAudit(id uuid pk, user_id fk, idempotency_key?, request jsonb, response jsonb, status, created_at)` — unique on `(user_id, idempotency_key)`.
+- `OptionsAnalyticsSnapshotRecord(id uuid pk, symbol, expiration, observed_at, bucket_start, calculation_version, capture_reason, resolution_minutes, quality jsonb, normalized_input jsonb, output jsonb, created_at)` — unique by exact symbol/expiration/bucket/version/resolution; one-minute detail compacts to five-minute history.
+
+Options analytics capture uses the same exact calculation path as interactive
+requests. Core SPY/QQQ/IWM/SPX capture runs only during the authoritative New
+York session. Interactive requests persist the active symbol/expiration at
+most once per minute. One-minute data retains 30 days and five-minute data one
+year; cleanup and compaction are idempotent and observable. `bucket` is only
+the capture/deduplication bucket: any future replay must also require
+`observedAt <= replayTime`, so a later representative from the same five-minute
+bucket can never leak into an earlier candle.
 
 ## 6. Security Summary
 

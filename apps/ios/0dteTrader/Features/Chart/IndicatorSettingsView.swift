@@ -5,7 +5,7 @@ import SwiftUI
 struct IndicatorSettingsView: View {
     @Binding var settings: IndicatorSettings
     @Binding var twcSettings: TwcHeatmapSettings
-    @Binding var gexSettings: GexSettings
+    @Binding var optionsAnalyticsSettings: OptionsAnalyticsSettings
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -130,27 +130,33 @@ struct IndicatorSettingsView: View {
                         .accessibilityLabel("TWC Heatmap V5 settings")
                     }
 
-                    Toggle(isOn: $gexSettings.enabled) {
-                        labelWithSwatch("GEX / DEX Levels", id: "gex")
+                    Toggle(isOn: $optionsAnalyticsSettings.enabled) {
+                        labelWithSwatch("Options Structure", id: "optionsAnalytics")
                     }
-                    if gexSettings.enabled {
-                        Toggle("Level Lines", isOn: $gexSettings.showLevels)
-                        Toggle("Premium Heat Map", isOn: $gexSettings.showPremium)
-                        if gexSettings.showPremium {
-                            Stepper("Heat Strikes: \(gexSettings.maxPremiumStrikes)",
-                                    value: $gexSettings.maxPremiumStrikes,
-                                    in: GexSettings.heatStrikeRange)
-                                .monospacedDigit()
-                                .accessibilityLabel("Premium heat strike count")
-                                .accessibilityValue("\(gexSettings.maxPremiumStrikes)")
+                    if optionsAnalyticsSettings.enabled {
+                        Toggle("Implied 68% Range", isOn: $optionsAnalyticsSettings.showImpliedRange)
+                        Toggle("Call / Put Gamma Profile", isOn: $optionsAnalyticsSettings.showGammaProfile)
+                        Toggle("Marked OI", isOn: $optionsAnalyticsSettings.showMarkedOi)
+                        Toggle("Liquidity", isOn: $optionsAnalyticsSettings.showLiquidity)
+                        Toggle("Dealer Proxy Scenario", isOn: $optionsAnalyticsSettings.showDealerProxy)
+                        if optionsAnalyticsSettings.showDealerProxy {
+                            Text("Scenario only. This is not observed dealer inventory.")
+                                .font(.caption)
+                                .foregroundStyle(Color.appWarning)
                         }
-                        Stepper("Refresh: \(gexSettings.refreshSeconds)s",
-                                value: $gexSettings.refreshSeconds,
-                                in: GexSettings.refreshRange,
+                        Stepper("Profile Strikes: \(optionsAnalyticsSettings.profileStrikeCount)",
+                                value: $optionsAnalyticsSettings.profileStrikeCount,
+                                in: OptionsAnalyticsSettings.profileStrikeRange)
+                            .monospacedDigit()
+                            .accessibilityLabel("Options structure strike count")
+                            .accessibilityValue("\(optionsAnalyticsSettings.profileStrikeCount)")
+                        Stepper("Refresh: \(optionsAnalyticsSettings.refreshSeconds)s",
+                                value: $optionsAnalyticsSettings.refreshSeconds,
+                                in: OptionsAnalyticsSettings.refreshRange,
                                 step: 15)
                             .monospacedDigit()
-                            .accessibilityLabel("GEX refresh interval")
-                            .accessibilityValue("\(gexSettings.refreshSeconds) seconds")
+                            .accessibilityLabel("Options structure refresh interval")
+                            .accessibilityValue("\(optionsAnalyticsSettings.refreshSeconds) seconds")
                     }
                 }
                 .listRowBackground(Color.appSurface)
@@ -178,7 +184,11 @@ struct IndicatorSettingsView: View {
     private func labelWithSwatch(_ title: String, id: String) -> some View {
         HStack(spacing: AppSpacing.sm) {
             Circle()
-                .fill(id == "gex" ? Color(GexPresentation.gammaFlipColor) : ChartStyle.overlayColor(for: id))
+                .fill(
+                    id == "optionsAnalytics"
+                        ? Color(OptionsAnalyticsPresentation.rangeColor)
+                        : ChartStyle.overlayColor(for: id)
+                )
                 .frame(width: 8, height: 8)
                 .accessibilityHidden(true)
             Text(title)

@@ -6,9 +6,9 @@ import { parseDateTime } from '../../core/models/dates';
 import { Store } from '../../core/observable';
 import type { SettingsStore } from '../../core/storage/SettingsStore';
 import { loadTickCandles, saveTickCandles } from '../../core/storage/tickStorage';
-import type { GexSettings } from './gex/gexSettings';
 import type { IndicatorSettings } from './indicatorSettings';
 import { capSubPanes } from './indicatorSettings';
+import type { OptionsAnalyticsSettings } from './optionsAnalytics/optionsAnalyticsSettings';
 import type { TwcHeatmapSettings } from './twc/twcSettings';
 
 export const CHART_INTERVALS: ChartInterval[] = [
@@ -77,7 +77,7 @@ interface ChartStoreState {
   isStale: boolean;
   indicatorSettings: IndicatorSettings;
   twcSettings: TwcHeatmapSettings;
-  gexSettings: GexSettings;
+  optionsAnalytics: OptionsAnalyticsSettings;
 }
 
 /** Upper bound on rendered candles so live appends stay cheap. */
@@ -121,7 +121,7 @@ export class ChartStore extends Store<ChartStoreState> {
       isStale: socket.getState().connectionState !== 'connected',
       indicatorSettings,
       twcSettings: settingsStore.twcSettings,
-      gexSettings: settingsStore.gexSettings,
+      optionsAnalytics: settingsStore.optionsAnalytics,
     });
     socket.onQuote((quote) => this.handleLiveQuote(quote));
     // Mirror the socket's connection state so the header can flag frozen
@@ -208,9 +208,9 @@ export class ChartStore extends Store<ChartStoreState> {
     this.set({ twcSettings: settings });
   }
 
-  setGexSettings(settings: GexSettings): void {
-    this.settingsStore.gexSettings = settings;
-    this.set({ gexSettings: settings });
+  setOptionsAnalytics(settings: OptionsAnalyticsSettings): void {
+    this.settingsStore.optionsAnalytics = settings;
+    this.set({ optionsAnalytics: settings });
   }
 
   // MARK: - Live updates

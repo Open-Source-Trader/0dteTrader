@@ -27,8 +27,8 @@ npm run dev            # http://localhost:3000 — Webull gateway (paper or live
 The API always talks to Webull — there is no mock/demo data. Without stored
 Webull credentials, market-data and trading calls fail with `AUTH_FAILED`;
 add practice credentials first (see "Switching to real Webull" below).
-The options chain and GEX/DEX endpoints need a `TRADIER_API_TOKEN` in `.env`
-(Webull does not expose option Greeks, open interest, or full chain detail).
+The Options Structure endpoint needs a `TRADIER_API_TOKEN` in `.env`; the
+trading chain continues to come from Webull.
 
 > **Note:** `CRED_ENCRYPTION_KEY` is generated automatically by `npm run setup`. You do not need to generate it by hand unless you are setting up production manually.
 
@@ -67,25 +67,27 @@ iOS: `xcodebuild test -scheme 0dteTrader -destination 'platform=iOS Simulator,na
 
 Today the app uses a **hybrid broker/data model**:
 
-| Function                                       | Provider           | Why                                                                                                                                     |
-| ---------------------------------------------- | ------------------ | --------------------------------------------------------------------------------------------------------------------------------------- |
-| Order execution                                | **Webull OpenAPI** | Sends real or paper trades.                                                                                                             |
-| Candlestick / chart data                       | **Webull OpenAPI** | OHLCV bars and stock snapshots.                                                                                                         |
-| Options chain + Greeks (GEX/DEX, OI, IV, etc.) | **Tradier API**    | Webull OpenAPI does not expose option Greeks, implied volatility, open interest, or full chain detail beyond contract price and volume. |
+| Function                                                    | Provider           | Why                                                                                                                                            |
+| ----------------------------------------------------------- | ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| Order execution                                             | **Webull OpenAPI** | Sends real or paper trades.                                                                                                                    |
+| Candlestick / chart data                                    | **Webull OpenAPI** | OHLCV bars and stock snapshots.                                                                                                                |
+| Options Structure quotes, OI, volume, and provider metadata | **Tradier API**    | The backend derives local IV/Greeks and chart analytics from validated quotes because provider Greek timestamps can be much older than quotes. |
 
-So the typical flow is: Webull for placing/cancelling orders and chart candles, Tradier for picking strikes and viewing Greeks.
+So the typical flow is: Webull for placing/cancelling orders, the trading
+chain, and chart candles; Tradier for the separate Options Structure snapshot.
 
 ### Required credentials today
 
 - **Webull OpenAPI** app key + app secret + account ID (paper or live). Entered per-user in the app under Profile → Webull API and stored encrypted server-side.
-- **Tradier API token** (brokerage or paper). Set once in `.env` as `TRADIER_API_TOKEN`; the desktop/iOS app only calls `GET /v1/market/gex` on the backend. Get a token from Tradier → Settings → API Access.
+- **Tradier API token** (brokerage or paper). Set once in `.env` as `TRADIER_API_TOKEN`; desktop and iOS call only `GET /v1/market/options-analytics` on the backend. Get a token from Tradier → Settings → API Access.
 
 ### Future plans
 
 - A **Tradier-only mode** so you can trade and get market data from a single broker.
 - Additional broker integrations that offer free API access and the required options data (Greeks, chain, etc.).
 
-If you only want the chart/trading pieces without options analytics, the Tradier token is only needed for the GEX/DEX and options-chain views.
+If you only want chart/trading without options analytics, no Tradier token is
+needed.
 
 ## Webull setup (paper & live)
 
@@ -130,7 +132,7 @@ fields) — corrections belong in that one file.
 
 ## Tradier setup
 
-To populate the options chain, GEX/DEX levels, and Greeks:
+To populate the options chain and Options Structure snapshot:
 
 1. Get a Tradier brokerage or paper account.
 2. Go to Tradier → **Settings → API Access** and create an API token.
@@ -144,7 +146,25 @@ To populate the options chain, GEX/DEX levels, and Greeks:
    - Paper: `https://sandbox.tradier.com`
    - Live: `https://api.tradier.com` (default)
 
-The token stays server-side; the iOS and desktop apps never see it. The backend exposes it only through `GET /v1/market/gex`. If the token is missing, the options chain and GEX/DEX views will fail while chart and order functionality still works.
+The token stays server-side; iOS and desktop never see it. The backend exposes a quality-aware result only through `GET /v1/market/options-analytics`. If the token is missing, options analytics fail while chart and order functionality still work.
+
+The response reports `feedMode`, quote/Greek/OI timestamps, coverage, cache
+state, warnings, and calculation version. Sandbox/delayed feeds are never
+labeled real-time. The required expiration is exact-match only. The configured
+annual risk-free rate is disclosed in every snapshot because it is a model
+input, not a live timestamped yield curve.
+
+### Snapshot capture and retention
+
+By default the API captures SPY, QQQ, IWM, and SPX once per minute during the
+regular New York cash session, plus successfully viewed symbol/expiration
+pairs. Repeated work in the same bucket is deduplicated. One-minute records
+retain 30 days; a representative quality-preserving five-minute record retains
+one year. Capture, compaction, cleanup, and failures are logged. Disable or
+override scheduled capture with the documented `OPTIONS_ANALYTICS_*`
+environment variables when provider capacity is limited. Any future replay
+must filter by source observation time, not the minute bucket alone, to prevent
+look-ahead.
 
 ## Webull Cloud MCP (optional, for Claude Code)
 

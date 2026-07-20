@@ -10,12 +10,11 @@ import { PrismaClient } from '@prisma/client';
  *   webullCredential: upsert, findUnique, delete
  *   refreshToken:     create, findUnique, update, updateMany
  *   orderAudit:       findUnique, create, findMany
+ *   optionsAnalyticsSnapshotRecord: create, findMany, deleteMany
+ *   scheduledJobLease: create, updateMany
  */
 @Injectable()
-export class PrismaService
-  extends PrismaClient
-  implements OnModuleInit, OnModuleDestroy
-{
+export class PrismaService extends PrismaClient implements OnModuleInit, OnModuleDestroy {
   async onModuleInit(): Promise<void> {
     await this.$connect();
   }

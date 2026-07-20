@@ -24,7 +24,7 @@ final class SettingsStore: @unchecked Sendable {
         static let splitFraction = "settings.splitFraction"
         static let indicatorSettings = "settings.indicatorSettings"
         static let twcSettings = "settings.twcSettings"
-        static let gexSettings = "settings.gexSettings"
+        static let optionsAnalyticsSettings = "settings.optionsAnalytics.v1"
         static let riskDisclaimerAccepted = "settings.riskDisclaimerAccepted"
         static let lastSymbol = "settings.lastSymbol"
         static let appLockEnabled = "settings.appLockEnabled"
@@ -82,10 +82,10 @@ final class SettingsStore: @unchecked Sendable {
         }
     }
 
-    var gexSettings: GexSettings {
+    var optionsAnalyticsSettings: OptionsAnalyticsSettings {
         get {
-            guard let data = defaults.data(forKey: Keys.gexSettings),
-                  let settings = try? decoder.decode(GexSettings.self, from: data)
+            guard let data = defaults.data(forKey: Keys.optionsAnalyticsSettings),
+                  let settings = try? decoder.decode(OptionsAnalyticsSettings.self, from: data)
             else {
                 return .default
             }
@@ -93,7 +93,7 @@ final class SettingsStore: @unchecked Sendable {
         }
         set {
             if let data = try? encoder.encode(newValue) {
-                defaults.set(data, forKey: Keys.gexSettings)
+                defaults.set(data, forKey: Keys.optionsAnalyticsSettings)
             }
         }
     }

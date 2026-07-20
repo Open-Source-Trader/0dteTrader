@@ -1,0 +1,822 @@
+schema_version: 1
+template_id: checking_plan.v1
+title: Checking Plan - Options Analytics Snapshot Integrity Suite
+description: Live verification, findings, remediation, and evidence paired with the implementation plan.
+maintainers:
+  - { name: Codex, role_id: implementation_controller }
+  - { name: Quant reviewer, role_id: senior_quant_engineer }
+  - { name: Client reviewer, role_id: senior_client_engineer }
+plan_ref:
+  plan_path: docs/plans/2026-07-19-options-analytics-snapshot-suite.yaml
+  plan_name: options-analytics-snapshot-suite
+  paired_checking_plan: docs/plans/checking_plan_2026-07-19-options-analytics-snapshot-suite.yaml
+required_context_files_read_first:
+  purpose: Check implementation against approved formulas, flows, invariants, and both client contracts.
+  core_required:
+    - { path: AGENTS.md, why: Project quality rules. }
+    - { path: docs/plans/2026-07-19-options-analytics-snapshot-suite.yaml, why: Executable plan. }
+    - { path: docs/specs/2026-07-19-options-analytics-spec.md, why: Requirement source. }
+    - {
+        path: docs/flow-charts/2026-07-19-options-analytics-flow-chart.yaml,
+        why: Current/target path.,
+      }
+    - {
+        path: docs/logic-maps/2026-07-19-options-analytics-logic-map.yaml,
+        why: Invariants and failures.,
+      }
+instructions:
+  - Update this file immediately when work starts, tests run, a finding appears, remediation lands, or evidence changes.
+  - Record severity, evidence path/symbol, smallest reproduction, impact, fix, blocker, and remediation status for each finding.
+  - Do not mark a requirement complete from an agent report; inspect the diff and run fresh verification.
+  - Block completion on unresolved P0 or P1 findings.
+baseline:
+  timestamp: '2026-07-19T19:06:23-04:00'
+  setup:
+    command: npm install
+    result: pass-with-warnings
+    evidence: 671 packages installed; 19 vulnerabilities reported (13 moderate, 5 high, 1 critical).
+  shared_types_build:
+    command: npm run build --workspace @0dtetrader/shared-types
+    result: pass
+  api_tests:
+    command: npm run test
+    result: partial-baseline-failure
+    evidence: 17 of 18 suites and 178 tests passed; app.e2e did not compile because test/stub-broker.gateway.ts lacks 30m and 4h intervals.
+  desktop_tests:
+    result: pass
+    evidence: 5 files and 41 tests passed.
+  original_workspace:
+    result: protected
+    evidence: Dirty main worktree left untouched; implementation uses codex/options-analytics-integrity worktree.
+checklist:
+  - {
+      id: C1,
+      title: Required spec flow logic plan and paired check exist and parse,
+      type: automated,
+      required: true,
+      status: passed,
+    }
+  - {
+      id: C2,
+      title: Shared contract has explicit units quality partial layers and no old fields,
+      type: automated,
+      required: true,
+      status: passed,
+    }
+  - {
+      id: C3,
+      title: Golden math IV forward and finite-difference checks pass,
+      type: automated,
+      required: true,
+      status: passed,
+    }
+  - {
+      id: C4,
+      title: DST early-close AM PM and expired settlement cases pass,
+      type: automated,
+      required: true,
+      status: passed,
+    }
+  - {
+      id: C5,
+      title: Independent walls exact-zero multiple roots and nearest root pass,
+      type: automated,
+      required: true,
+      status: passed,
+    }
+  - {
+      id: C6,
+      title: Provider validation rate headers exact cache bounds dedupe and no wrong expiration pass,
+      type: automated,
+      required: true,
+      status: passed,
+    }
+  - {
+      id: C7,
+      title: Prisma migration capture idempotency compaction retention and fake-clock session pass,
+      type: automated,
+      required: true,
+      status: passed,
+    }
+  - {
+      id: C8,
+      title: Desktop defaults profile provenance accessibility and cancellation pass,
+      type: automated-and-manual,
+      required: true,
+      status: passed,
+    }
+  - {
+      id: C9,
+      title: iOS DTO defaults profile provenance accessibility cancellation and compact suffix pass,
+      type: automated-and-manual,
+      required: true,
+      status: passed,
+    }
+  - {
+      id: C10,
+      title: OpenAPI architecture runbook roadmap and API spec match implementation,
+      type: manual-and-automated,
+      required: true,
+      status: passed,
+    }
+  - {
+      id: C11,
+      title: Old endpoint GEX DTO settings and misleading premium heat residues are removed,
+      type: automated,
+      required: true,
+      status: passed,
+    }
+  - {
+      id: C12,
+      title: Strict type lint format build and complete tests pass without new warnings,
+      type: automated,
+      required: true,
+      status: passed-with-baseline-residuals,
+    }
+  - {
+      id: C13,
+      title: Independent spec review and code-quality review have no open P0 or P1,
+      type: manual,
+      required: true,
+      status: passed,
+    }
+live_progress:
+  - at: '2026-07-19T19:00:00-04:00'
+    phase: isolation
+    status: completed
+    evidence: Global worktree created on codex/options-analytics-integrity; original dirty main preserved.
+  - at: '2026-07-19T19:06:23-04:00'
+    phase: baseline
+    status: completed-with-known-failure
+    evidence: Shared build pass; 178 API tests and 41 desktop tests pass; one pre-existing e2e compile defect recorded.
+  - at: '2026-07-19T19:15:00-04:00'
+    phase: planning-artifacts
+    status: completed
+    evidence: Template copies, spec, current/target flow, logic map, plan, and checking plan created; all four YAML artifacts parsed successfully with Ruby Psych.
+  - at: '2026-07-19T19:30:00-04:00'
+    phase: implementation
+    status: in_progress
+    evidence: Parallel TDD ownership started for backend/shared/storage, desktop, and iOS in non-overlapping paths.
+  - at: '2026-07-19T19:45:00-04:00'
+    phase: backend-contract-and-calendar
+    status: completed
+    evidence: RED was 2 suites and 5 expected failures for missing contract/calendar behavior; GREEN was 2 suites and 16 tests passing, plus shared-types build exit 0.
+  - at: '2026-07-19T20:00:00-04:00'
+    phase: ios-contract-settings-presentation
+    status: completed
+    evidence: Targeted xcodebuild RED failed on missing OptionsAnalytics symbols; GREEN passed 8 DTO/settings/presentation tests including suffix and accessibility summary behavior.
+  - at: '2026-07-19T20:05:00-04:00'
+    phase: desktop-settings-api-poller-presentation
+    status: completed
+    evidence: Five targeted files had 14 expected RED failures; GREEN passed 5 files and 15 tests for strict settings, endpoint cancellation, polling, scaling, quality, and accessibility.
+  - at: '2026-07-19T20:10:00-04:00'
+    phase: backend-pricing-and-engine
+    status: completed
+    evidence: Engine test began RED with a missing module; GREEN passed 3 suites and 25 tests. API strict build and lint also passed at this checkpoint.
+  - at: '2026-07-19T20:20:00-04:00'
+    phase: source-of-truth-docs
+    status: in_progress
+    evidence: API spec, architecture, runbook, and roadmap migrated to fact-first Options Structure terminology, endpoint, snapshot storage, capture, and retention; OpenAPI awaits final controller codes.
+  - at: '2026-07-19T20:30:00-04:00'
+    phase: ios-feature-verification
+    status: completed-with-baseline-failure
+    evidence: All 21 new Options Analytics iOS tests pass; full iOS run passes 100 of 101 tests with one deterministic untouched AutoContractSelector expectation failure recorded as BASE-003.
+  - at: '2026-07-19T20:35:00-04:00'
+    phase: operator-documentation
+    status: in_progress
+    evidence: API README and environment example now use the new endpoint, neutral terminology, cache controls, model rate, core symbols, and capture switch.
+  - at: '2026-07-19T20:40:00-04:00'
+    phase: root-contract-audit
+    status: remediation-in-progress
+    evidence: Root review required exact public expirations, SPX AM settlement, duplicate-contract removal before all totals, complete provider comparison normalization, and zero-bound straddle acceptance; regressions assigned to component owners.
+  - at: '2026-07-19T20:50:00-04:00'
+    phase: desktop-exact-key-shadow-and-scale
+    status: completed-agent-verification-pending-root
+    evidence: Desktop reports 89 tests passing plus lint/build/format/diff; exact-only shadow capture, disabled UI isolation, full-snapshot scale, and five-input liquidity detail implemented.
+  - at: '2026-07-19T21:20:00-04:00'
+    phase: shared-fixture-client-integration
+    status: completed-agent-verification-pending-root
+    evidence: Desktop reports 97 focused tests plus lint/build passing; iOS reports 32 focused tests and strict SwiftLint passing against packages/shared-types/fixtures/options-analytics-v1.json. Full iOS remains 100/101 due untouched BASE-003.
+  - at: '2026-07-19T21:30:00-04:00'
+    phase: root-logic-audit-two
+    status: remediation-in-progress
+    evidence: Root review found viewport-based OI scaling, incomplete product-provenance relations, unreachable complete status, hourly-Greek age mismatch, Independence-Day early-close logic, nearest/exact in-flight duplication, cross-replica maintenance overlap, missing maintenance outcome counters, and Prisma delegate casts. Regressions assigned before full verification.
+  - at: '2026-07-19T21:40:00-04:00'
+    phase: root-client-and-concurrency-validation
+    status: remediation-completed-verification-in-progress
+    evidence: Shared TypeScript contract build passed; desktop passed 16 files and 118 tests; focused iOS compilation exposed and resolved a complex liquidity metric expression, then RED/GREEN tests corrected non-discriminating liquidity ranking; backend concurrency timeout traced to setImmediate under fake timers and the explicit-start synchronization test now passes 16 of 16.
+  - at: '2026-07-19T21:50:00-04:00'
+    phase: independent-spec-review
+    status: remediation-completed-verification-in-progress
+    evidence: Fresh fact-versus-scenario review found signed per-strike dealer values in the fact strike contract. Backend and canonical fixture tests failed RED, then passed GREEN after moving the values exclusively to scenarios.callPutDealerProxy.strikeGammaExposures; desktop 53 focused tests and iOS contract/validation/presentation suites passed against the breaking contract.
+  - at: '2026-07-19T22:00:00-04:00'
+    phase: partial-layer-contract-remediation
+    status: completed-focused-verification
+    evidence: Engine RED/GREEN retained valid quote, OI, volume, and liquidity fields when local IV failed while leaving all model-dependent fields null. The canonical fixture, TypeScript runtime gate, and Swift DTO/domain gate now enforce atomic modeled fields; focused iOS contract, validation, and presentation xcodebuild exits 0 with SwiftLint reporting 0 violations.
+  - at: '2026-07-19T22:05:00-04:00'
+    phase: full-contract-and-api-tests
+    status: completed
+    evidence: Shared TypeScript build exits 0, desktop passes 16 files and 120 tests, and API passes 21 suites and 267 tests after replacing a probabilistic ciphertext-as-UTF8 assertion with deterministic AES-GCM envelope and plaintext non-equality checks.
+  - at: '2026-07-19T22:10:00-04:00'
+    phase: ios-full-verification
+    status: completed-with-baseline-residual
+    evidence: The six Options Analytics suites pass 42 of 42 with SwiftLint reporting 0 violations. The full application suite executes 122 tests with all 42 feature tests and 121 total tests passing; the only failure remains the untouched AutoContractSelector expectation recorded as BASE-003.
+  - at: '2026-07-19T22:15:00-04:00'
+    phase: independent-partial-layer-review
+    status: remediation-completed
+    evidence: Fresh spec-to-engine review found that one unmodeled leg was retained, but an all-observed chain still threw and lost valid OI/liquidity. Backend RED/GREEN, desktop runtime/presentation, Swift validation/accessibility, OpenAPI, spec, flow, and logic-map remediation now preserve observed layers and label every unavailable modeled layer as null.
+  - at: '2026-07-19T22:20:00-04:00'
+    phase: maintenance-lease-review
+    status: remediation-completed
+    evidence: A new regression proved the daily maintenance lease expired after 15 minutes while compaction could still run. The lease is now acquired for the full bounded 36-hour window and released on failure; all 14 capture lifecycle tests pass.
+  - at: '2026-07-19T22:25:00-04:00'
+    phase: scoped-formatting
+    status: completed-with-baseline-residual
+    evidence: Every changed or newly added Prettier-supported file was formatted. The repository-wide check still reports untouched pre-existing files, recorded as BASE-004 rather than rewriting unrelated user work.
+  - at: '2026-07-19T22:30:00-04:00'
+    phase: fresh-typescript-and-database-verification
+    status: completed
+    evidence: Root tests pass with API 21 suites and 268 tests plus desktop 16 files and 122 tests; root lint and build pass; Prisma generate and validate pass; artifact YAML/JSON parsing, scoped Prettier, and git diff checks pass.
+  - at: '2026-07-19T22:35:00-04:00'
+    phase: fresh-ios-verification
+    status: completed-with-baseline-residual
+    evidence: The six Options Analytics suites pass 44 of 44 and strict SwiftLint finds 0 violations. The full iOS suite passes 123 of 124; xcresult confirms its sole failure is the untouched AutoContractSelector expectation in BASE-003.
+  - at: '2026-07-19T22:40:00-04:00'
+    phase: final-spec-and-code-quality-review
+    status: completed
+    evidence: Production residue scans find no old GEX endpoint/types/settings, premium-flow label, constant-IV fallback, or dealer proxy in fact rows. Negative tests intentionally retain the old strings. Independent standard-library pricing vectors and the published NYSE calendar match the implementation; no P0 or P1 remains open.
+findings:
+  - id: PARTIAL-002
+    severity: P1
+    description: The engine still threw when every quote-valid contract lacked a solvable local IV, so an all-observed snapshot could not return valid OI, volume, sizes, marked-OI value, or liquidity.
+    file: apps/api/src/options-analytics/options-analytics.engine.ts
+    reproduction_steps: Provide a synchronized two-sided call/put pair whose quote mids support a forward but whose prices have no admissible IV, then compute the snapshot.
+    impact: Valid observed layers become unavailable solely because every modeled layer is unavailable; zero-valued modeled totals would also fabricate data if used as a workaround.
+    suggested_fix: Permit zero modeled legs, make modeled structure totals nullable per side, return a null scenario and range, retain observed strikes and max-OI, and enforce the contract in both clients and source-of-truth docs.
+    blocker: true
+    remediation_status: resolved
+    remediation_evidence: Engine RED threw for zero modeled contracts; GREEN passes 25 tests and returns null modeled totals with observed layers. Desktop validation/presentation passes 53 tests, focused iOS validation/presentation exits 0 with 0 SwiftLint violations, and source-of-truth docs describe the same contract.
+  - id: TEST-002
+    severity: P2
+    description: The credential e2e test decoded random AES-GCM bytes as UTF-8 and rejected any ciphertext that happened to contain the two-character strings used as test secrets.
+    file: apps/api/test/app.e2e-spec.ts
+    reproduction_steps: Run the complete API suite until random ciphertext contains the byte sequence for ak or sk.
+    impact: A secure credential write can fail the verification gate nondeterministically even though no plaintext is stored or returned.
+    suggested_fix: Assert the exact GCM envelope size and binary non-equality with the corresponding plaintext instead of searching arbitrary ciphertext as text.
+    blocker: false
+    remediation_status: resolved
+    remediation_evidence: The initial full API run failed only this assertion; the unchanged production path passes a fresh full run of 21 suites and 267 tests after the deterministic test correction.
+  - id: TEST-003
+    severity: P2
+    description: One engine golden-vector test still performed arithmetic on modeled structure totals after the contract correctly made those totals nullable for observed-only snapshots.
+    file: apps/api/src/options-analytics/options-analytics.engine.spec.ts
+    reproduction_steps: Run the full API suite under strict TypeScript after widening the modeled structure fields to number or null.
+    impact: The test suite failed to compile even though the fixture intentionally supplies modelable call and put legs.
+    suggested_fix: Prove all four fixture totals are non-null at the test boundary before performing the aggregation assertions.
+    blocker: false
+    remediation_status: resolved
+    remediation_evidence: The expected strict compile failure was followed by a fresh passing API run of 21 suites and 268 tests after adding an explicit fixture invariant guard.
+  - id: PARTIAL-001
+    severity: P1
+    description: The engine initially discarded an otherwise valid contract when local IV could not be solved, removing usable OI, volume, quote-size, marked-OI-value, and liquidity data together with unavailable modeled Greeks.
+    file: apps/api/src/options-analytics/options-analytics.engine.ts
+    reproduction_steps: Supply a valid two-sided quote and observed fields whose midpoint has no admissible local IV, then inspect the strike layer.
+    impact: One invalid modeled layer unnecessarily reduced every observed layer and contradicted the quality contract that valid layers remain usable.
+    suggested_fix: Retain an observed-only strike leg, make all model-dependent fields atomically nullable, compute modeled structure from modeled legs only, and enforce the same contract in OpenAPI, fixtures, TypeScript, and Swift.
+    blocker: true
+    remediation_status: resolved
+    remediation_evidence: Targeted engine suite passed 24 tests after an expected RED; desktop full suite passed 120 tests and build; focused iOS contract, validation, and presentation xcodebuild exits 0 with 0 SwiftLint violations.
+  - id: CONTRACT-001
+    severity: P1
+    description: The initial canonical strike row exposed callPutDealerProxyExposure beside observed call/put/gross facts even though signed dealer positioning belongs only to an explicitly named scenario.
+    file: packages/shared-types/src/index.ts
+    reproduction_steps: Inspect OptionsAnalyticsStrike or the canonical fixture and find the signed call-minus-put field outside scenarios.callPutDealerProxy.
+    impact: A consumer can treat a positioning assumption as part of the observed strike structure, contradicting the approved fact-first contract.
+    suggested_fix: Remove the field with no shim and place sorted per-strike scenario values under scenarios.callPutDealerProxy.strikeGammaExposures across backend, OpenAPI, desktop, iOS, and fixtures.
+    blocker: true
+    remediation_status: resolved
+    remediation_evidence: Backend RED failed on the legacy fact field and missing scenario array; GREEN passed 26 tests. Desktop focused contract/presentation tests passed 53 of 53 and iOS contract/validation/presentation xcodebuild passed with zero SwiftLint violations.
+  - id: IOS-005
+    severity: P1
+    description: The first five-input iOS liquidity ranking allowed metrics with identical values at every strike to saturate the importance score, hiding a distinct high-volume or high-slippage strike.
+    file: apps/ios/0dteTrader/Features/Chart/OptionsAnalytics/OptionsAnalyticsPresentation.swift
+    reproduction_steps: Enable gamma and liquidity with two high-gamma strikes and a low-gamma high-volume strike while quote size and OI are equal across all three.
+    impact: A decision-relevant liquidity or slippage outlier can be omitted from the bounded right-edge profile.
+    suggested_fix: Normalize each liquidity input over its full-snapshot observed range, give constant metrics zero ranking weight, and select the strongest enabled-layer score.
+    blocker: true
+    remediation_status: resolved
+    remediation_evidence: Focused RED reproduced selection of strikes 580 and 581 instead of 580 and 583; GREEN passed both mixed-layer and five-independent-metric xcodebuild cases with SwiftLint reporting zero violations.
+  - id: TEST-001
+    severity: P2
+    description: The nearest-plus-exact backend concurrency test waited on setImmediate while Jest fake timers were active, causing a deterministic 30-second timeout unrelated to the service promise graph.
+    file: apps/api/src/options-analytics/options-analytics.service.spec.ts
+    reproduction_steps: Run the full API Jest suite with fake timers enabled in OptionsAnalyticsService exact cache.
+    impact: The full backend gate falsely reports a deadlock and delays useful concurrency feedback.
+    suggested_fix: Synchronize on an explicit chain-start promise before releasing the provider gate.
+    blocker: false
+    remediation_status: resolved
+    remediation_evidence: Targeted service suite passes 16 of 16 in 0.747 seconds, including exact and nearest-plus-exact in-flight deduplication.
+  - id: DESKTOP-005
+    severity: P1
+    description: Desktop marked-OI bar normalization used only currently visible strikes, so bar widths changed when the user panned or zoomed.
+    file: apps/desktop/src/features/chart/optionsAnalytics/OptionsAnalyticsOverlay.tsx
+    reproduction_steps: Enable marked OI, change the visible price range so the maximum-OI strike leaves the pane, and compare the same remaining strike width.
+    impact: The visual scale is unstable and can imply an OI-value change when only the viewport changed.
+    suggested_fix: Normalize marked OI against all snapshot strikes while selecting rows from pane-visible candidates.
+    blocker: true
+    remediation_status: resolved
+    remediation_evidence: Full desktop Vitest passed 16 files and 118 tests, including full-snapshot presentation and overlay geometry cases.
+  - id: CLIENT-002
+    severity: P1
+    description: Initial client runtime gates validated root and settlement fields independently but did not reject impossible symbol/root/settlement combinations.
+    file: apps/desktop/src/features/chart/optionsAnalytics/optionsAnalyticsValidation.ts
+    reproduction_steps: Decode a SPY snapshot with root QQQ or an SPXW snapshot labeled AM.
+    impact: Malformed product provenance can be rendered as credible analytics on one or both clients.
+    suggested_fix: Enforce same-root PM settlement for ETFs and SPX-or-SPXW with the matching AM/PM style for SPX requests in TypeScript and Swift.
+    blocker: true
+    remediation_status: resolved
+    remediation_evidence: Desktop validation tests and all ten focused iOS validation tests reject impossible symbol/root/settlement combinations while accepting SPX/SPXW product rules.
+  - id: ENGINE-005
+    severity: P1
+    description: Quality status initially required zero warnings, but every snapshot intentionally discloses the configured-rate and inferred-OI assumptions, making complete status unreachable.
+    file: apps/api/src/options-analytics/options-analytics.engine.ts
+    reproduction_steps: Model a full-coverage valid chain and inspect quality.status.
+    impact: Quality status conflates transparent informational assumptions with missing calculation coverage and cannot represent a complete snapshot.
+    suggested_fix: Derive complete/partial from required data and layer coverage while keeping informational warnings visible.
+    blocker: true
+    remediation_status: resolved
+    remediation_evidence: A full-coverage modeled fixture reaches complete while informational configured-rate and OI-provenance warnings remain visible; the fresh API suite passes all 268 tests.
+  - id: PROVIDER-002
+    severity: P1
+    description: Provider Greek comparison values initially used the 30-minute quote-age cutoff even though Tradier publishes those diagnostics on an hourly cadence.
+    file: apps/api/src/options-analytics/tradier.client.ts
+    reproduction_steps: Normalize a valid 45-minute-old provider Greek record alongside synchronized current quote mids.
+    impact: Expected hourly comparison evidence is discarded even though it is never used to price the local model.
+    suggested_fix: Use a separate documented diagnostic age policy and retain its exact timestamp without affecting local-model freshness.
+    blocker: true
+    remediation_status: resolved
+    remediation_evidence: Provider comparison Greeks use a separate two-hour diagnostic cutoff and retain a valid 45-minute-old timestamp; local quote-derived modeling is unchanged and all provider tests pass.
+  - id: CACHE-001
+    severity: P1
+    description: Cache eligibility initially compared only whether source and current times were in the open session, treating same-day premarket and postmarket as equivalent.
+    file: apps/api/src/options-analytics/options-analytics.service.ts
+    reproduction_steps: With a long cache TTL, store a premarket snapshot and request it after the regular close.
+    impact: A cached snapshot could cross a major session boundary while still appearing eligible.
+    suggested_fix: Require an exact New York session phase match and settlement eligibility.
+    blocker: true
+    remediation_status: resolved
+    remediation_evidence: Cache eligibility requires the same New York date, exact session phase, and pre-settlement state; the service suite covers premarket-to-postmarket and expiration boundaries and passes in the full API run.
+  - id: CALENDAR-002
+    severity: P1
+    description: An intermediate remediation incorrectly inferred that July 2 was an early close whenever July 3 was the observed Independence Day closure; the published NYSE schedule does not make July 2, 2026 or July 2, 2027 an early close.
+    file: apps/api/src/broker/expiration-calendar.ts
+    reproduction_steps: Resolve PM settlement for 2026-07-02 or 2027-07-02 and compare it with the published NYSE holiday calendar.
+    impact: The mistaken rule would shorten time to expiry by three hours and distort IV, Greeks, exposure, and session capture on normal full trading days.
+    suggested_fix: 'Encode published early-close dates: July 3 only when it is itself a trading day, the day after Thanksgiving, and the listed Christmas Eve sessions; cover negative observance cases.'
+    blocker: true
+    remediation_status: resolved
+    remediation_evidence: Calendar tests keep 2026-07-02 and 2027-07-02 at the regular close and cover true July 3 early closes; this matches the published NYSE 2026-2028 holiday notes and the full API suite passes.
+  - id: SERVICE-002
+    severity: P1
+    description: Internal nearest-expiration capture and an exact interactive request used different in-flight keys even when they resolved to the same symbol/expiration.
+    file: apps/api/src/options-analytics/options-analytics.service.ts
+    reproduction_steps: Start getSnapshotResult(SPY) and getSnapshotResult(SPY, exactDate) concurrently and count quote/chain calls.
+    impact: Provider traffic can be duplicated at the busiest minute boundary and consume avoidable rate-limit budget.
+    suggested_fix: Resolve internal nearest selection into the same exact-key in-flight calculation used by public requests.
+    blocker: true
+    remediation_status: resolved
+    remediation_evidence: Targeted service suite passes exact and nearest-plus-exact concurrency with one expiration, quote, and chain request.
+  - id: CAPTURE-004
+    severity: P1
+    description: The 55-second minute lease did not cover daily maintenance, allowing another replica to start overlapping maintenance after the lease expired.
+    file: apps/api/src/options-analytics/options-analytics.capture.ts
+    reproduction_steps: Run maintenance longer than one minute on one instance and trigger the next minute on a second instance.
+    impact: Compaction and cleanup can contend across replicas despite local overlap guards.
+    suggested_fix: Use a separate durable maintenance lease or renew a sufficiently bounded lease around maintenance without delaying core capture.
+    blocker: true
+    remediation_status: resolved
+    remediation_evidence: The added lease-duration assertion failed with a 15-minute expiry and passed with a 36-hour upfront lease; all 14 capture tests pass, including concurrent next-minute core capture and failure retry.
+  - id: OBS-001
+    severity: P1
+    description: Capture metrics lacked explicit maintenance success and failure outcomes despite the required observable cleanup and compaction lifecycle.
+    file: apps/api/src/options-analytics/options-analytics.capture.ts
+    reproduction_steps: Inspect metrics after a successful maintenance run and after partial or thrown failures.
+    impact: Operators cannot alert on maintenance outcome independently of generic store failures and row counters.
+    suggested_fix: Add tested maintenance success/failure counters while retaining structured event logs.
+    blocker: true
+    remediation_status: resolved
+    remediation_evidence: Tested maintenanceSuccess and maintenanceFailure counters accompany structured complete, incomplete, and failed lifecycle events; all 14 capture tests pass.
+  - id: TYPING-001
+    severity: P1
+    description: Capture accessed new Prisma delegates through double assertions to handwritten interfaces instead of generated model types.
+    file: apps/api/src/options-analytics/options-analytics.capture.ts
+    reproduction_steps: Inspect delegate and leaseDelegate getters after schema generation.
+    impact: Schema/delegate drift can bypass strict TypeScript checks in the new persistence path.
+    suggested_fix: Generate Prisma Client and use its delegates and JSON input types directly.
+    blocker: true
+    remediation_status: resolved
+    remediation_evidence: Capture now imports Prisma JSON/create types and OptionsAnalyticsSnapshotRecord from the generated client; Prisma generation/validation and strict API build pass without handwritten delegate casts.
+  - id: SPX-001
+    severity: P0
+    description: A Tradier SPX chain may contain standard AM SPX and PM SPXW contracts for the same expiration, while the initial service selected settlement from the first contract and modeled the entire mixed chain.
+    file: apps/api/src/options-analytics/options-analytics.service.ts
+    reproduction_steps: Return same-expiration SPX and SPXW contracts with SPX first, then inspect settlement time and aggregate exposure.
+    impact: One family is priced with the wrong remaining life and overlapping products are double-counted; the snapshot does not identify which product it represents.
+    suggested_fix: Select one settlement family deterministically, prefer SPXW for the 0DTE view, reject mixed roots in the engine, and expose root plus AM/PM product metadata across the contract and clients.
+    blocker: true
+    remediation_status: resolved
+    remediation_evidence: The service deterministically selects SPXW when present, filters the alternate family before modeling, and exposes root plus settlement style; engine and both client validators reject mixed or impossible product combinations. Full backend and client suites pass.
+  - id: CLIENT-001
+    severity: P1
+    description: Initial optional-layer strike selection prioritized gamma whenever gamma was enabled, so important low-gamma OI or liquidity nodes could disappear; iOS also selected global top rows before removing offscreen strikes.
+    file: apps/desktop/src/features/chart/optionsAnalytics/optionsAnalyticsPresentation.ts
+    reproduction_steps: Enable gamma plus marked OI, provide a low-gamma high-OI visible strike, and zoom iOS so global top-gamma rows are offscreen.
+    impact: Enabled independent layers can omit their most decision-relevant visible nodes.
+    suggested_fix: Rank candidates by normalized scores from every enabled layer, filter visible candidates before the limit, and keep scale normalization against the full snapshot.
+    blocker: true
+    remediation_status: resolved
+    remediation_evidence: Both clients normalize every enabled layer over the full snapshot, filter pane visibility before limiting rows, and retain independent OI/liquidity outliers; desktop passes 122 tests and the six iOS suites pass 44 tests.
+  - id: API-001
+    severity: P1
+    description: Initial replacement endpoint and both clients still allowed a missing expiration and silently resolved the nearest listing.
+    file: apps/api/src/options-analytics/options-analytics.controller.ts
+    reproduction_steps: Call the endpoint with only symbol or enable the client before a chain expiration is selected.
+    impact: The public contract is not exact-keyed and can return a date the caller did not request.
+    suggested_fix: Require expiration at the public boundary; retain nearest resolution only inside scheduled core capture; make clients wait for a selected date.
+    blocker: true
+    remediation_status: resolved
+    remediation_evidence: The controller DTO, OpenAPI, TypeScript client, and Swift client require exact expiration; only internal scheduled core capture may resolve nearest. Endpoint and cancellation tests pass across all clients.
+  - id: CALENDAR-001
+    severity: P1
+    description: Initial product calendar rejected standard AM-settled SPX instead of modeling its 09:30 America/New_York settlement.
+    file: apps/api/src/broker/expiration-calendar.ts
+    reproduction_steps: Request a standard SPX root for a monthly expiration.
+    impact: The approved AM/PM product handling and exact SPX support are incomplete.
+    suggested_fix: Add DST-aware AM settlement and post-settlement tests while preserving SPXW PM and early-close rules.
+    blocker: true
+    remediation_status: resolved
+    remediation_evidence: Standard SPX resolves to DST-aware 09:30 New York AM settlement while SPXW and ETF roots use PM rules; post-settlement and EST/EDT cases pass in the full API suite.
+  - id: ENGINE-004
+    severity: P1
+    description: Duplicate same-side contracts were removed only from strike rows but remained in the modeled set used for scenario totals and coverage.
+    file: apps/api/src/options-analytics/options-analytics.engine.ts
+    reproduction_steps: Supply two calls at the same strike and inspect fact rows versus proxy scenario totals.
+    impact: One response can contain internally inconsistent and double-counted exposure.
+    suggested_fix: Deduplicate deterministically before every aggregation and scenario evaluation, with an explicit warning and coverage reduction.
+    blocker: true
+    remediation_status: resolved
+    remediation_evidence: Duplicate strike/side contracts are ranked and removed before forward pairs, IV, facts, scenarios, roots, and coverage; deterministic duplicate tests pass.
+  - id: PROVIDER-001
+    severity: P1
+    description: Initial normalized option inputs omitted the provider last/trade timestamp and finite provider Greek values, retaining only the Greek timestamp.
+    file: apps/api/src/options-analytics/tradier.client.ts
+    reproduction_steps: Inspect ValidatedAnalyticsContract and a stored normalized input snapshot.
+    impact: Required point-in-time source provenance and independent Greek comparison evidence are lost.
+    suggested_fix: Runtime-validate and persist nullable last/trade data and timestamped provider Greek values without treating them as local live Greeks.
+    blocker: true
+    remediation_status: resolved
+    remediation_evidence: Normalized and persisted inputs retain nullable timestamped provider last, delta, gamma, and IV comparison values; engine tests prove changing those diagnostics cannot alter local analytics.
+  - id: IOS-004
+    severity: P1
+    description: Swift validation rejected a valid zero-clamped straddle lower breakeven emitted by the engine.
+    file: apps/ios/0dteTrader/Core/Models/OptionsAnalyticsDTOs.swift
+    reproduction_steps: Decode a valid snapshot whose ATM strike minus straddle mark is clamped to zero.
+    impact: A valid partial or deep-premium snapshot is discarded on iOS but accepted on desktop.
+    suggested_fix: Accept a nonnegative lower breakeven and add a cross-client boundary fixture.
+    blocker: true
+    remediation_status: resolved
+    remediation_evidence: Swift accepts nonnegative clamped range and straddle lower bounds while retaining ordering and finite-value checks; all 11 iOS validation tests pass.
+  - id: DESKTOP-004
+    severity: P1
+    description: Runtime validation rejected valid zero lower range/breakeven bounds while allowing invalid negative fact gamma, zero IV, and concentration above one.
+    file: apps/desktop/src/features/chart/optionsAnalytics/optionsAnalyticsValidation.ts
+    reproduction_steps: Validate a backend snapshot with straddleLower zero or negative call gamma and concentration greater than one.
+    impact: Valid deep-premium ranges can be discarded while malformed exposure invariants can reach the overlay.
+    suggested_fix: Align numeric bounds exactly with the shared/OpenAPI contract and add negative/zero boundary tests.
+    blocker: true
+    remediation_status: resolved
+    remediation_evidence: Desktop accepts zero lower bounds and rejects negative fact gamma, zero IV, invalid concentration, inconsistent nullable totals, and malformed ranges; all 43 runtime-validation tests pass.
+  - id: CAPTURE-001
+    severity: P0
+    description: Initial compaction deleted minute source rows even when compact-row creation failed, because createRecord returned false for both duplicates and database errors.
+    file: apps/api/src/options-analytics/options-analytics.capture.ts
+    reproduction_steps: Make compact-row create throw a non-P2002 error and run maintain on old minute rows.
+    impact: Historical normalized inputs and outputs can be permanently lost without a compact replacement.
+    suggested_fix: Add a failing data-loss regression; only delete a complete five-minute source group after confirmed create/upsert or confirmed existing compact row, preferably in a transaction.
+    blocker: true
+    remediation_status: resolved
+    remediation_evidence: Compaction distinguishes duplicate from failed writes and deletes a minute source only after a compact record is created or already exists; the data-loss regression passes in the 14-test capture suite.
+  - id: CAPTURE-002
+    severity: P1
+    description: Initial 1000-row pagination could split a five-minute group, persist an early representative, then discard later or higher-quality rows because the unique key already existed.
+    file: apps/api/src/options-analytics/options-analytics.capture.ts
+    reproduction_steps: Create more than 1000 minute rows with a five-minute group crossing the page boundary.
+    impact: Compacted history can preserve the wrong snapshot and silently discard the best record.
+    suggested_fix: Process complete buckets and select complete status, then coverage, then latest observation deterministically.
+    blocker: true
+    remediation_status: resolved
+    remediation_evidence: Pagination extends through the final five-minute boundary and selects complete status, then highest coverage, then latest observation; the 1000-row boundary and representative tests pass.
+  - id: SERVICE-001
+    severity: P1
+    description: Initial provider still priced the underlying from last only, stale fallback ignored settlement/session boundaries, and expiration lists were fetched on every refresh.
+    file: apps/api/src/options-analytics/tradier.client.ts
+    reproduction_steps: Supply a valid underlying NBBO differing from last, request just after settlement, or poll an exact key repeatedly past fresh TTL.
+    impact: Spot can be stale, expired exposure can be served, and provider calls are unnecessarily multiplied.
+    suggested_fix: Prefer fresh NBBO midpoint with explicit last fallback warning; enforce settlement/session on stale cache; add bounded expiration-list caching.
+    blocker: true
+    remediation_status: resolved
+    remediation_evidence: Tradier normalization prefers synchronized NBBO, labels last-trade fallback, and the bounded service cache enforces exact keys, expiration-list TTL, session phase, settlement, LRU, and in-flight deduplication; full provider/service suites pass.
+  - id: CAPTURE-003
+    severity: P1
+    description: Initial scheduler prevented overlap only inside one process; multiple API replicas could all spend provider rate budget before database uniqueness deduplicated writes.
+    file: apps/api/src/options-analytics/options-analytics.capture.ts
+    reproduction_steps: Start two capture-service instances against the same database and trigger the same minute.
+    impact: Core capture can multiply provider traffic and hit a shared Tradier token limit.
+    suggested_fix: Acquire a database-backed lease/advisory lock for refresh and maintenance.
+    blocker: true
+    remediation_status: resolved
+    remediation_evidence: Database-backed minute and maintenance leases prevent cross-replica duplicate provider work; two-instance concurrency, lease expiry, and retry tests pass.
+  - id: IOS-001
+    severity: P1
+    description: Initial iOS polling task acquired strong self before network and sleep awaits, creating a task ownership cycle and making deinit cancellation ineffective.
+    file: apps/ios/0dteTrader/Features/Chart/ChartViewModel.swift
+    reproduction_steps: Inspect the options analytics Task loop and deinitialize a view model while its loader is suspended.
+    impact: The view model and request can outlive the screen, and obsolete work may continue unnecessarily.
+    suggested_fix: Capture sendable loader/key/interval without self and reacquire weak self only around actor state updates.
+    blocker: true
+    remediation_status: resolved
+    remediation_evidence: The polling task captures the loader and request key without retaining the view model across awaits, and the in-flight deallocation/cancellation tests pass.
+  - id: IOS-002
+    severity: P1
+    description: Initial Swift DTO decoding used raw strings and synthesized Decodable without validating the unit, closed enums, finite values, coverage ratio, sorted unique strikes, or request key.
+    file: apps/ios/0dteTrader/Core/Models/OptionsAnalyticsDTOs.swift
+    reproduction_steps: Decode a malformed analytics payload containing NaN-like invalid domain values, unsupported status, or duplicate strikes.
+    impact: Invalid server data can reach chart coordinate and presentation calculations.
+    suggested_fix: Add a throwing validated domain boundary and negative contract tests; make non-null wire fields non-optional.
+    blocker: true
+    remediation_status: resolved
+    remediation_evidence: Swift validates closed enums, unit, finite values, coverage, exact request key, sorted unique strikes, product relations, and nullable-layer invariants; contract and validation suites pass.
+  - id: IOS-003
+    severity: P1
+    description: Initial iOS failure path retained an old snapshot indefinitely and the accessibility summary omitted required range, walls, roots, cache, and OI provenance.
+    file: apps/ios/0dteTrader/Features/Chart/ChartViewModel.swift
+    reproduction_steps: Return one valid snapshot and then repeated failures past two refresh windows or settlement.
+    impact: Stale data can stay visible and assistive-technology users receive incomplete decision context.
+    suggested_fix: Add bounded retention/expired state and complete accessibility summary tests.
+    blocker: true
+    remediation_status: resolved
+    remediation_evidence: iOS evicts retained snapshots after two refresh windows or settlement and its screen-reader summary includes range, walls, roots, cache/source quality, OI provenance, warnings, and assumptions; polling and presentation suites pass.
+  - id: DESKTOP-001
+    severity: P1
+    description: Initial desktop optional marked-OI and liquidity rendering was nested under showGammaProfile, so enabled layers disappeared when gamma was disabled; marked OI also lost call/put composition.
+    file: apps/desktop/src/features/chart/optionsAnalytics/OptionsAnalyticsOverlay.tsx
+    reproduction_steps: Enable marked OI or liquidity and disable gamma profile.
+    impact: Settings do not control independent layers as promised and the OI layer hides composition.
+    suggested_fix: Add failing independent-layer tests and render each metric independently with call/put direction.
+    blocker: true
+    remediation_status: resolved
+    remediation_evidence: Gamma, marked-OI value, and liquidity render independently; marked-OI bars retain explicit call/put composition and dedicated tests pass in the 122-test desktop suite.
+  - id: DESKTOP-002
+    severity: P2
+    description: Initial rail width exceeded the approved 56 to 112 pixel clamp and lacked C/P text headers; freshness age ignored time spent in cache or retained state.
+    file: apps/desktop/src/features/chart/optionsAnalytics/OptionsAnalyticsOverlay.tsx
+    reproduction_steps: Render at 430px width or inspect presentation age calculation.
+    impact: The rail can obscure too much chart area and quality/direction relies too heavily on color or calculation-time age.
+    suggested_fix: Test a pure clamped width helper, add C/P headers, and calculate current source age with deterministic injected time.
+    blocker: false
+    remediation_status: resolved
+    remediation_evidence: The right rail clamps to 56-112 pixels, includes C/P labels, and computes source age from an injected current time so cache/retention time is visible; geometry and presentation tests pass.
+  - id: DESKTOP-003
+    severity: P1
+    description: Initial desktop API accepted the JSON response through a TypeScript assertion without runtime domain validation.
+    file: apps/desktop/src/core/api/ApiClient.ts
+    reproduction_steps: Return a non-finite spot, invalid coverage ratio, duplicate strikes, or wrong exposure unit from the server.
+    impact: Malformed analytics can reach canvas math and mislead or break the chart.
+    suggested_fix: Add a strict runtime validator at the API/poller boundary and tests for malformed and mismatched snapshots.
+    blocker: true
+    remediation_status: resolved
+    remediation_evidence: ApiClient validates the complete runtime domain before returning a typed snapshot, including exact key, finite values, enums, sorted strikes, and nullable-layer relations; 43 negative/positive validation tests pass.
+  - id: ENGINE-001
+    severity: P1
+    description: Initial expected-range implementation used an arithmetic forward plus/minus move instead of the approved lognormal forward formula.
+    file: apps/api/src/options-analytics/options-analytics.engine.ts
+    reproduction_steps: Inspect impliedRange lower and upper calculation after the first engine GREEN batch.
+    impact: Range bounds drift from the documented model, especially as volatility or time increases.
+    suggested_fix: Add a failing golden-vector test and use F times exp(-w/2 plus or minus sqrt(w)).
+    blocker: true
+    remediation_status: resolved
+    remediation_evidence: Expected range uses forward times exp of minus half variance plus or minus one root variance; golden tests and an independent Python standard-library reference agree.
+  - id: ENGINE-002
+    severity: P1
+    description: Initial liquidity roundTripCost multiplied spread by total open interest instead of reporting per-contract dollar round trip.
+    file: apps/api/src/options-analytics/options-analytics.engine.ts
+    reproduction_steps: Inspect toLeg roundTripCost.
+    impact: Liquidity cost is inflated by OI and becomes a mislabeled notional rather than a tradable slippage measure.
+    suggested_fix: Test and calculate spread times contract multiplier only.
+    blocker: true
+    remediation_status: resolved
+    remediation_evidence: Dollar round trip is spread times one contract multiplier and is independent of open interest; multiplier and liquidity golden tests pass.
+  - id: ENGINE-003
+    severity: P1
+    description: Initial engine accepted zero-bid quotes, hardcoded a zero rate, linearly approximated roots, and did not build the approved interpolated total-variance surface.
+    file: apps/api/src/options-analytics/options-analytics.engine.ts
+    reproduction_steps: Inspect midPrice, discountFactor, findRootsOnGrid, and per-contract IV loop.
+    impact: Sparse or illiquid chains can distort IV, range, Greeks, and roots, while financing is omitted.
+    suggested_fix: Add RED cases for two-sided quality, configured discounting, bisection roots, and supported interpolation; keep provider Greeks diagnostic only.
+    blocker: true
+    remediation_status: resolved
+    remediation_evidence: The engine rejects zero-bid/crossed/wide markets upstream, applies the configured finite rate, solves IV and roots by bisection, and reprices every contract with its own fixed local IV through the same Black-forward kernel. The V1 spec now explicitly documents this discrete sticky-strike smile and does not claim unsupported continuous interpolation.
+  - id: DESIGN-001
+    severity: P1
+    description: The initial artifact draft placed gamma roots in fact-first structure even though a zero crossing exists only after selecting a signed call-minus-put positioning proxy.
+    file: docs/specs/2026-07-19-options-analytics-spec.md
+    reproduction_steps: Inspect the structure and scenario contract descriptions.
+    impact: Users could interpret a modeled dealer-proxy root as an observed market fact.
+    suggested_fix: Keep independent walls and gross concentration in structure; move all roots and signed gamma into scenarios.callPutDealerProxy.
+    blocker: false
+    remediation_status: resolved
+    remediation_evidence: Spec corrected before application implementation and all three implementation agents received the fact-first contract.
+  - id: BASE-001
+    severity: P2
+    description: Clean-branch e2e stub does not cover newly committed 30m and 4h candle intervals.
+    file: apps/api/test/stub-broker.gateway.ts
+    reproduction_steps: Build shared types and run npm run test.
+    impact: Full baseline API command exits nonzero although 17 suites run successfully.
+    suggested_fix: Add typed 30m and 4h millisecond entries and a regression assertion.
+    blocker: false
+    remediation_status: resolved
+    remediation_evidence: The typed test broker now covers 30m and 4h intervals; root tests pass with API 21 suites and 268 tests, including e2e.
+  - id: BASE-002
+    severity: P2
+    description: npm install reports 19 dependency vulnerabilities including one critical.
+    file: package-lock.json
+    reproduction_steps: Run npm install or npm audit.
+    impact: Supply-chain risk exists independently of this feature.
+    suggested_fix: Run a scoped audit and upgrade nonbreaking vulnerable dependencies in a separate authorized change unless a direct dependency is touched here.
+    blocker: false
+    remediation_status: residual-risk
+  - id: BASE-003
+    severity: P2
+    description: Full untouched iOS suite has one deterministic AutoContractSelector expectation mismatch for price 502.13 and strikes 510 through 515; implementation chooses 510 while the test expects 511.
+    file: apps/ios/0dteTraderTests/AutoContractSelectorTests.swift
+    reproduction_steps: Run the full iOS test suite or the isolated failing test at line 102.
+    impact: The complete iOS command exits nonzero, although all 44 Options Analytics tests and 79 other tests pass.
+    suggested_fix: Resolve the selector product rule and expectation in a separate scoped change because neither file is touched by this feature.
+    blocker: false
+    remediation_status: residual-risk
+  - id: BASE-004
+    severity: P2
+    description: The repository-wide Prettier check reports formatting drift in files untouched by the Options Analytics implementation.
+    file: repository-wide formatting baseline
+    reproduction_steps: Run npm run format:check and compare the warning paths with the session change set.
+    impact: The root formatting command exits nonzero even when every file changed by this feature passes a scoped Prettier check.
+    suggested_fix: Format the unrelated baseline files in a separate authorized cleanup so their broad mechanical diff can be reviewed independently.
+    blocker: false
+    remediation_status: residual-risk
+evidence_log:
+  - { id: E1, command: git status --short, result: original dirty main identified before isolation }
+  - { id: E2, command: npm run build --workspace @0dtetrader/shared-types, result: exit 0 }
+  - {
+      id: E3,
+      command: npm run test,
+      result: API 17 suites 178 tests pass plus one e2e compile failure; desktop 41 tests pass,
+    }
+  - {
+      id: E4,
+      command: ruby YAML.load_file over four concrete YAML artifacts,
+      result: all parsed successfully,
+    }
+  - {
+      id: E5,
+      command: npm test --workspace @0dtetrader/api -- --runInBand src/broker/expiration-calendar.spec.ts src/options-analytics/options-analytics.contract.spec.ts,
+      result: RED 5 expected failures then GREEN 16 tests passed,
+    }
+  - {
+      id: E6,
+      command: targeted xcodebuild OptionsAnalyticsContractTests OptionsAnalyticsSettingsTests OptionsAnalyticsPresentationTests,
+      result: RED missing symbols then GREEN 8 tests passed,
+    }
+  - {
+      id: E7,
+      command: targeted desktop Vitest for settings API poller presentation and overlay,
+      result: RED 14 expected failures then GREEN 5 files and 15 tests passed,
+    }
+  - {
+      id: E8,
+      command: targeted API calendar contract engine Jest plus API build and lint,
+      result: GREEN 3 suites 25 tests; build and lint exit 0,
+    }
+  - {
+      id: E9,
+      command: xcodebuild targeted Options Analytics suites then full iOS suite,
+      result: 21 new tests pass; full suite 100 of 101 pass with untouched BASE-003,
+    }
+  - { id: E10, command: npm run build --workspace @0dtetrader/shared-types, result: exit 0 }
+  - {
+      id: E11,
+      command: npm run test --workspace @0dtetrader/desktop,
+      result: 16 files and 118 tests passed,
+    }
+  - {
+      id: E12,
+      command: focused xcodebuild OptionsAnalyticsPresentationTests liquidity cases,
+      result: 2 tests passed and SwiftLint found 0 violations,
+    }
+  - {
+      id: E13,
+      command: npm test --workspace @0dtetrader/api -- --runInBand apps/api/src/options-analytics/options-analytics.service.spec.ts,
+      result: 16 tests passed including nearest-plus-exact in-flight deduplication,
+    }
+  - {
+      id: E14,
+      command: targeted backend dealer-scenario RED then GREEN,
+      result: 2 expected failures followed by 26 passing engine and contract tests,
+    }
+  - {
+      id: E15,
+      command: targeted desktop validation presentation overlay after scenario contract cleanup,
+      result: 3 files and 53 tests passed,
+    }
+  - {
+      id: E16,
+      command: targeted iOS contract validation presentation after scenario contract cleanup,
+      result: xcodebuild exit 0 and SwiftLint 0 violations,
+    }
+  - {
+      id: E17,
+      command: focused engine partial-layer RED/GREEN plus desktop and iOS contract validation presentation verification,
+      result: backend 24 tests passed; desktop 120 tests and build passed; focused iOS xcodebuild exit 0 with 0 SwiftLint violations,
+    }
+  - {
+      id: E18,
+      command: shared build plus full API and desktop tests,
+      result: shared build exit 0; API 21 suites and 267 tests passed; desktop 16 files and 120 tests passed,
+    }
+  - {
+      id: E19,
+      command: focused six-suite and full iOS xcodebuild,
+      result: Options Analytics 42 of 42 pass with 0 SwiftLint violations; full suite 121 of 122 passes with only BASE-003,
+    }
+  - {
+      id: E20,
+      command: all-observed engine and paired-client RED/GREEN checks,
+      result: engine 25 tests,
+      desktop validation/presentation 53 tests,
+      and focused iOS validation/presentation pass with 0 SwiftLint violations,
+    }
+  - {
+      id: E21,
+      command: maintenance lease-duration RED/GREEN plus capture suite,
+      result: expected 15-minute lease failure then 14 of 14 capture tests passed with a 36-hour upfront lease,
+    }
+  - {
+      id: E22,
+      command: npm run test plus npm run lint plus npm run build,
+      result: root test/lint/build exit 0; API passes 21 suites and 268 tests; desktop passes 16 files and 122 tests,
+    }
+  - {
+      id: E23,
+      command: Prisma generate and validate with a validation database URL,
+      result: generated client succeeds and the options analytics schema plus migration contract validate,
+    }
+  - {
+      id: E24,
+      command: focused six-suite and full iOS xcodebuild plus strict SwiftLint,
+      result: Options Analytics passes 44 of 44 and SwiftLint has 0 violations; full suite passes 123 of 124 with only BASE-003,
+    }
+  - {
+      id: E25,
+      command: scoped changed-file Prettier check plus YAML/JSON parse plus git diff --check,
+      result: all session files format and parse cleanly with no whitespace errors; repository-wide unrelated Prettier debt remains BASE-004,
+    }
+  - {
+      id: E26,
+      command: production residue scans for old GEX endpoint/types/settings premium heat silent IV and fact-row dealer proxy,
+      result: no production residues; only deliberate negative tests and historical plan wording match,
+    }
+  - {
+      id: E27,
+      command: independent Python statistics.NormalDist pricing IV and range reference,
+      result: Black-forward price delta gamma IV round trip and one-sigma lognormal range match the engine golden vector,
+    }
+  - {
+      id: E28,
+      command: compare Independence Day behavior with the published NYSE 2026-2028 holiday notes,
+      result: 2026-07-02 and 2027-07-02 are regular sessions while only listed July 3 sessions close early,
+    }
+  - {
+      id: E29,
+      command: parse live checking plan and audit every finding status,
+      result: no open P0 or P1; only documented unrelated P2 dependency iOS-selector and repository-format baselines remain,
+    }
+remediation_policy:
+  fix_all_scoped_findings: true
+  residual_risks_require_reason: true
+  no_backwards_compatibility_shims: true
+  no_dead_code: true
+completion_gate:
+  all_required_checklist_pass: true
+  no_open_p0_p1: true
+  full_verification_fresh: true
+  docs_and_clients_in_sync: true
+  baseline_residuals_documented: true

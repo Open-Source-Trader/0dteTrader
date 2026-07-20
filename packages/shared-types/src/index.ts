@@ -20,6 +20,123 @@ export type TickInterval = '500t' | '1000t' | '2500t' | '5000t' | '10000t';
 export type ChartInterval = CandleInterval | TickInterval;
 
 // ---------------------------------------------------------------------------
+// Options analytics
+// ---------------------------------------------------------------------------
+
+export const OPTIONS_ANALYTICS_EXPOSURE_UNIT = '$ delta change per 1% underlying move' as const;
+
+export type OptionsAnalyticsFeedMode = 'realtime' | 'delayed' | 'sandbox' | 'unknown';
+
+export type OptionsAnalyticsCacheStatus = 'fresh' | 'memory-cache' | 'stale-fallback';
+
+export interface OptionsAnalyticsScope {
+  symbol: string;
+  /** Exact option product/root selected for the calculation (for example SPX or SPXW). */
+  rootSymbol: string;
+  /** Opening-print (AM) or market-close (PM) settlement. */
+  settlementStyle: 'am' | 'pm';
+  /** YYYY-MM-DD. */
+  expiration: string;
+  /** ISO-8601 date-time. */
+  observedAt: string;
+  /** ISO-8601 date-time. */
+  settlementAt: string;
+  spot: number;
+  forward: number;
+}
+
+export interface OptionsAnalyticsCoverage {
+  contractsTotal: number;
+  contractsIncluded: number;
+  ratio: number;
+}
+
+export interface OptionsAnalyticsQuality {
+  /** ISO-8601 date-time, or null when the source did not provide it. */
+  quoteAsOf: string | null;
+  /** ISO-8601 date-time, or null when the source did not provide it. */
+  greeksAsOf: string | null;
+  /** YYYY-MM-DD, or null when the effective date cannot be established. */
+  oiEffectiveDate: string | null;
+  feedMode: OptionsAnalyticsFeedMode;
+  coverage: OptionsAnalyticsCoverage;
+  status: 'complete' | 'partial';
+  warnings: string[];
+  calculationVersion: string;
+  cacheStatus: OptionsAnalyticsCacheStatus;
+}
+
+export interface OptionsAnalyticsStrikeLeg {
+  openInterest: number;
+  volume: number;
+  impliedVolatility: number | null;
+  delta: number | null;
+  gamma: number | null;
+  gammaExposure: number | null;
+  deltaNotional: number | null;
+  markedOiValue: number | null;
+  relativeSpread: number | null;
+  roundTripCost: number | null;
+  bidSize: number;
+  askSize: number;
+  multiplier: number;
+}
+
+export interface OptionsAnalyticsStrike {
+  strike: number;
+  call: OptionsAnalyticsStrikeLeg | null;
+  put: OptionsAnalyticsStrikeLeg | null;
+  grossGammaExposure: number | null;
+  totalOpenInterest: number;
+}
+
+export interface OptionsAnalyticsStructure {
+  callGammaExposure: number | null;
+  putGammaExposure: number | null;
+  grossGammaExposure: number | null;
+  callDeltaNotional: number | null;
+  putDeltaNotional: number | null;
+  callWall: number | null;
+  putWall: number | null;
+  grossGammaConcentration: number | null;
+  maxOpenInterestStrike: number | null;
+}
+
+export interface OptionsAnalyticsDealerProxyScenario {
+  assumption: string;
+  gammaExposure: number;
+  deltaNotional: number;
+  strikeGammaExposures: Array<{ strike: number; gammaExposure: number | null }>;
+  gammaRoots: number[];
+  primaryGammaRoot: number | null;
+}
+
+export interface OptionsAnalyticsScenarios {
+  callPutDealerProxy: OptionsAnalyticsDealerProxyScenario | null;
+}
+
+export interface OptionsAnalyticsImpliedRange {
+  lower: number;
+  upper: number;
+  confidence: 0.68;
+  label: 'model-implied 68% range';
+  atmIv: number;
+  straddleLower: number;
+  straddleUpper: number;
+}
+
+/** Canonical GET /v1/market/options-analytics response. */
+export interface OptionsAnalyticsSnapshot {
+  scope: OptionsAnalyticsScope;
+  exposureUnit: typeof OPTIONS_ANALYTICS_EXPOSURE_UNIT;
+  quality: OptionsAnalyticsQuality;
+  structure: OptionsAnalyticsStructure;
+  scenarios: OptionsAnalyticsScenarios;
+  impliedRange: OptionsAnalyticsImpliedRange | null;
+  strikes: OptionsAnalyticsStrike[];
+}
+
+// ---------------------------------------------------------------------------
 // Auth
 // ---------------------------------------------------------------------------
 

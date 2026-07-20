@@ -10,7 +10,7 @@ import {
   type LineWidth,
   type UTCTimestamp,
 } from 'lightweight-charts';
-import type { ChartInterval } from '@0dtetrader/shared-types';
+import type { ChartInterval, OptionsAnalyticsSnapshot } from '@0dtetrader/shared-types';
 import { useStore } from '../../core/observable';
 import { Format } from '../../design/format';
 import { chartPalette } from './chartColors';
@@ -18,9 +18,8 @@ import type { ChartCandle } from './ChartStore';
 import { intervalSeconds } from './ChartStore';
 import { DrawingLayer } from './DrawingLayer';
 import type { DrawingsStore } from './drawings';
-import { GexOverlay } from './gex/GexOverlay';
-import type { GexSettings } from './gex/gexSettings';
-import type { GexLevels } from './gex/gexTypes';
+import { OptionsAnalyticsOverlay } from './optionsAnalytics/OptionsAnalyticsOverlay';
+import type { OptionsAnalyticsSettings } from './optionsAnalytics/optionsAnalyticsSettings';
 import { TwcOverlay } from './TwcOverlay';
 import type { TwcRenderModel } from './twc/twcTypes';
 
@@ -51,10 +50,10 @@ interface CandleChartProps {
   candleColors?: (string | null)[] | null;
   /** TWC Heatmap render model for the read-only overlay canvas. */
   twcModel?: TwcRenderModel | null;
-  /** GEX/DEX level structure for the read-only overlay canvas. */
-  gexLevels?: GexLevels | null;
-  gexSettings?: GexSettings | null;
-  gexStale?: boolean;
+  /** Exact point-in-time options structure for the right-edge profile rail. */
+  optionsAnalyticsSnapshot?: OptionsAnalyticsSnapshot | null;
+  optionsAnalyticsSettings?: OptionsAnalyticsSettings | null;
+  optionsAnalyticsRetained?: boolean;
   /** Fires on pan/zoom/snap so sub-panes can mirror the x-range. */
   onVisibleRangeChange?: (range: VisibleRange | null) => void;
 }
@@ -86,9 +85,9 @@ export function CandleChart({
   drawingsStore,
   candleColors = null,
   twcModel = null,
-  gexLevels = null,
-  gexSettings = null,
-  gexStale = false,
+  optionsAnalyticsSnapshot = null,
+  optionsAnalyticsSettings = null,
+  optionsAnalyticsRetained = false,
   onVisibleRangeChange,
 }: CandleChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -353,14 +352,14 @@ export function CandleChart({
       {apis && candles.length > 0 && twcModel ? (
         <TwcOverlay chart={apis.chart} series={apis.series} model={twcModel} candles={candles} />
       ) : null}
-      {apis && candles.length > 0 && gexLevels && gexSettings ? (
-        <GexOverlay
+      {apis && candles.length > 0 && optionsAnalyticsSnapshot && optionsAnalyticsSettings ? (
+        <OptionsAnalyticsOverlay
           chart={apis.chart}
           series={apis.series}
-          levels={gexLevels}
-          settings={gexSettings}
+          snapshot={optionsAnalyticsSnapshot}
+          settings={optionsAnalyticsSettings}
           candles={candles}
-          stale={gexStale}
+          retained={optionsAnalyticsRetained}
         />
       ) : null}
       {apis && candles.length > 0 ? (

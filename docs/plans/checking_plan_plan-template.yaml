@@ -1,0 +1,517 @@
+schema_version: 1
+template_id: checking_plan.v1
+title: 'Checking Plan - plan-template'
+description: |
+  Paired verification plan for docs/plans/plan-template.yaml. Validates that the
+  plan template matches Codex plan-mode behavior, captures user/agent Q&A, and
+  enforces required planning and quality standards.
+maintainers:
+  - name: 'Senior AI Agent Engineer'
+    role_id: senior_ai_agent_engineer
+  - name: 'Senior Backend Engineer'
+    role_id: senior_backend_engineer
+
+plan_ref:
+  plan_path: 'docs/plans/plan-template.yaml'
+  plan_name: 'plan-template'
+  paired_checking_plan: 'docs/plans/checking_plan_plan-template.yaml'
+
+required_context_files_read_first:
+  purpose: 'Load required context before checking so validation findings are grounded in project rules and source contracts.'
+  core_required:
+    - path: 'AGENTS.md'
+      why: 'Global quality, planning, and operating requirements.'
+    - path: 'docs/plans/plan-template.yaml'
+      why: 'Primary target under review.'
+    - path: 'docs/plans/checking_plan_plan-template.yaml'
+      why: 'Current checking criteria and expected evidence outputs.'
+    - path: 'docs/plans/checking_plan_*.yaml'
+      why: 'Paired checking-plan files that must conform to this template contract.'
+    - path: 'docs/specs/templates/spec-template.md'
+      why: 'Template lineage verification for spec-sheet artifacts.'
+    - path: 'docs/flow-charts/templates/event-driven-flow-chart-template.yaml'
+      why: 'Template lineage verification for event-driven flow-chart artifacts.'
+    - path: 'docs/logic-maps/templates/event-driven-logic-map-template.yaml'
+      why: 'Template lineage verification for event-driven logic-map artifacts.'
+  conditional_required:
+    - when: 'plan under review references specs/runbooks/contracts'
+      paths:
+        - '<all referenced docs/specs/runbooks/contracts>'
+      why: 'Verify claims against actual source-of-truth documents.'
+    - when: 'plan implies code-path changes'
+      paths:
+        - 'src/**'
+        - 'tests/**'
+      why: 'Validate feasibility, risk, and coverage expectations in real code paths.'
+  read_order:
+    - 'core_required'
+    - 'conditional_required'
+
+instructions:
+  - 'Re-read the entire original plan/spec and fully understand the intent.'
+  - 'Create an explicit, actionable task checklist derived from the plan.'
+  - 'Verify implementation: automated + manual checks; do not assume correctness.'
+  - 'Identify logical flaws, gaps, and unhandled edge-cases; mark severity and produce findings with id, severity, description, file, line, reproduction_steps, suggested_fix, blocker, remediation_status.'
+  - 'Remediate or document accepted exceptions for every finding.'
+  - 'Ensure code + docs + specs are updated; produce evidence for every passed step.'
+  - 'Read docs/plans/plan-template.yaml fully before running checks.'
+  - 'Confirm required sections exist and are actionable.'
+  - 'Verify the template requires user-message capture and agent-question/user-answer capture.'
+  - 'Verify the template requires separate new-vs-modify planning branches and event-driven logic flow charts.'
+  - 'Verify no backwards compatibility and dead code cleanup requirements are explicit.'
+  - 'Verify the template requires creating and filling a paired checking_plan_<current_plan_name>.yaml.'
+  - 'Verify self-questioning, multi-option brainstorming, best-solution selection, and ambiguity escalation to the user are required.'
+  - 'Verify request purpose lines use: This exists to ____ so that ____.'
+  - 'Verify flow mapping includes inputs -> transformations -> outputs -> side effects.'
+  - 'Verify invariants include preconditions, postconditions, and must_never_happen constraints.'
+  - 'Verify focused brainstorming pass and all four breakage prompts are required before finalizing.'
+  - 'Verify plan template requires pre-plan creation of spec sheet and event-driven flow chart/map artifacts before task planning.'
+  - 'Verify plan template references docs/specs/templates/spec-template.md.'
+  - 'Verify plan template references docs/flow-charts/templates/event-driven-flow-chart-template.yaml and docs/logic-maps/templates/event-driven-logic-map-template.yaml.'
+  - 'Verify paired checking plans include and review spec sheet plus event-driven flow chart/map artifacts for each relevant system.'
+  - 'Verify the plan template requires scanning for existing spec sheets and existing event-driven flow chart/map artifacts before plan authoring.'
+  - 'Verify that when existing artifacts are found, the plan requires a brief current-state statement and a detailed target-state update statement, especially for event-driven flow charts/maps.'
+  - 'List all issues and recommendations as they are discovered; do not defer issue capture until the end.'
+  - 'Update the checking plan artifacts immediately for every new issue, recommendation, remediation action, and evidence item.'
+  - 'For each finding, capture evidence (file + symbol/call path + key snippet), impact tied to intended output/invariants, smallest repro scenario, minimal fix, and optional better design (only if worth added complexity).'
+  - 'Convert each identified risk into either a concrete code/test/doc change in scoped files, or an explicit residual-risk entry when change is not possible in this run.'
+  - 'List all parts/sections/requirements of the paired plan file, map each to verification status, and keep this inventory updated as checks run.'
+  - 'After listing issues and recommendations, explicitly execute the fix/remediation steps and record each completion event.'
+  - 'Do not skip the focused analysis pass before finalizing.'
+  - 'Fix all issues, if any are remaining, and implement all solutions, if any are remaining. High quality solutions only that take in the context of the intended goal/output of the feature/file/plan, and are enterprise grade, and are not bandaid fixes.'
+
+scope:
+  include_globs:
+    - 'docs/plans/plan-template.yaml'
+    - 'docs/plans/checking_plan_plan-template.yaml'
+    - 'docs/plans/checking_plan_*.yaml'
+    - 'docs/specs/**/*.md'
+    - 'docs/flow-charts/**/*.yaml'
+    - 'docs/logic-maps/**/*.yaml'
+  exclude_globs:
+    - 'docs/drafts/**'
+  default_target: 'plan_ref' # plan-scoped review target
+
+variables:
+  pr_base: 'origin/main'
+  pr_head: 'HEAD'
+  plan_path_glob: 'docs/plans/plan-template.yaml'
+  plan_filename_pattern: 'plan-template.yaml'
+  live_issue_log_artifact: 'checking_plan_live_findings.yaml'
+  live_recommendations_artifact: 'checking_plan_live_recommendations.yaml'
+  live_progress_artifact: 'checking_plan_live_progress.yaml'
+  required_flow_chart_template: 'docs/flow-charts/templates/event-driven-flow-chart-template.yaml'
+  required_logic_map_template: 'docs/logic-maps/templates/event-driven-logic-map-template.yaml'
+  required_spec_template: 'docs/specs/templates/spec-template.md'
+
+checklist:
+  - id: C1
+    title: 'Objective and metadata exist'
+    type: manual + automated
+    required: true
+    description: 'Read and summarize plan intent; verify required top-level metadata and objective exist.'
+    automated_checks:
+      - command: "rg -n '^template_id:|^plan_mode:|^plan_scope_type:|^paired_checking_plan:' docs/plans/plan-template.yaml"
+      - command: "rg -n '^objective:' docs/plans/plan-template.yaml"
+      - command: "rg -n '^required_context_files_read_first:' docs/plans/plan-template.yaml"
+      - command: "rg -n 'core_required:|conditional_required:' docs/plans/plan-template.yaml"
+    verification:
+      - type: artifact
+        artifact_key: original_plan_summary
+        required: true
+    evidence: ['metadata-and-objective.txt']
+
+  - id: C2
+    title: 'Codex plan intake capture exists'
+    type: automated
+    required: true
+    automated_checks:
+      - command: "rg -n '^plan_intake:' docs/plans/plan-template.yaml"
+      - command: "rg -n 'user_messages:|agent_questions_and_user_answers:' docs/plans/plan-template.yaml"
+    verification:
+      - type: artifact
+        artifact_key: NEW_TASK_CHECK_LIST
+        required: true
+    evidence: ['plan-intake-sections.txt']
+
+  - id: C3
+    title: 'Skill requirements explicitly listed'
+    type: automated
+    required: true
+    automated_checks:
+      - command: "rg -n '^required_skill_usage:' docs/plans/plan-template.yaml"
+      - command: "rg -n '/using superpowers' docs/plans/plan-template.yaml"
+    evidence: ['skills-section.txt']
+
+  - id: C4
+    title: 'New vs modify branches and flow mapping exist'
+    type: automated
+    required: true
+    automated_checks:
+      - command: "rg -n '^spec_sheet:' docs/plans/plan-template.yaml"
+      - command: "rg -n 'new_implementation:|modifying_existing_implementation:' docs/plans/plan-template.yaml"
+      - command: "rg -n '^flow_description:' docs/plans/plan-template.yaml"
+      - command: 'rg -n ''required_format: "inputs -> transformations -> outputs -> side effects"'' docs/plans/plan-template.yaml'
+      - command: "rg -n 'event_driven_logic_flow_chart_actual_and_all_possible_events|event_driven_logic_map_actual_and_all_possible_events_per_step' docs/plans/plan-template.yaml"
+      - command: "rg -n 'current_logic_flow_event_driven_actual_and_all_possible_events|new_logic_flow_event_driven_actual_and_all_possible_events' docs/plans/plan-template.yaml"
+      - command: "rg -n 'current_logic_map_event_driven_actual_and_all_possible_events_per_step|new_logic_map_event_driven_actual_and_all_possible_events_per_step' docs/plans/plan-template.yaml"
+      - command: "rg -n 'actual_events_for_each_step|all_possible_events_for_each_step' docs/plans/plan-template.yaml"
+    evidence: ['flow-chart-sections.txt']
+
+  - id: C5
+    title: 'Task tracker and checklist requirements exist'
+    type: automated
+    required: true
+    automated_checks:
+      - command: "rg -n '^task_checklist:|^task_tracker:' docs/plans/plan-template.yaml"
+      - command: "rg -n 'update_every_message: true' docs/plans/plan-template.yaml"
+    evidence: ['task-tracking-sections.txt']
+
+  - id: C6
+    title: 'Quality and architecture standards exist'
+    type: automated
+    required: true
+    automated_checks:
+      - command: "rg -n '^engineering_standards:' docs/plans/plan-template.yaml"
+      - command: "rg -n 'DRY|SOLID|KISS|YAGNI' docs/plans/plan-template.yaml"
+      - command: "rg -n 'Do not leave backwards compatibility layers|Do not leave dead code' docs/plans/plan-template.yaml"
+    evidence: ['quality-standards.txt']
+
+  - id: C7
+    title: 'Paired checking-plan requirement exists'
+    type: automated
+    required: true
+    automated_checks:
+      - command: "rg -n '^paired_checking_plan_requirements:' docs/plans/plan-template.yaml"
+      - command: "rg -n 'checking_plan_<current_plan_name>\\.yaml' docs/plans/plan-template.yaml"
+      - command: 'test -f docs/plans/checking_plan_plan-template.yaml'
+    evidence: ['paired-checking-plan-section.txt']
+
+  - id: C8
+    title: 'Manual review for clarity and usability'
+    type: manual
+    required: true
+    description: |
+      Confirm wording is unambiguous, implementation-safe, and directly usable by
+      Codex planning workflows without requiring hidden assumptions.
+    evidence: ['manual-review-notes.md']
+
+  - id: C9
+    title: 'Self-questioning and solution selection requirements exist'
+    type: automated
+    required: true
+    automated_checks:
+      - command: "rg -n '^self_questioning_and_solution_selection:' docs/plans/plan-template.yaml"
+      - command: "rg -n 'guiding_questions:|min_options: 3|selected_solution:|if_still_ambiguous:' docs/plans/plan-template.yaml"
+    evidence: ['self-questioning-and-solution-selection.txt']
+
+  - id: C10
+    title: 'Request purpose, invariants, and focused brainstorming pass exist'
+    type: automated
+    required: true
+    automated_checks:
+      - command: "rg -n 'This exists to <outcome> so that <value>\\.' docs/plans/plan-template.yaml"
+      - command: "rg -n '^invariants:|preconditions:|postconditions:|must_never_happen:' docs/plans/plan-template.yaml"
+      - command: "rg -n '^focused_brainstorming_pass_before_finalize:' docs/plans/plan-template.yaml"
+      - command: "rg -n 'what would user behavior break\\?|what would production traffic break\\?|what would weird data break\\?|what would concurrency/time/order break\\?' docs/plans/plan-template.yaml"
+      - command: "rg -n 'logical_flaws:|logical_gaps:|contract_violations:|risk_hotspots:' docs/plans/plan-template.yaml"
+      - command: "rg -n 'brainstorming_requirement: \"Brainstorm the best solution before selecting final design\\.\"|brainstorming_requirement: \"Brainstorm the best possible solution before selecting final design\\.\"' docs/plans/plan-template.yaml"
+      - command: "rg -n 'no_backwards_compatibility_shims: true|no_dead_code: true|update_all_related_and_relevant_files' docs/plans/plan-template.yaml"
+    evidence: ['purpose-invariants-and-focused-pass.txt']
+
+  - id: C11
+    title: 'Remediation & validation'
+    type: manual + automated
+    required: true
+    description: |
+      For each finding, either implement the fix or document an accepted
+      exception. Re-run automated checks after remediation and update findings.
+    verification:
+      - type: artifact
+        artifact_key: remediation_commits
+        required: false
+      - type: artifact
+        artifact_key: updated_findings
+        required: true
+    evidence: ['findings.resolved.json', 'remediation-notes.md']
+
+  - id: C12
+    title: 'Continuous findings/recommendations updates during execution'
+    type: manual + automated
+    required: true
+    description: |
+      Ensure findings, recommendations, and progress artifacts are updated as each
+      issue/recommendation/information item is discovered or changed. The checking
+      file workflow must be incremental, not end-loaded.
+    verification:
+      - type: artifact
+        artifact_key: live_issue_log_artifact
+        required: true
+      - type: artifact
+        artifact_key: live_recommendations_artifact
+        required: true
+      - type: artifact
+        artifact_key: live_progress_artifact
+        required: true
+    evidence:
+      - 'checking_plan_live_findings.yaml'
+      - 'checking_plan_live_recommendations.yaml'
+      - 'checking_plan_live_progress.yaml'
+
+  - id: C13
+    title: 'Focused analysis pass and risk conversion completeness'
+    type: manual
+    required: true
+    description: |
+      Before finalizing, run focused brainstorming over scoped code paths and
+      explicitly evaluate:
+      - what would user behavior break?
+      - what would production traffic break?
+      - what would weird data break?
+      - what would concurrency/time/order break?
+      Then identify logical flaws, logical gaps, contract violations, and risk hotspots.
+      Every identified risk must be converted into either:
+      - concrete code/test/doc change in scoped files, or
+      - explicit residual-risk entry (if not fixable this run).
+    verification:
+      - type: artifact
+        artifact_key: focused_analysis_pass_report
+        required: true
+      - type: artifact
+        artifact_key: risk_conversion_register
+        required: true
+    evidence:
+      - 'focused-analysis-pass.md'
+      - 'risk-conversion-register.yaml'
+
+  - id: C14
+    title: 'Final remediation quality gate (no bandaid fixes)'
+    type: manual
+    required: true
+    description: |
+      Fix all issues, if any are remaining, and implement all solutions, if any are
+      remaining. High quality solutions only that take in the context of the intended
+      goal/output of the feature/file/plan, and are enterprise grade, and are not
+      bandaid fixes.
+    verification:
+      - type: checklist_inspection
+        items_required: 'all'
+    evidence:
+      - 'final-remediation-quality-gate.md'
+
+  - id: C15
+    title: 'Paired-plan parts inventory and coverage mapping'
+    type: manual + automated
+    required: true
+    description: |
+      Enumerate all parts of the paired plan file and map each part to:
+      - verification check(s)
+      - findings/recommendations
+      - remediation status
+      Keep this inventory updated continuously during execution.
+    verification:
+      - type: artifact
+        artifact_key: paired_plan_parts_inventory
+        required: true
+      - type: artifact
+        artifact_key: paired_plan_coverage_matrix
+        required: true
+    evidence:
+      - 'paired-plan-parts-inventory.yaml'
+      - 'paired-plan-coverage-matrix.yaml'
+
+  - id: C16
+    title: 'Post-listing fix execution log'
+    type: manual
+    required: true
+    description: |
+      After issue/recommendation listing is complete, execute fixes/remediations
+      and record each fix event with linked finding ids, changed files, and
+      validation rerun evidence.
+    verification:
+      - type: artifact
+        artifact_key: post_listing_fix_execution_log
+        required: true
+    evidence:
+      - 'post-listing-fix-execution-log.yaml'
+
+  - id: C17
+    title: 'Pre-plan artifact gating and template lineage enforcement'
+    type: manual + automated
+    required: true
+    description: |
+      Verify the plan template requires creation/reference of a spec sheet and
+      event-driven flow-chart and/or logic-map artifacts before writing the plan.
+      Verify required artifact templates are explicitly referenced and that paired
+      checking plans require reviewing these artifacts.
+    automated_checks:
+      - command: "rg -n '^pre_plan_artifact_requirements:' docs/plans/plan-template.yaml"
+      - command: "rg -n 'mandatory_before_plan_authoring: true' docs/plans/plan-template.yaml"
+      - command: "rg -n 'docs/specs/templates/spec-template.md' docs/plans/plan-template.yaml"
+      - command: "rg -n 'docs/flow-charts/templates/event-driven-flow-chart-template.yaml|docs/logic-maps/templates/event-driven-logic-map-template.yaml' docs/plans/plan-template.yaml"
+      - command: "rg -n 'docs/specs/|docs/flow-charts/|docs/logic-maps/' docs/plans/plan-template.yaml"
+      - command: 'test -f docs/specs/templates/spec-template.md'
+      - command: 'test -f docs/flow-charts/templates/event-driven-flow-chart-template.yaml'
+      - command: 'test -f docs/logic-maps/templates/event-driven-logic-map-template.yaml'
+      - command: "rg -n 'pre-plan creation of spec sheet and event-driven flow chart/map artifacts|include and review spec sheet plus event-driven flow chart/map artifacts' docs/plans/checking_plan_plan-template.yaml"
+    verification:
+      - type: artifact
+        artifact_key: pre_plan_artifact_and_template_lineage_report
+        required: true
+    evidence:
+      - 'pre-plan-artifact-and-template-lineage-report.md'
+
+  - id: C18
+    title: 'Existing artifact discovery and current-vs-target delta requirements'
+    type: manual + automated
+    required: true
+    description: |
+      Verify the plan template enforces pre-plan discovery of existing spec sheets
+      and existing event-driven flow-chart/logic-map artifacts. Verify that if an
+      existing artifact is found, the template requires:
+      - a brief exact current-state statement
+      - a detailed exact target-state update statement
+      with explicit emphasis on event-driven flow charts and logic maps.
+    automated_checks:
+      - command: "rg -n 'existing_artifact_discovery_and_delta_requirements:' docs/plans/plan-template.yaml"
+      - command: "rg -n 'discover_existing_spec_sheet_and_existing_event_driven_flow_artifacts_for_scope' docs/plans/plan-template.yaml"
+      - command: "rg -n 'brief_current_state_statement: true|detailed_target_state_update_statement: true' docs/plans/plan-template.yaml"
+      - command: "rg -n 'existing_artifact_update_policy:|must_briefly_state_current_exact_behavior: true|must_detail_exact_target_update_behavior: true' docs/plans/plan-template.yaml"
+      - command: "rg -n 'existing_spec_sheet_current_state_brief|existing_event_flow_chart_current_state_brief|existing_event_logic_map_current_state_brief' docs/plans/plan-template.yaml"
+      - command: "rg -n 'existing_spec_sheet_target_state_detailed|target_event_flow_chart_update_state_detailed|target_event_logic_map_update_state_detailed' docs/plans/plan-template.yaml"
+    verification:
+      - type: artifact
+        artifact_key: existing_artifact_delta_enforcement_report
+        required: true
+    evidence:
+      - 'existing-artifact-delta-enforcement-report.md'
+
+acceptance_criteria:
+  pass_when:
+    - all_required_checks_pass: true
+    - zero_critical_findings: true
+    - all_findings_remediated_or_accepted_exceptions: true
+    - live_artifacts_updated_incrementally: true
+    - all_risks_converted_to_change_or_residual_entry: true
+    - paired_plan_parts_inventory_completed: true
+    - fixes_executed_after_listing_with_evidence: true
+    - logic_flow_artifacts_verified: true
+    - existing_artifact_delta_requirements_verified: true
+  report_outputs:
+    - checklist_report: 'checking_plan_plan-template_report.yaml'
+    - findings: 'checking_plan_plan-template_findings.json'
+    - suggested_pr_description: 'PR_DESCRIPTION.md'
+
+result_schema:
+  checklist_report:
+    - id: string
+      title: string
+      status: [pass, fail, warn, skip]
+      evidence: [string]
+      notes: string
+  findings:
+    - id: string
+      severity: [critical, high, medium, low]
+      description: string
+      file: string
+      line: int
+      suggestion: string
+      symbol_or_call_path: string
+      key_snippet: string
+      impact_to_intended_output_or_invariants: string
+      smallest_repro_scenario: string
+      minimal_fix: string
+      optional_better_design: string
+      conversion_type: [fix_in_scope, residual_risk_entry]
+      conversion_target: string
+
+runtime_instructions: |
+  1. Locate and read docs/plans/plan-template.yaml.
+  2. Populate original_plan_summary from front-matter + top-level objective section.
+  3. Build NEW_TASK_CHECK_LIST from the plan checklist/tracker sections.
+  4. Initialize live artifacts: checking_plan_live_findings.yaml, checking_plan_live_recommendations.yaml, checking_plan_live_progress.yaml.
+  5. Run each automated check command in checklist order.
+  6. Execute manual clarity review and record findings/recommendations immediately as they are discovered.
+  7. For every issue/recommendation/piece of new evidence, update live artifacts right away (not at the end).
+  8. Perform focused analysis pass over scoped code paths:
+     - what would user behavior break?
+     - what would production traffic break?
+     - what would weird data break?
+     - what would concurrency/time/order break?
+  9. Identify logical flaws, logical gaps, contract violations, and risk hotspots.
+  10. For each finding include:
+      - evidence (file + symbol/call path and key snippet)
+      - impact tied to intended output/invariants
+      - smallest repro scenario
+      - minimal fix
+      - optional better design (only if worth added complexity)
+  11. Convert each identified risk into either:
+      - concrete code/test/doc change in scoped files, or
+      - explicit residual risk entry when change is not possible in this run.
+  12. Build and maintain paired-plan parts inventory + coverage matrix while checks run.
+  13. After issue/recommendation listing is complete, execute fixes/remediations and record post-listing fix execution log.
+  14. Remediate or record accepted exceptions, then re-run relevant checks.
+  15. Apply final quality gate:
+      Fix all issues, if any are remaining, and implement all solutions, if any are
+      remaining. High quality solutions only that take in the context of the intended
+      goal/output of the feature/file/plan, and are enterprise grade, and are not
+      bandaid fixes.
+  16. Verify pre-plan artifact gating and template lineage:
+      - spec sheet exists/is referenced before plan tasks.
+      - flow chart and logic map artifacts exist/is referenced using required templates.
+      - paired checking plan explicitly includes artifact review requirements.
+  17. Verify existing artifact discovery and delta requirements:
+      - existing spec/event artifacts are scanned before plan authoring.
+      - when existing artifacts are found, brief current-state and detailed target-state update sections are required.
+      - event-driven flow chart/map current-vs-target deltas are explicitly required.
+  18. Write checklist report and findings artifacts.
+  19. If any required check fails, mark result fail and list exact remediation.
+
+escalation_policy:
+  - if_critical_findings: |
+      Create blocking issues, add reviewer tag @team-leads, and attach remediation steps.
+  - if_tests_fail: |
+      Abort merge, list failing checks, and request author fixes.
+
+examples:
+  minimal_filled_example:
+    original_plan_summary: 'Update YAML plan template for Codex plan-mode intake, self-questioning, and focused risk brainstorming standards.'
+    NEW_TASK_CHECK_LIST:
+      - 'verify required intake sections'
+      - 'verify self-questioning and multi-option solution selection requirements'
+      - 'verify purpose lines, invariants, flow mapping, and focused brainstorming pass requirements'
+      - 'verify paired checking-plan requirements'
+      - 'verify continuous live finding/recommendation/progress updates'
+      - 'verify focused analysis pass and risk conversion completeness'
+    remediation:
+      remediation_commits: ['commit-hash-1']
+      findings_resolved: ['F-001']
+    checklist_report: |
+      - id: C1
+        status: pass
+        evidence: ["section-objective.txt"]
+      - id: C7
+        status: pass
+        evidence: ["paired-checking-plan-section.txt"]
+      - id: C11
+        status: pass
+        evidence: ["findings.resolved.json"]
+      - id: C12
+        status: pass
+        evidence: ["checking_plan_live_findings.yaml", "checking_plan_live_recommendations.yaml", "checking_plan_live_progress.yaml"]
+      - id: C13
+        status: pass
+        evidence: ["focused-analysis-pass.md", "risk-conversion-register.yaml"]
+      - id: C14
+        status: pass
+        evidence: ["final-remediation-quality-gate.md"]
+      - id: C15
+        status: pass
+        evidence: ["paired-plan-parts-inventory.yaml", "paired-plan-coverage-matrix.yaml"]
+      - id: C16
+        status: pass
+        evidence: ["post-listing-fix-execution-log.yaml"]
+
+notes:
+  - 'Agents should write artifacts to the PR (report + findings) and leave a concise PR comment with overall pass/fail and next steps.'
+  - 'This paired checking plan is the base checking template and source contract for plan-specific checking files.'

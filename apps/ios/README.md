@@ -78,11 +78,11 @@ Follows docs/ARCHITECTURE.md §4:
     Profile/            ProfileView, WebullCredentialsForm (write-only), AppLockManager (FaceID)
     Chart/              ChartView, ChartViewModel, CandleChartRepresentable, IndicatorPaneRepresentable,
                         IndicatorEngine (pure functions), IndicatorSettingsView, SymbolSearchView,
-                        Twc/ (TWC Heatmap V5 indicator), Gex/ (GEX/DEX level overlay)
+                        Twc/ (TWC Heatmap V5 indicator), OptionsAnalytics/ (Options Structure snapshot overlay)
     Trade/              TradeScreenView (Layout A/B + drag divider), TradePanelView, OrderConfirmSheet,
                         PositionsStripView, TradeViewModel, OptionsChainViewModel, AutoContractSelector,
                         PriceMath, FloatingTradeButtons, ToastView
-0dteTraderTests/        IndicatorEngine, AutoContractSelector, mid-price, DTO decoding, GEX presentation tests
+0dteTraderTests/        IndicatorEngine, AutoContractSelector, mid-price, DTO decoding, Options Structure contract/presentation tests
 ```
 
 ## Notes & assumptions

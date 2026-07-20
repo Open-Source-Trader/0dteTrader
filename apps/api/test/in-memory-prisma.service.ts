@@ -19,16 +19,25 @@ import { randomUUID } from 'node:crypto';
  */
 
 function p2002(target: string): Error {
-  return Object.assign(
-    new Error(`Unique constraint failed on the fields: (${target})`),
-    { code: 'P2002' },
-  );
+  return Object.assign(new Error(`Unique constraint failed on the fields: (${target})`), {
+    code: 'P2002',
+  });
 }
 
 function matches(row: any, where: any): boolean {
   return Object.entries(where ?? {}).every(([key, value]) => {
     if (value === null) return row[key] === null || row[key] === undefined;
-    if (typeof value === 'object') return false; // unsupported operator
+    if (typeof value === 'object' && value !== null) {
+      const actual = row[key];
+      const operator = value as Record<string, any>;
+      if (operator.lt !== undefined && !(actual < operator.lt)) return false;
+      if (operator.lte !== undefined && !(actual <= operator.lte)) return false;
+      if (operator.gt !== undefined && !(actual > operator.gt)) return false;
+      if (operator.gte !== undefined && !(actual >= operator.gte)) return false;
+      if (operator.equals !== undefined && actual !== operator.equals) return false;
+      if (operator.in !== undefined && !operator.in.includes(actual)) return false;
+      return true;
+    }
     return row[key] === value;
   });
 }
@@ -39,6 +48,8 @@ export class InMemoryPrismaService {
   readonly refreshTokens: any[] = [];
   readonly orderAudits: any[] = [];
   readonly tradeOrders: any[] = [];
+  readonly optionsAnalyticsSnapshots: any[] = [];
+  readonly scheduledJobLeases: any[] = [];
 
   readonly user = {
     findUnique: async ({ where }: any) => {
@@ -193,8 +204,7 @@ export class InMemoryPrismaService {
       const [row] = this.orderAudits.splice(idx, 1);
       return row;
     },
-    findMany: async ({ where }: any = {}) =>
-      this.orderAudits.filter((a) => matches(a, where)),
+    findMany: async ({ where }: any = {}) => this.orderAudits.filter((a) => matches(a, where)),
   };
 
   readonly tradeOrder = {
@@ -219,6 +229,70 @@ export class InMemoryPrismaService {
     },
   };
 
+  readonly optionsAnalyticsSnapshotRecord = {
+    create: async ({ data }: any) => {
+      if (
+        this.optionsAnalyticsSnapshots.some(
+          (row) =>
+            row.symbol === data.symbol &&
+            row.expiration === data.expiration &&
+            row.bucket.getTime() === data.bucket.getTime() &&
+            row.calculationVersion === data.calculationVersion &&
+            row.resolutionMinutes === data.resolutionMinutes,
+        )
+      ) {
+        throw p2002('symbol, expiration, bucket, calculationVersion, resolutionMinutes');
+      }
+      const row = {
+        id: randomUUID(),
+        createdAt: new Date(),
+        ...data,
+      };
+      this.optionsAnalyticsSnapshots.push(row);
+      return row;
+    },
+    findMany: async ({ where, orderBy, take }: any = {}) => {
+      const rows = this.optionsAnalyticsSnapshots.filter((row) => matches(row, where));
+      if (orderBy?.bucket === 'asc') {
+        rows.sort((a, b) => a.bucket.getTime() - b.bucket.getTime());
+      } else if (orderBy?.bucket === 'desc') {
+        rows.sort((a, b) => b.bucket.getTime() - a.bucket.getTime());
+      }
+      return take === undefined ? rows : rows.slice(0, take);
+    },
+    deleteMany: async ({ where }: any = {}) => {
+      let count = 0;
+      for (let index = this.optionsAnalyticsSnapshots.length - 1; index >= 0; index--) {
+        if (matches(this.optionsAnalyticsSnapshots[index], where)) {
+          this.optionsAnalyticsSnapshots.splice(index, 1);
+          count += 1;
+        }
+      }
+      return { count };
+    },
+  };
+
+  readonly scheduledJobLease = {
+    create: async ({ data }: any) => {
+      if (this.scheduledJobLeases.some((row) => row.name === data.name)) {
+        throw p2002('name');
+      }
+      const row = { updatedAt: new Date(), ...data };
+      this.scheduledJobLeases.push(row);
+      return row;
+    },
+    updateMany: async ({ where, data }: any) => {
+      let count = 0;
+      for (const row of this.scheduledJobLeases) {
+        if (matches(row, where)) {
+          Object.assign(row, data, { updatedAt: new Date() });
+          count += 1;
+        }
+      }
+      return { count };
+    },
+  };
+
   // Prisma lifecycle no-ops.
   async $connect(): Promise<void> {}
   async $disconnect(): Promise<void> {}
@@ -232,6 +306,8 @@ export class InMemoryPrismaService {
     this.refreshTokens.length = 0;
     this.orderAudits.length = 0;
     this.tradeOrders.length = 0;
+    this.optionsAnalyticsSnapshots.length = 0;
+    this.scheduledJobLeases.length = 0;
   }
 
   /** Test helper: flip the kill switch for a user. */

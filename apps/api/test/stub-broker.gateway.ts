@@ -68,16 +68,17 @@ export class StubBrokerGateway implements BrokerGateway {
     return 'live';
   }
 
-  async getCandles(
-    _userId: string,
-    symbol: string,
-    req: CandleRequest,
-  ): Promise<Candle[]> {
+  async getCandles(_userId: string, symbol: string, req: CandleRequest): Promise<Candle[]> {
     void symbol;
-    const intervalMs =
-      { '1m': 60_000, '5m': 300_000, '15m': 900_000, '1h': 3_600_000, '1d': 86_400_000 }[
-        req.interval
-      ];
+    const intervalMs = {
+      '1m': 60_000,
+      '5m': 300_000,
+      '15m': 900_000,
+      '30m': 1_800_000,
+      '1h': 3_600_000,
+      '4h': 14_400_000,
+      '1d': 86_400_000,
+    }[req.interval];
     const lastBucket = Math.floor(Date.now() / intervalMs);
     const candles: Candle[] = [];
     for (let b = lastBucket - 50; b < lastBucket; b++) {
@@ -112,9 +113,7 @@ export class StubBrokerGateway implements BrokerGateway {
       const strike = price + k;
       for (const optionType of ['call', 'put'] as OptionType[]) {
         const intrinsic =
-          optionType === 'call'
-            ? Math.max(0, price - strike)
-            : Math.max(0, strike - price);
+          optionType === 'call' ? Math.max(0, price - strike) : Math.max(0, strike - price);
         const last = round2(intrinsic + 1);
         contracts.push({
           symbol: formatOccSymbol(symbol, chosen, optionType, strike),
@@ -139,9 +138,7 @@ export class StubBrokerGateway implements BrokerGateway {
   async previewOrder(userId: string, order: OrderRequest): Promise<OrderPreview> {
     const resolved = await this.resolveContract(userId, order);
     const price =
-      order.orderType === 'market'
-        ? resolved.last
-        : computeMid(resolved.bid, resolved.ask);
+      order.orderType === 'market' ? resolved.last : computeMid(resolved.bid, resolved.ask);
     return {
       resolved: {
         contractSymbol: resolved.contractSymbol,
@@ -182,7 +179,13 @@ export class StubBrokerGateway implements BrokerGateway {
       if (record.status !== 'submitted') return;
       record.status = 'filled';
       record.filledPrice = record.limitPrice;
-      this.applyFill(userId, record.contractSymbol, record.side, record.quantity, record.filledPrice!);
+      this.applyFill(
+        userId,
+        record.contractSymbol,
+        record.side,
+        record.quantity,
+        record.filledPrice!,
+      );
     }, MID_FILL_DELAY_MS);
     record.timer.unref?.();
     return this.publicOrder(record);
@@ -230,15 +233,9 @@ export class StubBrokerGateway implements BrokerGateway {
   private async resolveContract(userId: string, order: OrderRequest) {
     const { optionType } = order.selection;
     if (!optionType) {
-      throw brokerErrors.orderRejected(
-        'selection.optionType is required for option orders',
-      );
+      throw brokerErrors.orderRejected('selection.optionType is required for option orders');
     }
-    const chain = await this.getOptionsChain(
-      userId,
-      order.underlying,
-      order.selection.expiration,
-    );
+    const chain = await this.getOptionsChain(userId, order.underlying, order.selection.expiration);
     const contract =
       order.selection.mode === 'auto_otm'
         ? resolveAutoOtm(chain.contracts, optionType, chain.underlyingPrice)

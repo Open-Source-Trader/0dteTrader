@@ -39,14 +39,15 @@ src/
   market-data/             REST: quote, candles, options-chain; WS gateway at
                            /v1/stream (1s quote ticks per symbol, orderUpdate
                            fan-out); crypto-data.service (Coinbase public API)
-  gex/                     GET /v1/market/gex — dealer GEX/DEX levels + premium
-                           heat map; tradier.client.ts (chain fetch with the
-                           static-OI day baseline), gex.engine.ts (pure math)
+  options-analytics/       GET /v1/market/options-analytics — exact-expiration
+                           observed options structure, model-implied range,
+                           liquidity, optional dealer proxy, and minute capture
   trading/                 preview / place (Idempotency-Key) / cancel / open
                            orders / positions / history; kill switch;
                            idempotency claims via OrderAudit; audit log
 prisma/
-  schema.prisma            User, WebullCredential, RefreshToken, OrderAudit, TradeOrder
+  schema.prisma            Auth/trading records plus point-in-time options
+                           analytics snapshots and scheduler leases
   migrations/              generated SQL (prisma migrate dev)
 test/
   jest.setup.ts            test env vars (loaded via jest setupFiles)
@@ -56,14 +57,14 @@ test/
 
 ## Scripts
 
-| Command | What it does |
-|---|---|
-| `npm run build` | `tsc -p tsconfig.build.json` → `dist/` |
-| `npm run dev` | build + run with `node --watch` (restarts on dist changes; run `npm run build:watch` in a second terminal for recompiles) |
-| `npm test` | jest (unit + e2e), `--runInBand` |
-| `npm run lint` | eslint over `src/` and `test/` |
-| `npm run db:migrate` | `prisma migrate deploy` (needs `DATABASE_URL`) |
-| `npm run db:generate` | `prisma generate` (also runs on `postinstall`) |
+| Command                | What it does                                                                                                                                   |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `npm run build`        | `tsc -p tsconfig.build.json` → `dist/`                                                                                                         |
+| `npm run dev`          | build + run with `node --watch` (restarts on dist changes; run `npm run build:watch` in a second terminal for recompiles)                      |
+| `npm test`             | jest (unit + e2e), `--runInBand`                                                                                                               |
+| `npm run lint`         | eslint over `src/` and `test/`                                                                                                                 |
+| `npm run db:migrate`   | `prisma migrate deploy` (needs `DATABASE_URL`)                                                                                                 |
+| `npm run db:generate`  | `prisma generate` (also runs on `postinstall`)                                                                                                 |
 | `npm run smoke:webull` | Live sandbox smoke test (`src/scripts/webull-smoke.ts`, needs `WEBULL_SMOKE_APP_KEY/SECRET`; `-- --trade` also places+cancels a far-OTM order) |
 
 From the repo root, `npm install && npm run build && npm test` builds
@@ -104,7 +105,7 @@ Schema deviations from `docs/ARCHITECTURE.md` §5, both deliberate:
 
 `OrderAudit.idempotencyKey` is nullable and unique together with `userId`
 (Postgres treats NULLs as distinct). Placement claims the key with a pending
-row *before* the broker call: concurrent duplicates get `ORDER_IN_FLIGHT`,
+row _before_ the broker call: concurrent duplicates get `ORDER_IN_FLIGHT`,
 failed executions free the key, and stale claims expire after 2 minutes.
 Previews, cancels, blocked and failed attempts are audited without one.
 
@@ -130,8 +131,9 @@ unit + e2e together (`jest --runInBand`):
     switch 403 + blocked audit row, audit coverage (in-spec stub gateway).
   - `trading/orders.service` — average-cost realized P/L incl. partial fills
     at the broker-reported filled quantity.
-  - `gex/gex.engine` — Black-Scholes sanity, exposure signs/magnitudes, walls,
-    0DTE magnet, premium ordering, gamma-flip bracketing.
+  - `options-analytics` — IV/Greek golden vectors, forward/range formulas,
+    independent walls, scenario roots, freshness, exact-expiration caching,
+    scheduled capture, idempotency, compaction, and retention.
   - `broker/webull/webull-signer` — HMAC signing against the official docs
     test vector, host→algorithm classification, percent-encoding.
   - `broker/webull/webull-mappers` — string-number tolerance, order status

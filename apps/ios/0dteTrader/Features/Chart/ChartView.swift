@@ -14,6 +14,7 @@ struct ChartView: View {
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var showClearConfirm = false
+    @State private var showOptionsAnalyticsDetails = false
 
     private let paneHeight: CGFloat = 68
 
@@ -49,22 +50,56 @@ struct ChartView: View {
                     intervalSeconds: viewModel.interval.seconds,
                     drawingsModel: drawings,
                     twcModel: viewModel.twcRenderModel,
-                    gexModel: viewModel.gexSettings.enabled ? viewModel.gexLevels : nil,
-                    gexSettings: viewModel.gexSettings,
-                    gexStale: viewModel.gexStale,
+                    optionsAnalyticsSnapshot: viewModel.optionsAnalyticsSettings.enabled
+                        ? viewModel.optionsAnalyticsSnapshot
+                        : nil,
+                    optionsAnalyticsSettings: viewModel.optionsAnalyticsSettings,
                     onVisibleRangeChange: { viewModel.visibleXRange = $0 }
                 )
                 if let banner = viewModel.twcRenderModel?.banner {
                     TwcBiasBannerView(banner: banner)
                 }
-                if let gexError = viewModel.gexErrorMessage, viewModel.gexSettings.enabled {
-                    Text("GEX unavailable: \(gexError)")
+                if let analyticsError = viewModel.optionsAnalyticsErrorMessage,
+                   viewModel.optionsAnalyticsSettings.enabled {
+                    Text(optionsAnalyticsErrorText(analyticsError))
                         .font(.caption2)
                         .foregroundStyle(Color.appWarning)
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
                         .padding(.leading, 52)
                         .padding(.bottom, AppSpacing.sm)
                         .allowsHitTesting(false)
+                }
+                if let snapshot = viewModel.optionsAnalyticsSnapshot,
+                   viewModel.optionsAnalyticsSettings.enabled {
+                    Button {
+                        showOptionsAnalyticsDetails = true
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text("STRUCT")
+                            Text(snapshot.quality.status.rawValue.uppercased())
+                            if viewModel.optionsAnalyticsDisplayState == .retained {
+                                Text("RETAINED")
+                            }
+                            if !snapshot.quality.warnings.isEmpty {
+                                Image(systemName: "exclamationmark.triangle.fill")
+                            }
+                        }
+                        .font(.system(size: 8, weight: .bold, design: .monospaced))
+                        .foregroundStyle(snapshot.quality.warnings.isEmpty ? Color.appAccent : Color.appWarning)
+                        .padding(.horizontal, 6)
+                        .frame(minHeight: 28)
+                        .background(Color.black.opacity(0.72))
+                        .clipShape(Capsule())
+                    }
+                    .padding(.leading, 52)
+                    .padding(.top, AppSpacing.sm)
+                    .accessibilityLabel(
+                        OptionsAnalyticsPresentation.accessibilitySummary(
+                            snapshot: snapshot,
+                            settings: viewModel.optionsAnalyticsSettings
+                        )
+                    )
+                    .accessibilityHint("Shows options structure details")
                 }
                 if viewModel.isLoading, viewModel.candles.isEmpty {
                     loadingState
@@ -173,6 +208,25 @@ struct ChartView: View {
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: viewModel.isLoading)
         .animation(reduceMotion ? nil : AppMotion.standard, value: drawings.tool)
         .animation(reduceMotion ? nil : AppMotion.standard, value: drawings.selectedId)
+        .sheet(isPresented: $showOptionsAnalyticsDetails) {
+            if let snapshot = viewModel.optionsAnalyticsSnapshot {
+                OptionsAnalyticsDetailsView(
+                    snapshot: snapshot,
+                    settings: viewModel.optionsAnalyticsSettings
+                )
+            }
+        }
+    }
+
+    private func optionsAnalyticsErrorText(_ error: String) -> String {
+        switch viewModel.optionsAnalyticsDisplayState {
+        case .retained:
+            return "Options Structure retained snapshot: \(error)"
+        case .expired:
+            return "Options Structure expired: \(error)"
+        default:
+            return "Options Structure unavailable: \(error)"
+        }
     }
 
     // MARK: - Sub-pane HUD cards

@@ -31,6 +31,10 @@ struct APIClient: @unchecked Sendable {
         let response: URLResponse
         do {
             (data, response) = try await urlSession.data(for: request)
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch let error as URLError where error.code == .cancelled || Task.isCancelled {
+            throw CancellationError()
         } catch {
             throw APIError.network(underlying: error.localizedDescription)
         }
@@ -169,13 +173,25 @@ struct APIClient: @unchecked Sendable {
         return try await request(Endpoint(method: .get, path: "v1/market/options-chain", query: query))
     }
 
-    /// Dealer GEX/DEX levels + premium heat map (Tradier-backed, server-side).
-    func gexLevels(symbol: String, expiration: String? = nil) async throws -> GexLevelsDTO {
-        var query = [URLQueryItem(name: "symbol", value: symbol)]
-        if let expiration {
-            query.append(URLQueryItem(name: "expiration", value: expiration))
+    func optionsAnalytics(
+        symbol: String,
+        expiration: String
+    ) async throws -> OptionsAnalyticsSnapshotDTO {
+        let query = [
+            URLQueryItem(name: "symbol", value: symbol),
+            URLQueryItem(name: "expiration", value: expiration),
+        ]
+        let snapshot: OptionsAnalyticsSnapshotDTO = try await request(
+            Endpoint(method: .get, path: "v1/market/options-analytics", query: query)
+        )
+        do {
+            return try snapshot.validated(
+                expectedSymbol: symbol,
+                expectedExpiration: expiration
+            )
+        } catch {
+            throw APIError.decoding
         }
-        return try await request(Endpoint(method: .get, path: "v1/market/gex", query: query))
     }
 
     func orderHistory() async throws -> TradeHistoryDTO {

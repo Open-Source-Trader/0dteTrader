@@ -46,12 +46,23 @@ users don't have to re-enter their app key/secret.
 
 ## Market Data
 
-| Method | Path                       | Query                                          | Returns        |
-| ------ | -------------------------- | ---------------------------------------------- | -------------- |
-| GET    | `/v1/market/quote`         | `symbol`                                       | `Quote`        |
-| GET    | `/v1/market/candles`       | `symbol, interval (1m/5m/15m/1h/1d), from, to` | `Candle[]`     |
-| GET    | `/v1/market/options-chain` | `symbol, expiration?`                          | `OptionsChain` |
-| GET    | `/v1/market/gex`           | `symbol, expiration?`                          | `GexLevels`    |
+| Method | Path                           | Query                                                 | Returns                    |
+| ------ | ------------------------------ | ----------------------------------------------------- | -------------------------- |
+| GET    | `/v1/market/quote`             | `symbol`                                              | `Quote`                    |
+| GET    | `/v1/market/candles`           | `symbol, interval (1m/5m/15m/30m/1h/4h/1d), from, to` | `Candle[]`                 |
+| GET    | `/v1/market/options-chain`     | `symbol, expiration?`                                 | `OptionsChain`             |
+| GET    | `/v1/market/options-analytics` | `symbol, expiration` (required exact match)           | `OptionsAnalyticsSnapshot` |
+
+Options analytics are fact-first. Call and put gamma are unsigned magnitudes,
+gross gamma is their sum, and delta fields describe long-holder option delta.
+The optional `callPutDealerProxy` is an explicitly labeled call-minus-put OI
+scenario; it is not observed dealer inventory. Gamma exposure is always USD
+delta change per a 1% underlying move. Marked OI is open interest times the
+current option mark and contract multiplier; it is not traded premium or flow.
+
+The required expiration is never replaced by another date. Invalid
+optional layers are `null` with `quality.status: partial` and warnings. A fully
+unusable exact snapshot returns an API error instead of fabricated values.
 
 Crypto symbols (e.g. `BTC`, `ETH`) are routed to the Coinbase public API for
 quotes and candles — no Webull credentials needed.
@@ -129,8 +140,31 @@ OrderPreview:     { resolved: { contractSymbol, price, estBuyingPower }, warning
 OrderResult:      { orderId, status, contractSymbol, side, quantity, orderType, limitPrice?, filledPrice?, filledQuantity?, timestamp }
 TradeHistoryEntry: OrderResult & { realizedPnl: number | null }
 TradeHistory:     { entries: TradeHistoryEntry[], totalRealizedPnl: number }
-GexLevels:        { symbol, expiration, isZeroDte, spot, asOf, stale, netGex, netDex, gammaFlip?, callWall?, putWall?, magnet?, topPremium: GexPremiumLevel[] }
-GexPremiumLevel:  { strike, totalPremium, callPremium, putPremium, callOi, putOi }
+OptionsAnalyticsSnapshot:
+  {
+    scope: { symbol, rootSymbol, settlementStyle, expiration, observedAt, settlementAt, spot, forward },
+    exposureUnit: '$ delta change per 1% underlying move',
+    quality: { quoteAsOf?, greeksAsOf?, oiEffectiveDate?, feedMode, coverage, status, warnings, calculationVersion, cacheStatus },
+    structure: { callGammaExposure: number|null, putGammaExposure: number|null, grossGammaExposure: number|null, callDeltaNotional: number|null, putDeltaNotional: number|null, callWall: number|null, putWall: number|null, grossGammaConcentration: number|null, maxOpenInterestStrike: number|null },
+    scenarios: { callPutDealerProxy? },
+    impliedRange?,
+    strikes: OptionsAnalyticsStrike[]
+  }
+OptionsAnalyticsStrike:
+  { strike, call?, put?, grossGammaExposure, totalOpenInterest }
+OptionsAnalyticsStrikeLeg:
+  { openInterest, volume, impliedVolatility, delta, gamma, gammaExposure, deltaNotional, markedOiValue?, relativeSpread?, roundTripCost?, bidSize, askSize, multiplier }
 ```
+
+The optional `scenarios.callPutDealerProxy` object owns its signed
+`strikeGammaExposures`; signed dealer-proxy values never appear in the fact-first
+strike rows.
+
+When a valid two-sided quote cannot support local IV inversion, its OI, volume,
+marked-OI value, sizes, and spread remain available. The leg's IV/Greek/notional
+fields and any unavailable per-strike gamma layer are `null`; coverage and
+warnings disclose the modeling loss. If no leg can be modeled, the snapshot
+still returns those observed layers, all modeled structure totals are `null`,
+and the implied range and dealer proxy are `null`.
 
 `AssetClass` is `'option'` only in v1 (futures support is deferred).

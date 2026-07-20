@@ -81,11 +81,9 @@ struct CandleChartRepresentable: UIViewRepresentable {
     /// TWC Heatmap render model: candle repaints, extra line series, and the
     /// read-only geometry overlay (nil when the script indicator is off).
     var twcModel: TwcRenderModel?
-    /// GEX/DEX level structure for the read-only overlay (nil when disabled
-    /// or before the first successful fetch for the current symbol).
-    var gexModel: GexLevels?
-    var gexSettings: GexSettings = .default
-    var gexStale: Bool = false
+    /// Current options structure snapshot for the right-edge profile.
+    var optionsAnalyticsSnapshot: OptionsAnalyticsSnapshotDTO?
+    var optionsAnalyticsSettings: OptionsAnalyticsSettings = .default
     /// Called with the main chart's visible x-range whenever the user pans or
     /// zooms, so non-interactive indicator panes can track the same window.
     var onVisibleRangeChange: ((ClosedRange<Double>) -> Void)?
@@ -95,7 +93,7 @@ struct CandleChartRepresentable: UIViewRepresentable {
     final class ContainerView: UIView {
         let chart = CombinedChartView()
         let twcOverlay = TwcOverlayView()
-        let gexOverlay = GexOverlayView()
+        let optionsAnalyticsOverlay = OptionsAnalyticsOverlayView()
         let overlay = DrawingOverlayView()
 
         override init(frame: CGRect) {
@@ -103,10 +101,10 @@ struct CandleChartRepresentable: UIViewRepresentable {
             addSubview(chart)
             // Read-only geometry overlays below the interactive drawing overlay.
             addSubview(twcOverlay)
-            addSubview(gexOverlay)
+            addSubview(optionsAnalyticsOverlay)
             addSubview(overlay)
             twcOverlay.chart = chart
-            gexOverlay.chart = chart
+            optionsAnalyticsOverlay.chart = chart
             overlay.chart = chart
         }
 
@@ -119,7 +117,7 @@ struct CandleChartRepresentable: UIViewRepresentable {
             super.layoutSubviews()
             chart.frame = bounds
             twcOverlay.frame = bounds
-            gexOverlay.frame = bounds
+            optionsAnalyticsOverlay.frame = bounds
             overlay.frame = bounds
         }
     }
@@ -175,7 +173,7 @@ struct CandleChartRepresentable: UIViewRepresentable {
         context.coordinator.onTransform = { [weak container] in
             container?.overlay.setNeedsDisplay()
             container?.twcOverlay.setNeedsDisplay()
-            container?.gexOverlay.setNeedsDisplay()
+            container?.optionsAnalyticsOverlay.setNeedsDisplay()
         }
         chart.delegate = context.coordinator
 
@@ -218,9 +216,8 @@ struct CandleChartRepresentable: UIViewRepresentable {
         container.overlay.candles = candles
         container.twcOverlay.model = twcModel
         container.twcOverlay.candles = candles
-        container.gexOverlay.model = gexModel
-        container.gexOverlay.settings = gexSettings
-        container.gexOverlay.stale = gexStale
+        container.optionsAnalyticsOverlay.snapshot = optionsAnalyticsSnapshot
+        container.optionsAnalyticsOverlay.settings = optionsAnalyticsSettings
 
         if let marker = chart.marker as? ChartMarkerView {
             marker.candles = candles
@@ -232,7 +229,7 @@ struct CandleChartRepresentable: UIViewRepresentable {
             chart.notifyDataSetChanged()
             chart.accessibilityValue = nil
             container.overlay.setNeedsDisplay()
-            container.gexOverlay.setNeedsDisplay()
+            container.optionsAnalyticsOverlay.setNeedsDisplay()
             return
         }
         let previousCount = (chart.data as? CombinedChartData)?.candleData?.entryCount ?? 0
@@ -373,9 +370,8 @@ struct CandleChartRepresentable: UIViewRepresentable {
         chart.xAxis.valueFormatter = IndexAxisValueFormatter(values: timeLabels)
         chart.notifyDataSetChanged()
         container.overlay.setNeedsDisplay()
-        // Candle changes shift the price↔pixel transform; the GEX overlay's
-        // didSet hooks only fire on model/settings changes, so repaint here.
-        container.gexOverlay.setNeedsDisplay()
+        // Candle changes shift the price↔pixel transform, so repaint the rail.
+        container.optionsAnalyticsOverlay.setNeedsDisplay()
 
         if let last = candles.last {
             chart.accessibilityLabel = "Price chart"

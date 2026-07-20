@@ -23,6 +23,7 @@ struct TradeScreenView: View {
     @State private var tradingMode: TradingMode?
     @State private var showModeConfirmation = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
 
     private let settingsStore: SettingsStore
 
@@ -84,6 +85,12 @@ struct TradeScreenView: View {
                     }
                 }
         }
+        .modifier(
+            OptionsAnalyticsLifecycleModifier(
+                viewModel: chartViewModel,
+                scenePhase: scenePhase
+            )
+        )
         .sheet(item: $tradeViewModel.armedTicket) { ticket in
             OrderConfirmSheet(tradeViewModel: tradeViewModel, ticket: ticket)
         }
@@ -98,7 +105,7 @@ struct TradeScreenView: View {
             IndicatorSettingsView(
                 settings: $chartViewModel.indicatorSettings,
                 twcSettings: $chartViewModel.twcSettings,
-                gexSettings: $chartViewModel.gexSettings
+                optionsAnalyticsSettings: $chartViewModel.optionsAnalyticsSettings
             )
             .presentationDetents([.medium, .large])
             .presentationDragIndicator(.visible)
@@ -158,7 +165,7 @@ struct TradeScreenView: View {
             Task { await chainViewModel.load(underlying: newSymbol) }
         }
         .onChange(of: chainViewModel.selectedExpiration) { _, expiration in
-            chartViewModel.gexExpiration = expiration
+            chartViewModel.optionsAnalyticsExpiration = expiration
         }
         .onChange(of: container.quoteSocket.lastOrderUpdate) { _, update in
             if let update {
@@ -323,5 +330,24 @@ struct TradeScreenView: View {
             layout = layout == .fullscreen ? .split : .fullscreen
         }
         settingsStore.layoutMode = layout
+    }
+}
+
+private struct OptionsAnalyticsLifecycleModifier: ViewModifier {
+    let viewModel: ChartViewModel
+    let scenePhase: ScenePhase
+
+    func body(content: Content) -> some View {
+        content
+            .onAppear {
+                viewModel.setOptionsAnalyticsVisible(true)
+                viewModel.setOptionsAnalyticsAppActive(scenePhase == .active)
+            }
+            .onDisappear {
+                viewModel.setOptionsAnalyticsVisible(false)
+            }
+            .onChange(of: scenePhase) { _, phase in
+                viewModel.setOptionsAnalyticsAppActive(phase == .active)
+            }
     }
 }

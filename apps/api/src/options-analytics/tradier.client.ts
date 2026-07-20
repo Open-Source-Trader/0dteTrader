@@ -1,0 +1,408 @@
+import { Logger } from '@nestjs/common';
+import type { OptionsAnalyticsFeedMode } from '@0dtetrader/shared-types';
+import { previousTradingDay, ymd } from '../broker/expiration-calendar';
+import type { ValidatedAnalyticsContract } from './options-analytics.engine';
+
+const MAX_SOURCE_AGE_MS = 30 * 60_000;
+const MAX_FUTURE_SKEW_MS = 2 * 60_000;
+/** Provider Greeks are comparison-only and documented on an hourly cadence. */
+const MAX_PROVIDER_GREEKS_AGE_MS = 2 * 60 * 60_000;
+/** Version 1 quote-quality cutoff: (ask - bid) / midpoint may not exceed 100%. */
+export const OPTIONS_ANALYTICS_MAX_RELATIVE_SPREAD_V1 = 1;
+/** Version 1 never forms an NBBO midpoint from bid/ask timestamps over one minute apart. */
+export const OPTIONS_ANALYTICS_MAX_BID_ASK_SKEW_MS_V1 = 60_000;
+
+interface FetchResponse {
+  ok: boolean;
+  status: number;
+  headers: { get(name: string): string | null };
+  json(): Promise<unknown>;
+}
+
+export type TradierFetch = (url: string, init: Record<string, unknown>) => Promise<FetchResponse>;
+
+export interface TradierQuote {
+  symbol: string;
+  spot: number;
+  quoteAsOf: string;
+  feedMode: OptionsAnalyticsFeedMode;
+  warnings: string[];
+}
+
+export interface TradierChain {
+  contractsTotal: number;
+  contractsTotalByRoot: Record<string, number>;
+  contracts: ValidatedAnalyticsContract[];
+  warnings: string[];
+}
+
+function record(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function finite(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+function nonNegative(value: unknown): number | null {
+  const number = finite(value);
+  return number !== null && number >= 0 ? number : null;
+}
+
+function positive(value: unknown): number | null {
+  const number = finite(value);
+  return number !== null && number > 0 ? number : null;
+}
+
+function timestamp(value: unknown): Date | null {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    const milliseconds = Math.abs(value) < 1e12 ? value * 1_000 : value;
+    const parsed = new Date(milliseconds);
+    return Number.isFinite(parsed.getTime()) ? parsed : null;
+  }
+  if (typeof value === 'string' && value.trim() !== '') {
+    const parsed = new Date(value);
+    return Number.isFinite(parsed.getTime()) ? parsed : null;
+  }
+  return null;
+}
+
+function isFresh(value: Date, now: Date, maximumAgeMs = MAX_SOURCE_AGE_MS): boolean {
+  const age = now.getTime() - value.getTime();
+  return age <= maximumAgeMs && age >= -MAX_FUTURE_SKEW_MS;
+}
+
+class BoundedContractWarnings {
+  private readonly reasons = new Map<string, { count: number; samples: string[] }>();
+
+  add(reason: string, symbol: string): void {
+    const group = this.reasons.get(reason) ?? { count: 0, samples: [] };
+    group.count += 1;
+    if (group.samples.length < 3 && !group.samples.includes(symbol)) group.samples.push(symbol);
+    this.reasons.set(reason, group);
+  }
+
+  messages(): string[] {
+    return [...this.reasons.entries()].map(
+      ([reason, group]) =>
+        `${reason} (${group.count} contract${group.count === 1 ? '' : 's'}; samples: ${group.samples.join(', ')})`,
+    );
+  }
+}
+
+export class TradierClient {
+  private readonly logger = new Logger(TradierClient.name);
+  private readonly fetchImpl: TradierFetch;
+
+  availableRequests: number | null = null;
+  rateLimitExpiry: string | null = null;
+  private rateLimitResetAt: Date | null = null;
+
+  constructor(
+    private readonly token: string,
+    private readonly baseUrl: string,
+    fetchImpl?: TradierFetch,
+    private readonly now: () => Date = () => new Date(),
+  ) {
+    this.fetchImpl = fetchImpl ?? (globalThis.fetch as unknown as TradierFetch).bind(globalThis);
+  }
+
+  private async get(path: string): Promise<unknown> {
+    if (!this.token) {
+      throw new Error('Tradier is not configured: TRADIER_API_TOKEN is empty');
+    }
+    const requestNow = this.now();
+    if (
+      this.availableRequests !== null &&
+      this.availableRequests <= 0 &&
+      this.rateLimitResetAt !== null &&
+      this.rateLimitResetAt.getTime() > requestNow.getTime()
+    ) {
+      throw new Error(`Tradier rate limit is exhausted until ${this.rateLimitExpiry}`);
+    }
+    const response = await this.fetchImpl(`${this.baseUrl}/v1${path}`, {
+      headers: {
+        Authorization: `Bearer ${this.token}`,
+        Accept: 'application/json',
+      },
+      signal: AbortSignal.timeout(10_000),
+    });
+    const available = response.headers.get('X-Ratelimit-Available');
+    const parsedAvailable = available === null ? null : Number(available);
+    this.availableRequests =
+      parsedAvailable !== null && Number.isFinite(parsedAvailable) ? parsedAvailable : null;
+    const rawExpiry = response.headers.get('X-Ratelimit-Expiry');
+    const parsedExpiry = rawExpiry === null ? Number.NaN : Number(rawExpiry);
+    if (
+      rawExpiry !== null &&
+      Number.isSafeInteger(parsedExpiry) &&
+      parsedExpiry >= 1_000_000_000_000
+    ) {
+      const resetAt = new Date(parsedExpiry);
+      this.rateLimitResetAt = resetAt;
+      this.rateLimitExpiry = resetAt.toISOString();
+    } else {
+      this.rateLimitResetAt = null;
+      this.rateLimitExpiry = null;
+      if (rawExpiry !== null) {
+        this.logger.warn(`Tradier rate-limit expiry header is invalid: ${rawExpiry}`);
+      }
+    }
+    if (this.availableRequests !== null && this.availableRequests < 10) {
+      this.logger.warn(
+        `Tradier rate limit nearly exhausted: ${this.availableRequests} available; expiry=${this.rateLimitExpiry ?? 'unknown'}`,
+      );
+    }
+    if (!response.ok) {
+      throw new Error(`Tradier ${path} -> HTTP ${response.status}`);
+    }
+    return response.json();
+  }
+
+  async getExpirations(symbol: string): Promise<string[]> {
+    const body = record(
+      await this.get(`/markets/options/expirations?symbol=${encodeURIComponent(symbol)}`),
+    );
+    const expirations = record(body?.['expirations']);
+    const rawDates = expirations?.['date'];
+    const dates = Array.isArray(rawDates) ? rawDates : [rawDates];
+    return [
+      ...new Set(
+        dates.filter(
+          (date): date is string => typeof date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(date),
+        ),
+      ),
+    ].sort();
+  }
+
+  async getQuote(symbol: string): Promise<TradierQuote> {
+    const body = record(await this.get(`/markets/quotes?symbols=${encodeURIComponent(symbol)}`));
+    const quoteContainer = record(body?.['quotes']);
+    const quoteValue = quoteContainer?.['quote'];
+    const quote = record(Array.isArray(quoteValue) ? quoteValue[0] : quoteValue);
+    const now = this.now();
+    const bid = positive(quote?.['bid']);
+    const ask = positive(quote?.['ask']);
+    const bidTime = timestamp(quote?.['bid_date']);
+    const askTime = timestamp(quote?.['ask_date']);
+    const validNbbo =
+      bid !== null &&
+      ask !== null &&
+      ask >= bid &&
+      bidTime !== null &&
+      askTime !== null &&
+      isFresh(bidTime, now) &&
+      isFresh(askTime, now) &&
+      Math.abs(bidTime.getTime() - askTime.getTime()) <= OPTIONS_ANALYTICS_MAX_BID_ASK_SKEW_MS_V1;
+    const last = positive(quote?.['last']);
+    const tradeTime = timestamp(quote?.['trade_date']);
+    const validLast = last !== null && tradeTime !== null && isFresh(tradeTime, now);
+    if (!validNbbo && !validLast) {
+      throw new Error(`Tradier returned no finite, fresh timestamped spot for ${symbol}`);
+    }
+    const warnings: string[] = [];
+    let spot: number;
+    let quoteTime: Date;
+    if (validNbbo) {
+      spot = (bid! + ask!) / 2;
+      quoteTime = bidTime!.getTime() <= askTime!.getTime() ? bidTime! : askTime!;
+    } else {
+      spot = last!;
+      quoteTime = tradeTime!;
+      warnings.push(
+        'Underlying spot uses the fresh last trade because a valid fresh NBBO midpoint was unavailable',
+      );
+    }
+    const feedMode: OptionsAnalyticsFeedMode = this.baseUrl.includes('sandbox')
+      ? 'sandbox'
+      : quote?.['delayed'] === true
+        ? 'delayed'
+        : quote?.['delayed'] === false
+          ? 'realtime'
+          : 'unknown';
+    return {
+      symbol,
+      spot,
+      quoteAsOf: quoteTime.toISOString(),
+      feedMode,
+      warnings,
+    };
+  }
+
+  async getChain(symbol: string, expiration: string): Promise<TradierChain> {
+    const body = record(
+      await this.get(
+        `/markets/options/chains?symbol=${encodeURIComponent(symbol)}&expiration=${encodeURIComponent(expiration)}&greeks=true`,
+      ),
+    );
+    const options = record(body?.['options']);
+    const rawValue = options?.['option'];
+    const rawOptions = rawValue ? (Array.isArray(rawValue) ? rawValue : [rawValue]) : [];
+    const contractWarnings = new BoundedContractWarnings();
+    const contracts: ValidatedAnalyticsContract[] = [];
+    const contractsTotalByRoot: Record<string, number> = {};
+    const now = this.now();
+    const normalizedSymbol = symbol.toUpperCase();
+
+    for (const rawValue of rawOptions) {
+      const raw = record(rawValue);
+      const contractSymbol =
+        typeof raw?.['symbol'] === 'string' ? raw['symbol'] : '(unknown contract)';
+      const reject = (reason: string): void => {
+        contractWarnings.add(`Excluded contracts: ${reason}`, contractSymbol);
+      };
+      if (!raw) {
+        reject('provider contract is not an object');
+        continue;
+      }
+      const rootSymbol =
+        typeof raw['root_symbol'] === 'string' ? raw['root_symbol'].trim().toUpperCase() : '';
+      if (rootSymbol !== '') {
+        contractsTotalByRoot[rootSymbol] = (contractsTotalByRoot[rootSymbol] ?? 0) + 1;
+      }
+      if (
+        rootSymbol === '' ||
+        (normalizedSymbol === 'SPX'
+          ? rootSymbol !== 'SPX' && rootSymbol !== 'SPXW'
+          : rootSymbol !== normalizedSymbol)
+      ) {
+        reject(`root ${rootSymbol || '(missing)'} does not match ${normalizedSymbol}`);
+        continue;
+      }
+      if (raw['expiration_date'] !== expiration) {
+        reject(`expiration does not exactly match ${expiration}`);
+        continue;
+      }
+      const optionType = raw['option_type'];
+      if (optionType !== 'call' && optionType !== 'put') {
+        reject('option type is missing or invalid');
+        continue;
+      }
+      const strike = positive(raw['strike']);
+      const openInterest = nonNegative(raw['open_interest']);
+      const volume = nonNegative(raw['volume']);
+      const bid = positive(raw['bid']);
+      const ask = positive(raw['ask']);
+      const bidSize = nonNegative(raw['bidsize']);
+      const askSize = nonNegative(raw['asksize']);
+      const multiplier = positive(raw['contract_size']);
+      if (multiplier === null) {
+        reject('contract multiplier is missing or invalid');
+        continue;
+      }
+      if (
+        strike === null ||
+        openInterest === null ||
+        volume === null ||
+        bid === null ||
+        ask === null ||
+        bidSize === null ||
+        askSize === null
+      ) {
+        reject('required finite quote, OI, volume, size, or strike field is missing');
+        continue;
+      }
+      if (ask < bid) {
+        reject('crossed two-sided market');
+        continue;
+      }
+      const midpoint = (bid + ask) / 2;
+      const relativeSpread = (ask - bid) / midpoint;
+      if (
+        !Number.isFinite(relativeSpread) ||
+        relativeSpread > OPTIONS_ANALYTICS_MAX_RELATIVE_SPREAD_V1
+      ) {
+        reject(
+          `two-sided market is too wide for v1 relative-spread limit ${OPTIONS_ANALYTICS_MAX_RELATIVE_SPREAD_V1}`,
+        );
+        continue;
+      }
+      const bidTime = timestamp(raw['bid_date']);
+      const askTime = timestamp(raw['ask_date']);
+      if (bidTime === null || askTime === null) {
+        reject('quote timestamps are missing or invalid');
+        continue;
+      }
+      if (
+        Math.abs(bidTime.getTime() - askTime.getTime()) > OPTIONS_ANALYTICS_MAX_BID_ASK_SKEW_MS_V1
+      ) {
+        reject(
+          `bid/ask timestamps differ by more than ${OPTIONS_ANALYTICS_MAX_BID_ASK_SKEW_MS_V1}ms`,
+        );
+        continue;
+      }
+      const quoteTime = bidTime.getTime() <= askTime.getTime() ? bidTime : askTime;
+      if (!isFresh(quoteTime, now)) {
+        reject('stale quote timestamp');
+        continue;
+      }
+      const greeks = record(raw['greeks']);
+      const providerGreeksTime = timestamp(greeks?.['updated_at']);
+      const providerDeltaValue = finite(greeks?.['delta']);
+      const providerGammaValue = nonNegative(greeks?.['gamma']);
+      const providerIvValue = positive(greeks?.['mid_iv']);
+      const validProviderGreeks =
+        providerGreeksTime !== null &&
+        isFresh(providerGreeksTime, now, MAX_PROVIDER_GREEKS_AGE_MS) &&
+        providerDeltaValue !== null &&
+        providerDeltaValue >= -1 &&
+        providerDeltaValue <= 1 &&
+        providerGammaValue !== null &&
+        providerIvValue !== null;
+      if (greeks === null) {
+        contractWarnings.add('Provider Greek comparison data unavailable', contractSymbol);
+      } else if (!validProviderGreeks) {
+        contractWarnings.add(
+          'Provider Greek comparison data stale or invalid and was nulled',
+          contractSymbol,
+        );
+      }
+      const lastValue = positive(raw['last']);
+      const lastTradeTime = timestamp(raw['trade_date']);
+      const validLast = lastValue !== null && lastTradeTime !== null && isFresh(lastTradeTime, now);
+      if ((raw['last'] !== undefined || raw['trade_date'] !== undefined) && !validLast) {
+        contractWarnings.add(
+          'Provider comparison last trade stale or invalid and was nulled',
+          contractSymbol,
+        );
+      }
+      contracts.push({
+        symbol: contractSymbol,
+        strike,
+        optionType,
+        openInterest,
+        volume,
+        bid,
+        ask,
+        bidSize,
+        askSize,
+        multiplier,
+        quoteAsOf: quoteTime.toISOString(),
+        last: validLast ? lastValue : null,
+        lastTradeAsOf: validLast ? lastTradeTime.toISOString() : null,
+        providerDelta: validProviderGreeks ? providerDeltaValue : null,
+        providerGamma: validProviderGreeks ? providerGammaValue : null,
+        providerImpliedVolatility: validProviderGreeks ? providerIvValue : null,
+        providerGreeksAsOf: validProviderGreeks ? providerGreeksTime.toISOString() : null,
+        oiEffectiveDate: ymd(previousTradingDay(now)),
+        rootSymbol,
+      });
+    }
+
+    const warnings = contractWarnings.messages();
+    if (rawOptions.length > 0) {
+      warnings.push(
+        `Open interest effective date inferred as ${ymd(previousTradingDay(now))}; Tradier does not publish an OI effective timestamp`,
+      );
+    }
+
+    return {
+      contractsTotal: rawOptions.length,
+      contractsTotalByRoot,
+      contracts,
+      warnings,
+    };
+  }
+}

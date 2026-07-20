@@ -4,9 +4,14 @@ import { WsAdapter } from '@nestjs/platform-ws';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { BROKER_GATEWAY } from '../src/broker/broker-gateway.interface';
+import { optionExpirations, optionSettlementAt } from '../src/broker/expiration-calendar';
+import { blackForwardKernel } from '../src/options-analytics/options-analytics.engine';
+import { TradierClient } from '../src/options-analytics/tradier.client';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { InMemoryPrismaService } from './in-memory-prisma.service';
 import { StubBrokerGateway } from './stub-broker.gateway';
+
+const E2E_OPTION_EXPIRATION = optionExpirations('SPY', new Date(Date.now() + 86_400_000))[0];
 
 /**
  * Full-stack e2e over HTTP (supertest). The whole Nest app boots for real;
@@ -32,6 +37,63 @@ describe('0dteTrader API (e2e)', () => {
       .useValue(prisma)
       .overrideProvider(BROKER_GATEWAY)
       .useValue(new StubBrokerGateway())
+      .overrideProvider(TradierClient)
+      .useValue({
+        availableRequests: 100,
+        getExpirations: async () => [E2E_OPTION_EXPIRATION],
+        getQuote: async (symbol: string) => ({
+          symbol,
+          spot: 100,
+          quoteAsOf: new Date().toISOString(),
+          feedMode: 'sandbox' as const,
+          warnings: [],
+        }),
+        getChain: async (symbol: string, expiration: string) => {
+          const observedAt = new Date();
+          const settlementAt = optionSettlementAt(expiration, symbol, symbol);
+          const timeYears = (settlementAt.getTime() - observedAt.getTime()) / (365 * 86_400_000);
+          const discount = Math.exp(-0.043 * timeYears);
+          const base = {
+            strike: 100,
+            openInterest: 100,
+            volume: 50,
+            bidSize: 10,
+            askSize: 10,
+            multiplier: 100,
+            quoteAsOf: observedAt.toISOString(),
+            last: null,
+            lastTradeAsOf: null,
+            providerDelta: null,
+            providerGamma: null,
+            providerImpliedVolatility: null,
+            providerGreeksAsOf: null,
+            oiEffectiveDate: '2026-07-17',
+            rootSymbol: symbol,
+          };
+          return {
+            contractsTotal: 2,
+            warnings: [],
+            contracts: (['call', 'put'] as const).map((optionType) => {
+              const price = blackForwardKernel(
+                optionType,
+                100,
+                100,
+                100,
+                timeYears,
+                0.2,
+                discount,
+              ).price;
+              return {
+                ...base,
+                symbol: `${symbol}-${expiration}-${optionType}`,
+                optionType,
+                bid: Math.max(0.01, price - 0.01),
+                ask: price + 0.01,
+              };
+            }),
+          };
+        },
+      })
       .compile();
     app = moduleRef.createNestApplication();
     app.setGlobalPrefix('v1');
@@ -45,28 +107,20 @@ describe('0dteTrader API (e2e)', () => {
   });
 
   it('registers a user and returns AuthTokens', async () => {
-    const res = await request(server)
-      .post('/v1/auth/register')
-      .send(user)
-      .expect(200);
+    const res = await request(server).post('/v1/auth/register').send(user).expect(200);
     expect(res.body.accessToken).toBeTruthy();
     expect(res.body.refreshToken).toBeTruthy();
     expect(res.body.expiresIn).toBe(900);
     accessToken = res.body.accessToken;
     refreshToken = res.body.refreshToken;
 
-    const payload = JSON.parse(
-      Buffer.from(accessToken.split('.')[1], 'base64url').toString(),
-    );
+    const payload = JSON.parse(Buffer.from(accessToken.split('.')[1], 'base64url').toString());
     userId = payload.sub;
     expect(userId).toBeTruthy();
   });
 
   it('rejects duplicate registration with 409 EMAIL_TAKEN', async () => {
-    const res = await request(server)
-      .post('/v1/auth/register')
-      .send(user)
-      .expect(409);
+    const res = await request(server).post('/v1/auth/register').send(user).expect(409);
     expect(res.body).toEqual({
       error: { code: 'EMAIL_TAKEN', message: expect.any(String) },
     });
@@ -81,10 +135,7 @@ describe('0dteTrader API (e2e)', () => {
   });
 
   it('logs in and rejects bad credentials', async () => {
-    const ok = await request(server)
-      .post('/v1/auth/login')
-      .send(user)
-      .expect(200);
+    const ok = await request(server).post('/v1/auth/login').send(user).expect(200);
     expect(ok.body.accessToken).toBeTruthy();
 
     const bad = await request(server)
@@ -97,6 +148,79 @@ describe('0dteTrader API (e2e)', () => {
   it('protects routes: 401 without a token', async () => {
     const res = await request(server).get('/v1/me').expect(401);
     expect(res.body.error.code).toBe('UNAUTHORIZED');
+  });
+
+  it('returns and idempotently persists the exact options analytics snapshot', async () => {
+    const missingExpiration = await request(server)
+      .get('/v1/market/options-analytics')
+      .query({ symbol: 'SPY' })
+      .set('Authorization', `Bearer ${accessToken}`)
+      .expect(400);
+    expect(missingExpiration.body).toEqual({
+      error: {
+        code: 'VALIDATION_ERROR',
+        message:
+          'expiration must be a valid ISO 8601 date string; expiration must match /^\\d{4}-\\d{2}-\\d{2}$/ regular expression; expiration must be a string',
+      },
+    });
+
+    const impossibleExpiration = await request(server)
+      .get('/v1/market/options-analytics')
+      .query({ symbol: 'SPY', expiration: '2026-02-29' })
+      .set('Authorization', `Bearer ${accessToken}`)
+      .expect(400);
+    expect(impossibleExpiration.body).toEqual({
+      error: {
+        code: 'VALIDATION_ERROR',
+        message: 'expiration must be a valid ISO 8601 date string',
+      },
+    });
+
+    const first = await request(server)
+      .get('/v1/market/options-analytics')
+      .query({ symbol: 'SPY', expiration: E2E_OPTION_EXPIRATION })
+      .set('Authorization', `Bearer ${accessToken}`)
+      .expect(200);
+    expect(first.body).toMatchObject({
+      scope: {
+        symbol: 'SPY',
+        rootSymbol: 'SPY',
+        settlementStyle: 'pm',
+        expiration: E2E_OPTION_EXPIRATION,
+      },
+      exposureUnit: '$ delta change per 1% underlying move',
+      quality: {
+        feedMode: 'sandbox',
+        cacheStatus: 'fresh',
+        calculationVersion: 'options-analytics-v1',
+      },
+    });
+    expect(first.body.structure).not.toHaveProperty('gammaRoots');
+    expect(first.body.scenarios.callPutDealerProxy).toHaveProperty('gammaRoots');
+
+    const second = await request(server)
+      .get('/v1/market/options-analytics')
+      .query({ symbol: 'SPY', expiration: E2E_OPTION_EXPIRATION })
+      .set('Authorization', `Bearer ${accessToken}`)
+      .expect(200);
+    expect(second.body.quality.cacheStatus).toBe('memory-cache');
+    expect(prisma.optionsAnalyticsSnapshots).toHaveLength(1);
+
+    const missing = await request(server)
+      .get('/v1/market/options-analytics')
+      .query({ symbol: 'SPY', expiration: '2099-01-01' })
+      .set('Authorization', `Bearer ${accessToken}`)
+      .expect(404);
+    expect(missing.body.error.code).toBe('EXPIRATION_NOT_FOUND');
+    expect(prisma.optionsAnalyticsSnapshots).toHaveLength(1);
+  });
+
+  it('does not expose the removed GEX endpoint', async () => {
+    await request(server)
+      .get('/v1/market/gex')
+      .query({ symbol: 'SPY' })
+      .set('Authorization', `Bearer ${accessToken}`)
+      .expect(404);
   });
 
   it('GET /v1/me returns the profile with webullConfigured=false', async () => {
@@ -159,12 +283,19 @@ describe('0dteTrader API (e2e)', () => {
       .expect(200);
     expect(me.body.webullConfigured).toBe(true);
 
-    // Stored encrypted: no plaintext anywhere in the credential row.
+    // Stored encrypted: each blob has the GCM envelope and is not the plaintext value.
     expect(prisma.credentials).toHaveLength(1);
     const row = prisma.credentials[0];
-    for (const field of ['encAppKey', 'encAppSecret', 'encAccountId']) {
-      expect(Buffer.isBuffer(row[field])).toBe(true);
-      expect(row[field].toString('utf8')).not.toMatch(/ak|sk|acct-1/);
+    const plaintextByField = {
+      encAppKey: 'ak',
+      encAppSecret: 'sk',
+      encAccountId: 'acct-1',
+    } as const;
+    for (const [field, plaintext] of Object.entries(plaintextByField)) {
+      const blob = row[field];
+      expect(Buffer.isBuffer(blob)).toBe(true);
+      expect(blob.equals(Buffer.from(plaintext))).toBe(false);
+      expect(blob).toHaveLength(12 + 16 + Buffer.byteLength(plaintext));
     }
   });
 
@@ -226,10 +357,7 @@ describe('0dteTrader API (e2e)', () => {
 
   it('serves market data (quote, candles, chain)', async () => {
     const auth = { Authorization: `Bearer ${accessToken}` };
-    const quote = await request(server)
-      .get('/v1/market/quote?symbol=SPY')
-      .set(auth)
-      .expect(200);
+    const quote = await request(server).get('/v1/market/quote?symbol=SPY').set(auth).expect(200);
     expect(quote.body.last).toBeGreaterThan(0);
     expect(quote.body.bid).toBeLessThan(quote.body.ask);
 
@@ -272,10 +400,7 @@ describe('0dteTrader API (e2e)', () => {
       .expect(200);
     expect(res.body.resolved.contractSymbol).toMatch(/^SPY\d{6}C\d{8}$/);
     expect(res.body.resolved.price).toBeGreaterThan(0);
-    expect(res.body.resolved.estBuyingPower).toBeCloseTo(
-      res.body.resolved.price * 100,
-      2,
-    );
+    expect(res.body.resolved.estBuyingPower).toBeCloseTo(res.body.resolved.price * 100, 2);
     expect(Array.isArray(res.body.warnings)).toBe(true);
   });
 
@@ -327,9 +452,7 @@ describe('0dteTrader API (e2e)', () => {
       .expect(200);
     expect(res.body.orderId).toBe(placedOrderId);
 
-    const audits = prisma.orderAudits.filter(
-      (a) => a.idempotencyKey === 'e2e-key-1',
-    );
+    const audits = prisma.orderAudits.filter((a) => a.idempotencyKey === 'e2e-key-1');
     expect(audits).toHaveLength(1);
   });
 
@@ -362,9 +485,7 @@ describe('0dteTrader API (e2e)', () => {
       .get('/v1/orders')
       .set('Authorization', `Bearer ${accessToken}`)
       .expect(200);
-    expect(open.body.map((o: { orderId: string }) => o.orderId)).toContain(
-      placed.body.orderId,
-    );
+    expect(open.body.map((o: { orderId: string }) => o.orderId)).toContain(placed.body.orderId);
 
     await new Promise((resolve) => setTimeout(resolve, 500));
     const openAfter = await request(server)
@@ -446,17 +567,11 @@ describe('0dteTrader API (e2e)', () => {
       .expect(401);
 
     // Old access token still authenticates until it expires (stateless JWT).
-    await request(server)
-      .get('/v1/me')
-      .set('Authorization', `Bearer ${accessToken}`)
-      .expect(200);
+    await request(server).get('/v1/me').set('Authorization', `Bearer ${accessToken}`).expect(200);
   });
 
   it('logout revokes the refresh token (204)', async () => {
-    const login = await request(server)
-      .post('/v1/auth/login')
-      .send(user)
-      .expect(200);
+    const login = await request(server).post('/v1/auth/login').send(user).expect(200);
     await request(server)
       .post('/v1/auth/logout')
       .send({ refreshToken: login.body.refreshToken })

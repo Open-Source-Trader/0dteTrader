@@ -21,18 +21,18 @@ datasource db {
 }
 
 model User {
-  id             String             @id @default(uuid()) @db.Uuid
-  email          String             @unique
-  passwordHash   String
-  tradingDisabled Boolean           @default(false)
-  tradingMode    String             @default("live")
-  createdAt      DateTime           @default(now())
-  updatedAt      DateTime           @updatedAt
-  credentials    WebullCredential[]
-  refreshTokens  RefreshToken[]
-  orderAudits    OrderAudit[]
+  id              String             @id @default(uuid()) @db.Uuid
+  email           String             @unique
+  passwordHash    String
+  tradingDisabled Boolean            @default(false)
+  tradingMode     String             @default("live")
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+  credentials     WebullCredential[]
+  refreshTokens   RefreshToken[]
+  orderAudits     OrderAudit[]
   webullApiTokens WebullApiToken[]
-  tradeOrders    TradeOrder[]
+  tradeOrders     TradeOrder[]
 
   @@map("users")
 }
@@ -117,15 +117,47 @@ model TradeOrder {
 
 model OrderAudit {
   id             String   @id @default(uuid()) @db.Uuid
-  userId          String   @db.Uuid
-  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  idempotencyKey  String?
-  request         Json
-  response        Json?
-  status          String
-  createdAt       DateTime @default(now())
+  userId         String   @db.Uuid
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  idempotencyKey String?
+  request        Json
+  response       Json?
+  status         String
+  createdAt      DateTime @default(now())
 
   @@unique([userId, idempotencyKey])
   @@index([userId])
   @@map("order_audits")
+}
+
+model OptionsAnalyticsSnapshotRecord {
+  id                 String   @id @default(uuid()) @db.Uuid
+  symbol             String
+  expiration         String
+  observedAt         DateTime
+  settlementAt       DateTime
+  bucket             DateTime
+  // "core" | "viewed"; enforced by a database check constraint.
+  captureReason      String
+  // 1 | 5; enforced by a database check constraint.
+  resolutionMinutes  Int
+  calculationVersion String
+  input              Json
+  output             Json
+  quality            Json
+  createdAt          DateTime @default(now())
+
+  @@unique([symbol, expiration, bucket, calculationVersion, resolutionMinutes], map: "options_analytics_snapshot_identity_key")
+  @@index([resolutionMinutes, bucket])
+  @@map("options_analytics_snapshots")
+}
+
+model ScheduledJobLease {
+  name      String   @id
+  ownerId   String
+  expiresAt DateTime
+  updatedAt DateTime @updatedAt
+
+  @@index([expiresAt])
+  @@map("scheduled_job_leases")
 }

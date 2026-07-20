@@ -4,13 +4,9 @@ import { Stepper } from '../../design/components/Stepper';
 import { Toggle } from '../../design/components/Toggle';
 import { Format } from '../../design/format';
 import { SlidersIcon } from '../../design/icons';
-import type { GexSettings } from './gex/gexSettings';
 import type { IndicatorSettings } from './indicatorSettings';
-import {
-  DEFAULT_INDICATOR_SETTINGS,
-  enabledSubPanes,
-  MAX_SUB_PANES,
-} from './indicatorSettings';
+import { DEFAULT_INDICATOR_SETTINGS, enabledSubPanes, MAX_SUB_PANES } from './indicatorSettings';
+import type { OptionsAnalyticsSettings } from './optionsAnalytics/optionsAnalyticsSettings';
 
 interface IndicatorSettingsViewProps {
   settings: IndicatorSettings;
@@ -19,8 +15,8 @@ interface IndicatorSettingsViewProps {
   twcEnabled: boolean;
   onToggleTwc: (on: boolean) => void;
   onOpenTwcSettings: () => void;
-  gexSettings: GexSettings;
-  onChangeGex: (settings: GexSettings) => void;
+  optionsAnalytics: OptionsAnalyticsSettings;
+  onChangeOptionsAnalytics: (settings: OptionsAnalyticsSettings) => void;
 }
 
 /** Series-color cue mapping a settings row to its chart line. */
@@ -48,11 +44,12 @@ export function IndicatorSettingsView({
   twcEnabled,
   onToggleTwc,
   onOpenTwcSettings,
-  gexSettings,
-  onChangeGex,
+  optionsAnalytics,
+  onChangeOptionsAnalytics,
 }: IndicatorSettingsViewProps) {
   const patch = (partial: Partial<IndicatorSettings>) => onChange({ ...settings, ...partial });
-  const patchGex = (partial: Partial<GexSettings>) => onChangeGex({ ...gexSettings, ...partial });
+  const patchOptionsAnalytics = (partial: Partial<OptionsAnalyticsSettings>) =>
+    onChangeOptionsAnalytics({ ...optionsAnalytics, ...partial });
 
   // Sub-panes are capped: at the cap, toggles for the remaining panes are
   // disabled until one is turned off.
@@ -380,71 +377,82 @@ export function IndicatorSettingsView({
               <div className="grouped-row">
                 <span>
                   <SeriesDot color="var(--hud-amber)" />
-                  GEX / DEX Levels
+                  Options Structure
                 </span>
                 <span className="row-value">
                   <Toggle
-                    on={gexSettings.enabled}
-                    onChange={(on) => patchGex({ enabled: on })}
+                    on={optionsAnalytics.enabled}
+                    onChange={(on) => patchOptionsAnalytics({ enabled: on })}
                   />
                 </span>
               </div>
-              {gexSettings.enabled ? (
+              {optionsAnalytics.enabled ? (
                 <>
                   <div className="grouped-row param-row">
-                    <span>Level Lines</span>
+                    <span>Implied 68% Range</span>
                     <span className="row-value">
                       <Toggle
-                        on={gexSettings.showLevels}
-                        onChange={(on) => patchGex({ showLevels: on })}
+                        on={optionsAnalytics.showImpliedRange}
+                        onChange={(on) => patchOptionsAnalytics({ showImpliedRange: on })}
                       />
                     </span>
                   </div>
                   <div className="grouped-row param-row">
-                    <span>Premium Heat Map</span>
+                    <span>Gamma Profile</span>
                     <span className="row-value">
                       <Toggle
-                        on={gexSettings.showPremium}
-                        onChange={(on) => patchGex({ showPremium: on })}
+                        on={optionsAnalytics.showGammaProfile}
+                        onChange={(on) => patchOptionsAnalytics({ showGammaProfile: on })}
                       />
                     </span>
                   </div>
-                  {gexSettings.showPremium ? (
-                    <div className="grouped-row param-row">
-                      <span>Heat Strikes: {gexSettings.maxPremiumStrikes}</span>
-                      <span className="row-value">
-                        <Stepper
-                          value={gexSettings.maxPremiumStrikes}
-                          min={3}
-                          max={10}
-                          onChange={(value) => patchGex({ maxPremiumStrikes: value })}
-                        />
-                      </span>
-                    </div>
-                  ) : null}
-                  {gexSettings.showPremium ? (
-                    <div className="grouped-row param-row">
-                      <span>Heat Opacity: {Math.round(gexSettings.opacityCap * 100)}%</span>
-                      <span className="row-value">
-                        <Stepper
-                          value={Math.round(gexSettings.opacityCap * 100)}
-                          min={20}
-                          max={80}
-                          step={5}
-                          onChange={(value) => patchGex({ opacityCap: value / 100 })}
-                        />
-                      </span>
-                    </div>
-                  ) : null}
                   <div className="grouped-row param-row">
-                    <span>Refresh: {gexSettings.refreshSeconds}s</span>
+                    <span>Marked OI Value</span>
+                    <span className="row-value">
+                      <Toggle
+                        on={optionsAnalytics.showMarkedOi}
+                        onChange={(on) => patchOptionsAnalytics({ showMarkedOi: on })}
+                      />
+                    </span>
+                  </div>
+                  <div className="grouped-row param-row">
+                    <span>Liquidity (Spread / Round Trip)</span>
+                    <span className="row-value">
+                      <Toggle
+                        on={optionsAnalytics.showLiquidity}
+                        onChange={(on) => patchOptionsAnalytics({ showLiquidity: on })}
+                      />
+                    </span>
+                  </div>
+                  <div className="grouped-row param-row">
+                    <span>Dealer Proxy Scenario</span>
+                    <span className="row-value">
+                      <Toggle
+                        on={optionsAnalytics.showDealerProxy}
+                        onChange={(on) => patchOptionsAnalytics({ showDealerProxy: on })}
+                      />
+                    </span>
+                  </div>
+                  <div className="grouped-row param-row">
+                    <span>Profile Strikes: {optionsAnalytics.profileStrikeCount}</span>
                     <span className="row-value">
                       <Stepper
-                        value={gexSettings.refreshSeconds}
+                        value={optionsAnalytics.profileStrikeCount}
+                        min={3}
+                        max={20}
+                        onChange={(value) => patchOptionsAnalytics({ profileStrikeCount: value })}
+                      />
+                    </span>
+                  </div>
+                  <div className="grouped-row param-row">
+                    <span>Refresh: {optionsAnalytics.refreshSeconds}s</span>
+                    <span className="row-value">
+                      <Stepper
+                        value={optionsAnalytics.refreshSeconds}
                         min={15}
                         max={120}
                         step={15}
-                        onChange={(value) => patchGex({ refreshSeconds: value })}
+                        onChange={(value) => patchOptionsAnalytics({ refreshSeconds: value })}
                       />
                     </span>
                   </div>

@@ -12,11 +12,11 @@ import { CandleChart, type OverlaySeries, type VisibleRange } from './CandleChar
 import { overlayPalette, panePalette } from './chartColors';
 import { DrawToolsMenu } from './DrawingToolbar';
 import type { DrawingsStore } from './drawings';
-import { useGexLevels } from './gex/useGexLevels';
 import { IndicatorPane, type PaneSeries } from './IndicatorPane';
 import { PaneCard, type PaneReadout } from './PaneCard';
 import * as engine from './indicatorEngine';
 import { enabledSubPanes, type SubPaneKey } from './indicatorSettings';
+import { useOptionsAnalytics } from './optionsAnalytics/useOptionsAnalytics';
 import { computeTwc } from './twc/computeTwc';
 import type { TwcBanner } from './twc/twcTypes';
 import { intervalSeconds } from './ChartStore';
@@ -30,8 +30,8 @@ interface ChartViewProps {
   onIndicatorSettings: () => void;
   tradingMode: TradingMode;
   onToggleMode: () => void;
-  /** Trade-ticket expiration for the GEX overlay; null = server default. */
-  gexExpiration: string | null;
+  /** Trade-ticket expiration for the exact options snapshot; null pauses shadow capture. */
+  optionsAnalyticsExpiration: string | null;
 }
 
 // Interval hotkeys. 'H'/'D' are uppercase (shift held) so they don't collide
@@ -70,7 +70,7 @@ export function ChartView({
   onIndicatorSettings,
   tradingMode,
   onToggleMode,
-  gexExpiration,
+  optionsAnalyticsExpiration,
 }: ChartViewProps) {
   const {
     symbol,
@@ -82,21 +82,24 @@ export function ChartView({
     isStale,
     indicatorSettings,
     twcSettings,
-    gexSettings,
+    optionsAnalytics,
   } = useStore(store);
 
   // Main chart's visible x-range, mirrored into every sub-pane.
   const [visibleRange, setVisibleRange] = useState<VisibleRange | null>(null);
 
-  // GEX/DEX levels poll the API while the script is enabled. Levels are
-  // symbol-keyed server-side: suppress a stale previous symbol's overlay
-  // while the new symbol's first fetch is in flight.
-  const gex = useGexLevels(apiClient, symbol, gexSettings, gexExpiration);
-  const gexLevels =
-    gex.levels &&
-    gex.levels.symbol === symbol &&
-    (gexExpiration === null || gex.levels.expiration === gexExpiration)
-      ? gex.levels
+  const optionsAnalyticsState = useOptionsAnalytics(
+    apiClient,
+    symbol,
+    optionsAnalyticsExpiration,
+    optionsAnalytics,
+  );
+  const optionsAnalyticsSnapshot =
+    optionsAnalyticsState.snapshot &&
+    optionsAnalyticsExpiration !== null &&
+    optionsAnalyticsState.snapshot.scope.symbol === symbol &&
+    optionsAnalyticsState.snapshot.scope.expiration === optionsAnalyticsExpiration
+      ? optionsAnalyticsState.snapshot
       : null;
 
   const closes = useMemo(() => candles.map((c) => c.close), [candles]);
@@ -398,15 +401,14 @@ export function ChartView({
             drawingsStore={drawingsStore}
             candleColors={twcModel?.candleColors ?? null}
             twcModel={twcModel}
-            gexLevels={gexLevels}
-            gexSettings={gexSettings.enabled ? gexSettings : null}
-            gexStale={gex.stale}
+            optionsAnalyticsSnapshot={optionsAnalyticsSnapshot}
+            optionsAnalyticsSettings={optionsAnalytics.enabled ? optionsAnalytics : null}
+            optionsAnalyticsRetained={optionsAnalyticsState.retained}
             onVisibleRangeChange={setVisibleRange}
           />
           {twcModel?.banner ? <TwcBiasBanner banner={twcModel.banner} /> : null}
-          {gex.errorMessage ? (
+          {optionsAnalytics.enabled && optionsAnalyticsState.errorMessage ? (
             <div
-              role="status"
               style={{
                 position: 'absolute',
                 bottom: 8,
@@ -417,7 +419,7 @@ export function ChartView({
                 zIndex: 3,
               }}
             >
-              GEX unavailable: {gex.errorMessage}
+              Options analytics unavailable: {optionsAnalyticsState.errorMessage}
             </div>
           ) : null}
           {isLoading && candles.length === 0 ? (

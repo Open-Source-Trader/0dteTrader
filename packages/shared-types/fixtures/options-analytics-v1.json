@@ -1,0 +1,144 @@
+{
+  "scope": {
+    "symbol": "SPX",
+    "rootSymbol": "SPXW",
+    "settlementStyle": "pm",
+    "expiration": "2026-07-20",
+    "observedAt": "2026-07-20T14:30:10.000Z",
+    "settlementAt": "2026-07-20T20:00:00.000Z",
+    "spot": 6300,
+    "forward": 6301.25
+  },
+  "exposureUnit": "$ delta change per 1% underlying move",
+  "quality": {
+    "quoteAsOf": "2026-07-20T14:30:08.000Z",
+    "greeksAsOf": "2026-07-20T14:30:06.000Z",
+    "oiEffectiveDate": "2026-07-17",
+    "feedMode": "realtime",
+    "coverage": {
+      "contractsTotal": 4,
+      "contractsIncluded": 3,
+      "ratio": 0.75
+    },
+    "status": "partial",
+    "warnings": [
+      "Selected SPXW PM-settled product for SPX",
+      "Discounting uses the configured annual risk-free rate 4.3000%; it is not a live timestamped yield curve"
+    ],
+    "calculationVersion": "options-analytics-v1",
+    "cacheStatus": "fresh"
+  },
+  "structure": {
+    "callGammaExposure": 900000,
+    "putGammaExposure": 500000,
+    "grossGammaExposure": 1400000,
+    "callDeltaNotional": 70560000,
+    "putDeltaNotional": -15120000,
+    "callWall": 6325,
+    "putWall": 6275,
+    "grossGammaConcentration": 0.6428571428571429,
+    "maxOpenInterestStrike": 6275
+  },
+  "scenarios": {
+    "callPutDealerProxy": {
+      "assumption": "Call gamma is positive and put gamma is negative; delta uses model-signed call and put delta. Open interest does not reveal actual dealer inventory.",
+      "gammaExposure": 400000,
+      "deltaNotional": 55440000,
+      "strikeGammaExposures": [
+        { "strike": 6275, "gammaExposure": -100000 },
+        { "strike": 6325, "gammaExposure": 500000 },
+        { "strike": 6350, "gammaExposure": null }
+      ],
+      "gammaRoots": [6288.25, 6312.5],
+      "primaryGammaRoot": 6288.25
+    }
+  },
+  "impliedRange": {
+    "lower": 6250,
+    "upper": 6355,
+    "confidence": 0.68,
+    "label": "model-implied 68% range",
+    "atmIv": 0.2,
+    "straddleLower": 6245,
+    "straddleUpper": 6355
+  },
+  "strikes": [
+    {
+      "strike": 6275,
+      "call": {
+        "openInterest": 100,
+        "volume": 12,
+        "impliedVolatility": 0.21,
+        "delta": 0.7,
+        "gamma": 0.002,
+        "gammaExposure": 400000,
+        "deltaNotional": 44100000,
+        "markedOiValue": 120000,
+        "relativeSpread": 0.08,
+        "roundTripCost": 80,
+        "bidSize": 20,
+        "askSize": 18,
+        "multiplier": 100
+      },
+      "put": {
+        "openInterest": 80,
+        "volume": 10,
+        "impliedVolatility": 0.22,
+        "delta": -0.3,
+        "gamma": 0.002,
+        "gammaExposure": 500000,
+        "deltaNotional": -15120000,
+        "markedOiValue": 80000,
+        "relativeSpread": 0.12,
+        "roundTripCost": 60,
+        "bidSize": 15,
+        "askSize": 14,
+        "multiplier": 100
+      },
+      "grossGammaExposure": 900000,
+      "totalOpenInterest": 180
+    },
+    {
+      "strike": 6325,
+      "call": {
+        "openInterest": 120,
+        "volume": 16,
+        "impliedVolatility": 0.2,
+        "delta": 0.35,
+        "gamma": 0.0025,
+        "gammaExposure": 500000,
+        "deltaNotional": 26460000,
+        "markedOiValue": 200000,
+        "relativeSpread": 0.05,
+        "roundTripCost": 50,
+        "bidSize": 25,
+        "askSize": 22,
+        "multiplier": 100
+      },
+      "put": null,
+      "grossGammaExposure": 500000,
+      "totalOpenInterest": 120
+    },
+    {
+      "strike": 6350,
+      "call": {
+        "openInterest": 10,
+        "volume": 0,
+        "impliedVolatility": null,
+        "delta": null,
+        "gamma": null,
+        "gammaExposure": null,
+        "deltaNotional": null,
+        "markedOiValue": 1000,
+        "relativeSpread": 0.2,
+        "roundTripCost": 50,
+        "bidSize": 4,
+        "askSize": 3,
+        "multiplier": 100
+      },
+      "put": null,
+      "grossGammaExposure": null,
+      "totalOpenInterest": 10
+    }
+  ]
+}

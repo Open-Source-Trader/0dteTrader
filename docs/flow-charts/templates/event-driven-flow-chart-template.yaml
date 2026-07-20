@@ -1,0 +1,102 @@
+schema_version: 1
+template_id: event_driven_flow_chart.v1
+title: '<system-name>-event-driven-flow-chart'
+owner: '<team-or-owner>'
+date: 'YYYY-MM-DD'
+status: draft # draft | review | approved
+system: '<system-name>'
+source_plan: 'docs/plans/<YYYY-MM-DD>-<short-title>.yaml'
+source_spec_sheet: 'docs/specs/<spec-name>.md'
+
+objective:
+  restated: '<what this flow chart exists to show and why>'
+
+required_context_files_read_first:
+  - 'AGENTS.md'
+  - 'docs/plans/plan-template.yaml'
+  - 'docs/plans/checking_plan_plan-template.yaml'
+  - 'docs/specs/<spec-name>.md'
+  - '<relevant source files>'
+
+flow_chart:
+  style: event_driven
+  nodes:
+    - id: N1
+      label: '<event received>'
+      type: event
+    - id: N2
+      label: '<validation/decision>'
+      type: decision
+    - id: N3
+      label: '<transformation/action>'
+      type: process
+    - id: N4
+      label: '<output/side effect>'
+      type: output
+  edges:
+    - from: N1
+      to: N2
+      condition: 'always'
+    - from: N2
+      to: N3
+      condition: 'valid'
+    - from: N2
+      to: N4
+      condition: 'invalid'
+
+actual_events_by_step:
+  - step: 1
+    event: '<actual expected event>'
+    outcome: '<expected outcome>'
+  - step: 2
+    event: '<actual expected event>'
+    outcome: '<expected outcome>'
+
+all_possible_events_by_step:
+  - step: 1
+    possible_events:
+      - '<event-a>'
+      - '<event-b>'
+    outcomes:
+      - '<outcome-a>'
+      - '<outcome-b>'
+
+failure_recovery_paths:
+  - failure: '<failure scenario>'
+    detection: '<how detected>'
+    retry_timeout_fallback: '<behavior>'
+    terminal_outcome: '<state/result>'
+
+inputs_transformations_outputs_side_effects:
+  inputs:
+    - '<input>'
+  transformations:
+    - '<transformation>'
+  outputs:
+    - '<output>'
+  side_effects:
+    - '<side effect>'
+
+invariants:
+  preconditions:
+    - '<must be true before execution>'
+  postconditions:
+    - '<must be true after execution>'
+  must_never_happen:
+    - '<forbidden state/behavior>'
+
+risk_review:
+  user_behavior_breaks:
+    - '<what user behavior could break and why>'
+  production_traffic_breaks:
+    - '<load/volume/ordering risks>'
+  weird_data_breaks:
+    - '<bad/partial/unexpected data risks>'
+  concurrency_time_order_breaks:
+    - '<race/time-ordering risks>'
+
+cleanup_requirements:
+  remove_dead_code: true
+  remove_backwards_compatibility_paths: true
+  update_related_files:
+    - '<docs/specs/tests/code paths>'

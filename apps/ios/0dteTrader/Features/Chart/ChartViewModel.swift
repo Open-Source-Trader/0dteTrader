@@ -82,6 +82,14 @@ struct ChartAlertNotice: Equatable, Sendable {
     let message: String
 }
 
+enum OptionsAnalyticsDisplayState: Equatable, Sendable {
+    case empty
+    case live
+    case retained
+    case unavailable
+    case expired
+}
+
 /// Owns the chart: candle history via REST, live quotes via QuoteSocketClient,
 /// indicator computation, symbol/interval switching, chart annotations.
 @MainActor
@@ -96,13 +104,10 @@ final class ChartViewModel: ObservableObject {
     /// The main chart's visible candle-index window; indicator panes track it.
     @Published var visibleXRange: ClosedRange<Double>?
 
-    /// GEX/DEX level structure from the server (nil while disabled or before
-    /// the first successful fetch for the current symbol).
-    @Published private(set) var gexLevels: GexLevels?
-    /// Fresh GEX fetch failed — showing the last good computation.
-    @Published private(set) var gexStale = false
-    /// Set only when there is nothing to show (e.g. token not configured).
-    @Published private(set) var gexErrorMessage: String?
+    /// Exact-expiration options structure snapshot for the current chart key.
+    @Published private(set) var optionsAnalyticsSnapshot: OptionsAnalyticsSnapshotDTO?
+    @Published private(set) var optionsAnalyticsErrorMessage: String?
+    @Published private(set) var optionsAnalyticsDisplayState: OptionsAnalyticsDisplayState = .empty
 
     /// Drawing tools + price alerts for the current symbol.
     let drawings = ChartDrawingsModel()
@@ -115,15 +120,11 @@ final class ChartViewModel: ObservableObject {
         didSet { settingsStore.twcSettings = twcSettings }
     }
 
-    @Published var gexSettings: GexSettings {
+    @Published var optionsAnalyticsSettings: OptionsAnalyticsSettings {
         didSet {
-            settingsStore.gexSettings = gexSettings
-            // Only connectivity-relevant changes restart the poll loop;
-            // display toggles apply on the next redraw and must not drop the
-            // cached levels (a failed refetch would blank the overlay).
-            if gexSettings.enabled != oldValue.enabled
-                || gexSettings.refreshSeconds != oldValue.refreshSeconds {
-                updateGexPolling()
+            settingsStore.optionsAnalyticsSettings = optionsAnalyticsSettings
+            if optionsAnalyticsSettings.refreshSeconds != oldValue.refreshSeconds {
+                updateOptionsAnalyticsPolling(clearSnapshot: false)
             }
         }
     }
@@ -131,13 +132,20 @@ final class ChartViewModel: ObservableObject {
     private let apiClient: APIClient
     private let socket: QuoteSocketClient
     private let settingsStore: SettingsStore
+    private let optionsAnalyticsLoader: @Sendable (String, String) async throws -> OptionsAnalyticsSnapshotDTO
+    private let optionsAnalyticsNow: @Sendable () -> Date
     private var cancellables: Set<AnyCancellable> = []
-    private var gexTask: Task<Void, Never>?
+    private var optionsAnalyticsTask: Task<Void, Never>?
+    private var optionsAnalyticsGeneration = 0
+    private var isOptionsAnalyticsVisible = false
+    private var isOptionsAnalyticsAppActive = false
 
-    /// Trade-ticket expiration for the GEX overlay; nil = server default.
-    var gexExpiration: String? {
+    /// Trade-ticket expiration. A non-nil value must be returned exactly.
+    var optionsAnalyticsExpiration: String? {
         didSet {
-            if gexExpiration != oldValue { updateGexPolling() }
+            if optionsAnalyticsExpiration != oldValue {
+                updateOptionsAnalyticsPolling(clearSnapshot: true)
+            }
         }
     }
 
@@ -155,14 +163,24 @@ final class ChartViewModel: ObservableObject {
 
     private var tickAccumulator: TickAccumulator?
 
-    init(apiClient: APIClient, socket: QuoteSocketClient, settingsStore: SettingsStore) {
+    init(
+        apiClient: APIClient,
+        socket: QuoteSocketClient,
+        settingsStore: SettingsStore,
+        optionsAnalyticsLoader: (@Sendable (String, String) async throws -> OptionsAnalyticsSnapshotDTO)? = nil,
+        optionsAnalyticsNow: @escaping @Sendable () -> Date = { Date() }
+    ) {
         self.apiClient = apiClient
         self.socket = socket
         self.settingsStore = settingsStore
+        self.optionsAnalyticsLoader = optionsAnalyticsLoader ?? { symbol, expiration in
+            try await apiClient.optionsAnalytics(symbol: symbol, expiration: expiration)
+        }
+        self.optionsAnalyticsNow = optionsAnalyticsNow
         self.symbol = settingsStore.lastSymbol ?? "SPY"
         self.indicatorSettings = settingsStore.indicatorSettings
         self.twcSettings = settingsStore.twcSettings
-        self.gexSettings = settingsStore.gexSettings
+        self.optionsAnalyticsSettings = settingsStore.optionsAnalyticsSettings
         drawings.setSymbol(self.symbol)
 
         socket.$lastQuote
@@ -172,7 +190,10 @@ final class ChartViewModel: ObservableObject {
             }
             .store(in: &cancellables)
 
-        updateGexPolling()
+    }
+
+    deinit {
+        optionsAnalyticsTask?.cancel()
     }
 
     // MARK: - Loading
@@ -223,7 +244,10 @@ final class ChartViewModel: ObservableObject {
         quote = nil
         candles = []
         socket.subscribe(symbols: [normalized])
-        updateGexPolling()
+        // Never pair the new symbol with the previous chain's expiration.
+        // Shadow capture resumes after the new chain selects an exact date.
+        optionsAnalyticsExpiration = nil
+        updateOptionsAnalyticsPolling(clearSnapshot: true)
         Task { await loadCandles() }
     }
 
@@ -234,55 +258,176 @@ final class ChartViewModel: ObservableObject {
         Task { await loadCandles() }
     }
 
-    // MARK: - GEX/DEX polling
+    // MARK: - Options Analytics polling
 
-    /// (Re)starts the GEX poll loop for the current symbol and settings.
-    /// The server caches the option chain (OI is static intraday), so each
-    /// poll is cheap. On failure the last good levels stay on screen,
-    /// flagged stale.
-    private func updateGexPolling() {
-        gexTask?.cancel()
-        gexTask = nil
-        gexLevels = nil
-        gexStale = false
-        gexErrorMessage = nil
-        guard gexSettings.enabled else { return }
+    func setOptionsAnalyticsVisible(_ visible: Bool) {
+        guard visible != isOptionsAnalyticsVisible else { return }
+        isOptionsAnalyticsVisible = visible
+        updateOptionsAnalyticsPolling(clearSnapshot: false)
+    }
 
-        gexTask = Task { [weak self] in
+    func setOptionsAnalyticsAppActive(_ active: Bool) {
+        guard active != isOptionsAnalyticsAppActive else { return }
+        isOptionsAnalyticsAppActive = active
+        updateOptionsAnalyticsPolling(clearSnapshot: false)
+    }
+
+    private func updateOptionsAnalyticsPolling(clearSnapshot: Bool) {
+        optionsAnalyticsTask?.cancel()
+        optionsAnalyticsTask = nil
+        optionsAnalyticsGeneration &+= 1
+        if clearSnapshot {
+            optionsAnalyticsSnapshot = nil
+            optionsAnalyticsDisplayState = .empty
+        } else if let snapshot = optionsAnalyticsSnapshot {
+            if let expiration = optionsAnalyticsExpiration,
+               Self.isRetainableOptionsAnalyticsSnapshot(
+                   snapshot,
+                   symbol: symbol,
+                   expiration: expiration,
+                   refreshSeconds: optionsAnalyticsSettings.refreshSeconds,
+                   now: optionsAnalyticsNow()
+               ) {
+                // Keep the exact fresh snapshot visible while the replacement request runs.
+            } else {
+                optionsAnalyticsSnapshot = nil
+                optionsAnalyticsDisplayState = Self.evictionState(
+                    for: snapshot,
+                    now: optionsAnalyticsNow()
+                )
+            }
+        }
+        optionsAnalyticsErrorMessage = nil
+        guard isOptionsAnalyticsVisible,
+              isOptionsAnalyticsAppActive,
+              let requestExpiration = optionsAnalyticsExpiration
+        else { return }
+
+        let generation = optionsAnalyticsGeneration
+        let requestSymbol = symbol
+        let refreshSeconds = optionsAnalyticsSettings.refreshSeconds
+        let loader = optionsAnalyticsLoader
+        let now = optionsAnalyticsNow
+        optionsAnalyticsTask = Task { [weak self] in
             while !Task.isCancelled {
-                guard let self else { return }
-                let symbol = self.symbol
                 do {
-                    let dto = try await self.apiClient.gexLevels(
-                        symbol: symbol,
-                        expiration: self.gexExpiration
+                    let snapshot = try await loader(
+                        requestSymbol,
+                        requestExpiration
                     )
                     guard !Task.isCancelled else { return }
-                    let levels = GexLevels(dto: dto)
-                    // A symbol or expiration change during the fetch makes
-                    // the result irrelevant to the chart now on screen.
-                    if levels.symbol == self.symbol,
-                       self.gexExpiration == nil || levels.expiration == self.gexExpiration {
-                        self.gexLevels = levels
-                        self.gexStale = levels.stale
-                        self.gexErrorMessage = nil
-                    }
+                    let accepted = { [weak self] in
+                        guard let self,
+                              generation == self.optionsAnalyticsGeneration,
+                              requestSymbol == self.symbol,
+                              self.optionsAnalyticsExpiration == requestExpiration
+                        else { return false }
+                        do {
+                            self.optionsAnalyticsSnapshot = try snapshot.validated(
+                                expectedSymbol: requestSymbol,
+                                expectedExpiration: requestExpiration
+                            )
+                            self.optionsAnalyticsErrorMessage = nil
+                            self.optionsAnalyticsDisplayState = .live
+                        } catch {
+                            self.handleOptionsAnalyticsFailure(
+                                error,
+                                symbol: requestSymbol,
+                                expiration: requestExpiration,
+                                refreshSeconds: refreshSeconds,
+                                now: now()
+                            )
+                        }
+                        return true
+                    }()
+                    guard accepted else { return }
                 } catch is CancellationError {
                     return
                 } catch {
                     guard !Task.isCancelled else { return }
-                    if self.gexLevels != nil {
-                        self.gexStale = true
-                    } else if let apiError = error as? APIError {
-                        self.gexErrorMessage = apiError.userMessage
-                    } else {
-                        self.gexErrorMessage = error.localizedDescription
-                    }
+                    let accepted = { [weak self] in
+                        guard let self,
+                              generation == self.optionsAnalyticsGeneration,
+                              requestSymbol == self.symbol,
+                              self.optionsAnalyticsExpiration == requestExpiration
+                        else { return false }
+                        self.handleOptionsAnalyticsFailure(
+                            error,
+                            symbol: requestSymbol,
+                            expiration: requestExpiration,
+                            refreshSeconds: refreshSeconds,
+                            now: now()
+                        )
+                        return true
+                    }()
+                    guard accepted else { return }
                 }
-                let seconds = max(self.gexSettings.refreshSeconds, 15)
-                try? await Task.sleep(nanoseconds: UInt64(seconds) * 1_000_000_000)
+                do {
+                    try await Task.sleep(for: .seconds(refreshSeconds))
+                } catch {
+                    return
+                }
             }
         }
+    }
+
+    private func handleOptionsAnalyticsFailure(
+        _ error: Error,
+        symbol: String,
+        expiration: String,
+        refreshSeconds: Int,
+        now: Date
+    ) {
+        if let apiError = error as? APIError {
+            optionsAnalyticsErrorMessage = apiError.userMessage
+        } else {
+            optionsAnalyticsErrorMessage = error.localizedDescription
+        }
+        if let snapshot = optionsAnalyticsSnapshot,
+           Self.isRetainableOptionsAnalyticsSnapshot(
+               snapshot,
+               symbol: symbol,
+               expiration: expiration,
+               refreshSeconds: refreshSeconds,
+               now: now
+           ) {
+            optionsAnalyticsDisplayState = .retained
+        } else {
+            let previous = optionsAnalyticsSnapshot
+            optionsAnalyticsSnapshot = nil
+            optionsAnalyticsDisplayState = previous.map {
+                Self.evictionState(for: $0, now: now)
+            } ?? .unavailable
+        }
+    }
+
+    nonisolated private static func evictionState(
+        for snapshot: OptionsAnalyticsSnapshotDTO,
+        now: Date
+    ) -> OptionsAnalyticsDisplayState {
+        guard let settlementAt = DateParsing.dateTime(snapshot.scope.settlementAt) else {
+            return .unavailable
+        }
+        return now >= settlementAt ? .expired : .unavailable
+    }
+
+    nonisolated static func isRetainableOptionsAnalyticsSnapshot(
+        _ snapshot: OptionsAnalyticsSnapshotDTO,
+        symbol: String,
+        expiration: String,
+        refreshSeconds: Int,
+        now: Date
+    ) -> Bool {
+        let normalizedSymbol = symbol.uppercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        guard snapshot.scope.symbol == normalizedSymbol,
+              snapshot.scope.expiration == expiration,
+              let observedAt = DateParsing.dateTime(snapshot.scope.observedAt),
+              let settlementAt = DateParsing.dateTime(snapshot.scope.settlementAt),
+              observedAt <= now,
+              now < settlementAt
+        else { return false }
+        let maximumAge = TimeInterval(max(15, refreshSeconds) * 2)
+        return now.timeIntervalSince(observedAt) <= maximumAge
     }
 
     // MARK: - Live updates (FR-8)

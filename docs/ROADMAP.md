@@ -27,14 +27,18 @@ simulator run pending on a Mac.**
 ## P3.5 — Desktop Clone ✅
 
 React + Vite + Electron desktop app (`apps/desktop`) that mirrors the iOS UI in a fixed
-phone-frame layout. Same features: auth, chart with indicators/GEX/TWC overlays, trade panel,
+phone-frame layout. Same features: auth, chart with indicators/Options Structure/TWC overlays, trade panel,
 positions strip, history, profile. Useful for backend testing without Xcode.
 
-## P3.6 — GEX/DEX Indicator ✅
+## P3.6 — Options Analytics Snapshot Integrity Suite ✅
 
-Tradier-backed GEX/DEX engine: options chain fetch, Black-Scholes Greeks, dealer
-gamma/delta exposure, call/put walls, gamma-flip, 0DTE magnet, premium heat map.
-Exposed via `GET /v1/market/gex`; overlaid on the chart in both iOS and desktop.
+Tradier-backed, exact-expiration Options Structure engine: runtime-validated
+quotes and metadata, local IV/Greeks, explicit USD-per-1%-move exposure units,
+fact-first call/put/gross structure, independent walls, implied expiry range,
+marked-OI value, liquidity, and an optional labeled call-minus-put scenario.
+Snapshots include source age/coverage/warnings/version, persist at one-minute
+resolution with compaction, and render as a current right-edge profile on iOS
+and desktop through `GET /v1/market/options-analytics`.
 
 ## P4 — Real Webull Gateway ✅ (code complete; paper verification pending credentials)
 

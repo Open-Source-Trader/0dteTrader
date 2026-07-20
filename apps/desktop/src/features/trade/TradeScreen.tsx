@@ -19,6 +19,7 @@ import { OrderConfirmSheet } from './OrderConfirmSheet';
 import { PositionsStrip } from './PositionsStrip';
 import { ToastView } from './ToastView';
 import { TradePanel } from './TradePanel';
+import { optionsAnalyticsExpirationForChart } from './optionsAnalyticsSelection';
 
 const DIVIDER_HEIGHT = 1;
 
@@ -31,12 +32,19 @@ const DIVIDER_HEIGHT = 1;
  */
 export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
   const container = useContainer();
-  const { apiClient, chartStore, chainStore, tradeStore, settingsStore, quoteSocket, drawingsStore } =
-    container;
+  const {
+    apiClient,
+    chartStore,
+    chainStore,
+    tradeStore,
+    settingsStore,
+    quoteSocket,
+    drawingsStore,
+  } = container;
 
   const chart = useStore(chartStore);
   const trade = useStore(tradeStore);
-  const chain = useStore(chainStore); // chain selection drives canTrade and the GEX expiration
+  const chain = useStore(chainStore); // Chain selection supplies the exact analytics expiration.
 
   const [layout, setLayout] = useState<TradeLayout>(() => settingsStore.layoutMode);
   const [showSymbolSearch, setShowSymbolSearch] = useState(false);
@@ -193,6 +201,11 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
   const panelHeight = Math.round(contentHeight * PANEL_FRACTIONS[paneCount]);
   const panelDensity = PANEL_DENSITIES[paneCount];
   const chartHeight = Math.max(contentHeight - panelHeight - DIVIDER_HEIGHT, 96);
+  const optionsAnalyticsExpiration = optionsAnalyticsExpirationForChart(
+    chart.symbol,
+    chain.underlying,
+    chain.selectedExpiration,
+  );
 
   const positionsStrip = (
     <PositionsStrip
@@ -205,15 +218,31 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
   );
 
   return (
-    <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', position: 'relative' }}>
+    <div
+      style={{
+        flex: 1,
+        minHeight: 0,
+        display: 'flex',
+        flexDirection: 'column',
+        position: 'relative',
+      }}
+    >
       <NavBar
         title="0dteTrader"
         leading={
           <>
-            <button className="navbar-icon-button" onClick={() => setShowProfile(true)} aria-label="Profile">
+            <button
+              className="navbar-icon-button"
+              onClick={() => setShowProfile(true)}
+              aria-label="Profile"
+            >
               <PersonCircleIcon size={22} />
             </button>
-            <button className="navbar-icon-button" onClick={() => setShowHistory(true)} aria-label="Trade history">
+            <button
+              className="navbar-icon-button"
+              onClick={() => setShowHistory(true)}
+              aria-label="Trade history"
+            >
               <ClockIcon size={22} />
             </button>
           </>
@@ -243,7 +272,7 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
               onIndicatorSettings={() => setShowIndicatorSettings(true)}
               tradingMode={tradingMode}
               onToggleMode={() => setShowModeConfirmation(true)}
-              gexExpiration={chain.selectedExpiration}
+              optionsAnalyticsExpiration={optionsAnalyticsExpiration}
             />
             {/* Scrim so the dock never lets chart content bleed through the buttons */}
             <div
@@ -255,8 +284,7 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
                 bottom: 0,
                 height: 190,
                 pointerEvents: 'none',
-                background:
-                  'linear-gradient(to bottom, rgba(0,0,0,0), var(--app-background) 78%)',
+                background: 'linear-gradient(to bottom, rgba(0,0,0,0), var(--app-background) 78%)',
               }}
             />
             <div
@@ -297,7 +325,7 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
                 onIndicatorSettings={() => setShowIndicatorSettings(true)}
                 tradingMode={tradingMode}
                 onToggleMode={() => setShowModeConfirmation(true)}
-                gexExpiration={chain.selectedExpiration}
+                optionsAnalyticsExpiration={optionsAnalyticsExpiration}
               />
             </div>
 
@@ -315,7 +343,12 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
                 transition: 'height 200ms cubic-bezier(0.32, 0.72, 0, 1)',
               }}
             >
-              <TradePanel tradeStore={tradeStore} chainStore={chainStore} onArm={arm} density={panelDensity} />
+              <TradePanel
+                tradeStore={tradeStore}
+                chainStore={chainStore}
+                onArm={arm}
+                density={panelDensity}
+              />
             </div>
           </div>
         )}
@@ -348,8 +381,8 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
             setShowIndicatorSettings(false);
             setShowTwcSettings(true);
           }}
-          gexSettings={chart.gexSettings}
-          onChangeGex={(settings) => chartStore.setGexSettings(settings)}
+          optionsAnalytics={chart.optionsAnalytics}
+          onChangeOptionsAnalytics={(settings) => chartStore.setOptionsAnalytics(settings)}
         />
       ) : null}
       {showTwcSettings ? (

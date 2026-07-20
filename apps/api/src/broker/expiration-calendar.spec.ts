@@ -1,8 +1,5 @@
-import {
-  isTradingDay,
-  marketHolidays,
-  optionExpirations,
-} from './expiration-calendar';
+import { isTradingDay, marketHolidays, optionExpirations } from './expiration-calendar';
+import * as expirationCalendar from './expiration-calendar';
 
 function utc(iso: string): Date {
   return new Date(`${iso}T12:00:00Z`);
@@ -99,5 +96,70 @@ describe('optionExpirations', () => {
   it('is ascending and deduped', () => {
     const expirations = optionExpirations('SPY', utc('2026-07-13'));
     expect(expirations).toEqual([...new Set(expirations)].sort());
+  });
+});
+
+describe('option settlement', () => {
+  type SettlementCalendar = {
+    optionSettlementAt?: (expiration: string, underlying: string, rootSymbol?: string) => Date;
+    isRegularMarketSessionOpen?: (now: Date) => boolean;
+  };
+
+  const settlement = expirationCalendar as SettlementCalendar;
+
+  it('settles PM equity and SPXW options at 16:00 America/New_York across DST', () => {
+    expect(settlement.optionSettlementAt).toBeDefined();
+    expect(settlement.optionSettlementAt!('2026-07-17', 'SPY').toISOString()).toBe(
+      '2026-07-17T20:00:00.000Z',
+    );
+    expect(settlement.optionSettlementAt!('2026-01-16', 'SPY').toISOString()).toBe(
+      '2026-01-16T21:00:00.000Z',
+    );
+    expect(settlement.optionSettlementAt!('2026-07-17', 'SPX', 'SPXW').toISOString()).toBe(
+      '2026-07-17T20:00:00.000Z',
+    );
+  });
+
+  it('uses the 13:00 America/New_York close on scheduled early-close sessions', () => {
+    expect(settlement.optionSettlementAt).toBeDefined();
+    expect(settlement.optionSettlementAt!('2026-11-27', 'SPY').toISOString()).toBe(
+      '2026-11-27T18:00:00.000Z',
+    );
+  });
+
+  it.each([
+    ['2025-07-03', true],
+    ['2026-07-02', false],
+    ['2027-07-02', false],
+    ['2028-07-03', true],
+    ['2026-07-01', false],
+    ['2021-12-24', false],
+    ['2022-12-23', false],
+    ['2026-12-24', true],
+  ] as const)('classifies %s early-close status as %s', (date, expected) => {
+    expect(expirationCalendar.isEarlyCloseTradingDay(new Date(`${date}T12:00:00Z`))).toBe(expected);
+  });
+
+  it('keeps July 2 2026 at the regular close because the published early close is not shifted', () => {
+    expect(settlement.optionSettlementAt!('2026-07-02', 'SPY').toISOString()).toBe(
+      '2026-07-02T20:00:00.000Z',
+    );
+  });
+
+  it('settles standard SPX contracts at the 09:30 America/New_York opening print', () => {
+    expect(settlement.optionSettlementAt).toBeDefined();
+    expect(settlement.optionSettlementAt!('2026-07-17', 'SPX', 'SPX').toISOString()).toBe(
+      '2026-07-17T13:30:00.000Z',
+    );
+    expect(settlement.optionSettlementAt!('2026-01-16', 'SPX', 'SPX').toISOString()).toBe(
+      '2026-01-16T14:30:00.000Z',
+    );
+  });
+
+  it('reports the regular market session using the same New York calendar', () => {
+    expect(settlement.isRegularMarketSessionOpen).toBeDefined();
+    expect(settlement.isRegularMarketSessionOpen!(new Date('2026-07-20T15:00:00Z'))).toBe(true);
+    expect(settlement.isRegularMarketSessionOpen!(new Date('2026-07-20T20:01:00Z'))).toBe(false);
+    expect(settlement.isRegularMarketSessionOpen!(new Date('2026-11-27T18:01:00Z'))).toBe(false);
   });
 });

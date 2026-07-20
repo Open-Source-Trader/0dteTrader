@@ -74,3 +74,46 @@ describe('ChartStore.handleLiveQuote', () => {
     expect(candles.at(-1)!.open).toBe(501.2);
   });
 });
+
+describe('ChartStore options analytics settings', () => {
+  it('loads and persists the renamed settings contract', () => {
+    const socket = {
+      onQuote: () => () => undefined,
+      subscribe: () => () => undefined,
+      getState: () => ({ connectionState: 'connected' }),
+      subscribeSymbols: () => undefined,
+      unsubscribeSymbols: () => undefined,
+    } as unknown as QuoteSocket;
+    const optionsAnalytics = {
+      enabled: false,
+      showImpliedRange: true,
+      showGammaProfile: true,
+      showMarkedOi: false,
+      showLiquidity: false,
+      showDealerProxy: false,
+      refreshSeconds: 45,
+      profileStrikeCount: 12,
+    };
+    const settingsStore = {
+      lastSymbol: 'SPY',
+      indicatorSettings: {},
+      twcSettings: {},
+      optionsAnalytics,
+    } as unknown as SettingsStore;
+    const store = new ChartStore({} as ApiClient, socket, settingsStore);
+
+    expect(
+      (store.getState() as unknown as { optionsAnalytics: typeof optionsAnalytics })
+        .optionsAnalytics,
+    ).toEqual(optionsAnalytics);
+    const enabled = { ...optionsAnalytics, enabled: true };
+    (
+      store as unknown as {
+        setOptionsAnalytics(settings: typeof optionsAnalytics): void;
+      }
+    ).setOptionsAnalytics(enabled);
+    expect(
+      (settingsStore as unknown as { optionsAnalytics: typeof optionsAnalytics }).optionsAnalytics,
+    ).toEqual(enabled);
+  });
+});

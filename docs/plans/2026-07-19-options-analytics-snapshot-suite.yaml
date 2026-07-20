@@ -1,0 +1,320 @@
+schema_version: 1
+template_id: codex_plan_template.v1
+title: options-analytics-snapshot-suite
+issue: local-options-analytics-integrity
+author: Codex
+date: '2026-07-19'
+status: completed
+plan_mode: codex-plan
+plan_scope_type: modify
+paired_checking_plan: docs/plans/checking_plan_2026-07-19-options-analytics-snapshot-suite.yaml
+runtime:
+  codex_required_sub_skill: executing-plans
+  claude_required_sub_skill: executing-plans
+required_context_files_read_first:
+  purpose: Ground formulas, provider behavior, client integration, storage, and required planning controls in repository truth.
+  core_required:
+    - { path: AGENTS.md, why: Project rules and paired-client requirement. }
+    - { path: docs/plans/plan-template.yaml, why: Required plan schema. }
+    - { path: docs/plans/checking_plan_plan-template.yaml, why: Required checking schema. }
+    - { path: docs/specs/2026-07-19-options-analytics-spec.md, why: Approved source of truth. }
+    - {
+        path: docs/flow-charts/2026-07-19-options-analytics-flow-chart.yaml,
+        why: Current and target event paths.,
+      }
+    - {
+        path: docs/logic-maps/2026-07-19-options-analytics-logic-map.yaml,
+        why: State transitions and invariants.,
+      }
+  conditional_required:
+    - when: implementing backend
+      paths:
+        [
+          apps/api/src/gex,
+          apps/api/src/broker/expiration-calendar.ts,
+          apps/api/prisma/schema.prisma,
+        ]
+      why: Current engine, provider, calendar, service, and persistence behavior.
+    - when: implementing clients
+      paths: [apps/desktop/src/features/chart/gex, apps/ios/0dteTrader/Features/Chart/Gex]
+      why: Current duplicate contracts, polling, settings, and overlay behavior.
+  read_order: [core_required, conditional_required]
+objective:
+  restated:
+    - Correct gamma and delta formulas, signs, units, multipliers, settlement, and freshness.
+    - Replace misleading premium heat with marked-OI value and liquidity layers.
+    - Make call, put, and gross observed structure the default and dealer scenarios explicit and optional.
+    - Add implied range, straddle breakevens, independent walls, and robust roots.
+    - Persist minute snapshots for core plus viewed symbols with compaction and retention.
+    - Keep desktop and iOS terminology, defaults, provenance, accessibility, and cancellation aligned.
+    - Remove the obsolete GEX endpoint and dead compatibility code.
+    - Pass strict types, lint, format, builds, tests, and checking-plan review.
+plan_intake:
+  user_messages:
+    - timestamp_utc: '2026-07-19'
+      message: Implement the approved Options Analytics Snapshot Integrity Suite end to end.
+  agent_questions_and_user_answers:
+    - q_id: Q1
+      agent_question: Which suite shape should be implemented?
+      provided_options: [snapshot-suite, minimal-correction, flow-first]
+      user_answer: snapshot-suite
+      impact_on_plan: Includes calculation, storage, and paired clients now.
+    - q_id: Q2
+      agent_question: What should the default chart assert?
+      provided_options: [structure-first, conventional-dealer-proxy]
+      user_answer: structure-first
+      impact_on_plan: Observed call/put/gross values default on; proxy defaults off.
+    - q_id: Q3
+      agent_question: Persist point-in-time history now?
+      provided_options: [yes, later]
+      user_answer: yes
+      impact_on_plan: Adds Prisma record, capture, compaction, and retention.
+  locked_assumptions_and_constraints:
+    - Exact requested expiration only; never substitute.
+    - Core capture symbols are SPY, QQQ, IWM, and SPX plus the actively viewed key.
+    - One-minute detail retains 30 days and five-minute compact data retains one year.
+    - No public history endpoint in this version.
+    - No compatibility shim or dead GEX naming.
+required_skill_usage:
+  must_use:
+    [
+      using-superpowers,
+      brainstorming,
+      writing-plans,
+      executing-plans,
+      test-driven-development,
+      subagent-driven-development,
+      verification-before-completion,
+    ]
+  skills_used:
+    - {
+        skill: brainstorming,
+        why: Compared three concrete product designs and locked user choices.,
+      }
+    - {
+        skill: writing-plans,
+        why: Created the required paired artifacts from repository templates.,
+      }
+    - { skill: test-driven-development, why: Every behavior change begins with a failing test. }
+    - {
+        skill: subagent-driven-development,
+        why: Non-overlapping backend,
+        client,
+        and documentation ownership.,
+      }
+pre_plan_artifact_requirements:
+  mandatory_before_plan_authoring: true
+  discovery_result: No existing options-analytics spec, flow chart, or logic map existed.
+  artifacts:
+    - docs/specs/2026-07-19-options-analytics-spec.md
+    - docs/flow-charts/2026-07-19-options-analytics-flow-chart.yaml
+    - docs/logic-maps/2026-07-19-options-analytics-logic-map.yaml
+request_breakdown:
+  requests:
+    - request: Correct calculation and provider truthfulness.
+      purpose: This exists to prevent materially wrong exposure levels so that traders can interpret the chart safely.
+    - request: Add honest high-value indicators.
+      purpose: This exists to expose range, structure, OI value, and liquidity so that the chart supports actual options decisions.
+    - request: Persist and render point-in-time snapshots.
+      purpose: This exists to make calculations replayable and visible without implying present data existed historically.
+    - request: Migrate both clients and docs.
+      purpose: This exists to eliminate contract and terminology drift so that every surface communicates the same model.
+self_questioning_and_solution_selection:
+  required: true
+  guiding_questions:
+    - What can be observed versus only assumed from OI?
+    - What units and timestamps let a user independently interpret every value?
+    - What partial data can remain useful without fabrication?
+    - What capture rate is useful without causing provider overload?
+  brainstorm_candidate_solutions:
+    min_options: 3
+    options:
+      - option_id: O1
+        summary: Patch only current formulas and labels.
+        tradeoffs:
+          { pros: [smallest change], cons: [no quality contract, no history, limited value] }
+      - option_id: O2
+        summary: Build signed trade-flow infrastructure first.
+        tradeoffs:
+          {
+            pros: [future flagship signal],
+            cons: [requires unavailable streamed classification and larger scope],
+          }
+      - option_id: O3
+        summary: Build a fact-first quality-aware snapshot suite.
+        tradeoffs:
+          {
+            pros: [accurate now, replayable, supports useful indicators],
+            cons: [breaking coordinated migration],
+          }
+  selected_solution:
+    option_id: O3
+    why_best: Delivers the most reliable currently observable product while leaving signed flow for a correctly sourced later version.
+spec_sheet:
+  current_state: GEX-specific duplicated contracts use silent assumptions, misleading names, and present-time full-width rendering.
+  target_state: One canonical options-analytics contract separates facts, models, quality, capture, and presentation.
+  source: docs/specs/2026-07-19-options-analytics-spec.md
+flow_description:
+  required_format: inputs -> transformations -> outputs -> side effects
+  mapping: symbol/expiration/quote/chain/clock -> validation/settlement/forward/IV/Greeks/aggregation -> quality-aware snapshot/client profile -> exact cache/snapshot write/logs/metrics
+  current_logic_flow: docs/flow-charts/2026-07-19-options-analytics-flow-chart.yaml#current_flow
+  new_logic_flow: docs/flow-charts/2026-07-19-options-analytics-flow-chart.yaml#target_flow
+invariants:
+  preconditions: [exact key, explicit settlement, validated source fields]
+  postconditions: [finite outputs, explicit units and provenance, paired client parity]
+  must_never_happen:
+    [
+      wrong expiration,
+      silent IV,
+      dealer-fact claim,
+      premium-flow mislabel,
+      unbounded cache,
+      obsolete response overwrite,
+    ]
+implementation_tasks:
+  - id: T1
+    title: Canonical contract and fixture
+    owner: root
+    files:
+      [packages/shared-types/src/index.ts, packages/shared-types/fixtures/options-analytics-v1.json]
+    steps:
+      [write failing fixture contract test, verify RED, add strict types and fixture, verify GREEN]
+    acceptance: Shared package builds and fixture represents complete and partial layers without old fields.
+  - id: T2
+    title: Session-aware pricing and analytics engine
+    owner: backend-agent
+    files:
+      [
+        apps/api/src/options-analytics/options-analytics.engine.ts,
+        apps/api/src/options-analytics/options-analytics.engine.spec.ts,
+        apps/api/src/broker/expiration-calendar.ts,
+      ]
+    steps:
+      [
+        write golden and settlement failures,
+        verify RED,
+        implement pricing/IV/exposures/roots/range,
+        verify GREEN,
+        refactor,
+      ]
+    acceptance: REQ-003 through REQ-009 pass with finite outputs.
+  - id: T3
+    title: Provider and exact-expiration service
+    owner: backend-agent
+    files:
+      [
+        apps/api/src/options-analytics/tradier.client.ts,
+        apps/api/src/options-analytics/options-analytics.service.ts,
+        apps/api/src/options-analytics/options-analytics.controller.ts,
+      ]
+    steps:
+      [
+        write validation/header/cache tests,
+        verify RED,
+        implement runtime normalization and bounded dedupe cache,
+        verify GREEN,
+      ]
+    acceptance: REQ-001, REQ-002, and REQ-010 pass.
+  - id: T4
+    title: Snapshot persistence and scheduler
+    owner: backend-agent
+    files:
+      [
+        apps/api/prisma/schema.prisma,
+        apps/api/prisma/migrations,
+        apps/api/src/options-analytics/options-analytics.capture.ts,
+      ]
+    steps:
+      [
+        write fake-clock/idempotency/retention tests,
+        verify RED,
+        add model/migration/capture lifecycle,
+        verify GREEN,
+      ]
+    acceptance: REQ-011 and REQ-012 pass without duplicate records.
+  - id: T5
+    title: Desktop Options Structure migration
+    owner: desktop-client-agent
+    files:
+      [
+        apps/desktop/src/features/chart/optionsAnalytics,
+        apps/desktop/src/core/api/ApiClient.ts,
+        apps/desktop/src/core/storage/SettingsStore.ts,
+      ]
+    steps:
+      [
+        write poller/presentation/settings failures,
+        verify RED,
+        migrate endpoint/settings/profile/accessibility,
+        verify GREEN,
+      ]
+    acceptance: Desktop meets REQ-013 through REQ-017 and builds.
+  - id: T6
+    title: iOS Options Structure migration
+    owner: ios-client-agent
+    files:
+      [
+        apps/ios/0dteTrader/Core/Models,
+        apps/ios/0dteTrader/Features/Chart/OptionsAnalytics,
+        apps/ios/0dteTrader/Features/Chart/ChartViewModel.swift,
+      ]
+    steps:
+      [
+        write DTO/presentation/cancellation failures,
+        verify RED,
+        migrate endpoint/settings/profile/accessibility,
+        verify GREEN,
+      ]
+    acceptance: iOS meets REQ-013 through REQ-017 and suffix tests pass.
+  - id: T7
+    title: Documentation cleanup and integration
+    owner: docs-and-integration
+    files:
+      [docs/openapi.yaml, docs/API-SPEC.md, docs/ARCHITECTURE.md, docs/RUNBOOK.md, docs/ROADMAP.md]
+    steps:
+      [
+        scan old residues,
+        update source-of-truth docs,
+        remove old module/client files,
+        run full checks,
+        remediate findings,
+      ]
+    acceptance: No misleading GEX/premium-heat contract residues and full verification evidence is recorded.
+task_checklist:
+  update_every_message: true
+  items:
+    - { id: T1, status: completed }
+    - { id: T2, status: completed }
+    - { id: T3, status: completed }
+    - { id: T4, status: completed }
+    - { id: T5, status: completed }
+    - { id: T6, status: completed }
+    - { id: T7, status: completed }
+engineering_standards:
+  principles: [DRY, SOLID, KISS, YAGNI]
+  strict_typing: true
+  no_backwards_compatibility_shims: true
+  no_dead_code: true
+  update_all_related_and_relevant_files: true
+focused_brainstorming_pass_before_finalize:
+  required: true
+  breakage_prompts:
+    user_behavior: rapid symbol/expiration/settings changes
+    production_traffic: provider rate limit and database growth
+    weird_data: stale/crossed/one-sided/nonstandard contracts
+    concurrency_time_order: DST/early close/in-flight overlap/minute duplicates
+  logical_flaws: [OI cannot reveal dealer side, straddle breakeven is not one sigma]
+  logical_gaps: [provider lacks true signed flow, no public history consumer yet]
+  contract_violations: [old endpoint and duplicated DTOs must be deleted]
+  risk_hotspots: [IV solver, settlement, roots, cache, scheduler, late client responses]
+validation_commands:
+  - npm run build --workspace @0dtetrader/shared-types
+  - npm run test
+  - npm run lint
+  - npm run format:check
+  - npm run build
+  - xcodebuild test -scheme 0dteTrader -destination 'platform=iOS Simulator,name=iPhone 16 Pro,OS=18.6' CODE_SIGNING_ALLOWED=NO
+paired_checking_plan_requirements:
+  continuously_update: true
+  path: docs/plans/checking_plan_2026-07-19-options-analytics-snapshot-suite.yaml
+  block_completion_on_p0_p1: true

@@ -1,0 +1,417 @@
+schema_version: 1
+template_id: codex_plan_template.v1
+title: '<current_plan_name>'
+issue: 'PROJ-1234'
+author: 'Your Name <you@example.com>'
+date: '2026-02-19'
+status: draft # draft | review | approved | implemented
+plan_mode: codex-plan
+plan_scope_type: new_or_modify # new | modify
+paired_checking_plan: 'docs/plans/checking_plan_<current_plan_name>.yaml'
+
+required_context_files_read_first:
+  purpose: 'Load the minimum required context before drafting a plan so design choices are correct, complete, and aligned with project contracts.'
+  core_required:
+    - path: 'AGENTS.md'
+      why: 'Global operating rules, quality bars, and mandatory planning behavior.'
+    - path: 'docs/plans/plan-template.yaml'
+      why: 'Authoring schema and mandatory plan sections.'
+    - path: 'docs/plans/checking_plan_plan-template.yaml'
+      why: 'Base verification template structure for paired checking plans.'
+    - path: 'docs/plans/checking_plan_<current_plan_name>.yaml'
+      why: 'Plan-specific verification expectations and evidence outputs.'
+    - path: 'docs/specs/templates/spec-template.md'
+      why: 'Required base template for spec-sheet artifacts.'
+    - path: 'docs/flow-charts/templates/event-driven-flow-chart-template.yaml'
+      why: 'Required base template for event-driven flow-chart artifacts.'
+    - path: 'docs/logic-maps/templates/event-driven-logic-map-template.yaml'
+      why: 'Required base template for event-driven logic-map artifacts.'
+  conditional_required:
+    - when: 'creating new behavior'
+      paths:
+        - 'docs/specs/**/*.md'
+      why: 'Identify or author source-of-truth contracts/specs for new behavior.'
+    - when: 'modifying existing behavior'
+      paths:
+        - 'docs/specs/**/*.md'
+        - 'docs/runbooks/**/*.md'
+        - 'src/**'
+        - 'tests/**'
+      why: 'Understand current behavior, operational constraints, and implementation/test impacts before changing logic.'
+    - when: 'plan references a specific file, endpoint, contract, or runbook'
+      paths:
+        - '<all directly referenced files>'
+      why: 'Avoid assumption-driven planning and contract drift.'
+  read_order:
+    - 'core_required'
+    - 'conditional_required'
+
+objective:
+  restated: '<restate all of the objectives in as many bulleted sentences as necessary to be crystal clear on the goals and success criteria>'
+
+plan_intake:
+  user_messages:
+    - timestamp_utc: 'YYYY-MM-DD HH:MM'
+      message: '<exact user message>'
+  agent_questions_and_user_answers:
+    - q_id: Q1
+      agent_question: '<question>'
+      provided_options:
+        - '<option 1>'
+        - '<option 2>'
+      user_answer: '<selected answer>'
+      impact_on_plan: '<what changed in the plan>'
+  locked_assumptions_and_constraints:
+    - '<assumption/constraint>'
+
+required_skill_usage:
+  must_use:
+    - '/using superpowers'
+    - '/brainstorm'
+    - '/brainstorming'
+    - 'brainstorming before implementation planning'
+  skills_used:
+    - skill: '<skill-name>'
+      why: '<why this skill is required for this plan>'
+
+plan_and_checking_file_creation_order:
+  required: true
+  required_directory: 'docs/plans/'
+  sequence:
+    - step: 1
+      action: 'create_or_update_plan_file'
+      path_pattern: 'docs/plans/<YYYY-MM-DD>-<short-title>.yaml'
+      required: true
+    - step: 2
+      action: 'create_or_update_paired_checking_plan_file_immediately_after_step_1'
+      path_pattern: 'docs/plans/checking_plan_<current_plan_name>.yaml'
+      base_template: 'docs/plans/checking_plan_plan-template.yaml'
+      required: true
+    - step: 3
+      action: 'iteratively_update_both_files_during_planning_and_revisions'
+      required: true
+
+pre_plan_artifact_requirements:
+  mandatory_before_plan_authoring: true
+  objective: 'Stimulate high-quality brainstorming and design by forcing concrete artifacts before writing the implementation plan.'
+  required_directory_contract:
+    - 'docs/specs/'
+    - 'docs/flow-charts/'
+    - 'docs/logic-maps/'
+  required_templates:
+    spec_sheet_template: 'docs/specs/templates/spec-template.md'
+    flow_chart_template: 'docs/flow-charts/templates/event-driven-flow-chart-template.yaml'
+    logic_map_template: 'docs/logic-maps/templates/event-driven-logic-map-template.yaml'
+  required_artifacts:
+    - type: spec_sheet
+      required: true
+      path_pattern: 'docs/specs/<YYYY-MM-DD>-<system-or-feature>-spec.md'
+      must_use_template: 'docs/specs/templates/spec-template.md'
+    - type: event_driven_flow_chart
+      required: true
+      path_pattern: 'docs/flow-charts/<YYYY-MM-DD>-<system-or-feature>-flow-chart.yaml'
+      must_use_template: 'docs/flow-charts/templates/event-driven-flow-chart-template.yaml'
+    - type: event_driven_logic_map
+      required: true
+      path_pattern: 'docs/logic-maps/<YYYY-MM-DD>-<system-or-feature>-logic-map.yaml'
+      must_use_template: 'docs/logic-maps/templates/event-driven-logic-map-template.yaml'
+  creation_and_reference_order:
+    - step: 1
+      action: 'discover_existing_spec_sheet_and_existing_event_driven_flow_artifacts_for_scope'
+      required: true
+    - step: 2
+      action: 'if_existing_artifacts_found_briefly_state_current_state_and_in_detail_define_target_state_updates'
+      required: true
+    - step: 3
+      action: 'create_or_update_spec_sheet'
+      required: true
+    - step: 4
+      action: 'create_or_update_event_driven_flow_chart_and_or_logic_map_for_each_relevant_system'
+      required: true
+    - step: 5
+      action: 'reference_created_spec_and_event_artifacts_in_this_plan_before_any_task_planning'
+      required: true
+  existing_artifact_discovery_and_delta_requirements:
+    required: true
+    scan_locations:
+      - 'docs/specs/'
+      - 'docs/flow-charts/'
+      - 'docs/logic-maps/'
+    artifact_types:
+      - 'existing_spec_sheet'
+      - 'existing_event_driven_flow_chart'
+      - 'existing_event_driven_logic_map'
+    if_exists_mandatory_output:
+      brief_current_state_statement: true
+      detailed_target_state_update_statement: true
+      especially_required_for:
+        - 'event_driven_flow_charts'
+        - 'event_driven_logic_maps'
+    if_missing_mandatory_output:
+      - 'explicitly state that no existing artifact was found'
+      - 'create net-new artifact from required template and reference it'
+
+request_breakdown:
+  # List all user requests in detail and include purpose for each.
+  requests:
+    - request: '<request detail>'
+      purpose: 'This exists to <outcome> so that <value>.'
+
+self_questioning_and_solution_selection:
+  required: true
+  objective: 'Ask itself targeted questions to reach a logical conclusion about what is actually being achieved.'
+  guiding_questions:
+    - 'What is the real user outcome and what signals prove success?'
+    - 'What constraints are non-negotiable?'
+    - 'Which assumptions could invalidate the approach?'
+    - 'Which option is simplest while fully satisfying requirements?'
+  brainstorm_candidate_solutions:
+    min_options: 3
+    options:
+      - option_id: O1
+        summary: '<approach summary>'
+        tradeoffs:
+          pros:
+            - '<pro>'
+          cons:
+            - '<con>'
+      - option_id: O2
+        summary: '<approach summary>'
+        tradeoffs:
+          pros:
+            - '<pro>'
+          cons:
+            - '<con>'
+      - option_id: O3
+        summary: '<approach summary>'
+        tradeoffs:
+          pros:
+            - '<pro>'
+          cons:
+            - '<con>'
+  selected_solution:
+    option_id: '<best option id>'
+    why_best: '<logic for best choice based on correctness, maintainability, and fit>'
+  ambiguity_protocol:
+    if_still_ambiguous:
+      ask_user_questions: true
+      question_strategy:
+        - 'Ask only the minimum clarifying questions needed to remove ambiguity.'
+        - 'Prioritize questions that change architecture, contracts, or risk posture.'
+
+spec_sheet:
+  artifact_rules:
+    mandatory: true
+    spec_sheet_location: 'docs/specs/'
+    flow_chart_location: 'docs/flow-charts/'
+    logic_map_location: 'docs/logic-maps/'
+    must_reference_templates:
+      - 'docs/specs/templates/spec-template.md'
+      - 'docs/flow-charts/templates/event-driven-flow-chart-template.yaml'
+      - 'docs/logic-maps/templates/event-driven-logic-map-template.yaml'
+    required_reference_section: 'required_context_files_read_first'
+    existing_artifact_update_policy:
+      required: true
+      evaluate_existing_before_create: true
+      if_existing_spec_sheet_or_event_artifact:
+        must_briefly_state_current_exact_behavior: true
+        must_detail_exact_target_update_behavior: true
+        must_include_delta_for:
+          - 'event_driven_flow_chart_current_vs_target'
+          - 'event_driven_logic_map_current_vs_target'
+      if_not_existing:
+        must_state_missing_and_create_new: true
+  new_implementation:
+    brainstorming_requirement: 'Brainstorm the best solution before selecting final design.'
+    mandatory: true
+    required_sections:
+      - problem_statement
+      - in_scope
+      - out_of_scope
+      - contracts_and_interfaces
+      - data_model_changes
+      - observability_and_telemetry
+      - test_strategy
+      - rollout_and_rollback
+      - no_backwards_compatibility_confirmation
+      - dead_code_removal_plan
+      - event_driven_logic_flow_chart_actual_and_all_possible_events
+      - event_driven_logic_map_actual_and_all_possible_events_per_step
+      - existing_artifact_scan_results
+      - existing_artifacts_current_state_brief
+      - target_artifacts_update_state_detailed
+    event_design_requirements:
+      required: true
+      flow_chart:
+        required: true
+        type: event_driven
+        must_include:
+          - actual_events_for_each_step
+          - all_possible_events_for_each_step
+          - success_paths
+          - failure_paths
+          - retries_timeouts_fallbacks
+          - side_effects_per_step
+      logic_map:
+        required: true
+        type: event_driven
+        must_include:
+          - step_by_step_event_transitions
+          - state_changes_per_transition
+          - branch_conditions
+          - error_and_recovery_transitions
+          - terminal_states
+  modifying_existing_implementation:
+    brainstorming_requirement: 'Brainstorm the best possible solution before selecting final design.'
+    mandatory: true
+    required_sections:
+      - what_is_changing_and_why
+      - existing_spec_sheet_current_state_brief
+      - existing_spec_sheet_target_state_detailed
+      - current_logic_flow_event_driven_actual_and_all_possible_events
+      - new_logic_flow_event_driven_actual_and_all_possible_events
+      - current_logic_map_event_driven_actual_and_all_possible_events_per_step
+      - new_logic_map_event_driven_actual_and_all_possible_events_per_step
+      - existing_event_artifacts_scan_results
+      - existing_event_flow_chart_current_state_brief
+      - target_event_flow_chart_update_state_detailed
+      - existing_event_logic_map_current_state_brief
+      - target_event_logic_map_update_state_detailed
+      - files_to_modify_create_delete
+      - cleanup_and_removals
+      - no_backwards_compatibility_confirmation
+      - dead_code_removal_plan
+      - update_all_related_and_relevant_files
+    event_design_requirements:
+      required: true
+      current_state_artifacts:
+        flow_chart_required: true
+        logic_map_required: true
+      target_state_artifacts:
+        flow_chart_required: true
+        logic_map_required: true
+      each_artifact_must_include:
+        - actual_events_for_each_step
+        - all_possible_events_for_each_step
+        - branch_conditions_and_ordering
+        - failure_and_recovery_paths
+        - side_effects_and_state_mutations
+    cleanup_and_removal_requirements:
+      no_backwards_compatibility_shims: true
+      no_dead_code: true
+      remove_obsolete_paths: true
+      remove_obsolete_docs_comments_contracts: true
+
+flow_description:
+  required_format: 'inputs -> transformations -> outputs -> side effects'
+  inputs:
+    - '<input>'
+  transformations:
+    - '<transformation>'
+  outputs:
+    - '<output>'
+  side_effects:
+    - '<side effect>'
+
+invariants:
+  preconditions:
+    - '<must be true before execution>'
+  postconditions:
+    - '<must be true after execution>'
+  must_never_happen:
+    - '<forbidden state/behavior>'
+
+focused_brainstorming_pass_before_finalize:
+  required: true
+  scoped_code_paths:
+    - '<path 1>'
+    - '<path 2>'
+  prompts:
+    - 'what would user behavior break?'
+    - 'what would production traffic break?'
+    - 'what would weird data break?'
+    - 'what would concurrency/time/order break?'
+  identify_and_record:
+    logical_flaws:
+      # wrong conditions, unreachable branches, ordering bugs, state mismatch
+      - '<finding or none with justification>'
+    logical_gaps:
+      # missing validation/handling, undefined behavior, silent failures
+      - '<finding or none with justification>'
+    contract_violations:
+      # caller/callee mismatches, stale docs/comments, unit/type drift
+      - '<finding or none with justification>'
+    risk_hotspots:
+      # security/privacy leaks, injection surfaces, unsafe defaults
+      - '<finding or none with justification>'
+
+engineering_standards:
+  principles:
+    - DRY
+    - SOLID
+    - KISS
+    - YAGNI
+    - modular_architecture
+  mandates:
+    - 'Optimize for correctness and maintainability first.'
+    - 'Prefer the simplest solution that fully satisfies request/instructions/plans/requirements.'
+    - 'Do not leave backwards compatibility layers.'
+    - 'Do not leave dead code.'
+    - 'Ensure production-ready quality across related files.'
+
+ui_ux_requirements:
+  idiot_proof: true
+  requirements:
+    - 'Prevent common mistakes through clear constraints and explicit states.'
+    - 'Provide clear failure and empty-state behavior.'
+
+task_checklist:
+  - id: T1
+    task: '<task>'
+    done: false
+  - id: T2
+    task: '<task>'
+    done: false
+  - id: T3
+    task: '<task>'
+    done: false
+
+task_tracker:
+  update_every_message: true
+  tasks:
+    - id: T1
+      status: '<status>'
+    - id: T2
+      status: '<status>'
+    - id: T3
+      status: '<status>'
+
+acceptance_criteria:
+  - id: AC-1
+    criterion: '<observable behavior or contract change>'
+  - id: AC-2
+    criterion: '<tests and evidence required>'
+
+verification_plan:
+  run_after_meaningful_changes:
+    lint: '<command>'
+    typecheck: '<command>'
+    relevant_tests: '<command>'
+
+paired_checking_plan_requirements:
+  file_path: 'docs/plans/checking_plan_<current_plan_name>.yaml'
+  base_template: 'docs/plans/checking_plan_plan-template.yaml'
+  required_directory: 'docs/plans/'
+  must_create_immediately_after_plan_creation: true
+  must_update_as_plan_changes: true
+  must_fill:
+    - 'title includes current plan name'
+    - 'variables.plan_path_glob points to this exact plan file path'
+    - 'runtime_instructions include this plan path and artifacts'
+    - 'examples.minimal_filled_example.original_plan_summary matches this objective'
+    - 'NEW_TASK_CHECK_LIST is concrete and derived from task_checklist'
+    - 'checking plan verifies and reviews spec sheet + event-driven flow chart/map artifacts and their template lineage'
+
+pr_references:
+  plan_line: 'Plan: docs/plans/<YYYY-MM-DD>-<short-title>.yaml'
+  checking_plan_line: 'CheckingPlan: docs/plans/checking_plan_<current_plan_name>.yaml'

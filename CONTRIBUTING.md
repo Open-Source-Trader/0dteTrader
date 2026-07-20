@@ -1,6 +1,7 @@
 # Contributing to 0dteTrader
 
-Thank you for considering contributing to 0dteTrader.
+Thank you for considering contributing to 0dteTrader. By participating in this
+project you agree to abide by the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## Getting Started
 
@@ -13,7 +14,7 @@ Thank you for considering contributing to 0dteTrader.
 ### Setup
 
 ```bash
-git clone https://github.com/TradeWithCash2025/0dteTrader.git
+git clone https://github.com/Open-Source-Trader/0dteTrader.git
 cd 0dteTrader
 npm run setup
 ```

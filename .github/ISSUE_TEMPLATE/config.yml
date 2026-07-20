@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Ask a question
+    url: https://github.com/Open-Source-Trader/0dteTrader/discussions/new?category=q-a
+    about: Use GitHub Discussions for questions, setup help, and general conversation.
+  - name: Share an idea or trading setup
+    url: https://github.com/Open-Source-Trader/0dteTrader/discussions/new?category=ideas
+    about: Not a bug or feature request? Share it in Discussions.

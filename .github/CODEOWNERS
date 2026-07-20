@@ -1,0 +1,22 @@
+# Default owner for everything in the repo.
+# PRs will auto-request review from @TradeWithCash2025.
+*                          @TradeWithCash2025
+
+# iOS app — add iOS maintainers here as the community grows
+apps/ios/                  @TradeWithCash2025
+
+# Desktop app
+apps/desktop/              @TradeWithCash2025
+
+# API / backend
+apps/api/                  @TradeWithCash2025
+
+# Shared types
+packages/shared-types/     @TradeWithCash2025
+
+# GitHub configuration and CI — extra scrutiny
+.github/                   @TradeWithCash2025
+
+# Security-sensitive files
+SECURITY.md                @TradeWithCash2025
+docs/SECURITY.md           @TradeWithCash2025

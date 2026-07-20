@@ -166,6 +166,10 @@ export class WebullBrokerGateway implements BrokerGateway, OnModuleDestroy {
     const appSecret = this.config.get<string>('webull.practiceAppSecret') ?? '';
     const accountId = this.config.get<string>('webull.practiceAccountId') ?? '';
     if (!appKey || !appSecret) return null;
+    // Materialize the built-in practice fallback as a stored credential so the
+    // discovered account id survives a token-cache miss / restart (bug 3) and
+    // so /me reports webullPracticeConfigured once practice is used (bug 2).
+    await this.credentials.ensureWebullPracticeStored(userId, { appKey, appSecret, accountId });
     return { appKey, appSecret, accountId };
   }
 

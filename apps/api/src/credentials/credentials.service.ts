@@ -64,6 +64,33 @@ export class CredentialsService {
     });
   }
 
+  /**
+   * Materialize the server's built-in Webull practice fallback as a stored
+   * `broker_credentials` row (idempotent: only when no row exists). This lets
+   * the discovered practice account id persist across token-cache misses /
+   * restarts (bug 3) and lets `/me` report `webullPracticeConfigured` for
+   * fallback users once they trade in practice (bug 2). Without it, the
+   * fallback lives only in the gateway's config and is never written, so the
+   * discovered account id is re-discovered on every cache miss / restart.
+   */
+  async ensureWebullPracticeStored(
+    userId: string,
+    creds: { appKey: string; appSecret: string; accountId?: string },
+  ): Promise<void> {
+    const environment: TradingMode = 'practice';
+    const existing = await this.prisma.brokerCredential.findUnique({
+      where: { userId_provider_environment: { userId, provider: WEBULL_PROVIDER, environment } },
+    });
+    if (existing) return;
+    const secrets: WebullSecrets = {
+      provider: 'webull',
+      appKey: creds.appKey,
+      appSecret: creds.appSecret,
+      accountId: creds.accountId,
+    };
+    await this.upsertSecrets(userId, WEBULL_PROVIDER, environment, secrets);
+  }
+
   async remove(
     userId: string,
     provider: BrokerProvider = WEBULL_PROVIDER,

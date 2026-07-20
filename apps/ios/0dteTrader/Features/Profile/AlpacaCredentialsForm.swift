@@ -1,19 +1,27 @@
 import SwiftUI
 
-/// Write-only Alpaca credential entry (API key + secret). Alpaca v2 is
-/// key-scoped, so there is no account id to discover.
+/// Write-only Alpaca credential entry for one environment (live / practice).
+/// Fields are local `@State` (write-only: never re-displayed after saving — FR-4).
 struct AlpacaCredentialsForm: View {
     @ObservedObject var viewModel: ProfileViewModel
+    let environment: TradingMode
 
-    private enum Field: Hashable {
-        case apiKey, apiSecret
-    }
+    @State private var apiKey = ""
+    @State private var apiSecret = ""
 
+    private enum Field: Hashable { case apiKey, apiSecret }
     @FocusState private var focused: Field?
+
+    private var canSave: Bool {
+        !apiKey.trimmingCharacters(in: .whitespaces).isEmpty && !apiSecret.isEmpty
+    }
+    private var isSaving: Bool {
+        viewModel.savingAlpaca.contains(environment)
+    }
 
     var body: some View {
         VStack(spacing: AppSpacing.md) {
-            TextField("API Key", text: $viewModel.alpacaApiKey)
+            TextField("API Key", text: $apiKey)
                 .textContentType(.none)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
@@ -23,7 +31,7 @@ struct AlpacaCredentialsForm: View {
                 .onSubmit { focused = .apiSecret }
                 .authField(isFocused: focused == .apiKey)
 
-            SecureField("API Secret", text: $viewModel.alpacaApiSecret)
+            SecureField("API Secret", text: $apiSecret)
                 .textContentType(.none)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
@@ -31,38 +39,32 @@ struct AlpacaCredentialsForm: View {
                 .focused($focused, equals: .apiSecret)
                 .submitLabel(.go)
                 .onSubmit {
-                    guard viewModel.canSaveAlpacaCredentials else { return }
-                    Task { await viewModel.saveAlpacaCredentials() }
+                    guard canSave else { return }
+                    Task { await viewModel.saveAlpaca(environment: environment, apiKey: apiKey, apiSecret: apiSecret) }
                 }
                 .authField(isFocused: focused == .apiSecret)
 
-            Text("Your API key and secret identify your Alpaca account — no separate account id is needed.")
+            Text("Use the key/secret for the matching environment. The server connects to Alpaca's live or paper API accordingly.")
                 .font(.chipLabel)
                 .foregroundStyle(.secondary)
 
             Button {
-                Task { await viewModel.saveAlpacaCredentials() }
+                Task { await viewModel.saveAlpaca(environment: environment, apiKey: apiKey, apiSecret: apiSecret) }
             } label: {
                 HStack(spacing: AppSpacing.sm) {
-                    if viewModel.isSavingAlpacaCredentials {
-                        ProgressView().controlSize(.small).tint(Color.appAccent)
-                    }
+                    if isSaving { ProgressView().controlSize(.small).tint(Color.appAccent) }
                     Text("Save Credentials")
                         .font(.hudButton)
                         .kerning(0.5)
                 }
-                .foregroundStyle(Color.appAccent.opacity(
-                    viewModel.canSaveAlpacaCredentials && !viewModel.isSavingAlpacaCredentials ? 1 : AppOpacity.disabled
-                ))
+                .foregroundStyle(Color.appAccent.opacity(canSave && !isSaving ? 1 : AppOpacity.disabled))
                 .frame(maxWidth: .infinity, minHeight: 44)
             }
             .buttonStyle(HudActionButtonStyle(
-                accent: Color.appAccent.opacity(
-                    viewModel.canSaveAlpacaCredentials && !viewModel.isSavingAlpacaCredentials ? 1 : AppOpacity.disabled
-                ),
+                accent: Color.appAccent.opacity(canSave && !isSaving ? 1 : AppOpacity.disabled),
                 chamfer: 6
             ))
-            .disabled(!viewModel.canSaveAlpacaCredentials || viewModel.isSavingAlpacaCredentials)
+            .disabled(!canSave || isSaving)
         }
     }
 }

@@ -8,22 +8,23 @@ import LocalAuthentication
 final class ProfileViewModel: ObservableObject {
     @Published private(set) var me: MeDTO?
     @Published private(set) var isLoading = false
-    @Published private(set) var isSavingCredentials = false
-    @Published private(set) var isDeletingCredentials = false
     @Published var errorMessage: String?
     @Published var successMessage: String?
 
-    @Published var appKey = ""
-    @Published var appSecret = ""
-    @Published var isEditingCredentials = false
-    @Published private(set) var isReconnecting = false
-
     @Published var tradingProvider: BrokerProvider = .webull
-    @Published var alpacaApiKey = ""
-    @Published var alpacaApiSecret = ""
-    @Published var isEditingAlpacaCredentials = false
-    @Published private(set) var isSavingAlpacaCredentials = false
-    @Published private(set) var isDeletingAlpacaCredentials = false
+
+    // Per-environment (live / practice) credential lifecycle state.
+    @Published private(set) var savingWebull: Set<TradingMode> = []
+    @Published private(set) var deletingWebull: Set<TradingMode> = []
+    @Published private(set) var reconnectingWebull: Set<TradingMode> = []
+    @Published private(set) var editingWebull: Set<TradingMode> = []
+
+    @Published private(set) var savingAlpaca: Set<TradingMode> = []
+    @Published private(set) var deletingAlpaca: Set<TradingMode> = []
+    @Published private(set) var editingAlpaca: Set<TradingMode> = []
+
+    /// Which section the current success/error message belongs to.
+    @Published private(set) var messageEnv: TradingMode? = nil
 
     @Published var appLockEnabled: Bool {
         didSet { settingsStore.appLockEnabled = appLockEnabled }
@@ -51,9 +52,14 @@ final class ProfileViewModel: ObservableObject {
     /// so an account-fetch failure doesn't render as a Webull credential error.
     @Published private(set) var loadFailed = false
 
-    var canSaveCredentials: Bool {
-        !appKey.trimmingCharacters(in: .whitespaces).isEmpty
-            && !appSecret.isEmpty
+    // MARK: - Credential editing (per environment)
+
+    func setEditingWebull(_ environment: TradingMode, _ isEditing: Bool) {
+        if isEditing { editingWebull.insert(environment) } else { editingWebull.remove(environment) }
+    }
+
+    func setEditingAlpaca(_ environment: TradingMode, _ isEditing: Bool) {
+        if isEditing { editingAlpaca.insert(environment) } else { editingAlpaca.remove(environment) }
     }
 
     func load() async {
@@ -84,67 +90,64 @@ final class ProfileViewModel: ObservableObject {
         appLockEnabled = enabled
     }
 
-    func saveCredentials() async {
-        guard canSaveCredentials, !isSavingCredentials else { return }
-        isSavingCredentials = true
+    func saveWebull(environment: TradingMode, appKey: String, appSecret: String) async {
+        guard !savingWebull.contains(environment),
+              !appKey.trimmingCharacters(in: .whitespaces).isEmpty,
+              !appSecret.isEmpty else { return }
+        savingWebull.insert(environment)
         errorMessage = nil
         successMessage = nil
-        defer { isSavingCredentials = false }
+        messageEnv = environment
+        defer { savingWebull.remove(environment) }
         do {
             // Account id is intentionally absent: the server discovers it via
             // Webull's account/list once the token is approved.
             try await apiClient.putWebullCredentials(
                 WebullCredentialsInputDTO(
                     appKey: appKey.trimmingCharacters(in: .whitespaces),
-                    appSecret: appSecret
+                    appSecret: appSecret,
+                    environment: environment
                 )
             )
-            // Write-only: wipe the fields, never render them back (FR-4).
-            appKey = ""
-            appSecret = ""
-            isEditingCredentials = false
-            successMessage = "Webull credentials saved."
+            editingWebull.remove(environment)
+            successMessage = "Webull \(environment.label) credentials saved."
             await load()
-        } catch let error as APIError {
-            errorMessage = error.userMessage
         } catch {
-            errorMessage = error.localizedDescription
+            setError($error)
         }
     }
 
-    func deleteCredentials() async {
-        guard !isDeletingCredentials else { return }
-        isDeletingCredentials = true
+    func deleteWebull(environment: TradingMode) async {
+        guard !deletingWebull.contains(environment) else { return }
+        deletingWebull.insert(environment)
         errorMessage = nil
         successMessage = nil
-        defer { isDeletingCredentials = false }
+        messageEnv = environment
+        defer { deletingWebull.remove(environment) }
         do {
-            try await apiClient.deleteWebullCredentials()
-            successMessage = "Webull credentials removed."
+            try await apiClient.deleteWebullCredentials(environment: environment)
+            successMessage = "Webull \(environment.label) credentials removed."
             await load()
-        } catch let error as APIError {
-            errorMessage = error.userMessage
         } catch {
-            errorMessage = error.localizedDescription
+            setError($error)
         }
     }
 
     /// "Reconnect": mint a fresh Webull access token from the stored
     /// credentials (ProfileStore.reconnect analog) — a stale token never
     /// forces re-entering secrets.
-    func reconnect() async {
-        guard !isReconnecting else { return }
-        isReconnecting = true
+    func reconnect(environment: TradingMode) async {
+        guard !reconnectingWebull.contains(environment) else { return }
+        reconnectingWebull.insert(environment)
         errorMessage = nil
         successMessage = nil
-        defer { isReconnecting = false }
+        messageEnv = environment
+        defer { reconnectingWebull.remove(environment) }
         do {
             try await apiClient.refreshWebullSession()
             successMessage = "Webull session refreshed."
-        } catch let error as APIError {
-            errorMessage = error.userMessage
         } catch {
-            errorMessage = error.localizedDescription
+            setError($error)
         }
     }
 
@@ -154,9 +157,29 @@ final class ProfileViewModel: ObservableObject {
 
     // MARK: - Alpaca credentials (generic broker-credentials endpoint)
 
-    var canSaveAlpacaCredentials: Bool {
-        !alpacaApiKey.trimmingCharacters(in: .whitespaces).isEmpty
-            && !alpacaApiSecret.isEmpty
+    func saveAlpaca(environment: TradingMode, apiKey: String, apiSecret: String) async {
+        guard !savingAlpaca.contains(environment),
+              !apiKey.trimmingCharacters(in: .whitespaces).isEmpty,
+              !apiSecret.isEmpty else { return }
+        savingAlpaca.insert(environment)
+        errorMessage = nil
+        successMessage = nil
+        messageEnv = environment
+        defer { savingAlpaca.remove(environment) }
+        do {
+            try await apiClient.putAlpacaCredentials(
+                AlpacaCredentialsInputDTO(
+                    apiKey: apiKey.trimmingCharacters(in: .whitespaces),
+                    apiSecret: apiSecret,
+                    environment: environment
+                )
+            )
+            editingAlpaca.remove(environment)
+            successMessage = "Alpaca \(environment.label) credentials saved."
+            await load()
+        } catch {
+            setError($error)
+        }
     }
 
     func setTradingProvider(_ provider: BrokerProvider) async {
@@ -176,45 +199,26 @@ final class ProfileViewModel: ObservableObject {
         }
     }
 
-    func saveAlpacaCredentials() async {
-        guard canSaveAlpacaCredentials, !isSavingAlpacaCredentials else { return }
-        isSavingAlpacaCredentials = true
+    func deleteAlpaca(environment: TradingMode) async {
+        guard !deletingAlpaca.contains(environment) else { return }
+        deletingAlpaca.insert(environment)
         errorMessage = nil
         successMessage = nil
-        defer { isSavingAlpacaCredentials = false }
+        messageEnv = environment
+        defer { deletingAlpaca.remove(environment) }
         do {
-            try await apiClient.putAlpacaCredentials(
-                AlpacaCredentialsInputDTO(
-                    apiKey: alpacaApiKey.trimmingCharacters(in: .whitespaces),
-                    apiSecret: alpacaApiSecret
-                )
-            )
-            // Write-only: wipe the fields, never render them back (FR-4).
-            alpacaApiKey = ""
-            alpacaApiSecret = ""
-            isEditingAlpacaCredentials = false
-            successMessage = "Alpaca credentials saved."
+            try await apiClient.deleteBrokerCredentials(provider: .alpaca, environment: environment)
+            successMessage = "Alpaca \(environment.label) credentials removed."
             await load()
-        } catch let error as APIError {
-            errorMessage = error.userMessage
         } catch {
-            errorMessage = error.localizedDescription
+            setError($error)
         }
     }
 
-    func deleteAlpacaCredentials() async {
-        guard !isDeletingAlpacaCredentials else { return }
-        isDeletingAlpacaCredentials = true
-        errorMessage = nil
-        successMessage = nil
-        defer { isDeletingAlpacaCredentials = false }
-        do {
-            try await apiClient.deleteBrokerCredentials(provider: .alpaca)
-            successMessage = "Alpaca credentials removed."
-            await load()
-        } catch let error as APIError {
-            errorMessage = error.userMessage
-        } catch {
+    private func setError(_ error: Error) {
+        if let apiError = error as? APIError {
+            errorMessage = apiError.userMessage
+        } else {
             errorMessage = error.localizedDescription
         }
     }

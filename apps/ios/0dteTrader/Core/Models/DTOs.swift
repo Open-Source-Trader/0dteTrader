@@ -32,9 +32,17 @@ struct AuthTokensDTO: Decodable, Equatable, Sendable {
 // MARK: - Profile & credentials
 
 /// Practice/live trading environment (server-persisted; `PATCH /v1/me`).
-enum TradingMode: String, Codable, Equatable, Sendable {
+enum TradingMode: String, Codable, Equatable, Sendable, Hashable {
     case practice
     case live
+
+    /// User-facing label for UI ("Live" / "Practice").
+    var label: String {
+        switch self {
+        case .practice: return "Practice"
+        case .live: return "Live"
+        }
+    }
 }
 
 /// Trading provider selected by the user (Webull or Alpaca).
@@ -73,6 +81,7 @@ struct UpdateTradingModeDTO: Encodable, Sendable {
 struct WebullCredentialsInputDTO: Encodable, Sendable {
     let appKey: String
     let appSecret: String
+    let environment: TradingMode
 }
 
 struct WebullConfiguredResponseDTO: Decodable, Equatable, Sendable {
@@ -83,6 +92,7 @@ struct AlpacaCredentialsInputDTO: Encodable, Sendable {
     let provider = "alpaca"
     let apiKey: String
     let apiSecret: String
+    let environment: TradingMode
 }
 
 struct BrokerCredentialsSavedDTO: Decodable, Equatable, Sendable {

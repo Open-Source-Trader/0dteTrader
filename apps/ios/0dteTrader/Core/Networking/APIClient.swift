@@ -131,8 +131,12 @@ struct APIClient: @unchecked Sendable {
         return try await request(endpoint, body: encode(credentials))
     }
 
-    func deleteWebullCredentials() async throws {
-        try await requestVoid(Endpoint(method: .delete, path: "v1/me/webull-credentials"))
+    func deleteWebullCredentials(environment: TradingMode = .live) async throws {
+        var query: [URLQueryItem] = []
+        if environment == .practice {
+            query.append(URLQueryItem(name: "environment", value: "practice"))
+        }
+        try await requestVoid(Endpoint(method: .delete, path: "v1/me/webull-credentials", query: query))
     }
 
     /// Mint a fresh Webull access token from the stored credentials (the

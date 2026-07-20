@@ -97,6 +97,10 @@ export function OptionsAnalyticsOverlay({
       context.stroke();
       context.setLineDash([]);
       context.font = '9px "JetBrains Mono", ui-monospace, monospace';
+      // Backing pill keeps labels legible where lines and profile bars overlap.
+      const labelWidth = context.measureText(label).width;
+      context.fillStyle = 'rgba(4, 10, 22, 0.72)';
+      context.fillRect(railStart + 1, y - 12, labelWidth + 5, 11);
       context.fillStyle = color;
       context.fillText(label, railStart + 3, y - 3);
     };

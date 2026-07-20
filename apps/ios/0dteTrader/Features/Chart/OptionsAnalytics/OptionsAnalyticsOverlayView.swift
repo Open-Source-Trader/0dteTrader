@@ -251,13 +251,18 @@ final class OptionsAnalyticsOverlayView: UIView {
         context.strokePath()
         context.setLineDash(phase: 0, lengths: [])
         let text = line.label as NSString
-        text.draw(
-            at: CGPoint(x: rail.minX + 3, y: y - 11),
-            withAttributes: [
-                .font: UIFont.systemFont(ofSize: 7, weight: .bold),
-                .foregroundColor: line.color,
-            ]
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: UIFont.systemFont(ofSize: 7, weight: .bold),
+            .foregroundColor: line.color,
+        ]
+        let origin = CGPoint(x: rail.minX + 3, y: y - 11)
+        let size = text.size(withAttributes: attributes)
+        // Backing pill keeps labels legible where lines and profile bars overlap.
+        context.setFillColor(UIColor.black.withAlphaComponent(0.6).cgColor)
+        context.fill(
+            CGRect(x: origin.x - 2, y: origin.y - 1, width: size.width + 4, height: size.height + 2)
         )
+        text.draw(at: origin, withAttributes: attributes)
     }
 
     private func liquidityAlpha(_ relativeSpread: Double?) -> CGFloat {

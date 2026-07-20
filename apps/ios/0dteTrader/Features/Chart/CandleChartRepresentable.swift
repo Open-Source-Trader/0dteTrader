@@ -21,10 +21,24 @@ struct CandleChartRepresentable: UIViewRepresentable {
     var optionsAnalyticsSettings: OptionsAnalyticsSettings = .default
     var resetToken: Int = 0
 
+    /// CombinedChartView that reports the end of each draw pass. DGCharts
+    /// recomputes the auto-scaled y-axis (and its value→pixel matrix) inside
+    /// draw(_:), so price-anchored sibling overlays must repaint after the
+    /// chart draws — repainting on gesture callbacks alone leaves them one
+    /// frame behind on a stale scale.
+    final class PostDrawChartView: CombinedChartView {
+        var onPostDraw: (() -> Void)?
+
+        override func draw(_ rect: CGRect) {
+            super.draw(rect)
+            onPostDraw?()
+        }
+    }
+
     /// Hosts the chart plus the annotation overlay at identical frames so the
     /// overlay can reuse the chart's pixel coordinate space directly.
     final class ContainerView: UIView {
-        let chart = CombinedChartView()
+        let chart = PostDrawChartView()
         let twcOverlay = TwcOverlayView()
         let optionsAnalyticsOverlay = OptionsAnalyticsOverlayView()
         let overlay = DrawingOverlayView()
@@ -39,6 +53,12 @@ struct CandleChartRepresentable: UIViewRepresentable {
             twcOverlay.chart = chart
             optionsAnalyticsOverlay.chart = chart
             overlay.chart = chart
+            chart.onPostDraw = { [weak self] in
+                guard let self else { return }
+                self.twcOverlay.setNeedsDisplay()
+                self.optionsAnalyticsOverlay.setNeedsDisplay()
+                self.overlay.setNeedsDisplay()
+            }
         }
 
         @available(*, unavailable)

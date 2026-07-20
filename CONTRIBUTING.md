@@ -3,6 +3,15 @@
 Thank you for considering contributing to 0dteTrader. By participating in this
 project you agree to abide by the [Code of Conduct](CODE_OF_CONDUCT.md).
 
+## Where to start
+
+Issues labeled [`good first issue`](https://github.com/Open-Source-Trader/0dteTrader/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22)
+are scoped for newcomers. Help is especially welcome on:
+
+- **Broker integrations** — the roadmap's pluggable OAuth broker layer (Schwab, Tastytrade, IBKR, Alpaca, …)
+- **iOS ↔ desktop parity** — the two clients must always ship features together; parity gaps are bugs
+- **Docs** — setup friction, unclear instructions, missing explanations
+
 ## Getting Started
 
 ### Prerequisites
@@ -45,7 +54,7 @@ Pre-commit hooks run ESLint and Prettier on staged files automatically.
 - ESLint with `@typescript-eslint` (workspace configs in each app/package)
 - Prettier for formatting (see `.prettierrc`)
 - Prefix unused variables with `_`
-- See `CLAUDE.md` for the full coding philosophy
+- See [`AGENTS.md`](AGENTS.md) for architecture conventions and per-module gotchas. (`AGENTS.md` and `CLAUDE.md` are instruction files for AI coding assistants, kept in the repo for transparency — they double as accurate engineering documentation.)
 
 ## Project Structure
 

@@ -1,5 +1,7 @@
 # AGENTS.md — AI Agent Context
 
+> Instructions for AI coding assistants, kept public for transparency. The architecture notes and gotchas below double as accurate engineering documentation for human readers too.
+
 This file gives AI coding agents the project-specific context needed to build, test, and modify this codebase correctly.
 
 ## Project Structure

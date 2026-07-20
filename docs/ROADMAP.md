@@ -9,7 +9,7 @@ docs set, CI skeleton, docker-compose, `.env.example`.
 
 NestJS app: Auth, Users, Credentials (AES-256-GCM), BrokerGateway,
 MarketData (REST + WS), Trading (idempotency, kill switch, audit), Prisma schema/migrations,
-Jest unit + e2e tests. **155/155 tests green; live smoke test against docker Postgres passed.**
+Jest unit + e2e tests. **155/155 tests green at P1 completion (suites have since grown: api 298, desktop 129, iOS 128); live smoke test against docker Postgres passed.**
 
 ## P2 — iOS Shell ✅
 

@@ -1,5 +1,7 @@
 # CLAUDE.md
 
+> Instructions for AI coding assistants working in this repo, kept public for transparency. Human contributors: start with [CONTRIBUTING.md](CONTRIBUTING.md) instead.
+
 ## Project Quick Reference
 
 **What this is:** 0dteTrader — a rapid options trading app (iOS + desktop) backed by Webull OpenAPI and Tradier.

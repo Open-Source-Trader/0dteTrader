@@ -1,5 +1,10 @@
 # 0dteTrader
 
+[![CI](https://github.com/Open-Source-Trader/0dteTrader/actions/workflows/ci.yml/badge.svg)](https://github.com/Open-Source-Trader/0dteTrader/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![iOS 17+](https://img.shields.io/badge/iOS-17%2B-black?logo=apple)](apps/ios)
+[![Node >= 18.17](https://img.shields.io/badge/node-%E2%89%A518.17-339933?logo=nodedotjs&logoColor=white)](package.json)
+
 Rapid options quick-trade iOS (and desktop) app backed by the official Webull OpenAPI for order execution and candlestick data, with options analytics (Greeks, open interest, etc.) sourced from Tradier.
 
 - `apps/ios` — SwiftUI iPhone app (iOS 17+)
@@ -8,7 +13,7 @@ Rapid options quick-trade iOS (and desktop) app backed by the official Webull Op
 - `packages/shared-types` — shared TypeScript contracts
 - `docs` — architecture, API spec, security model, Webull integration guide, runbook
 
-> **Risk warning:** Trading involves substantial risk of loss. This software places real orders when connected to a live brokerage account. Always validate against a paper (practice) account first.
+> **Risk warning:** Trading involves substantial risk of loss. This software places real orders when connected to a live brokerage account. Always validate against a paper (practice) account first. 0dteTrader is an order-entry and market-data tool, not financial or investment advice; the authors and contributors accept no liability for trading losses incurred while using it.
 
 ## Why I built this
 
@@ -18,7 +23,7 @@ Traditional brokers and trading platforms weren't built for the speed 0DTE optio
 
 ## Screenshots
 
-The iOS app running against the production backend (SPX hourly chart via Tradier index data; captured on the iPhone simulator):
+The iOS app running against a live backend (SPX hourly chart via Tradier index data; captured on the iPhone simulator):
 
 <p align="center">
   <img src="docs/screenshots/trade-screen.png" width="24%" alt="Trade screen — SPX hourly candlestick chart with moving average and one-tap options order panel" />
@@ -29,25 +34,7 @@ The iOS app running against the production backend (SPX hourly chart via Tradier
 
 With a Webull-connected account the chart adds the live options-structure overlay — call/put walls, breakevens, the 68% implied range, and per-strike open-interest and gamma profiles drawn on the price axis.
 
-The screenshots are reproducible: the `0dteTraderScreenshots` scheme drives the real app through login to the chart and captures each frame (`apps/ios/0dteTraderUITests`).
-
-## Quick start
-
-```bash
-git clone https://github.com/TradeWithCash2025/0dteTrader.git
-cd 0dteTrader
-npm run setup
-npm run dev
-```
-
-`npm run setup` checks your environment, creates `.env` from `.env.example`, generates a credential-encryption key, installs dependencies, starts Postgres and Redis, and applies Prisma migrations.
-
-## Prerequisites
-
-- **Node.js >= 18.17** and **npm**
-- **Docker + Docker Compose** (Postgres 16 and Redis 7 run in containers)
-- **macOS + Xcode 15+** if you want to build the iOS app
-- **XcodeGen** (`brew install xcodegen`) for generating the iOS `.xcodeproj`
+The screenshots are reproducible: the `0dteTraderScreenshots` scheme drives the real app from login through to the chart screen and captures each frame (`apps/ios/0dteTraderUITests`).
 
 ## Data sources and broker support
 
@@ -56,7 +43,7 @@ Today the app uses a **hybrid broker/data model**:
 | Function                                   | Provider           | Why                                                                                                                                     |
 | ------------------------------------------ | ------------------ | --------------------------------------------------------------------------------------------------------------------------------------- |
 | Order execution                            | **Webull OpenAPI** | Sends real or paper trades.                                                                                                             |
-| Candlestick / chart data                   | **Webull OpenAPI** | OHLCV bars and stock snapshots.                                                                                                         |
+| Candlestick / chart data                   | **Webull OpenAPI** | OHLCV bars and stock snapshots (indices and crypto come from Tradier and public data server-side).                                      |
 | Options chain + Greeks (GEX/DEX, OI, etc.) | **Tradier API**    | Webull OpenAPI does not expose option Greeks, implied volatility, open interest, or full chain detail beyond contract price and volume. |
 
 So a typical flow looks like: Webull for placing/cancelling orders and chart candles, Tradier for picking strikes and viewing Greeks.
@@ -64,18 +51,30 @@ So a typical flow looks like: Webull for placing/cancelling orders and chart can
 ### Required credentials today
 
 - **Webull OpenAPI** app key + app secret + account ID (paper or live). Entered per-user in the app under Profile → Webull API and stored encrypted server-side.
-- **Tradier API token** (brokerage or paper). Set once in `.env` as `TRADIER_API_TOKEN`; the desktop/iOS app only calls `GET /v1/market/gex` on the backend.
+- **Tradier API token** (brokerage or paper), set once in the backend `.env`. See [Connect to Webull and Tradier](#connect-to-webull-and-tradier).
 
-### Future plans
+If you only want the chart/trading pieces without options analytics, the Tradier token is only needed for the options-structure and options-chain views. For where this is headed (OAuth for every major broker, and more), see the [Roadmap](#roadmap).
 
-- A **Tradier-only mode** so you can trade and get market data from a single broker.
-- Additional broker integrations that offer free API access and the required options data (Greeks, chain, etc.).
+## Prerequisites
 
-If you only want the chart/trading pieces without options analytics, the Tradier token is only needed for the GEX/DEX and options-chain views.
+- **Node.js >= 18.17** and **npm**
+- **Docker + Docker Compose** (Postgres 16 and Redis 7 run in containers)
+- **macOS + Xcode 15+** if you want to build the iOS app
+- **XcodeGen** (`brew install xcodegen`) for generating the iOS `.xcodeproj`
 
-## What the setup script does
+## Quick start
 
-Running `npm run setup`:
+```bash
+git clone https://github.com/Open-Source-Trader/0dteTrader.git
+cd 0dteTrader
+npm run setup
+npm run dev
+```
+
+`npm run setup` checks your environment, creates `.env` from `.env.example`, generates a credential-encryption key, installs dependencies, starts Postgres and Redis, and applies Prisma migrations.
+
+<details>
+<summary>What the setup script does, step by step</summary>
 
 1. Verifies Node.js >= 18.17 and that Docker is running.
 2. Copies `.env.example` → `.env` (if `.env` does not already exist).
@@ -86,13 +85,15 @@ Running `npm run setup`:
 
 The script is idempotent — you can run it again safely.
 
+</details>
+
 ## Run the API
 
 ```bash
 npm run dev
 ```
 
-The API starts at `http://localhost:3000`. It always talks to the real Webull OpenAPI; there is no mock data. Without stored Webull credentials, market-data and trading calls return `AUTH_FAILED` until you add practice credentials. The options chain and GEX/DEX endpoints also need a `TRADIER_API_TOKEN` in `.env`.
+The API starts at `http://localhost:3000`. It always talks to the real Webull OpenAPI; there is no mock data. Without stored Webull credentials, market-data and trading calls return `AUTH_FAILED` until you add practice credentials. The options chain and options-analytics endpoints also need a `TRADIER_API_TOKEN` in `.env`.
 
 Register a dev account:
 
@@ -110,7 +111,7 @@ xcodegen
 open 0dteTrader.xcodeproj
 ```
 
-Run on the iOS simulator (⌘+R). The Debug build targets `http://localhost:3000` (configurable in `apps/ios/0dteTrader/App/AppConfig.swift`). Register the dev account you created above, then add Webull credentials under Profile → Webull API.
+Run on the iOS simulator (⌘+R). **Note:** the app ships pointing at the maintainer's hosted backend (`apiBaseURL` in `apps/ios/0dteTrader/App/AppConfig.swift`). To develop against your own stack, change it to `http://localhost:3000` (or your deployment's URL) before building. Register the dev account you created above, then add Webull credentials under Profile → Webull API.
 
 ## Run the desktop app
 
@@ -122,7 +123,20 @@ npm run dev:desktop
 
 Then open the printed local URL (usually `http://localhost:5173`).
 
-## All npm scripts
+## Testing
+
+```bash
+npm run test        # API + desktop + shared-types (Jest, Vitest)
+npm run lint        # ESLint across all workspaces
+```
+
+iOS unit tests (from `apps/ios`):
+
+```bash
+xcodebuild test -scheme 0dteTrader -destination 'platform=iOS Simulator,name=iPhone 16'
+```
+
+## Key npm scripts
 
 | Command                | What it does                                         |
 | ---------------------- | ---------------------------------------------------- |
@@ -147,13 +161,6 @@ Desktop-only (run from `apps/desktop`):
 | `npm run electron` | Launch in Electron (requires `dev` running) |
 | `npm run preview`  | Vite production preview                     |
 
-iOS tests:
-
-```bash
-cd apps/ios
-xcodebuild test -scheme 0dteTrader -destination 'platform=iOS Simulator,name=iPhone 16'
-```
-
 ## Connect to Webull and Tradier
 
 ### Webull (order execution + chart data)
@@ -175,7 +182,7 @@ npm run smoke:webull
 
 ### Tradier (options chain + Greeks)
 
-To populate the options chain, GEX/DEX levels, and Greeks, set a Tradier token in `.env`:
+To populate the options chain, options-structure levels, and Greeks, set a Tradier token in `.env`:
 
 ```bash
 TRADIER_API_TOKEN=your_token_here
@@ -196,6 +203,7 @@ Real secrets live only in `.env`, which is gitignored. Never commit credentials.
 - [`docs/WEBULL-INTEGRATION.md`](docs/WEBULL-INTEGRATION.md) — Webull OpenAPI integration details
 - [`docs/RUNBOOK.md`](docs/RUNBOOK.md) — local development, Webull setup, smoke tests, troubleshooting
 - [`docs/ROADMAP.md`](docs/ROADMAP.md) — future plans and priorities
+- [`CONTRIBUTING.md`](CONTRIBUTING.md) — how to contribute
 
 ## Roadmap
 

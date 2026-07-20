@@ -31,3 +31,6 @@ apps/api/prisma/*.db
 
 # Codex audit scan dumps
 .codex-audit/
+
+# Internal working notes (sprint plans, lessons) — local only
+tasks/

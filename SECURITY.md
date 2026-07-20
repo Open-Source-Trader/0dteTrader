@@ -2,10 +2,10 @@
 
 ## Supported versions
 
-| Version | Supported |
-|---------|-----------|
-| `main` (latest) | ✅ |
-| Older branches | ❌ |
+| Version         | Supported |
+| --------------- | --------- |
+| `main` (latest) | ✅        |
+| Older branches  | ❌        |
 
 Only the current `main` branch receives security fixes. Please update to the latest commit before reporting.
 
@@ -21,9 +21,7 @@ This application handles encrypted brokerage credentials and places real financi
 2. Fill in a description, affected component, and reproduction steps.
 3. We will acknowledge your report within **48 hours** and aim to publish a fix within **14 days** for critical issues.
 
-### Alternative: email
-
-Send details to **security@0dtetrader.dev** with the subject line `[SECURITY] <brief description>`.
+Private vulnerability reporting through GitHub is the only supported channel — please do not open public issues for security problems.
 
 Please include:
 

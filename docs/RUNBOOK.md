@@ -60,7 +60,7 @@ npm run build
 npm run test           # Jest unit + e2e
 ```
 
-iOS: `xcodebuild test -scheme 0dteTrader -destination 'platform=iOS Simulator,name=iPhone 15'`
+iOS: `xcodebuild test -scheme 0dteTrader -destination 'platform=iOS Simulator,name=iPhone 16'`
 (or Cmd+U in Xcode).
 
 ## Brokers and data sources

@@ -106,8 +106,11 @@ struct OptionsAnalyticsDetailsView: View {
                         Text("Assumption: \(proxy.assumption)")
                         row("Gamma", OptionsAnalyticsPresentation.notionalText(proxy.gammaExposure))
                         row("Delta notional", OptionsAnalyticsPresentation.notionalText(proxy.deltaNotional))
-                        row("Roots", proxy.gammaRoots.map { Format.price($0) }.joined(separator: ", "))
-                        optionalPriceRow("Primary root", proxy.primaryGammaRoot)
+                        row(
+                            "Gamma flip proxy roots",
+                            proxy.gammaRoots.map { Format.price($0) }.joined(separator: ", ")
+                        )
+                        optionalPriceRow("Primary gamma flip proxy", proxy.primaryGammaRoot)
                     }
                 }
             }

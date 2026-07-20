@@ -77,7 +77,15 @@ transitions:
     from_state: fetching
     trigger_event: provider-response
     guard_conditions: [quote and at least one contract pass observed-field runtime validation]
-    transformations: [settlement calculation, synchronized pairs, forward, IV solve, local Greeks]
+    transformations:
+      [
+        open-or-latest-completed-session validation,
+        settlement calculation,
+        synchronized pairs,
+        forward,
+        IV solve,
+        local Greeks,
+      ]
     to_state: modeling
     outputs: [normalized observed contracts with modeled fields where IV is solvable]
     side_effects: [quality counters and warnings]
@@ -174,7 +182,12 @@ all_possible_event_paths:
   - 503 no usable contracts or cache
   - late client response discarded by generation key
 invariants:
-  preconditions: [exact symbol-expiration identity, explicit settlement, validated provider values]
+  preconditions:
+    [
+      exact symbol-expiration identity,
+      explicit settlement,
+      open-session-fresh or latest-completed-session-close provider values,
+    ]
   postconditions:
     [finite output, explicit units and provenance, idempotent minute storage, client parity]
   must_never_happen:

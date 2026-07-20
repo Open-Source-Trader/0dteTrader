@@ -425,7 +425,7 @@ export function IndicatorSettingsView({
                     </span>
                   </div>
                   <div className="grouped-row param-row">
-                    <span>Dealer Proxy Scenario</span>
+                    <span>Dealer Gamma Flip Proxy</span>
                     <span className="row-value">
                       <Toggle
                         on={optionsAnalytics.showDealerProxy}

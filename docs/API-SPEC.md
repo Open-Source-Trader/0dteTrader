@@ -63,6 +63,10 @@ current option mark and contract multiplier; it is not traded premium or flow.
 The required expiration is never replaced by another date. Invalid
 optional layers are `null` with `quality.status: partial` and warnings. A fully
 unusable exact snapshot returns an API error instead of fabricated values.
+During regular trading, quotes retain the strict 30-minute wall-clock age
+limit. Outside regular hours, the endpoint may use only the final 30 minutes of
+the latest completed New York session and reports that prior-session state in
+`quality.warnings` and source timestamps.
 
 Crypto symbols (e.g. `BTC`, `ETH`) are routed to the Coinbase public API for
 quotes and candles — no Webull credentials needed.

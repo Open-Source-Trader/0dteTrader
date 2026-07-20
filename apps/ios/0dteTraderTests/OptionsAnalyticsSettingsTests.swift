@@ -5,7 +5,7 @@ final class OptionsAnalyticsSettingsTests: XCTestCase {
     func testDefaultsExposeFactsAndHideOptionalAssumptionLayers() {
         let settings = OptionsAnalyticsSettings.default
 
-        XCTAssertFalse(settings.enabled)
+        XCTAssertTrue(settings.enabled)
         XCTAssertTrue(settings.showImpliedRange)
         XCTAssertTrue(settings.showGammaProfile)
         XCTAssertFalse(settings.showMarkedOi)
@@ -39,7 +39,7 @@ final class OptionsAnalyticsSettingsTests: XCTestCase {
         defaults.set(Data("{\"enabled\":true}".utf8), forKey: legacyKey)
         let store = SettingsStore(defaults: defaults)
 
-        XCTAssertFalse(store.optionsAnalyticsSettings.enabled)
+        XCTAssertTrue(store.optionsAnalyticsSettings.enabled)
 
         var settings = OptionsAnalyticsSettings.default
         settings.enabled = true

@@ -10,7 +10,7 @@ export interface OptionsAnalyticsSettings {
 }
 
 export const DEFAULT_OPTIONS_ANALYTICS_SETTINGS: OptionsAnalyticsSettings = {
-  enabled: false,
+  enabled: true,
   showImpliedRange: true,
   showGammaProfile: true,
   showMarkedOi: false,

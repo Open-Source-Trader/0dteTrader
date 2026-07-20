@@ -177,6 +177,17 @@ export function OptionsAnalyticsOverlay({
           `Call wall ${presentation.callWall.toFixed(2)}`,
         );
       }
+      if (presentation.maxOpenInterestStrike !== null) {
+        drawPriceLine(
+          context,
+          railStart,
+          pane.width,
+          presentation.maxOpenInterestStrike,
+          COLORS.markedOiPut,
+          `Max OI node ${presentation.maxOpenInterestStrike.toFixed(2)}`,
+          [2, 2],
+        );
+      }
 
       const hasStrikeLayer =
         presentation.showGammaProfile || presentation.showMarkedOi || presentation.showLiquidity;
@@ -260,7 +271,15 @@ export function OptionsAnalyticsOverlay({
 
       if (presentation.dealerProxy) {
         for (const root of presentation.dealerProxy.gammaRoots) {
-          drawPriceLine(context, railStart, pane.width, root, COLORS.proxy, 'Proxy root', [6, 3]);
+          drawPriceLine(
+            context,
+            railStart,
+            pane.width,
+            root,
+            COLORS.proxy,
+            'Gamma flip proxy',
+            [6, 3],
+          );
         }
       }
 

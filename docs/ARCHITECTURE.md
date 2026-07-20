@@ -95,6 +95,12 @@ Features/
 
 **Indicators:** pure functions over `[Candle]` in `IndicatorEngine` — unit-testable, no UI deps.
 
+**Options Structure:** enabled by default with implied range, gross call/put
+gamma profile, and independent call/put walls in a right-edge snapshot rail.
+Marked OI/liquidity and the explicitly assumed dealer gamma-flip proxy remain
+opt-in. Closed-market snapshots can use only the final 30 minutes of the latest
+completed regular session and carry a visible warning.
+
 ### 4b. Desktop (apps/desktop) — React + Vite + Electron
 
 Faithful web clone of the iOS UI for development/testing without Xcode. Fixed 430×932 phone frame with `--app-scale` CSS variable. Same feature structure: auth, chart (with Options Structure/TWC overlays), profile, trade. Shared indicator behavior is tested for parity between TypeScript and Swift.

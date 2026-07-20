@@ -138,7 +138,7 @@ struct IndicatorSettingsView: View {
                         Toggle("Call / Put Gamma Profile", isOn: $optionsAnalyticsSettings.showGammaProfile)
                         Toggle("Marked OI", isOn: $optionsAnalyticsSettings.showMarkedOi)
                         Toggle("Liquidity", isOn: $optionsAnalyticsSettings.showLiquidity)
-                        Toggle("Dealer Proxy Scenario", isOn: $optionsAnalyticsSettings.showDealerProxy)
+                        Toggle("Dealer Gamma Flip Proxy", isOn: $optionsAnalyticsSettings.showDealerProxy)
                         if optionsAnalyticsSettings.showDealerProxy {
                             Text("Scenario only. This is not observed dealer inventory.")
                                 .font(.caption)

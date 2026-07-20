@@ -14,7 +14,7 @@ struct OptionsAnalyticsSettings: Codable, Equatable, Sendable {
     static let profileStrikeRange = 3...20
 
     static let `default` = OptionsAnalyticsSettings(
-        enabled: false,
+        enabled: true,
         showImpliedRange: true,
         showGammaProfile: true,
         showMarkedOi: false,

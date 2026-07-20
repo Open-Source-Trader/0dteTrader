@@ -154,6 +154,12 @@ labeled real-time. The required expiration is exact-match only. The configured
 annual risk-free rate is disclosed in every snapshot because it is a model
 input, not a live timestamped yield curve.
 
+During regular New York trading, quote inputs older than 30 minutes remain
+invalid. Premarket, postmarket, weekends, and holidays may use only quotes from
+the final 30 minutes of the latest completed regular session; the response
+labels that state as market-closed and preserves the source ages. Older-session
+or earlier intraday quotes still fail instead of being presented as current.
+
 ### Snapshot capture and retention
 
 By default the API captures SPY, QQQ, IWM, and SPX once per minute during the

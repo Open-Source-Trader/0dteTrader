@@ -1,6 +1,12 @@
 import { Logger } from '@nestjs/common';
 import type { OptionsAnalyticsFeedMode } from '@0dtetrader/shared-types';
-import { previousTradingDay, ymd } from '../broker/expiration-calendar';
+import {
+  isEarlyCloseTradingDay,
+  isTradingDay,
+  optionSettlementAt,
+  previousTradingDay,
+  ymd,
+} from '../broker/expiration-calendar';
 import type { ValidatedAnalyticsContract } from './options-analytics.engine';
 
 const MAX_SOURCE_AGE_MS = 30 * 60_000;
@@ -63,10 +69,73 @@ function timestamp(value: unknown): Date | null {
     return Number.isFinite(parsed.getTime()) ? parsed : null;
   }
   if (typeof value === 'string' && value.trim() !== '') {
+    const trimmed = value.trim();
+    if (/^\d+(?:\.\d+)?$/.test(trimmed)) {
+      const numeric = Number(trimmed);
+      if (Number.isFinite(numeric)) return timestamp(numeric);
+    }
     const parsed = new Date(value);
     return Number.isFinite(parsed.getTime()) ? parsed : null;
   }
   return null;
+}
+
+function newYorkClock(now: Date): { day: Date; minutes: number } {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(now);
+  const value = (type: Intl.DateTimeFormatPartTypes): number =>
+    Number(parts.find((part) => part.type === type)?.value);
+  return {
+    day: new Date(Date.UTC(value('year'), value('month') - 1, value('day'))),
+    minutes: value('hour') * 60 + value('minute'),
+  };
+}
+
+interface SourceTimestampPolicy {
+  latestCompletedSession: { date: string; close: Date } | null;
+}
+
+function sourceTimestampPolicy(now: Date): SourceTimestampPolicy {
+  const marketClock = newYorkClock(now);
+  const closeMinutes = isEarlyCloseTradingDay(marketClock.day) ? 13 * 60 : 16 * 60;
+  const regularSessionOpen =
+    isTradingDay(marketClock.day) &&
+    marketClock.minutes >= 9 * 60 + 30 &&
+    marketClock.minutes < closeMinutes;
+  if (regularSessionOpen) return { latestCompletedSession: null };
+  const completedDay =
+    isTradingDay(marketClock.day) && marketClock.minutes >= closeMinutes
+      ? marketClock.day
+      : previousTradingDay(marketClock.day);
+  const date = ymd(completedDay);
+  return {
+    latestCompletedSession: { date, close: optionSettlementAt(date, 'SPY', 'SPY') },
+  };
+}
+
+function isUsableSourceTimestamp(
+  value: Date,
+  now: Date,
+  policy: SourceTimestampPolicy,
+  maximumAgeMs = MAX_SOURCE_AGE_MS,
+): boolean {
+  const completedSession = policy.latestCompletedSession;
+  if (completedSession === null) return isFresh(value, now, maximumAgeMs);
+  const ageAtClose = completedSession.close.getTime() - value.getTime();
+  return ageAtClose >= -MAX_FUTURE_SKEW_MS && ageAtClose <= maximumAgeMs;
+}
+
+function closedSessionWarning(policy: SourceTimestampPolicy): string | null {
+  const completedSession = policy.latestCompletedSession;
+  if (completedSession === null) return null;
+  return `Market is closed; using latest completed regular-session quotes from ${completedSession.date}; source timestamps and ages remain visible`;
 }
 
 function isFresh(value: Date, now: Date, maximumAgeMs = MAX_SOURCE_AGE_MS): boolean {
@@ -183,6 +252,7 @@ export class TradierClient {
     const quoteValue = quoteContainer?.['quote'];
     const quote = record(Array.isArray(quoteValue) ? quoteValue[0] : quoteValue);
     const now = this.now();
+    const timestampPolicy = sourceTimestampPolicy(now);
     const bid = positive(quote?.['bid']);
     const ask = positive(quote?.['ask']);
     const bidTime = timestamp(quote?.['bid_date']);
@@ -193,16 +263,21 @@ export class TradierClient {
       ask >= bid &&
       bidTime !== null &&
       askTime !== null &&
-      isFresh(bidTime, now) &&
-      isFresh(askTime, now) &&
+      isUsableSourceTimestamp(bidTime, now, timestampPolicy) &&
+      isUsableSourceTimestamp(askTime, now, timestampPolicy) &&
       Math.abs(bidTime.getTime() - askTime.getTime()) <= OPTIONS_ANALYTICS_MAX_BID_ASK_SKEW_MS_V1;
     const last = positive(quote?.['last']);
     const tradeTime = timestamp(quote?.['trade_date']);
-    const validLast = last !== null && tradeTime !== null && isFresh(tradeTime, now);
+    const validLast =
+      last !== null &&
+      tradeTime !== null &&
+      isUsableSourceTimestamp(tradeTime, now, timestampPolicy);
     if (!validNbbo && !validLast) {
       throw new Error(`Tradier returned no finite, fresh timestamped spot for ${symbol}`);
     }
     const warnings: string[] = [];
+    const sessionWarning = closedSessionWarning(timestampPolicy);
+    if (sessionWarning !== null) warnings.push(sessionWarning);
     let spot: number;
     let quoteTime: Date;
     if (validNbbo) {
@@ -244,6 +319,7 @@ export class TradierClient {
     const contracts: ValidatedAnalyticsContract[] = [];
     const contractsTotalByRoot: Record<string, number> = {};
     const now = this.now();
+    const timestampPolicy = sourceTimestampPolicy(now);
     const normalizedSymbol = symbol.toUpperCase();
 
     for (const rawValue of rawOptions) {
@@ -334,7 +410,7 @@ export class TradierClient {
         continue;
       }
       const quoteTime = bidTime.getTime() <= askTime.getTime() ? bidTime : askTime;
-      if (!isFresh(quoteTime, now)) {
+      if (!isUsableSourceTimestamp(quoteTime, now, timestampPolicy)) {
         reject('stale quote timestamp');
         continue;
       }
@@ -345,7 +421,12 @@ export class TradierClient {
       const providerIvValue = positive(greeks?.['mid_iv']);
       const validProviderGreeks =
         providerGreeksTime !== null &&
-        isFresh(providerGreeksTime, now, MAX_PROVIDER_GREEKS_AGE_MS) &&
+        isUsableSourceTimestamp(
+          providerGreeksTime,
+          now,
+          timestampPolicy,
+          MAX_PROVIDER_GREEKS_AGE_MS,
+        ) &&
         providerDeltaValue !== null &&
         providerDeltaValue >= -1 &&
         providerDeltaValue <= 1 &&
@@ -361,7 +442,10 @@ export class TradierClient {
       }
       const lastValue = positive(raw['last']);
       const lastTradeTime = timestamp(raw['trade_date']);
-      const validLast = lastValue !== null && lastTradeTime !== null && isFresh(lastTradeTime, now);
+      const validLast =
+        lastValue !== null &&
+        lastTradeTime !== null &&
+        isUsableSourceTimestamp(lastTradeTime, now, timestampPolicy);
       if ((raw['last'] !== undefined || raw['trade_date'] !== undefined) && !validLast) {
         contractWarnings.add(
           'Provider comparison last trade stale or invalid and was nulled',
@@ -392,6 +476,8 @@ export class TradierClient {
     }
 
     const warnings = contractWarnings.messages();
+    const sessionWarning = contracts.length > 0 ? closedSessionWarning(timestampPolicy) : null;
+    if (sessionWarning !== null) warnings.push(sessionWarning);
     if (rawOptions.length > 0) {
       warnings.push(
         `Open interest effective date inferred as ${ymd(previousTradingDay(now))}; Tradier does not publish an OI effective timestamp`,

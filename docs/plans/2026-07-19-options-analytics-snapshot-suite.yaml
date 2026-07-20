@@ -280,6 +280,24 @@ implementation_tasks:
         remediate findings,
       ]
     acceptance: No misleading GEX/premium-heat contract residues and full verification evidence is recorded.
+  - id: T8
+    title: Closed-session provider and chart-visibility remediation
+    owner: root
+    files:
+      [
+        apps/api/src/options-analytics/tradier.client.ts,
+        apps/desktop/src/features/chart/optionsAnalytics,
+        apps/ios/0dteTrader/Features/Chart/OptionsAnalytics,
+      ]
+    steps:
+      [
+        reproduce the Sunday prior-session quote rejection and disabled defaults,
+        add failing provider and paired-client tests,
+        accept only the latest completed regular-session quote outside market hours with a warning,
+        enable the fact-first overlay by default while leaving the dealer proxy off,
+        verify focused and complete suites,
+      ]
+    acceptance: Closed-market snapshots use only the latest completed session with explicit provenance and both clients show the default fact-first chart layers without enabling dealer assumptions.
 task_checklist:
   update_every_message: true
   items:
@@ -290,6 +308,7 @@ task_checklist:
     - { id: T5, status: completed }
     - { id: T6, status: completed }
     - { id: T7, status: completed }
+    - { id: T8, status: completed }
 engineering_standards:
   principles: [DRY, SOLID, KISS, YAGNI]
   strict_typing: true

@@ -190,7 +190,10 @@ paths:
         Greeks are derived locally from validated two-sided quotes. Call/put
         gamma are unsigned magnitudes in USD delta change per 1% move; the
         optional call-minus-put dealer proxy is an explicit assumption, not
-        observed inventory. Marked OI is not traded premium or flow.
+        observed inventory. Marked OI is not traded premium or flow. During an
+        open regular session quotes have a 30-minute wall-clock age bound;
+        outside regular hours only the final 30 minutes of the latest completed
+        New York session are eligible and the response includes a warning.
       parameters:
         - { name: symbol, in: query, required: true, schema: { type: string } }
         - {

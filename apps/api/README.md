@@ -132,7 +132,7 @@ unit + e2e together (`jest --runInBand`):
   - `trading/orders.service` — average-cost realized P/L incl. partial fills
     at the broker-reported filled quantity.
   - `options-analytics` — IV/Greek golden vectors, forward/range formulas,
-    independent walls, scenario roots, freshness, exact-expiration caching,
+    independent walls, scenario roots, open/latest-session freshness, exact-expiration caching,
     scheduled capture, idempotency, compaction, and retention.
   - `broker/webull/webull-signer` — HMAC signing against the official docs
     test vector, host→algorithm classification, percent-encoding.

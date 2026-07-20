@@ -204,6 +204,20 @@ final class OptionsAnalyticsOverlayView: UIView {
                 in: context
             )
         }
+        if settings.showMarkedOi,
+           let maxOpenInterestStrike = snapshot.structure.maxOpenInterestStrike {
+            drawRailLine(
+                RailLine(
+                    price: maxOpenInterestStrike,
+                    label: "MAX OI NODE",
+                    color: OptionsAnalyticsPresentation.markedOiPutColor,
+                    dashed: true
+                ),
+                rail: rail,
+                content: content,
+                in: context
+            )
+        }
     }
 
     private func drawProxyRoots(
@@ -214,7 +228,9 @@ final class OptionsAnalyticsOverlayView: UIView {
     ) {
         guard let proxy = snapshot.scenarios.callPutDealerProxy else { return }
         for (index, root) in proxy.gammaRoots.enumerated() {
-            let label = root == proxy.primaryGammaRoot ? "PROXY ROOT *" : "PROXY ROOT \(index + 1)"
+            let label = root == proxy.primaryGammaRoot
+                ? "GAMMA FLIP PROXY *"
+                : "GAMMA ROOT PROXY \(index + 1)"
             drawRailLine(
                 RailLine(price: root, label: label, color: OptionsAnalyticsPresentation.proxyColor, dashed: true),
                 rail: rail,

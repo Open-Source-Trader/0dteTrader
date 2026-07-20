@@ -268,6 +268,7 @@ describe('options analytics presentation', () => {
     expect(defaultModel.strikes[0]?.markedOiValue).toBeNull();
     expect(defaultModel.strikes[0]?.liquidity).toBeNull();
     expect(defaultModel.dealerProxy).toBeNull();
+    expect(defaultModel.maxOpenInterestStrike).toBeNull();
     expect(defaultModel.accessibleSummary).not.toContain('dealer proxy');
 
     const optInModel = module.buildOptionsAnalyticsPresentation(
@@ -304,7 +305,9 @@ describe('options analytics presentation', () => {
       putRoundTripCost: 600,
     });
     expect(optInModel.dealerProxy?.assumption).toContain('Calls short');
-    expect(optInModel.accessibleSummary).toContain('dealer proxy roots 497.50, 502.50');
+    expect(optInModel.maxOpenInterestStrike).toBe(500);
+    expect(optInModel.accessibleSummary).toContain('max OI node 500.00');
+    expect(optInModel.accessibleSummary).toContain('dealer gamma flip proxy roots 497.50, 502.50');
     expect(optInModel.accessibleSummary).toContain('dealer proxy gamma exposure 400.00');
     expect(optInModel.accessibleSummary).toContain('dealer proxy delta notional -100000.00');
   });

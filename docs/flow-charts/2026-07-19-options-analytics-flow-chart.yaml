@@ -37,7 +37,11 @@ target_flow:
     - { id: T1, label: API request or minute capture event, type: event }
     - { id: T2, label: normalize symbol and require exact expiration, type: decision }
     - { id: T3, label: fetch synchronized quote and complete chain fields, type: process }
-    - { id: T4, label: validate ages spreads multiplier feed and settlement, type: decision }
+    - {
+        id: T4,
+        label: validate open-session freshness or latest completed-session close plus spreads multiplier feed and settlement,
+        type: decision,
+      }
     - {
         id: T5,
         label: derive forward and attempt local IV and Greeks with one kernel,
@@ -102,7 +106,7 @@ failure_recovery_paths:
     retry_timeout_fallback: bounded exact-key cache only within hard age
     terminal_outcome: partial/cached 200 or explicit 503
   - failure: invalid or stale quote
-    detection: runtime validation and timestamp/spread rules
+    detection: runtime validation, open-session age, latest-completed-session close, and spread rules
     retry_timeout_fallback: exclude contract and reduce coverage
     terminal_outcome: partial snapshot or 503 when none remain
   - failure: local IV unavailable from a quote-valid contract

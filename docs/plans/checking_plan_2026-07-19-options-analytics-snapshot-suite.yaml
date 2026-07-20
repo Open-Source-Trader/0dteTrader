@@ -249,7 +249,74 @@ live_progress:
     phase: main-integration
     status: completed-with-baseline-residual
     evidence: Main was merged into the feature branch before final delivery. Conflict resolution preserves main's independent pane zoom/reset behavior and the fact-first Options Structure UI. Main's new AI Analysis context now consumes OptionsAnalyticsSnapshotDTO with explicit quality and scenario labels. Regenerating the ignored Xcode project from project.yml added main's new source files; the focused iOS suite passes 44 of 44 and the full suite passes 123 of 124 with only BASE-003; SwiftLint reports 0 violations.
+  - at: '2026-07-19T21:53:39-04:00'
+    phase: production-overlay-remediation
+    status: analysis-completed-tests-pending
+    evidence: The reported 2026-07-20T01:43Z Sunday failure reproduces a fixed 30-minute quote-age policy rejecting Friday's latest completed-session quote; desktop and iOS also default the replacement overlay master switch off while the dealer-root scenario correctly remains opt-in. A clean main baseline passes API 21 suites/268 tests and desktop 16 files/122 tests.
+  - at: '2026-07-19T21:56:47-04:00'
+    phase: production-overlay-remediation-red
+    status: completed
+    evidence: Targeted provider tests fail exactly for Sunday latest-session quote/chain acceptance and numeric-string epochs; desktop tests fail exactly for the disabled default and undiscoverable gamma-flip proxy label. Existing provider cases remain green.
+  - at: '2026-07-19T21:58:01-04:00'
+    phase: provider-and-desktop-remediation-green
+    status: completed
+    evidence: Tradier normalization now passes 16 focused tests, accepting only the final 30 minutes of the latest completed session outside regular hours with an explicit warning and parsing numeric epoch strings. Desktop settings and indicator controls pass 5 focused tests with fact-first defaults enabled and the assumption labeled Dealer Gamma Flip Proxy.
+  - at: '2026-07-19T22:01:39-04:00'
+    phase: paired-chart-visibility-remediation
+    status: completed
+    evidence: Desktop passes 14 focused presentation/overlay tests and iOS passes 15 focused settings/presentation tests. Both clients render call/put walls and profiles by default, label the optional roots as a dealer gamma-flip proxy, and draw Max OI node only with the opt-in marked-OI layer.
+  - at: '2026-07-19T22:04:36-04:00'
+    phase: full-remediation-verification
+    status: completed-with-baseline-residual
+    evidence: Root tests pass API 21 suites/274 tests and desktop 16 files/122 tests; root lint and build pass. Full iOS passes 123 of 124 with only the unchanged BASE-003 AutoContractSelector expectation; all Options Analytics suites pass and strict SwiftLint reports 0 violations.
+  - at: '2026-07-19T22:07:00-04:00'
+    phase: double-check-performance-remediation
+    status: completed
+    evidence: Scoped attack review found repeated New York timezone/calendar computation per contract field. The provider now creates one immutable source-timestamp policy per response; 19 provider tests, API strict lint/build, scoped formatting, YAML parsing, residue scans, and diff checks pass.
+  - at: '2026-07-19T22:09:00-04:00'
+    phase: final-pre-integration-verification
+    status: completed-with-baseline-residual
+    evidence: After performance remediation, a fresh root run passes API 21 suites/274 tests, desktop 16 files/122 tests, lint, strict TypeScript builds, and the desktop production build. The checking-plan audit reports no open P0/P1 findings.
 findings:
+  - id: PERF-001
+    severity: P1
+    description: The first closed-session remediation recomputed New York session and settlement state for each quote, Greek, and last-trade timestamp in every contract.
+    file: apps/api/src/options-analytics/tradier.client.ts
+    reproduction_steps: Normalize a large option chain outside regular hours and count Intl.DateTimeFormat/session-calendar evaluation calls.
+    impact: A thousand-contract chain could perform thousands of redundant timezone/calendar transformations on every interactive poll and scheduled capture.
+    suggested_fix: Derive one immutable source timestamp policy per underlying quote response and one per chain response, then reuse it for every timestamp decision and warning.
+    blocker: true
+    remediation_status: resolved
+    remediation_evidence: getQuote and getChain now each construct sourceTimestampPolicy once; the provider suite passes 19 of 19 and API strict lint/build pass after the refactor.
+  - id: PROVIDER-003
+    severity: P1
+    description: Tradier quote normalization applies the same 30-minute wall-clock freshness cutoff during regular trading and closed-market periods, so Friday's valid closing snapshot is unconditionally rejected on Sunday night.
+    file: apps/api/src/options-analytics/tradier.client.ts
+    reproduction_steps: At 2026-07-20T01:43Z request AAPL with a finite synchronized Tradier quote timestamped in the final minute of the Friday 2026-07-17 regular session.
+    impact: The exact options snapshot returns 503 outside a 30-minute window after every close, leaving all chart options layers empty even when the latest completed-session structure is useful and can be clearly aged.
+    suggested_fix: Keep strict wall-clock freshness while the regular session is open; outside it accept only timestamps from the latest completed regular session, retain future/skew/spread checks, and add an explicit prior-session warning.
+    blocker: true
+    remediation_status: resolved
+    remediation_evidence: Three expected RED failures became 19 passing provider tests; prior-session acceptance is bounded to the final 30 minutes of the latest completed regular session and covers Sunday, Monday premarket/postmarket, an older Thursday, an early same-session quote, and numeric-string epochs.
+  - id: CLIENT-003
+    severity: P1
+    description: The breaking Options Structure migration defaults its master chart setting off on both clients and intentionally ignores the deleted GEX settings key, so users who previously viewed GEX receive no replacement overlay.
+    file: apps/desktop/src/features/chart/optionsAnalytics/optionsAnalyticsSettings.ts
+    reproduction_steps: Launch either client with no optionsAnalytics.v1 settings after upgrading from the removed GEX implementation.
+    impact: Valid implied range, fact-first gamma profile, and independent call/put walls are fetched in shadow mode but not rendered, which looks like the feature was removed.
+    suggested_fix: Enable the fact-first master layer by default on desktop and iOS while keeping marked OI, liquidity, and the dealer-position gamma-root proxy off until explicitly selected.
+    blocker: true
+    remediation_status: resolved
+    remediation_evidence: The desktop RED became 5 passing settings/control tests, desktop presentation/overlay passes 14 focused tests, and iOS settings/presentation passes 15 focused tests. The default enables only implied range and gamma profile, while marked OI, liquidity, and dealer proxy remain false.
+  - id: AUTH-001
+    severity: P2
+    description: Webull is returning UNAUTHORIZED for the configured application credentials and the live-stream gateway cannot recover without a valid key/secret plus Webull OpenAPI approval.
+    file: external Webull account configuration
+    reproduction_steps: Connect the reported user credential set and request AAPL or AAPL260724C00335000 stream quotes.
+    impact: Live Webull chart/contract ticks fail independently of the Tradier options-analytics snapshot.
+    suggested_fix: Re-enter the matching environment's Webull app key and secret, approve the OpenAPI notification in Webull, then reconnect from Profile.
+    blocker: false
+    remediation_status: external-user-action-required
   - id: INTEGRATION-001
     severity: P1
     description: Main's newly added AI Analysis path referenced the deleted GexLevels contract and described inferred positioning as options flow after the breaking Options Analytics migration.
@@ -832,6 +899,48 @@ evidence_log:
       id: E31,
       command: full iOS xcodebuild after main integration,
       result: 123 of 124 tests pass and SwiftLint reports 0 violations; the sole failure is the unchanged AutoContractSelector expectation documented as BASE-003,
+    }
+  - {
+      id: E32,
+      command: targeted Tradier provider and desktop settings/indicator tests before remediation,
+      result: expected RED with three provider failures and three desktop failures reproducing PROVIDER-003 and CLIENT-003,
+    }
+  - {
+      id: E33,
+      command: targeted Tradier provider and desktop settings/indicator tests after remediation,
+      result: provider 16 of 16 and desktop 5 of 5 pass,
+    }
+  - {
+      id: E34,
+      command: focused desktop presentation/overlay and iOS settings/presentation tests,
+      result: desktop 14 of 14 and iOS 15 of 15 pass with paired chart labels and defaults,
+    }
+  - {
+      id: E35,
+      command: npm run test plus npm run lint plus npm run build,
+      result: API 21 suites and 274 tests pass; desktop 16 files and 122 tests pass; strict lint,
+      TypeScript builds,
+      and desktop production build exit 0,
+    }
+  - {
+      id: E36,
+      command: full iOS xcodebuild on iPhone 16 Pro iOS 18.6,
+      result: 123 of 124 tests pass; the sole failure is unchanged BASE-003 and every Options Analytics suite passes,
+    }
+  - {
+      id: E37,
+      command: strict SwiftLint plus scoped Prettier/YAML/diff/residue checks,
+      result: SwiftLint finds 0 violations; scoped formatting and YAML parsing pass; no whitespace or obsolete production GEX terminology remains,
+    }
+  - {
+      id: E38,
+      command: provider performance-remediation test lint and strict build,
+      result: 19 of 19 provider tests pass and API lint/build exit 0 with one session policy per response,
+    }
+  - {
+      id: E39,
+      command: final npm run test plus npm run lint plus npm run build after all remediation,
+      result: API 21 suites/274 tests and desktop 16 files/122 tests pass; every lint/type/build command exits 0; no open P0/P1 finding remains,
     }
 remediation_policy:
   fix_all_scoped_findings: true

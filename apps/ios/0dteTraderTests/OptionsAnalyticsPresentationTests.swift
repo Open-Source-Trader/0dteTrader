@@ -255,7 +255,7 @@ final class OptionsAnalyticsPresentationTests: XCTestCase {
         XCTAssertTrue(summary.contains("Call wall 585.00"))
         XCTAssertTrue(summary.contains("Put wall 580.00"))
         XCTAssertTrue(summary.contains("Max OI strike 585.00"))
-        XCTAssertTrue(summary.contains("Proxy roots 583.40, 587.20"))
+        XCTAssertTrue(summary.contains("Dealer gamma flip proxy roots 583.40, 587.20"))
         XCTAssertTrue(summary.contains("Spot 584.00, forward 584.20"))
         XCTAssertTrue(summary.contains("Settlement 2026-07-19T20:00:00Z"))
         XCTAssertTrue(summary.contains("Root SPY"))

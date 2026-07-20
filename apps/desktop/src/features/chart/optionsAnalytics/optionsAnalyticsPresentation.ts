@@ -53,6 +53,7 @@ export interface OptionsAnalyticsPresentation {
   impliedRange: OptionsAnalyticsSnapshot['impliedRange'];
   callWall: number | null;
   putWall: number | null;
+  maxOpenInterestStrike: number | null;
   dealerProxy: NonNullable<OptionsAnalyticsSnapshot['scenarios']['callPutDealerProxy']> | null;
   structureLine: string;
   qualityLines: string[];
@@ -260,6 +261,12 @@ export function buildOptionsAnalyticsPresentation(
   if (snapshot.structure.putWall !== null) {
     summaryParts.push(`put wall ${formatPrice(snapshot.structure.putWall)}`);
   }
+  const maxOpenInterestStrike = settings.showMarkedOi
+    ? snapshot.structure.maxOpenInterestStrike
+    : null;
+  if (maxOpenInterestStrike !== null) {
+    summaryParts.push(`max OI node ${formatPrice(maxOpenInterestStrike)}`);
+  }
   const dealerProxy = settings.showDealerProxy ? snapshot.scenarios.callPutDealerProxy : null;
   if (dealerProxy) {
     summaryParts.push(`dealer proxy assumption ${dealerProxy.assumption}`);
@@ -269,8 +276,8 @@ export function buildOptionsAnalyticsPresentation(
     );
     summaryParts.push(
       dealerProxy.gammaRoots.length > 0
-        ? `dealer proxy roots ${dealerProxy.gammaRoots.map(formatPrice).join(', ')}`
-        : 'dealer proxy roots unavailable',
+        ? `dealer gamma flip proxy roots ${dealerProxy.gammaRoots.map(formatPrice).join(', ')}`
+        : 'dealer gamma flip proxy roots unavailable',
     );
   }
 
@@ -284,6 +291,7 @@ export function buildOptionsAnalyticsPresentation(
     impliedRange,
     callWall: snapshot.structure.callWall,
     putWall: snapshot.structure.putWall,
+    maxOpenInterestStrike,
     dealerProxy,
     structureLine,
     qualityLines,

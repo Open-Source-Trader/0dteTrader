@@ -55,7 +55,7 @@ describe('SettingsStore options analytics settings', () => {
 
   it('uses the fact-first defaults from the versioned settings key', () => {
     expect(optionsAnalyticsSettings(new SettingsStore())).toEqual({
-      enabled: false,
+      enabled: true,
       showImpliedRange: true,
       showGammaProfile: true,
       showMarkedOi: false,
@@ -71,7 +71,7 @@ describe('SettingsStore options analytics settings', () => {
     localStorage.setItem(obsoleteKey, JSON.stringify({ enabled: true, refreshSeconds: 15 }));
 
     expect(optionsAnalyticsSettings(new SettingsStore())).toMatchObject({
-      enabled: false,
+      enabled: true,
       refreshSeconds: 45,
     });
   });

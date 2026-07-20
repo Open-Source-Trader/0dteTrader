@@ -33,7 +33,7 @@ describe('IndicatorSettingsView options structure controls', () => {
     expect(markup).toContain('Gamma Profile');
     expect(markup).toContain('Marked OI Value');
     expect(markup).toContain('Liquidity (Spread / Round Trip)');
-    expect(markup).toContain('Dealer Proxy Scenario');
+    expect(markup).toContain('Dealer Gamma Flip Proxy');
     expect(markup).toContain('Profile Strikes: 12');
   });
 });

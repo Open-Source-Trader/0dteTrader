@@ -260,7 +260,7 @@ enum OptionsAnalyticsPresentation {
             let roots = proxy.gammaRoots.isEmpty
                 ? "unavailable"
                 : proxy.gammaRoots.map(priceText).joined(separator: ", ")
-            parts.append("Proxy roots \(roots)")
+            parts.append("Dealer gamma flip proxy roots \(roots)")
         }
         parts.append(contentsOf: quality.warnings.map { "Warning: \($0)" })
         return parts.joined(separator: ". ")

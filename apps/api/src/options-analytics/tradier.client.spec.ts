@@ -3,6 +3,8 @@ import { TradierClient } from './tradier.client';
 
 const NOW = new Date('2026-07-20T14:00:00.000Z');
 const QUOTE_TIME = NOW.getTime() - 5_000;
+const SUNDAY_NIGHT = new Date('2026-07-20T01:43:16.000Z');
+const FRIDAY_CLOSE_QUOTE_TIME = Date.parse('2026-07-17T19:59:55.000Z');
 
 function option(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
@@ -229,6 +231,164 @@ describe('TradierClient normalization', () => {
     await expect(delayed.getQuote('SPY')).resolves.toMatchObject({
       feedMode: 'delayed',
     });
+  });
+
+  it('accepts the latest completed-session underlying quote on Sunday with an explicit warning', async () => {
+    const fetchImpl = jest.fn().mockResolvedValue(
+      response({
+        quotes: {
+          quote: {
+            symbol: 'AAPL',
+            bid: 210,
+            ask: 210.2,
+            bid_date: FRIDAY_CLOSE_QUOTE_TIME,
+            ask_date: FRIDAY_CLOSE_QUOTE_TIME + 500,
+            last: 210.1,
+            trade_date: FRIDAY_CLOSE_QUOTE_TIME,
+            delayed: false,
+          },
+        },
+      }),
+    );
+    const client = new TradierClient(
+      'token',
+      'https://api.tradier.com',
+      fetchImpl,
+      () => SUNDAY_NIGHT,
+    );
+
+    await expect(client.getQuote('AAPL')).resolves.toMatchObject({
+      spot: 210.1,
+      quoteAsOf: new Date(FRIDAY_CLOSE_QUOTE_TIME).toISOString(),
+      warnings: [expect.stringMatching(/market is closed.*2026-07-17/i)],
+    });
+  });
+
+  it('accepts latest completed-session option quotes but rejects an older session', async () => {
+    const fetchImpl = jest.fn().mockResolvedValue(
+      response({
+        options: {
+          option: [
+            option({
+              symbol: 'AAPL260724C00210000',
+              root_symbol: 'AAPL',
+              expiration_date: '2026-07-24',
+              bid_date: FRIDAY_CLOSE_QUOTE_TIME,
+              ask_date: FRIDAY_CLOSE_QUOTE_TIME + 500,
+              trade_date: FRIDAY_CLOSE_QUOTE_TIME,
+            }),
+            option({
+              symbol: 'AAPL260724C00215000',
+              root_symbol: 'AAPL',
+              expiration_date: '2026-07-24',
+              bid_date: Date.parse('2026-07-16T19:59:55.000Z'),
+              ask_date: Date.parse('2026-07-16T19:59:55.500Z'),
+            }),
+          ],
+        },
+      }),
+    );
+    const client = new TradierClient(
+      'token',
+      'https://api.tradier.com',
+      fetchImpl,
+      () => SUNDAY_NIGHT,
+    );
+
+    const chain = await client.getChain('AAPL', '2026-07-24');
+
+    expect(chain.contracts.map((contract) => contract.symbol)).toEqual(['AAPL260724C00210000']);
+    expect(chain.warnings.join(' ')).toMatch(/market is closed.*2026-07-17/i);
+    expect(chain.warnings.join(' ')).toMatch(/stale quote timestamp.*AAPL260724C00215000/i);
+  });
+
+  it('accepts provider epoch timestamps encoded as numeric strings', async () => {
+    const fetchImpl = jest.fn().mockResolvedValue(
+      response({
+        quotes: {
+          quote: {
+            symbol: 'SPY',
+            bid: 100,
+            ask: 100.2,
+            bid_date: String(QUOTE_TIME),
+            ask_date: String(QUOTE_TIME + 500),
+            delayed: false,
+          },
+        },
+      }),
+    );
+    const client = new TradierClient('token', 'https://api.tradier.com', fetchImpl, () => NOW);
+
+    await expect(client.getQuote('SPY')).resolves.toMatchObject({
+      spot: 100.1,
+      quoteAsOf: new Date(QUOTE_TIME).toISOString(),
+    });
+  });
+
+  it.each([
+    {
+      label: 'Monday premarket',
+      now: new Date('2026-07-20T13:00:00.000Z'),
+      source: FRIDAY_CLOSE_QUOTE_TIME,
+      sessionDate: '2026-07-17',
+    },
+    {
+      label: 'Monday postmarket',
+      now: new Date('2026-07-20T20:30:00.000Z'),
+      source: Date.parse('2026-07-20T19:59:55.000Z'),
+      sessionDate: '2026-07-20',
+    },
+  ])('selects the correct latest completed session during $label', async (scenario) => {
+    const fetchImpl = jest.fn().mockResolvedValue(
+      response({
+        quotes: {
+          quote: {
+            symbol: 'SPY',
+            bid: 100,
+            ask: 100.2,
+            bid_date: scenario.source,
+            ask_date: scenario.source + 500,
+            delayed: false,
+          },
+        },
+      }),
+    );
+    const client = new TradierClient(
+      'token',
+      'https://api.tradier.com',
+      fetchImpl,
+      () => scenario.now,
+    );
+
+    await expect(client.getQuote('SPY')).resolves.toMatchObject({
+      warnings: [expect.stringContaining(scenario.sessionDate)],
+    });
+  });
+
+  it('rejects a latest-session quote outside the final 30-minute window', async () => {
+    const tooEarly = Date.parse('2026-07-17T19:29:59.000Z');
+    const fetchImpl = jest.fn().mockResolvedValue(
+      response({
+        quotes: {
+          quote: {
+            symbol: 'AAPL',
+            bid: 210,
+            ask: 210.2,
+            bid_date: tooEarly,
+            ask_date: tooEarly + 500,
+            delayed: false,
+          },
+        },
+      }),
+    );
+    const client = new TradierClient(
+      'token',
+      'https://api.tradier.com',
+      fetchImpl,
+      () => SUNDAY_NIGHT,
+    );
+
+    await expect(client.getQuote('AAPL')).rejects.toThrow(/no finite, fresh timestamped spot/i);
   });
 
   it('prefers a fresh valid underlying NBBO midpoint with the conservative timestamp', async () => {

@@ -67,6 +67,7 @@ Out of scope: order execution behavior, Webull market-data behavior, unrelated c
 The V1 volatility representation is a discrete sticky-strike smile: each retained contract's locally solved IV is held fixed while that contract is repriced across the scenario spot grid. Current Greeks, scenario exposures, and root refinement all use that same IV set and Black forward kernel. V1 does not claim an interpolated continuous surface between listed strikes.
 
 - **REQ-017 (must):** The old GEX endpoint, DTOs, settings keys, comments, UI names, and dead code are removed without compatibility aliases.
+- **REQ-018 (must):** During an open regular session, quote inputs remain subject to the 30-minute wall-clock freshness bound. Outside regular hours, only inputs from the final 30 minutes of the latest completed New York regular session are usable, and the snapshot must warn that the market is closed. Validate weekend, premarket, postmarket, older-session, and numeric-provider-timestamp cases.
 
 ## 7. User/System Flows
 
@@ -132,7 +133,7 @@ Rollback is a branch/release rollback plus disabling scheduled capture. No old e
 2. Compare golden and recorded snapshots against an independent reference.
 3. Land synchronized API and client contract migration.
 4. Enable core capture in configured environments.
-5. Keep the refreshed indicator disabled by default until shadow validation is accepted.
+5. Shadow validation is accepted; enable the fact-first range, gross gamma profile, and independent walls by default while keeping marked OI, liquidity, and dealer scenarios opt-in.
 
 ## 14. Open Questions
 

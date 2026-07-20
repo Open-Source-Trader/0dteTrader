@@ -23,6 +23,7 @@ describe('IndicatorSettingsView options structure controls', () => {
           showDealerProxy: false,
           refreshSeconds: 45,
           profileStrikeCount: 12,
+          showDiagnostics: false,
         },
         onChangeOptionsAnalytics: vi.fn(),
       }),

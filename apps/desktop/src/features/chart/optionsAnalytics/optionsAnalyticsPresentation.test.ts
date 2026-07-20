@@ -14,6 +14,7 @@ const settings = {
   showDealerProxy: false,
   refreshSeconds: 45,
   profileStrikeCount: 12,
+  showDiagnostics: false,
 };
 
 describe('options analytics presentation', () => {
@@ -279,6 +280,7 @@ describe('options analytics presentation', () => {
         showMarkedOi: true,
         showLiquidity: true,
         showDealerProxy: true,
+        showDiagnostics: true,
       },
       Date.parse('2026-07-19T14:30:20.000Z'),
     );

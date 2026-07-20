@@ -7,6 +7,9 @@ export interface OptionsAnalyticsSettings {
   showDealerProxy: boolean;
   refreshSeconds: number;
   profileStrikeCount: number;
+  /** Show the diagnostics/quality box (provenance + warnings). The structure
+   *  drawing is independent and always renders when enabled. */
+  showDiagnostics: boolean;
 }
 
 export const DEFAULT_OPTIONS_ANALYTICS_SETTINGS: OptionsAnalyticsSettings = {
@@ -18,6 +21,7 @@ export const DEFAULT_OPTIONS_ANALYTICS_SETTINGS: OptionsAnalyticsSettings = {
   showDealerProxy: false,
   refreshSeconds: 45,
   profileStrikeCount: 12,
+  showDiagnostics: true,
 };
 
 function booleanValue(value: unknown, fallback: boolean): boolean {
@@ -50,5 +54,6 @@ export function decodeOptionsAnalyticsSettings(value: unknown): OptionsAnalytics
       20,
       defaults.profileStrikeCount,
     ),
+    showDiagnostics: booleanValue(record.showDiagnostics, defaults.showDiagnostics),
   };
 }

@@ -84,7 +84,7 @@ jobs:
 
       - name: Mayhem for API
         if: env.MAYHEM_TOKEN != ''
-        uses: ForAllSecure/mapi-action@v1
+        uses: ForAllSecure/mapi-action@v2
         continue-on-error: true
         with:
           mayhem-token: ${{ env.MAYHEM_TOKEN }}

@@ -17,8 +17,8 @@ const ROOT = process.cwd();
 const ENV_PATH = resolve(ROOT, '.env');
 const ENV_EXAMPLE_PATH = resolve(ROOT, '.env.example');
 
-const MIN_NODE_MAJOR = 18;
-const MIN_NODE_MINOR = 17;
+const MIN_NODE_MAJOR = 22;
+const MIN_NODE_MINOR = 12;
 
 function fail(message) {
   console.error(`\n❌ ${message}`);
@@ -47,7 +47,9 @@ function checkNode() {
   const version = process.versions.node;
   const [major, minor] = version.split('.').map(Number);
   if (major < MIN_NODE_MAJOR || (major === MIN_NODE_MAJOR && minor < MIN_NODE_MINOR)) {
-    fail(`Node.js ${version} is installed, but >= ${MIN_NODE_MAJOR}.${MIN_NODE_MINOR} is required.`);
+    fail(
+      `Node.js ${version} is installed, but >= ${MIN_NODE_MAJOR}.${MIN_NODE_MINOR} is required.`,
+    );
   }
   ok(`Node.js ${version}`);
 }
@@ -76,10 +78,7 @@ function ensureEnv() {
   if (placeholderPattern.test(env)) {
     info('Generating a 32-byte CRED_ENCRYPTION_KEY');
     const key = randomBytes(32).toString('base64');
-    const updated = env.replace(
-      /^CRED_ENCRYPTION_KEY=.*$/m,
-      `CRED_ENCRYPTION_KEY=${key}`,
-    );
+    const updated = env.replace(/^CRED_ENCRYPTION_KEY=.*$/m, `CRED_ENCRYPTION_KEY=${key}`);
     writeFileSync(ENV_PATH, updated);
     ok('CRED_ENCRYPTION_KEY generated and written to .env');
   } else if (/^CRED_ENCRYPTION_KEY=\s*.+/m.test(env)) {
@@ -94,17 +93,19 @@ async function waitForPostgres() {
   const deadline = Date.now() + 60_000;
   while (Date.now() < deadline) {
     try {
-      execSync(
-        'docker compose exec -T postgres pg_isready -U odtetrader',
-        { stdio: 'pipe', cwd: ROOT },
-      );
+      execSync('docker compose exec -T postgres pg_isready -U odtetrader', {
+        stdio: 'pipe',
+        cwd: ROOT,
+      });
       ok('Postgres is ready');
       return;
     } catch {
       await new Promise((r) => setTimeout(r, 1_000));
     }
   }
-  fail('Postgres did not become ready within 60 seconds. Run `npm run db:up` and check `docker compose ps`.');
+  fail(
+    'Postgres did not become ready within 60 seconds. Run `npm run db:up` and check `docker compose ps`.',
+  );
 }
 
 async function main() {

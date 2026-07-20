@@ -3,7 +3,7 @@
 [![CI](https://github.com/Open-Source-Trader/0dteTrader/actions/workflows/ci.yml/badge.svg)](https://github.com/Open-Source-Trader/0dteTrader/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![iOS 17+](https://img.shields.io/badge/iOS-17%2B-black?logo=apple)](apps/ios)
-[![Node >= 18.17](https://img.shields.io/badge/node-%E2%89%A518.17-339933?logo=nodedotjs&logoColor=white)](package.json)
+[![Node >= 22.12](https://img.shields.io/badge/node-%E2%89%A522.12-339933?logo=nodedotjs&logoColor=white)](package.json)
 
 Rapid options quick-trade iOS (and desktop) app backed by the official Webull OpenAPI for order execution and candlestick data, with options analytics (Greeks, open interest, etc.) sourced from Tradier.
 
@@ -57,7 +57,7 @@ If you only want the chart/trading pieces without options analytics, the Tradier
 
 ## Prerequisites
 
-- **Node.js >= 18.17** and **npm**
+- **Node.js >= 22.12** and **npm**
 - **Docker + Docker Compose** (Postgres 16 and Redis 7 run in containers)
 - **macOS + Xcode 15+** if you want to build the iOS app
 - **XcodeGen** (`brew install xcodegen`) for generating the iOS `.xcodeproj`
@@ -76,7 +76,7 @@ npm run dev
 <details>
 <summary>What the setup script does, step by step</summary>
 
-1. Verifies Node.js >= 18.17 and that Docker is running.
+1. Verifies Node.js >= 22.12 and that Docker is running.
 2. Copies `.env.example` → `.env` (if `.env` does not already exist).
 3. Generates a real `CRED_ENCRYPTION_KEY` in `.env` if it is still a placeholder.
 4. Runs `npm install`.

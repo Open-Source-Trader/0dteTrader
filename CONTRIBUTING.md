@@ -16,7 +16,7 @@ are scoped for newcomers. Help is especially welcome on:
 
 ### Prerequisites
 
-- Node.js >= 18.17 (see `.nvmrc`)
+- Node.js >= 22.12 (see `.nvmrc`)
 - Docker and Docker Compose (for Postgres and Redis)
 - npm (not yarn or pnpm)
 

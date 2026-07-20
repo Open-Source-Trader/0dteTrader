@@ -2,7 +2,7 @@
 
 ## Prerequisites
 
-- Node.js >= 18.17, npm
+- Node.js >= 22.12, npm
 - Docker + docker compose (Postgres, Redis)
 - For iOS: macOS with Xcode 15+, XcodeGen (`brew install xcodegen`)
 

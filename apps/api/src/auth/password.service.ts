@@ -20,7 +20,7 @@ const ARGON2_PARAMS = {
 } as const;
 
 class Argon2Hasher implements PasswordHasher {
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
   private readonly argon2 = require('argon2') as typeof import('argon2');
 
   hash(password: string): Promise<string> {
@@ -45,12 +45,8 @@ class ScryptHasher implements PasswordHasher {
     const crypto = await import('node:crypto');
     const salt = crypto.randomBytes(16);
     const derived = await new Promise<Buffer>((resolve, reject) => {
-      crypto.scrypt(
-        password,
-        salt,
-        this.keylen,
-        { N: this.N, r: this.r, p: this.p },
-        (err, key) => (err ? reject(err) : resolve(key)),
+      crypto.scrypt(password, salt, this.keylen, { N: this.N, r: this.r, p: this.p }, (err, key) =>
+        err ? reject(err) : resolve(key),
       );
     });
     return `scrypt$${this.N}$${this.r}$${this.p}$${salt.toString('hex')}$${derived.toString('hex')}`;
@@ -80,7 +76,7 @@ export class PasswordService implements PasswordHasher {
 
   constructor() {
     try {
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
       require('argon2');
       this.impl = new Argon2Hasher();
     } catch (err) {

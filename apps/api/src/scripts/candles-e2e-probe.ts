@@ -1,4 +1,3 @@
-/* eslint-disable no-console */
 /** E2E check: register a probe user, save env Webull creds via the API, then
  *  verify /v1/market/candles returns ascending, well-formed candles. Never
  *  prints credentials. */

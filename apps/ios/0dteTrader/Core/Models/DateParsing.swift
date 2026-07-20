@@ -16,6 +16,11 @@ enum DateParsing {
         let formatter = DateFormatter()
         formatter.calendar = Calendar(identifier: .gregorian)
         formatter.locale = Locale(identifier: "en_US_POSIX")
+        // Expiration strings are exchange-calendar (New York) dates. Parsing
+        // them in the device-local zone would shift the calendar day for any
+        // device east of ET (a UTC CI runner turns 2026-07-19 into 07-18 when
+        // round-tripped through marketDayString).
+        formatter.timeZone = TimeZone(identifier: "America/New_York")
         formatter.dateFormat = "yyyy-MM-dd"
         return formatter
     }()

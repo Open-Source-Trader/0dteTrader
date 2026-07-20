@@ -1,7 +1,5 @@
 import { randomUUID } from 'node:crypto';
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
-
 /**
  * In-memory stand-in for PrismaService, used by unit and e2e tests so the
  * suite runs without Postgres. It mirrors exactly the delegate surface the

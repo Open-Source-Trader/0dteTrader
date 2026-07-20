@@ -1,4 +1,3 @@
-/* eslint-disable no-console */
 /** Probe: which Webull market-data endpoints does this app's key have access to? */
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -13,7 +12,9 @@ function loadDotEnv(): void {
         process.env[match[1]] = match[2];
       }
     }
-  } catch { /* rely on shell env */ }
+  } catch {
+    /* rely on shell env */
+  }
 }
 loadDotEnv();
 
@@ -77,14 +78,40 @@ async function main(): Promise<void> {
   accessToken = token.token ?? token.access_token;
   console.log(`token/create: HTTP ${res.status}, status=${token.status}`);
 
-  await call('stock/snapshot SPY', '/openapi/market-data/stock/snapshot', { symbols: 'SPY', category: 'US_STOCK' });
-  await call('stock/bars SPY M1', '/openapi/market-data/stock/bars', { symbol: 'SPY', category: 'US_STOCK', timespan: 'M1', count: 3 });
-  await call('stock/bars SPY D', '/openapi/market-data/stock/bars', { symbol: 'SPY', category: 'US_STOCK', timespan: 'D', count: 3 });
-  await call('option/snapshot SPY', '/openapi/market-data/option/snapshot', { symbols: 'SPY260718C00600000', category: 'US_OPTION' });
+  await call('stock/snapshot SPY', '/openapi/market-data/stock/snapshot', {
+    symbols: 'SPY',
+    category: 'US_STOCK',
+  });
+  await call('stock/bars SPY M1', '/openapi/market-data/stock/bars', {
+    symbol: 'SPY',
+    category: 'US_STOCK',
+    timespan: 'M1',
+    count: 3,
+  });
+  await call('stock/bars SPY D', '/openapi/market-data/stock/bars', {
+    symbol: 'SPY',
+    category: 'US_STOCK',
+    timespan: 'D',
+    count: 3,
+  });
+  await call('option/snapshot SPY', '/openapi/market-data/option/snapshot', {
+    symbols: 'SPY260718C00600000',
+    category: 'US_OPTION',
+  });
 
   // option/bars param-shape variants
-  await call('obars symbol singular', '/openapi/market-data/option/bars', { symbol: 'SPY260718C00600000', category: 'US_OPTION', timespan: 'M1', count: 3 });
-  await call('obars symbols plural', '/openapi/market-data/option/bars', { symbols: 'SPY260718C00600000', category: 'US_OPTION', timespan: 'M1', count: 3 });
+  await call('obars symbol singular', '/openapi/market-data/option/bars', {
+    symbol: 'SPY260718C00600000',
+    category: 'US_OPTION',
+    timespan: 'M1',
+    count: 3,
+  });
+  await call('obars symbols plural', '/openapi/market-data/option/bars', {
+    symbols: 'SPY260718C00600000',
+    category: 'US_OPTION',
+    timespan: 'M1',
+    count: 3,
+  });
 }
 
 main().catch((err) => {

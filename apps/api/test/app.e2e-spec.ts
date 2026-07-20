@@ -292,8 +292,8 @@ describe('0dteTrader API (e2e)', () => {
       encAccountId: 'acct-1',
     } as const;
     for (const [field, plaintext] of Object.entries(plaintextByField)) {
-      const blob = row[field];
-      expect(Buffer.isBuffer(blob)).toBe(true);
+      // Prisma 7 surfaces Bytes columns as Uint8Array rather than Buffer.
+      const blob = Buffer.from(row[field]);
       expect(blob.equals(Buffer.from(plaintext))).toBe(false);
       expect(blob).toHaveLength(12 + 16 + Buffer.byteLength(plaintext));
     }

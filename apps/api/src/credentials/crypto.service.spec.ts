@@ -26,13 +26,13 @@ describe('CryptoService (AES-256-GCM)', () => {
     const blob = service.encrypt('12345');
     expect(blob.length).toBe(12 + 16 + 5);
     // Never contains plaintext.
-    expect(blob.toString('utf8')).not.toContain('12345');
+    expect(Buffer.from(blob).toString('utf8')).not.toContain('12345');
   });
 
   it('uses a random IV per write (same plaintext, different blobs)', () => {
     const a = service.encrypt('same-input');
     const b = service.encrypt('same-input');
-    expect(a.equals(b)).toBe(false);
+    expect(Buffer.from(a).equals(Buffer.from(b))).toBe(false);
     // ...but both decrypt to the same value.
     expect(service.decrypt(a)).toBe('same-input');
     expect(service.decrypt(b)).toBe('same-input');

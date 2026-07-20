@@ -277,6 +277,10 @@ live_progress:
     phase: final-pre-integration-verification
     status: completed-with-baseline-residual
     evidence: After performance remediation, a fresh root run passes API 21 suites/274 tests, desktop 16 files/122 tests, lint, strict TypeScript builds, and the desktop production build. The checking-plan audit reports no open P0/P1 findings.
+  - at: '2026-07-19T22:11:00-04:00'
+    phase: production-overlay-main-delivery
+    status: completed
+    evidence: Commit 25bcd3f fast-forwarded main and pushed to origin/main. Unrelated uncommitted candle aggregation, market-data, Webull mapper, and shared-type work in the main worktree remained unstaged and uncommitted.
 findings:
   - id: PERF-001
     severity: P1
@@ -941,6 +945,11 @@ evidence_log:
       id: E39,
       command: final npm run test plus npm run lint plus npm run build after all remediation,
       result: API 21 suites/274 tests and desktop 16 files/122 tests pass; every lint/type/build command exits 0; no open P0/P1 finding remains,
+    }
+  - {
+      id: E40,
+      command: fast-forward main to 25bcd3f and git push origin main,
+      result: origin/main advanced from c91b493 to 25bcd3f while unrelated main-worktree changes remained uncommitted,
     }
 remediation_policy:
   fix_all_scoped_findings: true

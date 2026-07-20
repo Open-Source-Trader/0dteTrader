@@ -157,7 +157,11 @@ export class AlpacaBrokerGateway implements BrokerGateway, OnModuleDestroy {
     const occ = parseOccSymbol(symbol);
     const key: EndpointKey = occ ? 'optionSnapshots' : 'stockSnapshots';
     const raw = await client.request(key, { query: { symbols: symbol } });
-    const snap = asObject(raw)[symbol] as AlpacaSnapshot | undefined;
+    // Stocks snapshots are keyed by symbol at the top level; options snapshots
+    // (Alpaca v1beta1) are nested under a `snapshots` wrapper. Tolerate both.
+    const obj = asObject(raw) as Record<string, unknown>;
+    const snapMap = (obj.snapshots as Record<string, unknown> | undefined) ?? obj;
+    const snap = snapMap[symbol] as AlpacaSnapshot | undefined;
     if (!snap) {
       throw brokerErrors.contractNotFound(
         occ ? `Unknown option: ${symbol}` : `Unknown symbol: ${symbol}`,
@@ -178,18 +182,19 @@ export class AlpacaBrokerGateway implements BrokerGateway, OnModuleDestroy {
       };
       if (req.from) query.start = new Date(req.from).toISOString();
       if (req.to) query.end = new Date(req.to).toISOString();
-      let raw = await client.request(endpoint, {
-        query,
-        pathParams: { symbol },
-      });
+      const buildOpts = (q: Record<string, string>) =>
+        occ ? { query: { ...q, symbols: symbol } } : { query: q, pathParams: { symbol } };
+      const requestOpts = buildOpts(query);
+      const barsOf = (r: unknown): unknown => (occ ? optionBarsForSymbol(r, symbol) : r);
+      let raw = await client.request(endpoint, requestOpts);
       // A window covering no session returns []; fall back to the latest bars.
-      if (asArray(raw).length === 0 && (req.from || req.to)) {
+      if (asArray(barsOf(raw)).length === 0 && (req.from || req.to)) {
         delete query.start;
         delete query.end;
-        raw = await client.request(endpoint, { query, pathParams: { symbol } });
+        raw = await client.request(endpoint, buildOpts(query));
       }
       // Alpaca returns bars newest-first; chart clients require ascending.
-      return asArray(raw)
+      return asArray(barsOf(raw))
         .map((b) => toCandle(b as never))
         .sort((a, b) => a.time.localeCompare(b.time));
     };
@@ -454,6 +459,16 @@ interface ResolvedContract {
   ask: number;
   last: number;
   optionTerms?: ResolvedOptionTerms;
+}
+
+/**
+ * Extract the bar array for one symbol from an Alpaca v1beta1 options-bars
+ * response, which is `{ bars: { SYMBOL: [...] } }` (object keyed by symbol),
+ * not a bare array like the stocks endpoint.
+ */
+function optionBarsForSymbol(raw: unknown, symbol: string): unknown {
+  const bars = (asObject(raw).bars as Record<string, unknown> | undefined) ?? {};
+  return bars[symbol] ?? [];
 }
 
 /** Today's date in the US options market timezone (0DTE warnings). */

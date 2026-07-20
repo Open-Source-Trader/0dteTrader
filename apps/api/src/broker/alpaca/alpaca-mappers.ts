@@ -39,8 +39,9 @@ function isoFrom(value: unknown): string {
 // Market data
 // ---------------------------------------------------------------------------
 
-/** Per-symbol snapshot object from /v2/stocks/snapshots or
- *  /v2/options/snapshots (the value keyed by symbol in the returned map). */
+/** Per-symbol snapshot object from /v2/stocks/snapshots (top-level keyed
+ *  by symbol) or /v1beta1/options/snapshots (nested under a `snapshots` key).
+ *  See getQuote in the gateway, which tolerates both layouts. */
 export interface AlpacaSnapshot {
   latestQuote?: {
     bp?: unknown;

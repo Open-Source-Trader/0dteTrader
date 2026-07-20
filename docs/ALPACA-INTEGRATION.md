@@ -57,18 +57,18 @@ identical for both; only the base URL differs.
 
 ## 4. Endpoint mapping (parity with Webull)
 
-| `BrokerGateway` method | Alpaca call                                                             |
-| ---------------------- | ----------------------------------------------------------------------- |
-| `getQuote` (stock)     | `GET /v2/stocks/snapshots?symbols=`                                     |
-| `getQuote` (option)    | `GET /v2/options/snapshots?symbols=`                                    |
-| `getCandles`           | `GET /v2/stocks/{symbol}/bars` (or `/v2/options/{symbol}/bars`)         |
-| `getOptionsChain`      | `GET /v2/options/chains?symbol=&expiration_date=` (real chain endpoint) |
-| `previewOrder`         | resolved client-side; no broker preview call                            |
-| `placeOrder`           | `POST /v2/orders` with deterministic `client_order_id`                  |
-| `cancelOrder`          | `DELETE /v2/orders/client:{client_order_id}`                            |
-| `getPositions`         | `GET /v2/positions`                                                     |
-| `getOpenOrders`        | `GET /v2/orders?status=open`                                            |
-| `reauthenticate`       | no-op                                                                   |
+| `BrokerGateway` method | Alpaca call                                                                   |
+| ---------------------- | ----------------------------------------------------------------------------- |
+| `getQuote` (stock)     | `GET /v2/stocks/snapshots?symbols=`                                           |
+| `getQuote` (option)    | `GET /v1beta1/options/snapshots?symbols=` (response nested under `snapshots`) |
+| `getCandles`           | `GET /v2/stocks/{symbol}/bars` (or `/v1beta1/options/bars?symbols=`)          |
+| `getOptionsChain`      | `GET /v1beta1/options/chains?symbol=&expiration_date=` (real chain endpoint)  |
+| `previewOrder`         | resolved client-side; no broker preview call                                  |
+| `placeOrder`           | `POST /v2/orders` with deterministic `client_order_id`                        |
+| `cancelOrder`          | `DELETE /v2/orders/client:{client_order_id}`                                  |
+| `getPositions`         | `GET /v2/positions`                                                           |
+| `getOpenOrders`        | `GET /v2/orders?status=open`                                                  |
+| `reauthenticate`       | no-op                                                                         |
 
 ### OCC parity (critical)
 
@@ -83,7 +83,7 @@ Webull.
 
 ### Differences worth knowing
 
-- **Options chain**: Alpaca hits the real `/v2/options/chains` endpoint (no
+- **Options chain**: Alpaca hits the real `/v1beta1/options/chains` endpoint (no
   strike-grid probe), so `getOptionsChain` latency matches a single round trip.
 - **Idempotency**: `client_order_id` is `md5(environment ‖ ':' ‖ idempotencyKey)`
   — identical derivation to Webull — so retried taps are de-duplicated by the

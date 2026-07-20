@@ -68,8 +68,18 @@ describe('AlpacaBrokerGateway', () => {
       if (path.endsWith('/v2/stocks/snapshots')) {
         return respond(200, { [u.searchParams.get('symbols')!]: stockSnap(SYMBOL) });
       }
-      if (path.endsWith('/v2/options/snapshots')) {
-        return respond(200, { [u.searchParams.get('symbols')!]: optionSnap(EXPECTED_OCC) });
+      if (path.endsWith('/v1beta1/options/snapshots')) {
+        return respond(200, {
+          snapshots: { [u.searchParams.get('symbols')!]: optionSnap(EXPECTED_OCC) },
+        });
+      }
+      if (path.endsWith('/v1beta1/options/bars')) {
+        const sym = u.searchParams.get('symbols')!;
+        return respond(200, {
+          bars: {
+            [sym]: [{ t: '2025-06-21T13:00:00.000Z', o: 99, h: 101, l: 98, c: 100, v: 1000 }],
+          },
+        });
       }
       if (path.endsWith(`/v2/stocks/${SYMBOL}/bars`)) {
         return respond(200, [
@@ -77,7 +87,7 @@ describe('AlpacaBrokerGateway', () => {
           { t: '2025-06-21T13:01:00.000Z', o: 100, h: 102, l: 99, c: 101, v: 1100 },
         ]);
       }
-      if (path.endsWith('/v2/options/chains')) {
+      if (path.endsWith('/v1beta1/options/chains')) {
         return respond(200, {
           underlying: { symbol: SYMBOL },
           options: [
@@ -226,7 +236,7 @@ describe('AlpacaBrokerGateway', () => {
 
   it('GETs an option snapshot (OCC) from the data host', async () => {
     const q: Quote = await gateway.getQuote('u1', EXPECTED_OCC);
-    expect(calls.some((c) => c.url.includes('/v2/options/snapshots'))).toBe(true);
+    expect(calls.some((c) => c.url.includes('/v1beta1/options/snapshots'))).toBe(true);
     expect(q).toMatchObject({ symbol: EXPECTED_OCC, bid: 5, ask: 5.5 });
   });
 
@@ -240,7 +250,7 @@ describe('AlpacaBrokerGateway', () => {
 
   it('uses the real options-chain endpoint (no strike-grid probe)', async () => {
     const chain = await gateway.getOptionsChain('u1', SYMBOL);
-    expect(calls.some((c) => c.url.includes('/v2/options/chains'))).toBe(true);
+    expect(calls.some((c) => c.url.includes('/v1beta1/options/chains'))).toBe(true);
     expect(chain.underlyingPrice).toBe(UNDER);
     expect(chain.contracts.map((c) => c.symbol)).toContain(EXPECTED_OCC);
   });

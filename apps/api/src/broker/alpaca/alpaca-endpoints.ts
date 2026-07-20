@@ -9,7 +9,7 @@
  * scripts/webull-smoke.ts) before any live trading. Corrections belong here.
  *
  * Sources used:
- *  - Alpaca API Reference: /v2/stocks, /v2/options, /v2/positions,
+ *  - Alpaca API Reference: /v2/stocks, /v1beta1/options, /v2/positions,
  *    /v2/orders, /v2/account (trading + market-data hosts).
  *  - The v2 orders endpoint is the single path for all asset classes; options
  *    are ordered by OCC symbol with asset_class: "option".
@@ -19,7 +19,7 @@
  *    lifecycle, no SMS 2FA. Keys are effectively long-lived.
  *  - Orders/positions are SCOPED TO THE API KEY's account — no account_id
  *    parameter is required (unlike Webull).
- *  - A real options-chain endpoint exists (/v2/options/chains) — no
+ *  - A real options-chain endpoint exists (/v1beta1/options/chains) — no
  *    strike-grid probe (the Webull hack is gone).
  *
  * Response payload → DTO translation lives in alpaca-mappers.ts; request
@@ -58,12 +58,13 @@ export const ALPACA_PAPER_HOSTS: AlpacaHosts = {
 export const EP = {
   account: { host: 'trading', method: 'GET', path: '/v2/account' },
 
-  // Market data (data host)
+  // Market data (data host). Stocks are v2; OPTIONS are v1beta1 (the /v2
+  // options endpoints do not exist and return 404 — see getQuote/getCandles).
   stockBars: { host: 'data', method: 'GET', path: '/v2/stocks/{symbol}/bars' },
   stockSnapshots: { host: 'data', method: 'GET', path: '/v2/stocks/snapshots' },
-  optionBars: { host: 'data', method: 'GET', path: '/v2/options/{symbol}/bars' },
-  optionSnapshots: { host: 'data', method: 'GET', path: '/v2/options/snapshots' },
-  optionChain: { host: 'data', method: 'GET', path: '/v2/options/chains' },
+  optionBars: { host: 'data', method: 'GET', path: '/v1beta1/options/bars' },
+  optionSnapshots: { host: 'data', method: 'GET', path: '/v1beta1/options/snapshots' },
+  optionChain: { host: 'data', method: 'GET', path: '/v1beta1/options/chains' },
 
   // Trade/account (trading host)
   positions: { host: 'trading', method: 'GET', path: '/v2/positions' },

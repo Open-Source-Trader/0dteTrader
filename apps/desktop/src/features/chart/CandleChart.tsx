@@ -90,6 +90,11 @@ export function CandleChart({
   const candleSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
   const volumeSeriesRef = useRef<ISeriesApi<'Histogram'> | null>(null);
   const overlaySeriesRef = useRef<Map<string, ISeriesApi<'Line'>>>(new Map());
+  const prevOverlaysRef = useRef<{
+    ids: string[];
+    lengths: number[];
+    firstTime: number | null;
+  } | null>(null);
   const lastLengthRef = useRef(0);
   const lastFirstTimeRef = useRef<number | null>(null);
   const lastBarRef = useRef<ChartCandle | null>(null);
@@ -172,6 +177,7 @@ export function CandleChart({
       candleSeriesRef.current = null;
       volumeSeriesRef.current = null;
       overlaySeriesRef.current = new Map();
+      prevOverlaysRef.current = null;
       lastLengthRef.current = 0;
       lastFirstTimeRef.current = null;
       lastBarRef.current = null;
@@ -327,6 +333,8 @@ export function CandleChart({
         existing.delete(id);
       }
     }
+    const firstTime = candles.length > 0 ? candles[0].time : null;
+    const prev = prevOverlaysRef.current;
     for (const entry of expanded) {
       let series = existing.get(entry.id);
       if (!series) {
@@ -342,8 +350,28 @@ export function CandleChart({
       } else {
         series.applyOptions({ color: entry.color, lineWidth: entry.lineWidth });
       }
-      series.setData(entry.data);
+      const idx = expanded.indexOf(entry);
+      // A structural change (series added/removed, run lengths changed, or the
+      // data head moved on truncation) requires a full setData. Otherwise the
+      // overlay's forming (last) point is the only thing that changed on this
+      // tick, so update() it instead of rebuilding the whole series every quote.
+      const structural =
+        !prev ||
+        entry.id !== prev.ids[idx] ||
+        prev.firstTime !== firstTime ||
+        entry.data.length !== prev.lengths[idx];
+      if (structural) {
+        series.setData(entry.data);
+      } else {
+        const lastPoint = entry.data[entry.data.length - 1];
+        if (lastPoint) series.update(lastPoint);
+      }
     }
+    prevOverlaysRef.current = {
+      ids: expanded.map((entry) => entry.id),
+      lengths: expanded.map((entry) => entry.data.length),
+      firstTime,
+    };
   }, [candles, overlays]);
 
   const resetView = () => {

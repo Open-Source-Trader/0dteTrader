@@ -62,15 +62,17 @@ ledger with per-entry P/L and net total. History view in both iOS and desktop.
 Rate-limit tuning, audit review, cert pinning, FaceID lock, edge-case pass (network loss
 mid-order, stale quotes, market closed), TestFlight build, live-account go-live checklist.
 
-## P6 — Universal Broker Connectivity (OAuth)
+## P6 — Multi-Broker Abstraction (Webull + Alpaca) ✅
 
-Replace the single hard-wired Webull integration with a pluggable broker layer.
-Every major brokerage that offers OAuth sign-in and a market-data API — Schwab,
-Tastytrade, Interactive Brokers, E\*TRADE, Alpaca, Tradier brokerage, and
-friends — connects with a couple of taps instead of copied API keys. Execution
-and market data become independently selectable, so each user assembles the
-stack they want: trade through one broker, chart another's data, pull options
-analytics from a third.
+Per-user `tradingProvider` (webull | alpaca) selecting the active broker. `DispatchingBrokerGateway`
+routes every `BrokerGateway` call to `WebullBrokerGateway` or `AlpacaBrokerGateway` by provider, so
+all client endpoints stay provider-agnostic. Alpaca uses API key/secret Basic auth (no token store,
+key-scoped account); OCC parity is preserved via the shared `formatOccSymbol` helper. Credentials moved
+to a provider-agnostic encrypted `BrokerCredential` blob with a lazy migration shim from the legacy
+`WebullCredential` rows. Mobile (iOS + desktop) gained a provider selector and an Alpaca credential form
+writing through the generic `me/broker-credentials` endpoint. **Code complete: 314 API tests green,
+desktop builds + lints clean; iOS awaiting an Xcode build on a Mac.** Remaining: apply for Alpaca API
+keys → run an Alpaca paper-account order end-to-end from the app.
 
 ## P7 — TradeDaddy Integration
 
@@ -102,4 +104,5 @@ Show off (or own up to) your trades without leaving the app:
 ## Later (not v1)
 
 Futures trading (backend has endpoint stubs but no client UI), alerts, portfolio analytics,
-Android, App Store public release + compliance review.
+additional brokers (IBKR/Tastytrade), Android, App Store public release + compliance
+review.

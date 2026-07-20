@@ -33,6 +33,16 @@ export interface AppConfig {
     /** https://api.tradier.com or https://sandbox.tradier.com. */
     baseUrl: string;
   };
+  alpaca: {
+    /** Live trading host (https://api.alpaca.markets). */
+    tradingBaseUrl: string;
+    /** Paper trading host (https://paper-api.alpaca.markets). */
+    paperTradingBaseUrl: string;
+    /** Live market-data host (https://data.alpaca.markets). */
+    dataBaseUrl: string;
+    /** Paper market-data host (https://paper-data.alpaca.markets). */
+    paperDataBaseUrl: string;
+  };
   optionsAnalytics: {
     riskFreeRate: number;
     cacheTtlMs: number;
@@ -88,6 +98,13 @@ export default (): AppConfig => ({
   tradier: {
     token: process.env.TRADIER_API_TOKEN ?? '',
     baseUrl: process.env.TRADIER_BASE_URL || 'https://api.tradier.com',
+  },
+  alpaca: {
+    tradingBaseUrl: process.env.ALPACA_TRADING_BASE_URL || 'https://api.alpaca.markets',
+    paperTradingBaseUrl:
+      process.env.ALPACA_PAPER_TRADING_BASE_URL || 'https://paper-api.alpaca.markets',
+    dataBaseUrl: process.env.ALPACA_DATA_BASE_URL || 'https://data.alpaca.markets',
+    paperDataBaseUrl: process.env.ALPACA_PAPER_DATA_BASE_URL || 'https://paper-data.alpaca.markets',
   },
   optionsAnalytics: {
     riskFreeRate: float(process.env.OPTIONS_ANALYTICS_RISK_FREE_RATE, 0.043),

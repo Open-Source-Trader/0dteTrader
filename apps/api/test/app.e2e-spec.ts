@@ -40,7 +40,15 @@ describe('0dteTrader API (e2e)', () => {
       .overrideProvider(TradierClient)
       .useValue({
         availableRequests: 100,
-        getExpirations: async () => [E2E_OPTION_EXPIRATION],
+        getExpirations: async () => {
+          const base = new Date(`${E2E_OPTION_EXPIRATION}T00:00:00Z`);
+          const iso = (dt: Date): string => dt.toISOString().slice(0, 10);
+          return [
+            iso(base),
+            iso(new Date(base.getTime() + 86_400_000)),
+            iso(new Date(base.getTime() + 2 * 86_400_000)),
+          ];
+        },
         getQuote: async (symbol: string) => ({
           symbol,
           spot: 100,
@@ -233,10 +241,15 @@ describe('0dteTrader API (e2e)', () => {
       email: user.email,
       tradingDisabled: false,
       tradingMode: 'live',
+      tradingProvider: 'webull',
       webullConfigured: false,
       webullPracticeConfigured: false,
       webullAccountId: null,
       webullPracticeAccountId: null,
+      alpacaConfigured: false,
+      alpacaPracticeConfigured: false,
+      alpacaAccountId: null,
+      alpacaPracticeAccountId: null,
     });
   });
 
@@ -283,20 +296,26 @@ describe('0dteTrader API (e2e)', () => {
       .expect(200);
     expect(me.body.webullConfigured).toBe(true);
 
-    // Stored encrypted: each blob has the GCM envelope and is not the plaintext value.
-    expect(prisma.credentials).toHaveLength(1);
-    const row = prisma.credentials[0];
-    const plaintextByField = {
-      encAppKey: 'ak',
-      encAppSecret: 'sk',
-      encAccountId: 'acct-1',
-    } as const;
-    for (const [field, plaintext] of Object.entries(plaintextByField)) {
-      // Prisma 7 surfaces Bytes columns as Uint8Array rather than Buffer.
-      const blob = Buffer.from(row[field]);
-      expect(blob.equals(Buffer.from(plaintext))).toBe(false);
-      expect(blob).toHaveLength(12 + 16 + Buffer.byteLength(plaintext));
-    }
+    // Stored encrypted as a single GCM blob (iv || tag || ciphertext); the
+    // plaintext secret is never persisted.
+    expect(prisma.brokerCredentials).toHaveLength(1);
+    const row = prisma.brokerCredentials[0];
+    expect(row.provider).toBe('webull');
+    expect(row.environment).toBe('live');
+    const blob = Buffer.from(row.encSecrets);
+    expect(blob.toString('utf8')).not.toContain('sk');
+    expect(blob).toHaveLength(
+      12 +
+        16 +
+        Buffer.byteLength(
+          JSON.stringify({
+            provider: 'webull',
+            appKey: 'ak',
+            appSecret: 'sk',
+            accountId: 'acct-1',
+          }),
+        ),
+    );
   });
 
   it('deletes Webull credentials (204, idempotent)', async () => {
@@ -336,7 +355,7 @@ describe('0dteTrader API (e2e)', () => {
     let me = await request(server).get('/v1/me').set(auth).expect(200);
     expect(me.body.webullConfigured).toBe(true);
     expect(me.body.webullPracticeConfigured).toBe(true);
-    expect(prisma.credentials).toHaveLength(2);
+    expect(prisma.brokerCredentials).toHaveLength(2);
 
     // An invalid environment is rejected.
     await request(server)

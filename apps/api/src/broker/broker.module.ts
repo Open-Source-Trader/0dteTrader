@@ -5,24 +5,38 @@ import { CredentialsService } from '../credentials/credentials.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { BROKER_GATEWAY, BrokerGateway } from './broker-gateway.interface';
 import { OrderEventsService } from './order-events.service';
+import { AlpacaBrokerGateway } from './alpaca/alpaca-broker.gateway';
+import { DispatchingBrokerGateway } from './dispatching-broker.gateway';
 import { WebullBrokerGateway } from './webull/webull-broker.gateway';
 import { WebullTokenStore } from './webull/webull-token-store';
-import { WebullSessionController } from './webull-session.controller';
+import {
+  CredentialsController,
+  BrokerCredentialsController,
+} from '../credentials/credentials.controller';
+import { BrokerSessionController, WebullSessionController } from './webull-session.controller';
 
 /**
- * Provides the Webull BrokerGateway under the BROKER_GATEWAY token
- * (docs/ARCHITECTURE.md §2/§7). There is no mock/demo gateway: market data
- * always comes from Webull; live vs practice only selects the live vs
- * paper-trading (sandbox) OpenAPI hosts.
+ * Provides the BrokerGateway under the BROKER_GATEWAY token
+ * (docs/ARCHITECTURE.md §2/§7). The token is a DispatchingBrokerGateway
+ * that routes each call to the user's provider (Webull or Alpaca) based on
+ * their `tradingProvider` (docs/plans/alpaca-provider-plan.md §Phase2). Both
+ * gateways are self-contained providers; the dispatcher is transparent to the
+ * consumers (trading.service, market-data.controller, stream.gateway).
  */
 @Module({
   imports: [CredentialsModule],
-  controllers: [WebullSessionController],
+  controllers: [
+    WebullSessionController,
+    BrokerSessionController,
+    CredentialsController,
+    BrokerCredentialsController,
+  ],
   providers: [
     OrderEventsService,
     WebullTokenStore,
+    // Webull gateway: token store + legacy account-id discovery (api key/secret).
     {
-      provide: BROKER_GATEWAY,
+      provide: WebullBrokerGateway,
       inject: [
         ConfigService,
         OrderEventsService,
@@ -37,6 +51,27 @@ import { WebullSessionController } from './webull-session.controller';
         prisma: PrismaService,
         tokenStore: WebullTokenStore,
       ): BrokerGateway => new WebullBrokerGateway(credentials, config, events, prisma, tokenStore),
+    },
+    // Alpaca gateway: HTTP Basic auth, no token store, no account-id discovery.
+    {
+      provide: AlpacaBrokerGateway,
+      inject: [CredentialsService, ConfigService, OrderEventsService, PrismaService],
+      useFactory: (
+        credentials: CredentialsService,
+        config: ConfigService,
+        events: OrderEventsService,
+        prisma: PrismaService,
+      ): AlpacaBrokerGateway => new AlpacaBrokerGateway(credentials, config, events, prisma),
+    },
+    // The BROKER_GATEWAY token: routes by tradingProvider.
+    {
+      provide: BROKER_GATEWAY,
+      inject: [PrismaService, WebullBrokerGateway, AlpacaBrokerGateway],
+      useFactory: (
+        prisma: PrismaService,
+        webull: WebullBrokerGateway,
+        alpaca: AlpacaBrokerGateway,
+      ): BrokerGateway => new DispatchingBrokerGateway(prisma, webull, alpaca),
     },
   ],
   exports: [BROKER_GATEWAY, OrderEventsService],

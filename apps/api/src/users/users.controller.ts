@@ -14,7 +14,14 @@ export class UsersController {
   }
 
   @Patch()
-  updateMe(@CurrentUser() user: AuthenticatedUser, @Body() dto: UpdateMeDto): Promise<Me> {
-    return this.users.setTradingMode(user.userId, dto.tradingMode);
+  async updateMe(@CurrentUser() user: AuthenticatedUser, @Body() dto: UpdateMeDto): Promise<Me> {
+    let me = await this.users.getMe(user.userId);
+    if (dto.tradingMode) {
+      me = await this.users.setTradingMode(user.userId, dto.tradingMode);
+    }
+    if (dto.tradingProvider) {
+      me = await this.users.setTradingProvider(user.userId, dto.tradingProvider);
+    }
+    return me;
   }
 }

@@ -1,14 +1,30 @@
 import { Injectable } from '@nestjs/common';
-import { TradingMode, WebullCredentialsInput } from '@0dtetrader/shared-types';
+import {
+  AlpacaCredentialsInput,
+  BrokerCredentialsInput,
+  BrokerProvider,
+  BrokerSecrets,
+  TradingMode,
+  WebullCredentialsInput,
+  WebullSecrets,
+} from '@0dtetrader/shared-types';
 import { PrismaService } from '../prisma/prisma.service';
 import { CryptoService } from './crypto.service';
 
+const WEBULL_PROVIDER: BrokerProvider = 'webull';
+
 /**
- * Persists Webull credentials encrypted at rest. Plaintext only exists in
- * memory for the duration of the request and is never logged (the logger
- * redacts appKey/appSecret/accountId). Credentials are never returned by any
- * endpoint (docs/API-SPEC.md). Each user can store one set per environment
- * (live / practice).
+ * Persists broker credentials encrypted at rest in the provider-agnostic
+ * `broker_credentials` table. `encSecrets` is one AES-256-GCM blob of the
+ * provider-specific secret JSON (Webull: {appKey, appSecret, accountId};
+ * Alpaca: {apiKey, apiSecret}). Plaintext only exists in memory for the
+ * duration of the request and is never logged. One set per (user, provider,
+ * environment) (live / practice).
+ *
+ * A temporary `ensureMigrated` shim lazily copies any legacy
+ * `webull_credentials` row into `broker_credentials` on first read, so the P1
+ * schema change is non-breaking. Remove it once all environments are
+ * backfilled.
  */
 @Injectable()
 export class CredentialsService {
@@ -19,40 +35,43 @@ export class CredentialsService {
 
   async save(
     userId: string,
-    input: WebullCredentialsInput,
+    input: BrokerCredentialsInput,
     environment: TradingMode = 'live',
   ): Promise<void> {
-    const encAppKey = this.crypto.encrypt(input.appKey);
-    const encAppSecret = this.crypto.encrypt(input.appSecret);
-    // No manual account id: store null and let the gateway discover it via
-    // GET /openapi/account/list. Re-saving key/secret clears a previously
-    // discovered id on purpose — it may belong to the old application.
-    const encAccountId = input.accountId ? this.crypto.encrypt(input.accountId) : null;
-
-    await this.prisma.webullCredential.upsert({
-      where: { userId_environment: { userId, environment } },
-      create: { userId, environment, encAppKey, encAppSecret, encAccountId },
-      update: { encAppKey, encAppSecret, encAccountId },
-    });
+    const provider = input.provider ?? WEBULL_PROVIDER;
+    const secrets = this.toSecrets(input, provider);
+    await this.upsertSecrets(userId, provider, environment, secrets);
   }
 
-  /** Persist an account id discovered via account/list (no-op without a row —
-   *  e.g. the server's built-in practice credentials have none). */
+  /** Persist an account id discovered out-of-band (Webull: account/list). */
   async saveDiscoveredAccountId(
     userId: string,
+    provider: BrokerProvider,
     environment: TradingMode,
     accountId: string,
   ): Promise<void> {
-    await this.prisma.webullCredential.updateMany({
-      where: { userId, environment },
-      data: { encAccountId: this.crypto.encrypt(accountId) },
+    await this.ensureMigrated(userId, environment);
+    const row = await this.prisma.brokerCredential.findUnique({
+      where: { userId_provider_environment: { userId, provider, environment } },
+    });
+    if (!row) return;
+    const secrets = this.decryptSecrets(row.encSecrets);
+    if (secrets.provider !== 'webull') return;
+    const updated: WebullSecrets = { ...(secrets as WebullSecrets), accountId };
+    await this.prisma.brokerCredential.update({
+      where: { userId_provider_environment: { userId, provider, environment } },
+      data: { encSecrets: this.crypto.encrypt(JSON.stringify(updated)) },
     });
   }
 
-  async remove(userId: string, environment: TradingMode = 'live'): Promise<void> {
+  async remove(
+    userId: string,
+    provider: BrokerProvider = WEBULL_PROVIDER,
+    environment: TradingMode = 'live',
+  ): Promise<void> {
     try {
-      await this.prisma.webullCredential.delete({
-        where: { userId_environment: { userId, environment } },
+      await this.prisma.brokerCredential.delete({
+        where: { userId_provider_environment: { userId, provider, environment } },
       });
     } catch (err) {
       // Only P2025 (row already absent) is idempotent — anything else (DB
@@ -63,21 +82,72 @@ export class CredentialsService {
   }
 
   /**
-   * Returns the decrypted credentials for a broker call. Plaintext stays in
-   * memory only; callers must not log it.
+   * Returns the decrypted secrets for a broker call. Plaintext stays in
+   * memory only; callers must not log it. Lazily migrates a legacy
+   * `webull_credentials` row on first read.
    */
   async getDecrypted(
     userId: string,
+    provider: BrokerProvider = WEBULL_PROVIDER,
     environment: TradingMode = 'live',
-  ): Promise<WebullCredentialsInput | null> {
-    const row = await this.prisma.webullCredential.findUnique({
-      where: { userId_environment: { userId, environment } },
+  ): Promise<BrokerSecrets | null> {
+    await this.ensureMigrated(userId, environment);
+    const row = await this.prisma.brokerCredential.findUnique({
+      where: { userId_provider_environment: { userId, provider, environment } },
     });
     if (!row) return null;
-    return {
-      appKey: this.crypto.decrypt(row.encAppKey),
-      appSecret: this.crypto.decrypt(row.encAppSecret),
-      accountId: row.encAccountId ? this.crypto.decrypt(row.encAccountId) : undefined,
+    return this.decryptSecrets(row.encSecrets);
+  }
+
+  private decryptSecrets(blob: Uint8Array): BrokerSecrets {
+    try {
+      return JSON.parse(this.crypto.decrypt(blob)) as BrokerSecrets;
+    } catch {
+      throw new Error('Corrupt broker credential blob — re-save your broker credentials');
+    }
+  }
+
+  private toSecrets(input: BrokerCredentialsInput, provider: BrokerProvider): BrokerSecrets {
+    if (provider === 'alpaca') {
+      const a = input as AlpacaCredentialsInput;
+      return { provider: 'alpaca', apiKey: a.apiKey, apiSecret: a.apiSecret };
+    }
+    const w = input as WebullCredentialsInput;
+    return { provider: 'webull', appKey: w.appKey, appSecret: w.appSecret, accountId: w.accountId };
+  }
+
+  private async upsertSecrets(
+    userId: string,
+    provider: BrokerProvider,
+    environment: TradingMode,
+    secrets: BrokerSecrets,
+  ): Promise<void> {
+    const encSecrets = this.crypto.encrypt(JSON.stringify(secrets));
+    await this.prisma.brokerCredential.upsert({
+      where: { userId_provider_environment: { userId, provider, environment } },
+      create: { userId, provider, environment, encSecrets },
+      update: { encSecrets },
+    });
+  }
+
+  /** Lazily copy a legacy `webull_credentials` row into `broker_credentials`.
+   *  Idempotent; leaves the legacy row intact. Transition shim — remove once
+   *  all environments have been backfilled. */
+  private async ensureMigrated(userId: string, environment: TradingMode): Promise<void> {
+    const existing = await this.prisma.brokerCredential.findUnique({
+      where: { userId_provider_environment: { userId, provider: WEBULL_PROVIDER, environment } },
+    });
+    if (existing) return;
+    const legacy = await this.prisma.webullCredential.findUnique({
+      where: { userId_environment: { userId, environment } },
+    });
+    if (!legacy) return;
+    const secrets: WebullSecrets = {
+      provider: 'webull',
+      appKey: this.crypto.decrypt(legacy.encAppKey),
+      appSecret: this.crypto.decrypt(legacy.encAppSecret),
+      accountId: legacy.encAccountId ? this.crypto.decrypt(legacy.encAccountId) : undefined,
     };
+    await this.upsertSecrets(userId, WEBULL_PROVIDER, environment, secrets);
   }
 }

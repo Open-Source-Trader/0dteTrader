@@ -160,8 +160,11 @@ describe('WebullBrokerGateway', () => {
     };
     const credentials = {
       getDecrypted: jest.fn(
-        async (_userId: string, environment: 'live' | 'practice' = 'live') =>
-          storedCreds[environment] ?? null,
+        async (
+          _userId: string,
+          _provider?: 'webull' | 'alpaca',
+          environment: 'live' | 'practice' = 'live',
+        ) => storedCreds[environment] ?? null,
       ),
       saveDiscoveredAccountId: jest.fn(async () => undefined),
     } as unknown as CredentialsService;
@@ -635,7 +638,7 @@ describe('WebullBrokerGateway', () => {
       expect(callsTo('/openapi/account/list')).toHaveLength(1);
       const positions = callsTo('/openapi/assets/positions');
       expect(positions[0].url).toContain('account_id=ACC-DISCOVERED');
-      expect(savedAccountIds).toHaveBeenCalledWith('u1', 'live', 'ACC-DISCOVERED');
+      expect(savedAccountIds).toHaveBeenCalledWith('u1', 'webull', 'live', 'ACC-DISCOVERED');
     });
 
     it('discovers only once — later calls reuse the resolved id', async () => {

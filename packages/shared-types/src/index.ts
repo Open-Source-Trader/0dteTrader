@@ -10,6 +10,9 @@
 
 export type AssetClass = 'option';
 export type TradingMode = 'live' | 'practice';
+/** Broker a user trades through. Webull is the only active provider in P1;
+ *  Alpaca is added behind the same BrokerGateway seam. */
+export type BrokerProvider = 'webull' | 'alpaca';
 export type OrderSide = 'buy' | 'sell';
 export type OrderType = 'mid' | 'market';
 export type OptionType = 'call' | 'put';
@@ -165,6 +168,8 @@ export interface Me {
   email: string;
   tradingDisabled: boolean;
   tradingMode: TradingMode;
+  /** Active trading provider chosen by the user (default 'webull'). */
+  tradingProvider: BrokerProvider;
   /** Live Webull credentials are stored. */
   webullConfigured: boolean;
   /** Practice (paper) Webull credentials are stored. */
@@ -173,9 +178,19 @@ export interface Me {
   webullAccountId: string | null;
   /** Practice account id; null until known. */
   webullPracticeAccountId: string | null;
+  /** Live Alpaca credentials are stored. */
+  alpacaConfigured?: boolean;
+  /** Practice (paper) Alpaca credentials are stored. */
+  alpacaPracticeConfigured?: boolean;
+  /** Live Alpaca account id (key-scoped; null until discovered). */
+  alpacaAccountId?: string | null;
+  /** Practice Alpaca account id; null until known. */
+  alpacaPracticeAccountId?: string | null;
 }
 
 export interface WebullCredentialsInput {
+  /** Present only on the discriminated union; omitted by the legacy DTO. */
+  provider?: 'webull';
   appKey: string;
   appSecret: string;
   /**
@@ -188,6 +203,29 @@ export interface WebullCredentialsInput {
   environment?: TradingMode;
 }
 
+/** Decrypted, in-memory secret shapes keyed by provider. */
+export interface WebullSecrets {
+  provider: 'webull';
+  appKey: string;
+  appSecret: string;
+  accountId?: string;
+}
+export interface AlpacaSecrets {
+  provider: 'alpaca';
+  apiKey: string;
+  apiSecret: string;
+}
+export type BrokerSecrets = WebullSecrets | AlpacaSecrets;
+
+/** Provider-scoped credential input from the client. */
+export interface AlpacaCredentialsInput {
+  provider: 'alpaca';
+  apiKey: string;
+  apiSecret: string;
+  environment?: TradingMode;
+}
+export type BrokerCredentialsInput = WebullCredentialsInput | AlpacaCredentialsInput;
+
 export interface WebullCredentialsSaved {
   webullConfigured: true;
   environment: TradingMode;
@@ -196,6 +234,18 @@ export interface WebullCredentialsSaved {
 export interface WebullSessionRefreshed {
   refreshed: true;
   /** Trading mode the fresh token was minted for (the user's current mode). */
+  environment: TradingMode;
+}
+
+export interface BrokerCredentialsSaved {
+  provider: BrokerProvider;
+  configured: true;
+  environment: TradingMode;
+}
+
+export interface BrokerSessionRefreshed {
+  provider: BrokerProvider;
+  refreshed: true;
   environment: TradingMode;
 }
 

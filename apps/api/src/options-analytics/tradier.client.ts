@@ -561,10 +561,13 @@ export class TradierClient {
         providerGammaValue !== null &&
         providerIvValue !== null;
       if (greeks === null) {
-        contractWarnings.add('Provider Greek comparison data unavailable', contractSymbol);
+        contractWarnings.add(
+          'Comparison greeks (Tradier-reported) unavailable — local model uses fresh quotes, unaffected',
+          contractSymbol,
+        );
       } else if (!validProviderGreeks) {
         contractWarnings.add(
-          'Provider Greek comparison data stale or invalid and was nulled',
+          'Comparison greeks (Tradier-reported) stale or invalid, ignored — local model uses fresh quotes, unaffected',
           contractSymbol,
         );
       }
@@ -576,7 +579,7 @@ export class TradierClient {
         isUsableSourceTimestamp(lastTradeTime, now, timestampPolicy);
       if ((raw['last'] !== undefined || raw['trade_date'] !== undefined) && !validLast) {
         contractWarnings.add(
-          'Provider comparison last trade stale or invalid and was nulled',
+          'Comparison last trade (Tradier-reported) stale or invalid, ignored — local model uses fresh quotes, unaffected',
           contractSymbol,
         );
       }

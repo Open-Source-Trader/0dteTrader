@@ -6,13 +6,14 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "build:watch": "tsc -p tsconfig.build.json --watch",
-    "dev": "npm run build && node --watch dist/main.js",
+    "dev": "npm run build && npm run db:generate && node --watch dist/main.js",
     "start": "node dist/main.js",
+    "prestart": "set -a; [ -f ../../.env ] && . ../../.env; set +a; prisma generate && prisma migrate deploy",
     "lint": "eslint \"{src,test}/**/*.ts\"",
     "test": "jest --runInBand",
     "smoke:webull": "npm run build && node dist/scripts/webull-smoke.js",
     "db:generate": "prisma generate",
-    "db:migrate": "prisma migrate deploy",
+    "db:migrate": "set -a; [ -f ../../.env ] && . ../../.env; set +a; prisma migrate deploy",
     "postinstall": "prisma generate"
   },
   "dependencies": {

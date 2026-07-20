@@ -370,6 +370,34 @@ describe('OptionsAnalyticsService exact cache', () => {
     expect(result.input.contracts).toHaveLength(2);
   });
 
+  it('keeps contracts despite after-hours underlying skew when the market is closed', async () => {
+    const provider = client();
+    provider.getQuote = async function () {
+      this.calls.quote += 1;
+      return {
+        symbol: 'SPY',
+        spot: 100,
+        quoteAsOf: '2026-07-17T23:55:00.000Z', // Friday 7:55pm ET after-hours
+        feedMode: 'realtime' as const,
+        completedSessionDate: '2026-07-17',
+      };
+    };
+    provider.getChain = async function (_symbol: string, expiration: string) {
+      this.calls.chain += 1;
+      const value = chain(expiration);
+      value.contracts.forEach((contract) => {
+        contract.quoteAsOf = '2026-07-17T20:14:30.000Z'; // options close ~4:15pm ET
+      });
+      return value;
+    };
+    const service = new OptionsAnalyticsService(config(), provider as never);
+
+    const result = await service.getSnapshotResult('SPY', EXPIRATION_A);
+
+    expect(result.input.contracts).toHaveLength(2);
+    expect(result.snapshot.quality.warnings.join(' ')).not.toMatch(/out.of.sync/i);
+  });
+
   it('returns unavailable when no contracts are synchronized to the underlying quote', async () => {
     const provider = client();
     provider.getChain = async function (_symbol: string, expiration: string) {

@@ -48,6 +48,8 @@ export interface TradierQuote {
   spot: number;
   quoteAsOf: string;
   feedMode: OptionsAnalyticsFeedMode;
+  /** Date of the latest completed regular session when the market is closed; null while open. */
+  completedSessionDate: string | null;
   warnings: string[];
 }
 
@@ -321,6 +323,7 @@ export class TradierClient {
       spot,
       quoteAsOf: quoteTime.toISOString(),
       feedMode,
+      completedSessionDate: timestampPolicy.latestCompletedSession?.date ?? null,
       warnings,
     };
   }

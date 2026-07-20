@@ -69,6 +69,7 @@ function result(symbol = 'SPY', observedAt = NOW): OptionsAnalyticsSnapshotResul
         spot: 100,
         quoteAsOf: output.scope.observedAt,
         feedMode: 'realtime',
+        completedSessionDate: null,
         warnings: [],
       },
       contractsTotal: 0,

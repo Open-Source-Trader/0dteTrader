@@ -249,12 +249,18 @@ export class OptionsAnalyticsService {
       if (!Number.isFinite(quoteTime)) {
         throw new Error(`Underlying quote timestamp is invalid for ${symbol}`);
       }
+      // When the market is closed, the underlying's latest quote may be stamped
+      // hours into after-hours trading while option quotes stop near the 4:15pm
+      // ET close, so intraday skew between them is meaningless — the client has
+      // already validated every timestamp against the completed session window.
+      const closedSession = typeof quote.completedSessionDate === 'string';
       const outOfSyncContracts: string[] = [];
       const synchronizedContracts = productContracts.filter((contract) => {
         const contractTime = Date.parse(contract.quoteAsOf);
         const synchronized =
           Number.isFinite(contractTime) &&
-          Math.abs(contractTime - quoteTime) <= OPTIONS_ANALYTICS_MAX_INPUT_SKEW_MS_V1;
+          (closedSession ||
+            Math.abs(contractTime - quoteTime) <= OPTIONS_ANALYTICS_MAX_INPUT_SKEW_MS_V1);
         if (!synchronized) {
           outOfSyncContracts.push(contract.symbol);
         }

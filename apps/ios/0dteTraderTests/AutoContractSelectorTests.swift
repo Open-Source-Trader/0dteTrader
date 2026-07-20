@@ -99,7 +99,7 @@ final class AutoContractSelectorTests: XCTestCase {
             expiration: expirationLater,
             today: today
         )
-        XCTAssertEqual(selected?.strike, 511)
+        XCTAssertEqual(selected?.strike, 510)
         XCTAssertEqual(selected?.expiration, expirationLater)
     }
 

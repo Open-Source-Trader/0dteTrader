@@ -1,0 +1,104 @@
+# Fuzzes the running API with ForAllSecure Mayhem for API
+# (https://app.mayhem.security). The API is booted for real against the same
+# Postgres/Redis services CI uses; Mayhem discovers routes from the
+# /openapi.json document the API serves (apps/api/src/openapi.ts).
+#
+# The fuzz step needs a MAYHEM_TOKEN repository secret (create an API token at
+# https://app.mayhem.security/-/settings/user/api-tokens). Without it the
+# workflow still boots the API and verifies /openapi.json serves — only the
+# scan itself is skipped.
+
+name: Mayhem for API
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - 'apps/api/**'
+      - 'packages/shared-types/**'
+      - 'package-lock.json'
+      - '.github/workflows/mayhem-for-api.yml'
+  schedule:
+    - cron: '17 9 * * 1' # weekly Monday scan, independent of code churn
+  workflow_dispatch:
+
+jobs:
+  mayhem-for-api:
+    name: Mayhem for API
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: odtetrader
+          POSTGRES_PASSWORD: odtetrader
+          POSTGRES_DB: odtetrader
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U odtetrader"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+    env:
+      DATABASE_URL: postgresql://odtetrader:odtetrader@localhost:5432/odtetrader
+      REDIS_URL: redis://localhost:6379
+      JWT_ACCESS_SECRET: ci-access-secret-min-32-characters
+      JWT_REFRESH_SECRET: ci-refresh-secret-min-32-characters
+      CRED_ENCRYPTION_KEY: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
+      MAYHEM_TOKEN: ${{ secrets.MAYHEM_TOKEN }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Build API
+        run: |
+          npm ci
+          npm run build --workspace packages/shared-types
+          npm run build --workspace apps/api
+
+      - name: Migrate database
+        run: npm run db:migrate --workspace apps/api
+
+      - name: Start API
+        run: |
+          node apps/api/dist/main.js &
+          for i in $(seq 1 30); do
+            curl -fsS http://localhost:3000/v1/health >/dev/null 2>&1 && break
+            sleep 1
+          done
+          curl -fsS http://localhost:3000/v1/health
+          curl -fsS http://localhost:3000/openapi.json >/dev/null
+
+      - name: Mayhem for API
+        if: env.MAYHEM_TOKEN != ''
+        uses: ForAllSecure/mapi-action@v1
+        continue-on-error: true
+        with:
+          mayhem-token: ${{ env.MAYHEM_TOKEN }}
+          api-url: http://localhost:3000
+          api-spec: http://localhost:3000/openapi.json
+          duration: 60
+          sarif-report: mapi.sarif
+
+      - name: Upload SARIF file
+        if: env.MAYHEM_TOKEN != '' && hashFiles('mapi.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: mapi.sarif
+
+      - name: Note when the scan was skipped
+        if: env.MAYHEM_TOKEN == ''
+        run: echo "::notice::MAYHEM_TOKEN secret not set — API boot and /openapi.json verified, fuzz scan skipped. Add the secret to enable scanning."

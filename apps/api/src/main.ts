@@ -5,6 +5,7 @@ import { WsAdapter } from '@nestjs/platform-ws';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
 import { AppLogger } from './common/app-logger';
+import { setupOpenApi } from './openapi';
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create(AppModule, {
@@ -15,6 +16,7 @@ async function bootstrap(): Promise<void> {
   app.enableCors();
   app.setGlobalPrefix('v1');
   app.useWebSocketAdapter(new WsAdapter(app));
+  setupOpenApi(app);
 
   const config = app.get(ConfigService);
   const port = config.get<number>('port', 3000);

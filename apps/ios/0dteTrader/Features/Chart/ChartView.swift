@@ -88,7 +88,12 @@ struct ChartView: View {
                             }
                         }
                         .font(.system(size: 8, weight: .bold, design: .monospaced))
-                        .foregroundStyle(snapshot.quality.warnings.isEmpty || !viewModel.optionsAnalyticsSettings.showDiagnostics ? Color.appAccent : Color.appWarning)
+                        .foregroundStyle(
+                            snapshot.quality.warnings.isEmpty
+                                || !viewModel.optionsAnalyticsSettings.showDiagnostics
+                                ? Color.appAccent
+                                : Color.appWarning
+                        )
                         .padding(.horizontal, 6)
                         .frame(minHeight: 28)
                         .background(Color.black.opacity(0.72))

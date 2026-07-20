@@ -87,6 +87,18 @@ threads) where traders watch the same 0DTE tape together. Built on the existing
 WebSocket streaming layer with the same auth, rate-limiting, and moderation
 hooks as the rest of the backend.
 
+## P9 — Social & Sharing
+
+Show off (or own up to) your trades without leaving the app:
+
+- **Discord connection** — link a Discord channel and every buy and sell is
+  posted there automatically.
+- **Quick screenshot button** — capture the current chart/trade view with one tap.
+- **Screenshot on sell** — optional automatic screenshot when a position is
+  closed, stamped with the realized P/L.
+- **Auto-post to social media** — optionally push those screenshots straight
+  to your connected social accounts.
+
 ## Later (not v1)
 
 Futures trading (backend has endpoint stubs but no client UI), alerts, portfolio analytics,

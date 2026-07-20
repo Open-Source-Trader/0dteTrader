@@ -1,5 +1,5 @@
 # ---- Stage 1: build ----
-FROM node:18-alpine AS builder
+FROM node:22-alpine AS builder
 
 RUN apk add --no-cache python3 make g++ openssl
 
@@ -28,7 +28,7 @@ RUN npm run build --workspace apps/api
 RUN npm prune --omit=dev
 
 # ---- Stage 2: production ----
-FROM node:18-alpine
+FROM node:22-alpine
 
 RUN apk add --no-cache tini openssl
 

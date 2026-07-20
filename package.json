@@ -26,7 +26,7 @@
     "format:check": "prettier --check ."
   },
   "engines": {
-    "node": ">=18.17"
+    "node": ">=22.12"
   },
   "dependencies": {
     "playwright-core": "^1.61.1"

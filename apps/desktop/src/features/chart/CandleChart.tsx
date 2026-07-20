@@ -322,6 +322,8 @@ export function CandleChart({
   const resetView = () => {
     const chart = chartRef.current;
     if (!chart || candles.length === 0) return;
+    // A manual price-axis drag disables auto-fit; reset restores it.
+    chart.priceScale('left').applyOptions({ autoScale: true });
     chart.timeScale().setVisibleLogicalRange({
       from: Math.max(0, candles.length - VISIBLE_CANDLES),
       to: candles.length + 12,

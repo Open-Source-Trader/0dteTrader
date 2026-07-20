@@ -24,8 +24,17 @@ struct IndicatorPaneRepresentable: UIViewRepresentable {
     var xValueCount: Int
     var resetToken: Int = 0
 
+    /// Pane chart that keeps the TradingView-style over-scroll allowance in
+    /// sync with its size (the pane has no container view to hook).
+    final class PaneChartView: CombinedChartView {
+        override func layoutSubviews() {
+            super.layoutSubviews()
+            setDragOffsetX(bounds.width * 0.45)
+        }
+    }
+
     func makeUIView(context: Context) -> CombinedChartView {
-        let chart = CombinedChartView()
+        let chart = PaneChartView()
         chart.drawOrder = [
             CombinedChartView.DrawOrder.bar.rawValue,
             CombinedChartView.DrawOrder.line.rawValue,
@@ -35,23 +44,25 @@ struct IndicatorPaneRepresentable: UIViewRepresentable {
         chart.backgroundColor = .clear
         chart.doubleTapToZoomEnabled = false
         chart.highlightPerTapEnabled = false
-        chart.dragEnabled = true
-        // Built-in pinch is fully disabled in favor of the coordinator's
-        // directional pinch (horizontal → time, vertical → price, diagonal → both).
+        // DGCharts' built-in pan keeps the x-axis; the gesture controller
+        // owns vertical panning through the axis range.
+        chart.dragXEnabled = true
+        chart.dragYEnabled = false
+        // Built-in pinch is fully disabled in favor of the gesture
+        // controller's directional pinch (horizontal → time, vertical →
+        // value, diagonal → both).
         chart.pinchZoomEnabled = false
         chart.scaleXEnabled = false
         chart.scaleYEnabled = false
         chart.isMultipleTouchEnabled = true
+        // TradingView y-axis model: auto-fit (or the pane's fixed range)
+        // until a vertical gesture switches the axis to manual control.
+        chart.autoScaleMinMaxEnabled = true
 
         chart.delegate = context.coordinator
         context.coordinator.chart = chart
-
-        let pinch = UIPinchGestureRecognizer(
-            target: context.coordinator,
-            action: #selector(Coordinator.handleDirectionalPinch(_:))
-        )
-        pinch.delegate = context.coordinator
-        chart.addGestureRecognizer(pinch)
+        context.coordinator.gestures.defaultYRange = yRange
+        context.coordinator.gestures.attach(to: chart)
 
         let xAxis = chart.xAxis
         xAxis.drawLabelsEnabled = false
@@ -124,80 +135,57 @@ struct IndicatorPaneRepresentable: UIViewRepresentable {
             line.lineDashLengths = [4, 3]
             leftAxis.addLimitLine(line)
         }
-        if let yRange {
-            leftAxis.axisMinimum = yRange.lowerBound
-            leftAxis.axisMaximum = yRange.upperBound
-        } else {
-            leftAxis.resetCustomAxisMin()
-            leftAxis.resetCustomAxisMax()
+        // Only re-apply the default y-range while the axis is auto-fitted —
+        // live ticks must not clobber a range the user set with a vertical
+        // pinch or pan.
+        context.coordinator.gestures.defaultYRange = yRange
+        if context.coordinator.gestures.yMode == .auto {
+            if let yRange {
+                leftAxis.axisMinimum = yRange.lowerBound
+                leftAxis.axisMaximum = yRange.upperBound
+            } else {
+                leftAxis.resetCustomAxisMin()
+                leftAxis.resetCustomAxisMax()
+            }
         }
+        // Same 12-bar right-offset gap as the main chart so the pane can
+        // scroll past the newest bar into empty space.
+        chart.xAxis.axisMinimum = -0.5
+        chart.xAxis.axisMaximum = Double(xValueCount - 1) + 12
         chart.notifyDataSetChanged()
 
         // Snap to the default window on first data arrival; after that the
         // pane keeps its own zoom (fully independent of the main chart).
         if context.coordinator.lastCount == 0 && xValueCount > 0 {
-            snapToDefaultView(chart)
+            snapToDefaultView(chart, coordinator: context.coordinator)
         }
         context.coordinator.lastCount = xValueCount
 
         if resetToken != context.coordinator.lastResetToken {
             context.coordinator.lastResetToken = resetToken
-            snapToDefaultView(chart)
+            snapToDefaultView(chart, coordinator: context.coordinator)
         }
     }
 
     /// Default view: the newest ~120 bars, y reset to fit. Used on first
     /// load and by the pane's "A" button.
-    private func snapToDefaultView(_ chart: CombinedChartView) {
+    private func snapToDefaultView(_ chart: CombinedChartView, coordinator: Coordinator) {
+        coordinator.gestures.resetToAuto()
         chart.fitScreen()
-        let scale = max(1, Double(xValueCount) / ChartMetrics.visibleCandles)
+        let totalRange = Double(xValueCount) + 12
+        let scale = max(1, totalRange / ChartMetrics.visibleCandles)
         chart.zoom(scaleX: CGFloat(scale), scaleY: 1, x: chart.bounds.width, y: 0)
         chart.moveViewToX(Double(xValueCount - 1))
     }
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
-    final class Coordinator: NSObject, ChartViewDelegate, UIGestureRecognizerDelegate {
+    final class Coordinator: NSObject, ChartViewDelegate {
         weak var chart: CombinedChartView?
         var lastResetToken: Int = 0
         var lastCount: Int = 0
-        private var lastXDist: CGFloat = 0
-        private var lastYDist: CGFloat = 0
-
-        // Same directional pinch as the main chart: horizontal spread zooms
-        // the x-axis, vertical spread zooms y, diagonal zooms both.
-        @objc func handleDirectionalPinch(_ recognizer: UIPinchGestureRecognizer) {
-            guard let chart, recognizer.numberOfTouches >= 2 else { return }
-            let p1 = recognizer.location(ofTouch: 0, in: chart)
-            let p2 = recognizer.location(ofTouch: 1, in: chart)
-            let xDist = abs(p1.x - p2.x)
-            let yDist = abs(p1.y - p2.y)
-            switch recognizer.state {
-            case .began:
-                chart.stopDeceleration()
-                lastXDist = xDist
-                lastYDist = yDist
-            case .changed:
-                let scaleX = lastXDist > 30 && xDist > 0 ? xDist / lastXDist : 1
-                let scaleY = lastYDist > 30 && yDist > 0 ? yDist / lastYDist : 1
-                let center = CGPoint(x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2)
-                var matrix = CGAffineTransform(translationX: center.x, y: center.y)
-                    .scaledBy(x: scaleX, y: scaleY)
-                    .translatedBy(x: -center.x, y: -center.y)
-                matrix = chart.viewPortHandler.touchMatrix.concatenating(matrix)
-                _ = chart.viewPortHandler.refresh(newMatrix: matrix, chart: chart, invalidate: true)
-                lastXDist = xDist
-                lastYDist = yDist
-            default:
-                break
-            }
-        }
-
-        func gestureRecognizer(
-            _ gestureRecognizer: UIGestureRecognizer,
-            shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
-        ) -> Bool {
-            true
-        }
+        // Same TradingView-style pinch/vertical-pan as the main chart, with
+        // this pane's own independent y-axis state machine.
+        let gestures = ChartGestureController()
     }
 }

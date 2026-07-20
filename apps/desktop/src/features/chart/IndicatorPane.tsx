@@ -162,6 +162,9 @@ export function IndicatorPane({ height, candles, series, guideLines, yRange }: I
   const resetView = () => {
     const chart = chartRef.current;
     if (!chart) return;
+    // A manual price-axis drag disables auto-fit; reset restores it (and
+    // with it the fixed 0-100 range on RSI/Stoch panes).
+    chart.priceScale('left').applyOptions({ autoScale: true });
     chart.timeScale().fitContent();
   };
 

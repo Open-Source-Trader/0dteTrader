@@ -113,7 +113,7 @@ final class ProfileViewModel: ObservableObject {
             successMessage = "Webull \(environment.label) credentials saved."
             await load()
         } catch {
-            setError($error)
+            setError(error)
         }
     }
 
@@ -129,7 +129,7 @@ final class ProfileViewModel: ObservableObject {
             successMessage = "Webull \(environment.label) credentials removed."
             await load()
         } catch {
-            setError($error)
+            setError(error)
         }
     }
 
@@ -147,7 +147,7 @@ final class ProfileViewModel: ObservableObject {
             try await apiClient.refreshWebullSession()
             successMessage = "Webull session refreshed."
         } catch {
-            setError($error)
+            setError(error)
         }
     }
 
@@ -178,7 +178,7 @@ final class ProfileViewModel: ObservableObject {
             successMessage = "Alpaca \(environment.label) credentials saved."
             await load()
         } catch {
-            setError($error)
+            setError(error)
         }
     }
 
@@ -211,7 +211,7 @@ final class ProfileViewModel: ObservableObject {
             successMessage = "Alpaca \(environment.label) credentials removed."
             await load()
         } catch {
-            setError($error)
+            setError(error)
         }
     }
 

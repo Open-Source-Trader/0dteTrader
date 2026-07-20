@@ -13,6 +13,7 @@ struct ProfileView: View {
                     accountCard
                     webullCard
                     securityCard
+                    tradingCard
                     logoutCard
                 }
                 .padding(.horizontal, AppSpacing.lg)
@@ -294,6 +295,39 @@ struct ProfileView: View {
                 ))
                 .labelsHidden()
                 .tint(Color.appAccent)
+            }
+            .padding(AppSpacing.md)
+            .background(Color.appSurface, in: HudPanelShape(chamfer: 6))
+            .overlay(
+                HudPanelShape(chamfer: 6)
+                    .strokeBorder(Color.hudStrokeDim, lineWidth: 1)
+            )
+        }
+        .padding(AppSpacing.lg)
+        .hudCard(glow: false)
+    }
+
+    private var tradingCard: some View {
+        VStack(alignment: .leading, spacing: AppSpacing.md) {
+            sectionHeader("Trading", icon: "bolt.horizontal")
+
+            HStack {
+                HStack(spacing: AppSpacing.sm) {
+                    Image(systemName: "hand.tap")
+                        .foregroundStyle(Color.appAccent)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Skip order confirmation")
+                            .font(.panelLabel)
+                            .foregroundStyle(.white)
+                        Text("Places the order immediately on Buy/Sell. This device only.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                Spacer()
+                Toggle("", isOn: $viewModel.bypassOrderConfirmation)
+                    .labelsHidden()
+                    .tint(Color.appAccent)
             }
             .padding(AppSpacing.md)
             .background(Color.appSurface, in: HudPanelShape(chamfer: 6))

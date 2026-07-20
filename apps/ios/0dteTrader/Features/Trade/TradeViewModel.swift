@@ -91,9 +91,11 @@ final class TradeViewModel: ObservableObject {
 
     // MARK: - Arm (step 1 of FR-19)
 
-    /// Builds the OrderRequest, generates the idempotency key, and opens the
-    /// confirmation sheet with a server preview.
-    func arm(side: OrderSide, underlying: String, chainViewModel: OptionsChainViewModel) {
+    /// Builds the OrderRequest and generates the idempotency key. Normally opens
+    /// the confirmation sheet with a server preview; when `bypass` is set
+    /// (Profile → Skip order confirmation) it submits immediately, skipping the
+    /// sheet.
+    func arm(side: OrderSide, underlying: String, chainViewModel: OptionsChainViewModel, bypass: Bool = false) {
         let selection: OrderSelectionDTO
         let summary: String
         let optionType = chainViewModel.optionType
@@ -131,6 +133,10 @@ final class TradeViewModel: ObservableObject {
             orderType: orderType.rawValue,
             selection: selection
         )
+        if bypass {
+            Task { await placeDirect(request, side: side) }
+            return
+        }
         armedTicket = ArmedOrderTicket(
             id: UUID(),
             request: request,
@@ -142,6 +148,21 @@ final class TradeViewModel: ObservableObject {
         previewError = nil
         submitError = nil
         Task { await loadPreview() }
+    }
+
+    /// Submits without the confirm sheet (bypass path). Failures surface as a
+    /// toast since there is no sheet to hold a submit error.
+    private func placeDirect(_ request: OrderRequestDTO, side: OrderSide) async {
+        guard !isSubmitting else { return }
+        isSubmitting = true
+        defer { isSubmitting = false }
+        do {
+            try await submitOrder(request, idempotencyKey: UUID().uuidString, side: side)
+        } catch let error as APIError {
+            showToast(error.userMessage, style: .error)
+        } catch {
+            showToast(error.localizedDescription, style: .error)
+        }
     }
 
     /// Server-side preview powering the confirmation sheet (resolved contract + price).
@@ -162,6 +183,22 @@ final class TradeViewModel: ObservableObject {
 
     // MARK: - Confirm (step 2 of FR-19)
 
+    /// Places the order, clears the armed ticket, toasts the result, and
+    /// refreshes positions/orders. Throws so callers surface the error their own
+    /// way (sheet submit error vs. toast). Shared by the confirm and bypass paths.
+    private func submitOrder(_ request: OrderRequestDTO, idempotencyKey: String, side: OrderSide) async throws {
+        let result = OrderResult(dto: try await apiClient.placeOrder(
+            request,
+            idempotencyKey: idempotencyKey
+        ))
+        armedTicket = nil
+        showToast(
+            "\(side.displayName) \(result.contractSymbol) — \(result.status.displayName)",
+            style: result.status == .rejected ? .error : .success
+        )
+        await refreshTradingData()
+    }
+
     /// Submits the armed order. The same idempotency key is reused across
     /// retries, so a double tap or a retried submission posts exactly one order.
     func confirmArmedOrder() async {
@@ -170,16 +207,7 @@ final class TradeViewModel: ObservableObject {
         submitError = nil
         defer { isSubmitting = false }
         do {
-            let result = OrderResult(dto: try await apiClient.placeOrder(
-                ticket.request,
-                idempotencyKey: ticket.idempotencyKey
-            ))
-            armedTicket = nil
-            showToast(
-                "\(ticket.side.displayName) \(result.contractSymbol) — \(result.status.displayName)",
-                style: result.status == .rejected ? .error : .success
-            )
-            await refreshTradingData()
+            try await submitOrder(ticket.request, idempotencyKey: ticket.idempotencyKey, side: ticket.side)
         } catch let error as APIError {
             // Keep the ticket armed so the user can retry with the same key.
             submitError = error.userMessage

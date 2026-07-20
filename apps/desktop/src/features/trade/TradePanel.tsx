@@ -24,6 +24,9 @@ interface TradePanelProps {
    * compacts to fit — the panel never scrolls.
    */
   density?: 'roomy' | 'compact' | 'dense';
+  /** Trading lock: disables Buy/Sell, the order-config controls, and the
+   *  positions strip's flatten/cancel. */
+  locked?: boolean;
 }
 
 const DENSITY = {
@@ -37,7 +40,13 @@ function expirationLabel(expiration: string): string {
 }
 
 /** Layout B's bottom trade panel (TradePanelView.swift). */
-export function TradePanel({ tradeStore, chainStore, onArm, density = 'roomy' }: TradePanelProps) {
+export function TradePanel({
+  tradeStore,
+  chainStore,
+  onArm,
+  density = 'roomy',
+  locked = false,
+}: TradePanelProps) {
   const trade = useStore(tradeStore);
   const chain = useStore(chainStore);
 
@@ -45,7 +54,7 @@ export function TradePanel({ tradeStore, chainStore, onArm, density = 'roomy' }:
   const selectedContract = chainStore.selectedContract;
   const autoMid = autoContract ? midPrice(autoContract.bid, autoContract.ask) : null;
 
-  const canTrade = selectedContract !== null;
+  const canTrade = selectedContract !== null && !locked;
 
   const selectedQuote = selectedContract;
   const indicativeMid = selectedQuote ? midPrice(selectedQuote.bid, selectedQuote.ask) : null;
@@ -75,9 +84,13 @@ export function TradePanel({ tradeStore, chainStore, onArm, density = 'roomy' }:
         onCancelOrder={(order) => void tradeStore.cancel(order)}
         rowPadding="0"
         maxHeight={d.stripMaxHeight}
+        locked={locked}
       />
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: d.gap }}>
+      <div
+        inert={locked}
+        style={{ display: 'flex', flexDirection: 'column', gap: d.gap, opacity: locked ? 0.55 : 1 }}
+      >
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           <SegmentedControl
             options={[
@@ -205,7 +218,10 @@ export function TradePanel({ tradeStore, chainStore, onArm, density = 'roomy' }:
       </div>
 
       {/* Quantity row */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+      <div
+        inert={locked}
+        style={{ display: 'flex', alignItems: 'center', gap: 8, opacity: locked ? 0.55 : 1 }}
+      >
         <span className="text-secondary" style={{ fontSize: 'var(--fs-subheadline)' }}>
           Qty
         </span>
@@ -233,7 +249,10 @@ export function TradePanel({ tradeStore, chainStore, onArm, density = 'roomy' }:
       </div>
 
       {/* Order type row */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+      <div
+        inert={locked}
+        style={{ display: 'flex', alignItems: 'center', gap: 8, opacity: locked ? 0.55 : 1 }}
+      >
         <SegmentedControl
           options={[
             { value: 'mid', label: 'Mid' },

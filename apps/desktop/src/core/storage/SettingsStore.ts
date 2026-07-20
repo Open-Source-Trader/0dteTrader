@@ -19,6 +19,8 @@ export class SettingsStore {
     optionsAnalytics: 'settings.optionsAnalytics.v1',
     riskDisclaimerAccepted: 'settings.riskDisclaimerAccepted',
     lastSymbol: 'settings.lastSymbol',
+    tradingLocked: 'settings.tradingLocked',
+    bypassOrderConfirmation: 'settings.bypassOrderConfirmation',
   };
 
   get layoutMode(): TradeLayout {
@@ -78,6 +80,25 @@ export class SettingsStore {
 
   set hasAcceptedRiskDisclaimer(value: boolean) {
     localStorage.setItem(SettingsStore.keys.riskDisclaimerAccepted, String(value));
+  }
+
+  /** Trading lock: when true, every order-placing control is disabled. Persists
+   *  across launches (the lock is remembered, like the layout choice). */
+  get tradingLocked(): boolean {
+    return localStorage.getItem(SettingsStore.keys.tradingLocked) === 'true';
+  }
+
+  set tradingLocked(value: boolean) {
+    localStorage.setItem(SettingsStore.keys.tradingLocked, String(value));
+  }
+
+  /** Skip the buy/sell confirmation sheet and submit immediately. Per-device. */
+  get bypassOrderConfirmation(): boolean {
+    return localStorage.getItem(SettingsStore.keys.bypassOrderConfirmation) === 'true';
+  }
+
+  set bypassOrderConfirmation(value: boolean) {
+    localStorage.setItem(SettingsStore.keys.bypassOrderConfirmation, String(value));
   }
 
   get lastSymbol(): string | null {

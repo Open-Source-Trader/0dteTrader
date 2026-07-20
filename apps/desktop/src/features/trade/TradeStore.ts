@@ -145,8 +145,17 @@ export class TradeStore extends Store<TradeStoreState> {
 
   // MARK: - Arm (step 1)
 
-  /** Builds the OrderRequest + idempotency key and opens the confirm sheet. */
-  arm(side: OrderSide, underlying: string, chainStore: ChainStore): void {
+  /**
+   * Builds the OrderRequest + idempotency key. Normally opens the confirm
+   * sheet; when `bypassConfirmation` is set (Profile → Skip order confirmation)
+   * it submits the order immediately, skipping the sheet.
+   */
+  arm(
+    side: OrderSide,
+    underlying: string,
+    chainStore: ChainStore,
+    bypassConfirmation = false,
+  ): void {
     const { quantity, orderType } = this.getState();
     let selection: OrderSelection;
     let summary: string;
@@ -182,11 +191,16 @@ export class TradeStore extends Store<TradeStoreState> {
       orderType,
       selection,
     };
+    const idempotencyKey = newIdempotencyKey();
+    if (bypassConfirmation) {
+      void this.placeDirect(request, idempotencyKey, side);
+      return;
+    }
     this.set({
       armedTicket: {
         id: nextId++,
         request,
-        idempotencyKey: newIdempotencyKey(),
+        idempotencyKey,
         side,
         summary,
       },
@@ -194,6 +208,26 @@ export class TradeStore extends Store<TradeStoreState> {
       previewError: null,
     });
     void this.loadPreview();
+  }
+
+  /**
+   * Submits without a confirm sheet (bypass path). Failures surface as a toast
+   * since there is no sheet to hold a preview error.
+   */
+  private async placeDirect(
+    request: OrderRequest,
+    idempotencyKey: string,
+    side: OrderSide,
+  ): Promise<void> {
+    if (this.getState().isSubmitting) return;
+    this.set({ isSubmitting: true });
+    try {
+      await this.submitOrder(request, idempotencyKey, side);
+    } catch (error) {
+      this.showToast(errorMessage(error), 'error');
+    } finally {
+      this.set({ isSubmitting: false });
+    }
   }
 
   /** Server-side preview powering the confirmation sheet. */
@@ -213,19 +247,32 @@ export class TradeStore extends Store<TradeStoreState> {
 
   // MARK: - Confirm (step 2)
 
+  /**
+   * Places the order, clears the armed ticket, toasts the result, and refreshes
+   * positions/orders. Throws on failure so callers surface the error their own
+   * way (sheet preview error vs. toast). Shared by the confirm and bypass paths.
+   */
+  private async submitOrder(
+    request: OrderRequest,
+    idempotencyKey: string,
+    side: OrderSide,
+  ): Promise<void> {
+    const result = await this.apiClient.placeOrder(request, idempotencyKey);
+    this.set({ armedTicket: null });
+    this.showToast(
+      `${sideDisplayName(side)} ${result.contractSymbol} — ${orderStatusDisplayName(result.status)}`,
+      result.status === 'rejected' ? 'error' : 'success',
+    );
+    await this.refreshTradingData();
+  }
+
   /** Submits the armed order, reusing the same idempotency key on retries. */
   async confirmArmedOrder(): Promise<void> {
     const ticket = this.getState().armedTicket;
     if (!ticket || this.getState().isSubmitting) return;
     this.set({ isSubmitting: true });
     try {
-      const result = await this.apiClient.placeOrder(ticket.request, ticket.idempotencyKey);
-      this.set({ armedTicket: null });
-      this.showToast(
-        `${sideDisplayName(ticket.side)} ${result.contractSymbol} — ${orderStatusDisplayName(result.status)}`,
-        result.status === 'rejected' ? 'error' : 'success',
-      );
-      await this.refreshTradingData();
+      await this.submitOrder(ticket.request, ticket.idempotencyKey, ticket.side);
     } catch (error) {
       // Keep the ticket armed so the user can retry with the same key.
       // Drop the stale preview: Retry now resubmits instead of confirming

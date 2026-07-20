@@ -23,6 +23,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `POST /v1/me/webull-session/refresh` — reconnect escape hatch
 - Webull account ID auto-discovery via `GET /openapi/account/list`
 - Partial fill tracking (`filledQuantity` on orders)
+- Trading lock toggle in the top-right nav (iOS + desktop) — disables all order-placing controls (Buy/Sell, order config, flatten/cancel) while leaving the chart interactive; remembered across launches
+- Profile setting to skip the buy/sell confirmation sheet and place orders immediately (per-device)
 
 ## [0.1.0] - 2026-07-19
 

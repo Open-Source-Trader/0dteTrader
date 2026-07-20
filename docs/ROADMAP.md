@@ -62,8 +62,32 @@ ledger with per-entry P/L and net total. History view in both iOS and desktop.
 Rate-limit tuning, audit review, cert pinning, FaceID lock, edge-case pass (network loss
 mid-order, stale quotes, market closed), TestFlight build, live-account go-live checklist.
 
+## P6 — Universal Broker Connectivity (OAuth)
+
+Replace the single hard-wired Webull integration with a pluggable broker layer.
+Every major brokerage that offers OAuth sign-in and a market-data API — Schwab,
+Tastytrade, Interactive Brokers, E\*TRADE, Alpaca, Tradier brokerage, and
+friends — connects with a couple of taps instead of copied API keys. Execution
+and market data become independently selectable, so each user assembles the
+stack they want: trade through one broker, chart another's data, pull options
+analytics from a third.
+
+## P7 — TradeDaddy Integration
+
+Bring **TradeDaddy**, our AI trading assistant already powered by Apple
+Intelligence, into 0dteTrader. On-device AI reads the chart you're looking at —
+candles, options structure, positions — and talks strategy in plain English:
+setups, risk framing, and post-trade review, without your market data leaving
+the phone.
+
+## P8 — Global Chat
+
+A real-time global chat inside the app: one shared room (plus per-symbol
+threads) where traders watch the same 0DTE tape together. Built on the existing
+WebSocket streaming layer with the same auth, rate-limiting, and moderation
+hooks as the rest of the backend.
+
 ## Later (not v1)
 
 Futures trading (backend has endpoint stubs but no client UI), alerts, portfolio analytics,
-multi-broker abstraction (IBKR/Tastytrade), Android, App Store public release + compliance
-review.
+Android, App Store public release + compliance review.

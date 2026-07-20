@@ -82,6 +82,22 @@ targets:
         # Newer Xcode/xcodegen no longer implies a generated Info.plist.
         GENERATE_INFOPLIST_FILE: YES
 
+  # README screenshot capture. Kept out of the main scheme's test action —
+  # it registers a throwaway account against the live backend, so it only
+  # runs via the dedicated 0dteTraderScreenshots scheme.
+  0dteTraderUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: 0dteTraderUITests
+    dependencies:
+      - target: 0dteTrader
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: 0dteTrader
+
 schemes:
   0dteTrader:
     build:
@@ -95,3 +111,14 @@ schemes:
       config: Debug
       targets:
         - 0dteTraderTests
+
+  0dteTraderScreenshots:
+    build:
+      targets:
+        0dteTrader: all
+        0dteTraderUITests:
+          - test
+    test:
+      config: Debug
+      targets:
+        - 0dteTraderUITests

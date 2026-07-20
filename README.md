@@ -10,6 +10,21 @@ Rapid options quick-trade iOS (and desktop) app backed by the official Webull Op
 
 > **Risk warning:** Trading involves substantial risk of loss. This software places real orders when connected to a live brokerage account. Always validate against a paper (practice) account first.
 
+## Screenshots
+
+The iOS app running against the production backend (SPX hourly chart via Tradier index data; captured on the iPhone simulator):
+
+<p align="center">
+  <img src="docs/screenshots/trade-screen.png" width="24%" alt="Trade screen — SPX hourly candlestick chart with moving average and one-tap options order panel" />
+  <img src="docs/screenshots/symbol-search.png" width="24%" alt="Symbol picker — indices, ETFs, and equity search" />
+  <img src="docs/screenshots/login.png" width="24%" alt="Login screen" />
+  <img src="docs/screenshots/risk-disclaimer.png" width="24%" alt="First-launch risk disclosure" />
+</p>
+
+With a Webull-connected account the chart adds the live options-structure overlay — call/put walls, breakevens, the 68% implied range, and per-strike open-interest and gamma profiles drawn on the price axis.
+
+The screenshots are reproducible: the `0dteTraderScreenshots` scheme drives the real app through login to the chart and captures each frame (`apps/ios/0dteTraderUITests`).
+
 ## Quick start
 
 ```bash
@@ -175,6 +190,14 @@ Real secrets live only in `.env`, which is gitignored. Never commit credentials.
 - [`docs/WEBULL-INTEGRATION.md`](docs/WEBULL-INTEGRATION.md) — Webull OpenAPI integration details
 - [`docs/RUNBOOK.md`](docs/RUNBOOK.md) — local development, Webull setup, smoke tests, troubleshooting
 - [`docs/ROADMAP.md`](docs/ROADMAP.md) — future plans and priorities
+
+## Roadmap
+
+Where 0dteTrader is headed after v1 hardening (full detail in [`docs/ROADMAP.md`](docs/ROADMAP.md)):
+
+1. **Universal broker connectivity** — a pluggable broker layer where every major brokerage with OAuth sign-in and a market-data API (Schwab, Tastytrade, Interactive Brokers, E\*TRADE, Alpaca, and more) connects in a couple of taps. Execution and market data become independently selectable, so you assemble the exact stack you want.
+2. **TradeDaddy integration** — our AI trading assistant, already powered by Apple Intelligence, built directly into the app: on-device AI that reads the chart and options structure you're looking at and talks strategy in plain English.
+3. **Global chat** — a real-time community chat inside the app (with per-symbol threads), so traders can watch the same 0DTE tape together.
 
 ## License
 

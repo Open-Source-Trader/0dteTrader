@@ -32,7 +32,7 @@ jobs:
       JWT_REFRESH_SECRET: ci-refresh-secret-min-32-characters
       CRED_ENCRYPTION_KEY: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         with:
           node-version: 18
@@ -45,7 +45,7 @@ jobs:
   ios:
     runs-on: macos-14
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # brew's xcodegen emits a project format newer than the runner's default
       # Xcode can read; select the newest installed Xcode so they agree.
       - name: Select latest Xcode

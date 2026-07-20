@@ -1,9 +1,6 @@
 import { Body, Controller, Delete, HttpCode, Put, Query } from '@nestjs/common';
 import { WebullCredentialsSaved } from '@0dtetrader/shared-types';
-import {
-  AuthenticatedUser,
-  CurrentUser,
-} from '../common/current-user.decorator';
+import { AuthenticatedUser, CurrentUser } from '../common/current-user.decorator';
 import { CredentialsService } from './credentials.service';
 import { EnvironmentQueryDto } from './dto/environment-query.dto';
 import { WebullCredentialsDto } from './dto/webull-credentials.dto';

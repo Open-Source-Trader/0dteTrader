@@ -1,9 +1,4 @@
-import {
-  compactJson,
-  isLegacyHost,
-  signRequest,
-  strictPercentEncode,
-} from './webull-signer';
+import { compactJson, isLegacyHost, signRequest, strictPercentEncode } from './webull-signer';
 
 // Official worked example from developer.webull.com/apis/docs/authentication/
 // signature.md — "If your output matches kvlS6opdZDhEBo5jq40nHYXaLvM=, your
@@ -54,9 +49,7 @@ describe('signRequest', () => {
 
   it('includes x-access-token only when a token is given', () => {
     expect(signRequest(DOCS_VECTOR)['x-access-token']).toBeUndefined();
-    expect(
-      signRequest({ ...DOCS_VECTOR, accessToken: 'tok' })['x-access-token'],
-    ).toBe('tok');
+    expect(signRequest({ ...DOCS_VECTOR, accessToken: 'tok' })['x-access-token']).toBe('tok');
   });
 
   it('changes the signature when the body changes', () => {

@@ -36,7 +36,9 @@ function svg({ stroke, glow, fill, highlight, glowOpacity, strokeWidth, withTick
     : '';
   return (
     `<svg xmlns='http://www.w3.org/2000/svg' width='${S}' height='${S}'>` +
-    (glowOpacity ? `<filter id='b' x='-30%25' y='-30%25' width='160%25' height='160%25'><feGaussianBlur stdDeviation='3.2'/></filter>` : '') +
+    (glowOpacity
+      ? `<filter id='b' x='-30%25' y='-30%25' width='160%25' height='160%25'><feGaussianBlur stdDeviation='3.2'/></filter>`
+      : '') +
     `<clipPath id='c'><path d='${p}'/></clipPath>` +
     `<linearGradient id='h' x1='0' y1='0' x2='0' y2='1'>` +
     `<stop offset='0' stop-color='${highlight}'/><stop offset='1' stop-color='${highlight}' stop-opacity='0'/>` +
@@ -51,17 +53,41 @@ function svg({ stroke, glow, fill, highlight, glowOpacity, strokeWidth, withTick
 }
 
 function uri(s) {
-  return `url("data:image/svg+xml,${s.replace(/#/g, '%23').replace(/</g, '%3C').replace(/>/g, '%3E').replace(/'/g, "%27")}")`;
+  return `url("data:image/svg+xml,${s.replace(/#/g, '%23').replace(/</g, '%3C').replace(/>/g, '%3E').replace(/'/g, '%27')}")`;
 }
 
 const FILL = '%23081020eb'; // hud panel fill ~0.92
 const HILITE = '%23a0d2ff38'; // inner top highlight ~0.22
 
 const variants = {
-  accent: { stroke: '%232e8fff', glow: '%233b9eff', glowOpacity: 0.85, strokeWidth: 1.5, withTicks: true },
-  buy: { stroke: '%2322e06a', glow: '%2322e06a', glowOpacity: 0.8, strokeWidth: 1.5, withTicks: true },
-  sell: { stroke: '%23ff3b4e', glow: '%23ff3b4e', glowOpacity: 0.8, strokeWidth: 1.5, withTicks: true },
-  warn: { stroke: '%23ffc53d', glow: '%23ffc53d', glowOpacity: 0.75, strokeWidth: 1.5, withTicks: true },
+  accent: {
+    stroke: '%232e8fff',
+    glow: '%233b9eff',
+    glowOpacity: 0.85,
+    strokeWidth: 1.5,
+    withTicks: true,
+  },
+  buy: {
+    stroke: '%2322e06a',
+    glow: '%2322e06a',
+    glowOpacity: 0.8,
+    strokeWidth: 1.5,
+    withTicks: true,
+  },
+  sell: {
+    stroke: '%23ff3b4e',
+    glow: '%23ff3b4e',
+    glowOpacity: 0.8,
+    strokeWidth: 1.5,
+    withTicks: true,
+  },
+  warn: {
+    stroke: '%23ffc53d',
+    glow: '%23ffc53d',
+    glowOpacity: 0.75,
+    strokeWidth: 1.5,
+    withTicks: true,
+  },
   flat: { stroke: '%232e8fff8c', glow: '', glowOpacity: 0, strokeWidth: 1.3, withTicks: false },
 };
 

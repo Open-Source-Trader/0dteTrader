@@ -6,9 +6,7 @@ describe('PasswordService', () => {
   it('hashes and verifies a password', async () => {
     const hash = await service.hash('correct horse battery staple');
     expect(hash).not.toContain('correct horse');
-    await expect(
-      service.verify(hash, 'correct horse battery staple'),
-    ).resolves.toBe(true);
+    await expect(service.verify(hash, 'correct horse battery staple')).resolves.toBe(true);
   });
 
   it('rejects a wrong password', async () => {

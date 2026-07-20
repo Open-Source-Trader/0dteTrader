@@ -12,7 +12,7 @@ body:
     attributes:
       label: Problem statement
       description: What problem does this solve? Who does it affect?
-      placeholder: "As a trader I find it frustrating when…"
+      placeholder: 'As a trader I find it frustrating when…'
     validations:
       required: true
 

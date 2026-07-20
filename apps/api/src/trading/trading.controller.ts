@@ -1,25 +1,8 @@
-import {
-  Body,
-  Controller,
-  Delete,
-  Get,
-  Headers,
-  HttpCode,
-  Param,
-  Post,
-} from '@nestjs/common';
+import { Body, Controller, Delete, Get, Headers, HttpCode, Param, Post } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
-import {
-  OrderPreview,
-  OrderResult,
-  Position,
-  TradeHistory,
-} from '@0dtetrader/shared-types';
+import { OrderPreview, OrderResult, Position, TradeHistory } from '@0dtetrader/shared-types';
 import { errors } from '../common/api-exception';
-import {
-  AuthenticatedUser,
-  CurrentUser,
-} from '../common/current-user.decorator';
+import { AuthenticatedUser, CurrentUser } from '../common/current-user.decorator';
 import { OrderRequestDto } from './dto/order-request.dto';
 import { OrdersService } from './orders.service';
 import { TradingService } from './trading.service';

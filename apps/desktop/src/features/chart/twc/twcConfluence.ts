@@ -51,7 +51,11 @@ function mtfVote(
   settings: TwcHeatmapSettings,
   chartIntervalSeconds: number,
 ): number[] {
-  const { htfCandles, chartToHtf } = resampleTo(candles, timeframeSeconds(tf), chartIntervalSeconds);
+  const { htfCandles, chartToHtf } = resampleTo(
+    candles,
+    timeframeSeconds(tf),
+    chartIntervalSeconds,
+  );
   const dir = fibDirectionSeries(htfCandles, settings);
   // lookahead_off with no [1] offset: chart bars read the developing bucket
   return chartToHtf.map((k) => dir[k]);
@@ -64,7 +68,14 @@ export function computeConfluence(
   chartIntervalSeconds: number,
 ): TwcConfluenceResult {
   const n = candles.length;
-  const tfs = [settings.mtfTf1, settings.mtfTf2, settings.mtfTf3, settings.mtfTf4, settings.mtfTf5, settings.mtfTf6];
+  const tfs = [
+    settings.mtfTf1,
+    settings.mtfTf2,
+    settings.mtfTf3,
+    settings.mtfTf4,
+    settings.mtfTf5,
+    settings.mtfTf6,
+  ];
   const votes = tfs.map((tf) => mtfVote(candles, tf, settings, chartIntervalSeconds));
 
   const score: (number | null)[] = new Array(n).fill(null);
@@ -95,13 +106,29 @@ export function computeConfluence(
     score[i] = s;
 
     if (!settings.showConfMarkers) continue;
-    const confluenceLong = input.crossUp[i] && (!settings.useConfluenceGate || s >= settings.confBullThr);
-    const confluenceShort = input.crossDn[i] && (!settings.useConfluenceGate || s <= settings.confBearThr);
+    const confluenceLong =
+      input.crossUp[i] && (!settings.useConfluenceGate || s >= settings.confBullThr);
+    const confluenceShort =
+      input.crossDn[i] && (!settings.useConfluenceGate || s <= settings.confBearThr);
     if (confluenceLong) {
-      markers.push({ barIndex: i, placement: 'belowBar', shape: 'labelUp', color: TWC_COLORS.bull, size: 'small', text: 'CL' });
+      markers.push({
+        barIndex: i,
+        placement: 'belowBar',
+        shape: 'labelUp',
+        color: TWC_COLORS.bull,
+        size: 'small',
+        text: 'CL',
+      });
     }
     if (confluenceShort) {
-      markers.push({ barIndex: i, placement: 'aboveBar', shape: 'labelDown', color: TWC_COLORS.bear, size: 'small', text: 'CS' });
+      markers.push({
+        barIndex: i,
+        placement: 'aboveBar',
+        shape: 'labelDown',
+        color: TWC_COLORS.bear,
+        size: 'small',
+        text: 'CS',
+      });
     }
   }
 

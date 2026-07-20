@@ -62,10 +62,10 @@
   --segmented-knob: #1f6fe0;
 
   /* Typography (bundled HUD fonts, see fonts.css) */
-  --font-sans: 'Rajdhani', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue',
-    Arial, sans-serif;
-  --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', 'Cascadia Mono', 'DejaVu Sans Mono',
-    Menlo, monospace;
+  --font-sans:
+    'Rajdhani', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --font-mono:
+    'JetBrains Mono', ui-monospace, 'SF Mono', 'Cascadia Mono', 'DejaVu Sans Mono', Menlo, monospace;
   --font-display: 'Orbitron', 'Rajdhani', system-ui, sans-serif;
 
   --fs-large-title: 34px;

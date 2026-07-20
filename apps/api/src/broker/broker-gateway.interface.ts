@@ -20,22 +20,10 @@ export const BROKER_GATEWAY = 'BROKER_GATEWAY';
  */
 export interface BrokerGateway {
   getQuote(userId: string, symbol: string): Promise<Quote>;
-  getCandles(
-    userId: string,
-    symbol: string,
-    req: CandleRequest,
-  ): Promise<Candle[]>;
-  getOptionsChain(
-    userId: string,
-    symbol: string,
-    expiration?: string,
-  ): Promise<OptionsChain>;
+  getCandles(userId: string, symbol: string, req: CandleRequest): Promise<Candle[]>;
+  getOptionsChain(userId: string, symbol: string, expiration?: string): Promise<OptionsChain>;
   previewOrder(userId: string, order: OrderRequest): Promise<OrderPreview>;
-  placeOrder(
-    userId: string,
-    order: OrderRequest,
-    idempotencyKey: string,
-  ): Promise<OrderResult>;
+  placeOrder(userId: string, order: OrderRequest, idempotencyKey: string): Promise<OrderResult>;
   cancelOrder(userId: string, orderId: string): Promise<void>;
   getPositions(userId: string): Promise<Position[]>;
   getOpenOrders(userId: string): Promise<OrderResult[]>;

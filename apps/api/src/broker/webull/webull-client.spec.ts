@@ -63,18 +63,12 @@ function withToken(handler: (url: string) => FakeResponse): (url: string) => Fak
 
 describe('WebullClient token lifecycle', () => {
   it('creates a token on the first call and attaches x-access-token after', async () => {
-    const { client, calls } = makeHarness(
-      withToken(() => ({ status: 200, body: { ok: true } })),
-    );
+    const { client, calls } = makeHarness(withToken(() => ({ status: 200, body: { ok: true } })));
     const result = await client.request('accountList');
     expect(result).toEqual({ ok: true });
 
-    expect(calls[0].url).toBe(
-      'https://api.sandbox.webull.com/openapi/auth/token/create',
-    );
-    expect(calls[1].url).toBe(
-      'https://api.sandbox.webull.com/openapi/account/list',
-    );
+    expect(calls[0].url).toBe('https://api.sandbox.webull.com/openapi/auth/token/create');
+    expect(calls[1].url).toBe('https://api.sandbox.webull.com/openapi/account/list');
     const headers = calls[1].init.headers as Record<string, string>;
     expect(headers['x-app-key']).toBe('key');
     expect(headers['x-signature']).toBeDefined();
@@ -84,33 +78,23 @@ describe('WebullClient token lifecycle', () => {
   });
 
   it('caches the token across requests (one create for many calls)', async () => {
-    const { client, calls } = makeHarness(
-      withToken(() => ({ status: 200, body: [] })),
-    );
+    const { client, calls } = makeHarness(withToken(() => ({ status: 200, body: [] })));
     await client.request('accountList');
     await client.request('balance', { query: { account_id: 'ACC-1' } });
     await client.request('positions', { query: { account_id: 'ACC-1' } });
-    const tokenCalls = calls.filter((c) =>
-      c.url.includes('/openapi/auth/token/'),
-    );
+    const tokenCalls = calls.filter((c) => c.url.includes('/openapi/auth/token/'));
     expect(tokenCalls).toHaveLength(1);
     expect(calls).toHaveLength(4);
   });
 
   it('reauthenticate() discards the token and forces a fresh create', async () => {
-    const { client, calls } = makeHarness(
-      withToken(() => ({ status: 200, body: { ok: true } })),
-    );
+    const { client, calls } = makeHarness(withToken(() => ({ status: 200, body: { ok: true } })));
     await client.request('accountList');
     await client.reauthenticate();
     await client.request('accountList');
-    const creates = calls.filter((c) =>
-      c.url.includes('/openapi/auth/token/create'),
-    );
+    const creates = calls.filter((c) => c.url.includes('/openapi/auth/token/create'));
     expect(creates).toHaveLength(2);
-    expect(
-      calls.filter((c) => c.url.includes('/openapi/auth/token/refresh')),
-    ).toHaveLength(0);
+    expect(calls.filter((c) => c.url.includes('/openapi/auth/token/refresh'))).toHaveLength(0);
   });
 
   it('latches after an auth-class token failure — never auto-recreates', async () => {
@@ -130,8 +114,7 @@ describe('WebullClient token lifecycle', () => {
       sleep: async () => {},
       now: () => new Date(nowMs),
     });
-    const creates = () =>
-      calls.filter((c) => c.url.includes('/openapi/auth/token/create'));
+    const creates = () => calls.filter((c) => c.url.includes('/openapi/auth/token/create'));
 
     // First failure hits the endpoint once; every later call fails fast
     // locally with the same auth error — no more creates, even after the
@@ -268,16 +251,12 @@ describe('WebullClient token lifecycle', () => {
     await expect(client.request('accountList')).rejects.toMatchObject({
       code: 'BROKER_AUTH_FAILED',
     });
-    expect(
-      calls.filter((c) => c.url.includes('/openapi/auth/token/create')),
-    ).toHaveLength(1);
+    expect(calls.filter((c) => c.url.includes('/openapi/auth/token/create'))).toHaveLength(1);
 
     // The Reconnect button is the only path to a fresh token.
     await client.reauthenticate();
     await expect(client.request('accountList')).resolves.toEqual({ ok: 1 });
-    expect(
-      calls.filter((c) => c.url.includes('/openapi/auth/token/create')),
-    ).toHaveLength(2);
+    expect(calls.filter((c) => c.url.includes('/openapi/auth/token/create'))).toHaveLength(2);
   });
 
   it('serves calls with a PENDING token and promotes it via token/check', async () => {
@@ -318,9 +297,7 @@ describe('WebullClient token lifecycle', () => {
     // Now NORMAL: no further creates or checks.
     nowMs += 21_000;
     await expect(client.request('accountList')).resolves.toEqual({ ok: 1 });
-    expect(
-      calls.filter((c) => c.url.includes('/openapi/auth/token/')),
-    ).toHaveLength(2);
+    expect(calls.filter((c) => c.url.includes('/openapi/auth/token/'))).toHaveLength(2);
   });
 
   it('latches when a PENDING token expires unverified (5-minute window)', async () => {
@@ -348,9 +325,7 @@ describe('WebullClient token lifecycle', () => {
       code: 'BROKER_AUTH_FAILED',
     });
     expect(calls).toHaveLength(count);
-    expect(
-      calls.filter((c) => c.url.includes('/openapi/auth/token/create')),
-    ).toHaveLength(1);
+    expect(calls.filter((c) => c.url.includes('/openapi/auth/token/create'))).toHaveLength(1);
   });
 
   it('maps quote-subscription 401s to BROKER_PERMISSION_DENIED and keeps the token', async () => {
@@ -371,9 +346,7 @@ describe('WebullClient token lifecycle', () => {
     await expect(client.request('stockBars')).rejects.toMatchObject({
       code: 'BROKER_PERMISSION_DENIED',
     });
-    const tokenCalls = calls.filter((c) =>
-      c.url.includes('/openapi/auth/token/create'),
-    );
+    const tokenCalls = calls.filter((c) => c.url.includes('/openapi/auth/token/create'));
     expect(tokenCalls).toHaveLength(1);
   });
 });
@@ -381,15 +354,17 @@ describe('WebullClient token lifecycle', () => {
 describe('WebullClient resilience', () => {
   it('retries 429 honoring Retry-After and then succeeds', async () => {
     const { client, calls, sleeps } = makeHarness(
-      withToken((() => {
-        let n = 0;
-        return () => {
-          n += 1;
-          return n <= 2
-            ? { status: 429, headers: { 'retry-after': '0' } }
-            : { status: 200, body: { ok: 1 } };
-        };
-      })()),
+      withToken(
+        (() => {
+          let n = 0;
+          return () => {
+            n += 1;
+            return n <= 2
+              ? { status: 429, headers: { 'retry-after': '0' } }
+              : { status: 200, body: { ok: 1 } };
+          };
+        })(),
+      ),
     );
     const result = await client.request('balance', {
       query: { account_id: 'ACC-1' },
@@ -401,13 +376,15 @@ describe('WebullClient resilience', () => {
 
   it('uses exponential backoff with jitter when Retry-After is absent', async () => {
     const { client, sleeps } = makeHarness(
-      withToken((() => {
-        let n = 0;
-        return () => {
-          n += 1;
-          return n <= 2 ? { status: 429 } : { status: 200, body: { ok: 1 } };
-        };
-      })()),
+      withToken(
+        (() => {
+          let n = 0;
+          return () => {
+            n += 1;
+            return n <= 2 ? { status: 429 } : { status: 200, body: { ok: 1 } };
+          };
+        })(),
+      ),
     );
     await client.request('balance', { query: { account_id: 'ACC-1' } });
     expect(sleeps).toHaveLength(2);
@@ -429,13 +406,15 @@ describe('WebullClient resilience', () => {
 
   it('retries a 5xx once before surfacing the error', async () => {
     const { client, calls } = makeHarness(
-      withToken((() => {
-        let n = 0;
-        return () => {
-          n += 1;
-          return n === 1 ? { status: 500 } : { status: 200, body: { ok: true } };
-        };
-      })()),
+      withToken(
+        (() => {
+          let n = 0;
+          return () => {
+            n += 1;
+            return n === 1 ? { status: 500 } : { status: 200, body: { ok: true } };
+          };
+        })(),
+      ),
     );
     const result = await client.request('accountList');
     expect(result).toEqual({ ok: true });
@@ -461,9 +440,7 @@ describe('WebullClient resilience', () => {
   });
 
   it('sends the exact compact-JSON bytes it signed', async () => {
-    const { client, calls } = makeHarness(
-      withToken(() => ({ status: 200, body: {} })),
-    );
+    const { client, calls } = makeHarness(withToken(() => ({ status: 200, body: {} })));
     await client.request('orderCancel', {
       body: { a: 1, b: 'two' } as never,
     });
@@ -477,13 +454,25 @@ describe('WebullClient error mapping (docs/WEBULL-INTEGRATION.md §6)', () => {
   // the same body on a non-trade endpoint is a parameter problem and must
   // fall through to BROKER_ERROR (last case pins that).
   const cases: ['accountList' | 'orderPlace', number, unknown, string, number][] = [
-    ['orderPlace', 417, { code: 'INSUFFICIENT_BUYING_POWER', message: 'not enough buying power' }, 'INSUFFICIENT_BUYING_POWER', 400],
+    [
+      'orderPlace',
+      417,
+      { code: 'INSUFFICIENT_BUYING_POWER', message: 'not enough buying power' },
+      'INSUFFICIENT_BUYING_POWER',
+      400,
+    ],
     ['accountList', 417, { code: 'OPENAPI_NO_NIGHT_TRADING_TIME' }, 'MARKET_CLOSED', 400],
     ['orderPlace', 417, { code: 'SOME_REJECT', message: 'bad order' }, 'ORDER_REJECTED', 400],
     ['orderPlace', 400, { message: 'insufficient buying power' }, 'INSUFFICIENT_BUYING_POWER', 400],
     ['accountList', 401, { code: 'UNAUTHORIZED' }, 'BROKER_AUTH_FAILED', 401],
     ['accountList', 429, {}, 'BROKER_RATE_LIMITED', 503],
-    ['accountList', 417, { code: 'INSUFFICIENT_BUYING_POWER', message: 'not enough buying power' }, 'BROKER_ERROR', 400],
+    [
+      'accountList',
+      417,
+      { code: 'INSUFFICIENT_BUYING_POWER', message: 'not enough buying power' },
+      'BROKER_ERROR',
+      400,
+    ],
   ];
 
   it.each(cases)(

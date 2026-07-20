@@ -4,7 +4,11 @@ import { AlertDialog } from '../../design/components/AlertDialog';
 import { Spinner } from '../../design/components/Spinner';
 import { Format } from '../../design/format';
 import { XCircleFillIcon } from '../../design/icons';
-import { orderStatusDisplayName, orderTypeDisplayName, sideDisplayName } from '../../core/models/domain';
+import {
+  orderStatusDisplayName,
+  orderTypeDisplayName,
+  sideDisplayName,
+} from '../../core/models/domain';
 
 interface PositionsStripProps {
   positions: Position[];
@@ -95,10 +99,7 @@ export function PositionsStrip({
                   </span>
                   {workingSymbols.includes(position.symbol) ? <Spinner size={11} /> : null}
                 </span>
-                <span
-                  className="text-secondary numeric"
-                  style={{ fontSize: 'var(--fs-caption2)' }}
-                >
+                <span className="text-secondary numeric" style={{ fontSize: 'var(--fs-caption2)' }}>
                   {Format.signedQuantity(position.quantity)} @ {Format.price(position.avgPrice)}
                 </span>
                 <span
@@ -136,13 +137,13 @@ export function PositionsStrip({
               style={{ ...chipStyle, display: 'flex', alignItems: 'center', gap: 8 }}
             >
               <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                <span className="numeric" style={{ fontSize: 'var(--fs-caption)', fontWeight: 600 }}>
+                <span
+                  className="numeric"
+                  style={{ fontSize: 'var(--fs-caption)', fontWeight: 600 }}
+                >
                   {sideDisplayName(order.side)} {order.quantity} {order.contractSymbol}
                 </span>
-                <span
-                  className="text-secondary numeric"
-                  style={{ fontSize: 'var(--fs-caption2)' }}
-                >
+                <span className="text-secondary numeric" style={{ fontSize: 'var(--fs-caption2)' }}>
                   {orderTypeDisplayName(order.orderType)} · {orderStatusDisplayName(order.status)}
                 </span>
               </div>

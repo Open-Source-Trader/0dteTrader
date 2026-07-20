@@ -57,7 +57,9 @@ function serveDist() {
         res.writeHead(404).end('not found');
         return;
       }
-      res.writeHead(200, { 'Content-Type': MIME[path.extname(filePath)] ?? 'application/octet-stream' });
+      res.writeHead(200, {
+        'Content-Type': MIME[path.extname(filePath)] ?? 'application/octet-stream',
+      });
       res.end(data);
     });
   });
@@ -109,7 +111,9 @@ async function ensureBackend() {
   }
   const entry = path.join(API_DIR, 'dist/main.js');
   if (!fs.existsSync(entry)) {
-    console.error(`[desktop] backend build missing (${entry}) — run: npm run build --workspace apps/api`);
+    console.error(
+      `[desktop] backend build missing (${entry}) — run: npm run build --workspace apps/api`,
+    );
     return;
   }
   console.log(`[desktop] starting backend on :${API_PORT}`);

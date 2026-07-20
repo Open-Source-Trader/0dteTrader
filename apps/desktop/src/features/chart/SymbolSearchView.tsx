@@ -51,9 +51,7 @@ export function SymbolSearchView({ currentSymbol, onSelect, onDismiss }: SymbolS
       event.preventDefault();
       if (visibleRows.length === 0) return;
       const delta = event.key === 'ArrowDown' ? 1 : -1;
-      setActiveIndex((index) =>
-        Math.min(visibleRows.length - 1, Math.max(0, index + delta)),
-      );
+      setActiveIndex((index) => Math.min(visibleRows.length - 1, Math.max(0, index + delta)));
       return;
     }
     // Enter commits the highlighted match (or the top one), not raw text.
@@ -63,13 +61,19 @@ export function SymbolSearchView({ currentSymbol, onSelect, onDismiss }: SymbolS
   };
 
   const activeStyle = (symbol: string) =>
-    rowIndex.get(symbol) === activeIndex
-      ? { background: 'rgba(46, 143, 255, 0.12)' }
-      : undefined;
+    rowIndex.get(symbol) === activeIndex ? { background: 'rgba(46, 143, 255, 0.12)' } : undefined;
 
   return (
     <Sheet detent="large" onDismiss={onDismiss}>
-      <div style={{ background: 'var(--app-background)', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+      <div
+        style={{
+          background: 'var(--app-background)',
+          flex: 1,
+          minHeight: 0,
+          display: 'flex',
+          flexDirection: 'column',
+        }}
+      >
         <NavBar
           title="Symbol"
           trailing={
@@ -141,7 +145,11 @@ export function SymbolSearchView({ currentSymbol, onSelect, onDismiss }: SymbolS
                         <span
                           className="row-value"
                           aria-hidden="true"
-                          style={{ color: 'var(--app-accent)', display: 'flex', alignItems: 'center' }}
+                          style={{
+                            color: 'var(--app-accent)',
+                            display: 'flex',
+                            alignItems: 'center',
+                          }}
                         >
                           <CheckmarkIcon size={17} />
                         </span>

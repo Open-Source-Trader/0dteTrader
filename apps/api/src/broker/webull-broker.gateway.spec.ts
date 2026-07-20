@@ -30,17 +30,11 @@ type Handler = (call: RecordedCall) => { status: number; body: unknown };
 const NEAREST_EXPIRATION = optionExpirations('SPY', new Date())[0];
 
 function defaultHandlers(): Record<string, Handler> {
-  const perSymbol = (
-    call: RecordedCall,
-    make: (symbol: string) => Record<string, unknown>,
-  ) => {
+  const perSymbol = (call: RecordedCall, make: (symbol: string) => Record<string, unknown>) => {
     const symbols = new URL(call.url).searchParams.get('symbols') ?? '';
     return {
       status: 200,
-      body: symbols
-        .split(',')
-        .filter(Boolean)
-        .map(make),
+      body: symbols.split(',').filter(Boolean).map(make),
     };
   };
 
@@ -126,8 +120,7 @@ describe('WebullBrokerGateway', () => {
   /** Saved override so the Prisma-client dotenv autoload can't leak into hosts(). */
   let savedDataBaseUrl: string | undefined;
 
-  const callsTo = (path: string): RecordedCall[] =>
-    calls.filter((c) => c.path === path);
+  const callsTo = (path: string): RecordedCall[] => calls.filter((c) => c.path === path);
 
   beforeEach(() => {
     calls = [];
@@ -180,14 +173,7 @@ describe('WebullBrokerGateway', () => {
       },
     } as unknown as PrismaService;
     events = new OrderEventsService();
-    gateway = new WebullBrokerGateway(
-      credentials,
-      config,
-      events,
-      prisma,
-      undefined,
-      fetchImpl,
-    );
+    gateway = new WebullBrokerGateway(credentials, config, events, prisma, undefined, fetchImpl);
   });
 
   afterEach(() => {
@@ -375,9 +361,7 @@ describe('WebullBrokerGateway', () => {
       const base = defaultHandlers()['GET /openapi/market-data/option/snapshot'];
       handlers['GET /openapi/market-data/option/snapshot'] = (call) => {
         const res = base(call) as { status: number; body: any[] };
-        res.body = res.body.filter(
-          (row) => (parseOccSymbol(row.symbol)?.strike ?? 0) <= 500,
-        );
+        res.body = res.body.filter((row) => (parseOccSymbol(row.symbol)?.strike ?? 0) <= 500);
         return res;
       };
       const chain = await gateway.getOptionsChain('u1', 'SPY');
@@ -386,9 +370,9 @@ describe('WebullBrokerGateway', () => {
     });
 
     it('rejects an expiration that is not probed', async () => {
-      await expect(
-        gateway.getOptionsChain('u1', 'SPY', '1999-01-01'),
-      ).rejects.toMatchObject({ code: 'CONTRACT_NOT_FOUND' });
+      await expect(gateway.getOptionsChain('u1', 'SPY', '1999-01-01')).rejects.toMatchObject({
+        code: 'CONTRACT_NOT_FOUND',
+      });
     });
   });
 
@@ -425,9 +409,7 @@ describe('WebullBrokerGateway', () => {
       const preview = await gateway.previewOrder('u1', order);
       // 2 contracts × 1.05 × 100 multiplier
       expect(preview.resolved.estBuyingPower).toBe(210);
-      expect(
-        preview.warnings.some((w) => w.includes('local estimate')),
-      ).toBe(true);
+      expect(preview.warnings.some((w) => w.includes('local estimate'))).toBe(true);
     });
 
     it('warns on market orders for options', async () => {
@@ -485,9 +467,7 @@ describe('WebullBrokerGateway', () => {
 
     it('closes an existing short with BUY_TO_CLOSE', async () => {
       const chain = await gateway.getOptionsChain('u1', 'SPY');
-      const target = chain.contracts.find(
-        (c) => c.optionType === 'call' && c.strike === 505,
-      )!;
+      const target = chain.contracts.find((c) => c.optionType === 'call' && c.strike === 505)!;
       handlers['GET /openapi/assets/positions'] = () => ({
         status: 200,
         body: [
@@ -662,9 +642,7 @@ describe('WebullBrokerGateway', () => {
       await gateway.getPositions('u1');
       await gateway.getOpenOrders('u1');
       expect(callsTo('/openapi/account/list')).toHaveLength(1);
-      expect(callsTo('/openapi/trade/order/open')[0].url).toContain(
-        'account_id=ACC-DISCOVERED',
-      );
+      expect(callsTo('/openapi/trade/order/open')[0].url).toContain('account_id=ACC-DISCOVERED');
     });
 
     it('accepts the {accounts: [...]} response wrapper', async () => {
@@ -673,9 +651,7 @@ describe('WebullBrokerGateway', () => {
         body: { accounts: [{ account_id: 'ACC-NESTED' }] },
       });
       await gateway.getPositions('u1');
-      expect(callsTo('/openapi/assets/positions')[0].url).toContain(
-        'account_id=ACC-NESTED',
-      );
+      expect(callsTo('/openapi/assets/positions')[0].url).toContain('account_id=ACC-NESTED');
     });
 
     it('fails with an auth error when no accounts come back', async () => {
@@ -689,9 +665,7 @@ describe('WebullBrokerGateway', () => {
       storedCreds = { live: { appKey: 'AK', appSecret: 'SK', accountId: 'ACC-1' } };
       await gateway.getPositions('u1');
       expect(callsTo('/openapi/account/list')).toHaveLength(0);
-      expect(callsTo('/openapi/assets/positions')[0].url).toContain(
-        'account_id=ACC-1',
-      );
+      expect(callsTo('/openapi/assets/positions')[0].url).toContain('account_id=ACC-1');
     });
   });
 });

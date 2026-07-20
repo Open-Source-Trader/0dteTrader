@@ -51,9 +51,7 @@ export class WebullTokenStore {
             status: row.status,
           };
         } catch (err) {
-          this.logger.warn(
-            `Webull token load failed (${environment}): ${(err as Error).message}`,
-          );
+          this.logger.warn(`Webull token load failed (${environment}): ${(err as Error).message}`);
           return null;
         }
       },
@@ -71,9 +69,7 @@ export class WebullTokenStore {
             update: data,
           });
         } catch (err) {
-          this.logger.warn(
-            `Webull token save failed (${environment}): ${(err as Error).message}`,
-          );
+          this.logger.warn(`Webull token save failed (${environment}): ${(err as Error).message}`);
         }
       },
       clear: async () => {
@@ -82,9 +78,7 @@ export class WebullTokenStore {
             where: { userId, environment },
           });
         } catch (err) {
-          this.logger.warn(
-            `Webull token clear failed (${environment}): ${(err as Error).message}`,
-          );
+          this.logger.warn(`Webull token clear failed (${environment}): ${(err as Error).message}`);
         }
       },
     };

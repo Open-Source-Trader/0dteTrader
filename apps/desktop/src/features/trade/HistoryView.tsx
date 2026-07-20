@@ -85,7 +85,10 @@ export function HistoryView({ onDismiss }: { onDismiss: () => void }) {
             </button>
           }
         />
-        <div className="sheet-body hide-scrollbar" style={{ overflowY: 'auto', padding: '0 16px 16px' }}>
+        <div
+          className="sheet-body hide-scrollbar"
+          style={{ overflowY: 'auto', padding: '0 16px 16px' }}
+        >
           {history === null && error === null ? (
             <div
               style={{
@@ -231,7 +234,12 @@ export function HistoryView({ onDismiss }: { onDismiss: () => void }) {
                     </div>
                     <div
                       className="text-secondary"
-                      style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 'var(--fs-caption)' }}
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        gap: 8,
+                        fontSize: 'var(--fs-caption)',
+                      }}
                     >
                       <span>
                         {orderTypeDisplayName(entry.orderType)}

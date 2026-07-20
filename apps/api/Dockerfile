@@ -12,6 +12,8 @@ COPY packages/shared-types/package.json packages/shared-types/
 
 # Prisma schema must be present before npm ci (postinstall runs prisma generate)
 COPY apps/api/prisma/ apps/api/prisma/
+# Prisma 7 reads the datasource from prisma.config.ts (postinstall generate + runtime migrate)
+COPY apps/api/prisma.config.ts apps/api/
 
 RUN npm ci
 
@@ -39,6 +41,7 @@ COPY --from=builder /app/packages/shared-types/dist ./packages/shared-types/dist
 COPY --from=builder /app/packages/shared-types/package.json ./packages/shared-types/
 COPY --from=builder /app/apps/api/dist ./apps/api/dist
 COPY --from=builder /app/apps/api/prisma ./apps/api/prisma
+COPY --from=builder /app/apps/api/prisma.config.ts ./apps/api/
 COPY --from=builder /app/apps/api/package.json ./apps/api/
 COPY --from=builder /app/package.json ./
 
@@ -48,4 +51,4 @@ USER appuser
 EXPOSE 3000
 
 ENTRYPOINT ["tini", "--"]
-CMD ["sh", "-c", "npx prisma migrate deploy --schema apps/api/prisma/schema.prisma && node apps/api/dist/main.js"]
+CMD ["sh", "-c", "npx prisma migrate deploy --config apps/api/prisma.config.ts && node apps/api/dist/main.js"]

@@ -1,20 +1,8 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import {
-  OrderPreview,
-  OrderRequest,
-  OrderResult,
-  Position,
-} from '@0dtetrader/shared-types';
-import {
-  BROKER_GATEWAY,
-  BrokerGateway,
-} from '../broker/broker-gateway.interface';
-import {
-  findExplicitOption,
-  pickExpiration,
-  resolveAutoOtm,
-} from '../broker/contract-resolution';
+import { OrderPreview, OrderRequest, OrderResult, Position } from '@0dtetrader/shared-types';
+import { BROKER_GATEWAY, BrokerGateway } from '../broker/broker-gateway.interface';
+import { findExplicitOption, pickExpiration, resolveAutoOtm } from '../broker/contract-resolution';
 import { errors, isUniqueViolation } from '../common/api-exception';
 import { BrokerError } from '../common/broker-error';
 import { PrismaService } from '../prisma/prisma.service';
@@ -51,11 +39,7 @@ export class TradingService {
     }
   }
 
-  async place(
-    userId: string,
-    dto: OrderRequestDto,
-    idempotencyKey: string,
-  ): Promise<OrderResult> {
+  async place(userId: string, dto: OrderRequestDto, idempotencyKey: string): Promise<OrderResult> {
     await this.assertTradingEnabled(userId, 'place', { order: dto });
 
     // Claim the key BEFORE the broker call: the pending audit row is the
@@ -187,29 +171,18 @@ export class TradingService {
    * what the server validated. Mid prices are recomputed by the gateway from
    * live bid/ask at execution time (and in previews).
    */
-  private async resolveAndValidate(
-    userId: string,
-    dto: OrderRequestDto,
-  ): Promise<OrderRequest> {
+  private async resolveAndValidate(userId: string, dto: OrderRequestDto): Promise<OrderRequest> {
     const { selection } = dto;
 
     if (!selection.optionType) {
       throw errors.validation('selection.optionType is required for option orders');
     }
-    const chain = await this.getChainValidated(
-      userId,
-      dto.underlying,
-      selection.expiration,
-    );
+    const chain = await this.getChainValidated(userId, dto.underlying, selection.expiration);
     const expiration = pickExpiration(chain.expirations, selection.expiration);
 
     if (selection.mode === 'auto_otm') {
       const quote = await this.gateway.getQuote(userId, dto.underlying);
-      const contract = resolveAutoOtm(
-        chain.contracts,
-        selection.optionType,
-        quote.last,
-      );
+      const contract = resolveAutoOtm(chain.contracts, selection.optionType, quote.last);
       return {
         ...dto,
         selection: {
@@ -224,11 +197,7 @@ export class TradingService {
     if (typeof selection.strike !== 'number') {
       throw errors.validation('selection.strike is required for explicit option orders');
     }
-    const contract = findExplicitOption(
-      chain.contracts,
-      selection.optionType,
-      selection.strike,
-    );
+    const contract = findExplicitOption(chain.contracts, selection.optionType, selection.strike);
     if (!contract) {
       throw errors.validation(
         `No ${selection.optionType} contract at strike ${selection.strike} ` +
@@ -250,11 +219,7 @@ export class TradingService {
    * Fetches a chain, translating gateway "no such expiration" errors into
    * client-facing validation errors (the expiration is client input).
    */
-  private async getChainValidated(
-    userId: string,
-    underlying: string,
-    expiration?: string,
-  ) {
+  private async getChainValidated(userId: string, underlying: string, expiration?: string) {
     try {
       return await this.gateway.getOptionsChain(userId, underlying, expiration);
     } catch (err) {

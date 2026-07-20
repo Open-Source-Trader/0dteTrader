@@ -19,6 +19,7 @@
 ## Findings
 
 ### [P1] — Canvas is 100% invisible to VoiceOver: drawings, alerts, prices, selection
+
 - **What/Why:** `DrawingOverlayView` renders everything with `CGContext` and exposes no accessibility elements. A VoiceOver user cannot perceive that annotations exist, where alert lines sit, or what is selected — a core trading feature (price alerts!) is unusable. Violates Accessibility + Platform Fidelity; Apple HIG requires all content-bearing views to be accessible. Hit areas compound it: `handleRadius = 5` → 10pt handles, `hitDistance = 10` → 20pt line band vs the 44×44pt HIG minimum (`DrawingOverlayView.swift:40-41`).
 - **Location:** `apps/ios/0dteTrader/Features/Chart/DrawingOverlayView.swift:12` (whole class), `:40-41`
 - **Exact fix:** Synthesize one `UIAccessibilityElement` per drawing/alert whenever the model changes, and enlarge hit slop without changing visuals:
@@ -57,6 +58,7 @@
   ```
 
 ### [P1] — "Clear All Drawings" wipes every annotation with one tap, no confirmation, no undo
+
 - **What/Why:** `removeSelectedOrClear()` bound to a `role: .destructive` menu button executes immediately (`ChartView.swift:189-198` → `ChartDrawings.swift:131-141`). One mis-tap destroys a trader's entire annotation set for the symbol, persisted instantly to UserDefaults. Violates State Coverage (destructive actions need a guardrail) — iOS convention (Photos, Notes) is a confirmation dialog for irreversible multi-item deletes.
 - **Location:** `apps/ios/0dteTrader/Features/Chart/ChartView.swift:190-197`, `apps/ios/0dteTrader/Features/Chart/ChartDrawings.swift:136-139`
 - **Exact fix:** Gate the bulk clear behind a confirmation dialog in `ChartView`:
@@ -82,6 +84,7 @@
   ```
 
 ### [P1] — Touch targets far below 44pt across the entire flow
+
 - **What/Why:** Selection handles are 10pt circles (`handleRadius = 5`, `DrawingOverlayView.swift:40`), line hit band is 20pt (`hitDistance = 10`, `:41`), and the header's drawing-tool menu / interval chip / settings buttons are all ~33pt or less: `.subheadline` glyph (~15pt) + `padding(8)` ≈ 31pt (`ChartView.swift:200-205`, `:163-168`); interval chip ≈ 12pt text + 12pt vertical padding ≈ 24pt tall (`:151-156`). HIG minimum is 44×44pt; on a trading screen where a missed tap mis-places an order-adjacent annotation, this is a P1.
 - **Location:** `apps/ios/0dteTrader/Features/Chart/DrawingOverlayView.swift:40-41`, `apps/ios/0dteTrader/Features/Chart/ChartView.swift:153-156,166,203`
 - **Exact fix:** Decouple hit slop from visual size (see fix 1 for canvas). For the header controls, enforce 44pt frames:
@@ -102,6 +105,7 @@
   ```
 
 ### [P1] — Zero-length drawings are persisted as invisible, undeletable junk
+
 - **What/Why:** On `.ended` the draft is committed unconditionally (`DrawingOverlayView.swift:144-149`). A tap-like micro-drag with a trend/ray/rect tool armed stores `p1 == p2`: the ray guard `a != b` (`:301`) means it strokes a zero-length path — nothing renders, but the shape lives in `drawings`, persists to UserDefaults, and can never be selected visually (its only hit area is a 20pt blob at one point). Violates State Coverage / DataViz integrity.
 - **Location:** `apps/ios/0dteTrader/Features/Chart/DrawingOverlayView.swift:144-149`
 - **Exact fix:** Reject degenerate drafts using pixel distance:
@@ -120,6 +124,7 @@
   ```
 
 ### [P1] — Arming a draw tool gives zero guidance; taps on empty space silently do nothing
+
 - **What/Why:** Selecting "Trend Line", "Ray", or "Box" from the menu only recolors the header pill (`ChartView.swift:200-204`). Nothing tells the user these tools are drag-placed while Horizontal/Alert are tap-placed (`DrawingOverlayView.swift:115-116` `break // Placed by drag`). In cursor mode, a tap that misses every shape silently sets `selectedId = nil` (`:114`). First-run users will conclude the feature is broken. Violates State Coverage (no designed empty/armed state) — Robinhood/TradingView both show a contextual hint banner.
 - **Location:** `apps/ios/0dteTrader/Features/Chart/DrawingOverlayView.swift:107-117`, `apps/ios/0dteTrader/Features/Chart/ChartView.swift:176-208`
 - **Exact fix:** Overlay a dismissible hint capsule at the top of the chart in `ChartView.body`'s `ZStack`, driven by the active tool:
@@ -141,7 +146,8 @@
   ```
 
 ### [P2] — Zero motion design; 30fps CADisplayLink repaints the canvas forever, even idle
-- **What/Why:** `didMoveToWindow` starts a 30fps `CADisplayLink` whose `tick` calls `setNeedsDisplay()` unconditionally (`DrawingOverlayView.swift:59-73`) — the full annotation layer is redrawn ~1,800×/min with zero changes, burning battery on a trading screen that runs all session. Meanwhile every state change that *should* be animated (selection, placement, deletion) is instantaneous. No `UIAccessibilityIsReduceMotionEnabled` consideration. Violates Motion & Micro-interactions.
+
+- **What/Why:** `didMoveToWindow` starts a 30fps `CADisplayLink` whose `tick` calls `setNeedsDisplay()` unconditionally (`DrawingOverlayView.swift:59-73`) — the full annotation layer is redrawn ~1,800×/min with zero changes, burning battery on a trading screen that runs all session. Meanwhile every state change that _should_ be animated (selection, placement, deletion) is instantaneous. No `UIAccessibilityIsReduceMotionEnabled` consideration. Violates Motion & Micro-interactions.
 - **Location:** `apps/ios/0dteTrader/Features/Chart/DrawingOverlayView.swift:59-73`
 - **Exact fix:** Invalidate only on actual change — model publications and chart transforms:
   ```swift
@@ -164,6 +170,7 @@
   Then animate selection in the model consumer: wrap `model.selectedId = …` mutations with `withAnimation(.spring(response: 0.25, dampingFraction: 0.8))` where surfaced in SwiftUI, and gate any future animated hints behind `withAnimation(UIAccessibilityIsReduceMotionEnabled() ? .none : .easeInOut(duration: 0.2))`.
 
 ### [P2] — No haptics anywhere in the draw/select/drag/alert flow
+
 - **What/Why:** `Haptics.swift` ships `selection()`, `impact()`, `success()` and the header uses `Haptics.selection()` for symbol search (`ChartView.swift:118`), but placing a drawing, grabbing a handle, selecting a shape, and an alert firing are all haptically silent. Violates Platform Fidelity — haptic confirmation on placement is exactly the "delight" bar (Robinhood order-submit tick).
 - **Location:** `apps/ios/0dteTrader/Features/Chart/DrawingOverlayView.swift:104-204`, `apps/ios/0dteTrader/Features/Chart/ChartViewModel.swift:127-132`
 - **Exact fix:**
@@ -177,6 +184,7 @@
   ```
 
 ### [P2] — Accent color hardcoded as a literal, duplicates the design token, and is light-mode-wrong
+
 - **What/Why:** `accentColor = UIColor(red: 0.337, green: 0.561, blue: 0.969)` (`DrawingOverlayView.swift:38`) is byte-identical to `AppColors.appAccent`'s **dark** variant (`AppColors.swift:54-58`) but is not dynamic — light mode (fully supported per the palette's doc comment) renders the dark-mode blue, and the white handle fill (`:350`) disappears against a white chart. Violates Consistency (token bypass) + Color correctness.
 - **Location:** `apps/ios/0dteTrader/Features/Chart/DrawingOverlayView.swift:38,350`
 - **Exact fix:** Mirror the token's dynamic provider (or expose a `UIColor` companion in `AppColors.swift`):
@@ -192,6 +200,7 @@
   ```
 
 ### [P2] — Price tags pinned to left edge collide with the y-axis; fixed 10pt ignores Dynamic Type
+
 - **What/Why:** `renderPriceTag` draws the tag background at `x: 4` (`DrawingOverlayView.swift:339`) — directly over the left price axis whose labels are also 10pt monospaced (`CandleChartRepresentable.swift:81-82`), producing overlapping price text at different scales. TradingView pins these tags on the price axis at the line's level. The font is also a fixed `UIFont.monospacedDigitSystemFont(ofSize: 10)` (`:335`) — no Dynamic Type, breaking Accessibility (text-size) and consistency with `AppTypography` (which has no UIKit price-tag token — gap).
 - **Location:** `apps/ios/0dteTrader/Features/Chart/DrawingOverlayView.swift:333-343`
 - **Exact fix:** Pin to the right edge inside the plot, scale via `UIFontMetrics`, and round the corners:
@@ -212,6 +221,7 @@
   ```
 
 ### [P2] — Emoji "⏰" in the alert tag violates the SF Symbols design language and breaks tag metrics
+
 - **What/Why:** `renderPriceTag(..., prefix: "⏰ ", ...)` (`DrawingOverlayView.swift:323`) mixes an emoji — which ignores the monospaced font, renders at platform-dependent metrics, and clashes with the SF-Symbols-only iconography used everywhere else (`ChartDrawings.swift:26-35`). The alert already has a non-color channel (dashed `[5,4]` line) — the emoji adds noise, not meaning. Violates Consistency + Typography.
 - **Location:** `apps/ios/0dteTrader/Features/Chart/DrawingOverlayView.swift:323`
 - **Exact fix:** Drop the emoji; render the SF Symbol tint-matched to the tag instead:
@@ -230,6 +240,7 @@
   ```
 
 ### [P2] — Selection affordance is a +0.75pt line width and two 10pt dots; no edit/delete surface
+
 - **What/Why:** Selected state = line width 1.25→2 (`DrawingOverlayView.swift:272`) plus two 10pt handles (`:345-355`). There is no color change, no glow, and no floating action bar — to delete a selection the user must open the header menu and find "Delete Selection" (`ChartView.swift:193-195`), two taps away and undiscoverable. TradingView shows a contextual floating toolbar on selection; that is the competitive bar. Violates Density (hierarchy) + Platform.
 - **Location:** `apps/ios/0dteTrader/Features/Chart/DrawingOverlayView.swift:270-312`, `apps/ios/0dteTrader/Features/Chart/ChartView.swift:189-198`
 - **Exact fix:** Add a SwiftUI contextual bar in `ChartView`'s chart `ZStack`, bottom-aligned, appearing when `drawings.selectedId != nil`:
@@ -254,6 +265,7 @@
   ```
 
 ### [P2] — 15+ magic numbers inline; no stroke/radius/alpha tokens
+
 - **What/Why:** `handleRadius: 5`, `hitDistance: 10` (`:40-41`), widths `1.25/2/1/1.5` (`:272,317,353`), dash `[5,4]` (`:318`), rect fill alpha `0.12` (`:290`), ray multiplier `100` (`:239,302`), tag insets `4/8/2` (`:339,342`), hit slop `+5`/`-3` (`:219,222,233`) — every one inline, while the project has zero spacing/radius/stroke tokens (confirmed: `DesignSystem/` contains only colors + typography). Violates Consistency; any future theming pass must grep the canvas.
 - **Location:** `apps/ios/0dteTrader/Features/Chart/DrawingOverlayView.swift:38-41,272,290,302,318,335-342,353`
 - **Exact fix:** Add a `DesignSystem/AppCanvas.swift` token namespace and reference it:
@@ -275,6 +287,7 @@
   ```
 
 ### [P3] — Ray extension `× 100` produces coordinates tens of thousands of points outside the bounds
+
 - **What/Why:** `end = CGPoint(x: a.x + (b.x - a.x) * 100, y: a.y + (b.y - a.y) * 100)` (`:239,302`) sends the stroke to e.g. 40,000pt — Core Graphics clips it, but extreme offsets invite float-precision artifacts on long rays and make the hit-test segment (`:241`) equally huge, so taps far from the visible ray can "hit" its invisible extension. Violates DataViz discipline.
 - **Location:** `apps/ios/0dteTrader/Features/Chart/DrawingOverlayView.swift:239,302`
 - **Exact fix:** Extend parametrically only to the bounds edge:
@@ -293,6 +306,7 @@
   ```
 
 ### [P3] — No magnet/snap-to-OHLC when placing or dragging anchors
+
 - **What/Why:** `dataPoint(at:)` maps the raw touch pixel straight to (time, price) (`:93-100`). TradingView's magnet mode (snap to open/high/low/close of the nearest candle) is table stakes for precision annotation and is the kind of detail that produces "holy shit". Without it, anchoring a trend line exactly to a wick on a 390pt-wide phone chart is luck. Violates DataViz / "delight" bar.
 - **Location:** `apps/ios/0dteTrader/Features/Chart/DrawingOverlayView.swift:93-100`
 - **Exact fix:** Snap in `dataPoint(at:)` when within 12pt of a candle OHLC (requires passing candles into the overlay alongside `firstTime`/`intervalSeconds`):
@@ -314,11 +328,13 @@
   ```
 
 ### [P3] — Fired alerts vanish silently, taking the price level with them
+
 - **What/Why:** `checkAlerts` removes crossed alerts and persists (`ChartDrawings.swift:145-154`); the only trace is a transient `alertNotice` string (`ChartViewModel.swift:127-132`). A trader who set an alert at a key level loses the visual level at the exact moment it becomes relevant. Violates State Coverage (feedback should be persistent, not just ephemeral).
 - **Location:** `apps/ios/0dteTrader/Features/Chart/ChartDrawings.swift:145-154`
 - **Exact fix:** Keep fired alerts rendered dimmed until dismissed — add `var firedAt: Date?` to `PriceAlert`, set it instead of removing in `checkAlerts`, render fired alerts with `alertColor.withAlphaComponent(0.35)` in `renderAlert`, and let the existing "Delete Selection / Clear All" path remove them. (Structural: touches `Payload` Codable — default `firedAt = nil` on decode for backward compatibility.)
 
 ### [P3] — Chart loading state is a bare spinner, not a candle skeleton
+
 - **What/Why:** While candles load, the chart area shows only `ProgressView().tint(.secondary)` (`ChartView.swift:44-47`) over an empty background — a layout-shifting void where the densest screen in the app will appear. A gray candle skeleton preserves layout and sets density expectations (Robinhood/TradingView both skeleton their charts). Violates State Coverage (skeletons > spinners).
 - **Location:** `apps/ios/0dteTrader/Features/Chart/ChartView.swift:44-47`
 - **Exact fix:** Replace the spinner with a static skeleton drawn into the same `ZStack`:
@@ -341,6 +357,7 @@
 ## Quick wins vs structural work
 
 **Landable in <1 hour:**
+
 - Confirmation dialog on "Clear All Drawings" (fix 2)
 - 44pt frames on header tool buttons + interval chip (fix 3, SwiftUI half)
 - Reject degenerate zero-length drafts (fix 4)
@@ -352,6 +369,7 @@
 - Ray-end clamp to bounds (fix 14)
 
 **Needs refactor / cross-file design:**
+
 - VoiceOver accessibility elements + 22pt canvas hit slop (fix 1 — needs model-observation wiring and AX audit)
 - Remove CADisplayLink in favor of change-driven invalidation (fix 6 — needs Combine subscriptions + `ChartViewDelegate` forwarding in `ContainerView`)
 - Selection floating action bar (fix 12 — new SwiftUI component + state plumbing)

@@ -43,7 +43,12 @@ describe('OrdersService', () => {
   });
 
   it('persists orders arriving on the events bus, updating status on later events', async () => {
-    const submitted = fill({ status: 'submitted', filledPrice: undefined, orderType: 'mid', limitPrice: 1.05 });
+    const submitted = fill({
+      status: 'submitted',
+      filledPrice: undefined,
+      orderType: 'mid',
+      limitPrice: 1.05,
+    });
     events.emit(USER, submitted);
     // The async fill for the same orderId arrives later.
     events.emit(USER, { ...submitted, status: 'filled', filledPrice: 1.05 });
@@ -118,7 +123,10 @@ describe('OrdersService', () => {
 
   it('keeps rejected and cancelled orders in history with no P/L', async () => {
     await orders.record(USER, fill({ status: 'rejected', filledPrice: undefined }));
-    await orders.record(USER, fill({ status: 'cancelled', filledPrice: undefined, orderType: 'mid' }));
+    await orders.record(
+      USER,
+      fill({ status: 'cancelled', filledPrice: undefined, orderType: 'mid' }),
+    );
 
     const history = await orders.history(USER);
     expect(history.entries.map((e) => e.status)).toEqual(['cancelled', 'rejected']);
@@ -142,8 +150,7 @@ describe('OrdersService', () => {
     await orders.record(practiceUser.id as string, fill());
     await orders.record(USER, fill());
 
-    const byUser = (userId: string) =>
-      prisma.tradeOrders.find((o) => o.userId === userId);
+    const byUser = (userId: string) => prisma.tradeOrders.find((o) => o.userId === userId);
     expect(byUser(practiceUser.id as string).environment).toBe('practice');
     expect(byUser(USER).environment).toBe('live'); // unknown user → default
   });

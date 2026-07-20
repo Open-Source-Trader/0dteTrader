@@ -1,10 +1,6 @@
 import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import { Subscription } from 'rxjs';
-import {
-  OrderResult,
-  TradeHistory,
-  TradeHistoryEntry,
-} from '@0dtetrader/shared-types';
+import { OrderResult, TradeHistory, TradeHistoryEntry } from '@0dtetrader/shared-types';
 import { OPTION_MULTIPLIER } from '../broker/contract-resolution';
 import { OrderEventsService } from '../broker/order-events.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -100,9 +96,7 @@ export class OrdersService implements OnModuleDestroy {
         row.filledPrice !== null &&
         (row.status === 'filled' ||
           row.status === 'partially_filled' ||
-          (row.status === 'cancelled' &&
-            row.filledQuantity !== null &&
-            row.filledQuantity > 0));
+          (row.status === 'cancelled' && row.filledQuantity !== null && row.filledQuantity > 0));
       if (!isFill) return entry;
 
       const multiplier = OPTION_MULTIPLIER;
@@ -114,8 +108,7 @@ export class OrdersService implements OnModuleDestroy {
         // Opening or adding: blend the average cost.
         const totalQty = Math.abs(position.quantity) + Math.abs(signed);
         position.avgPrice =
-          (position.avgPrice * Math.abs(position.quantity) + price * Math.abs(signed)) /
-          totalQty;
+          (position.avgPrice * Math.abs(position.quantity) + price * Math.abs(signed)) / totalQty;
         position.quantity += signed;
       } else {
         // Reducing (or flipping through zero): realize on the closed quantity.

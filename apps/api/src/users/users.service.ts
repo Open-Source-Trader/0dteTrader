@@ -33,9 +33,7 @@ export class UsersService {
       webullPracticeConfigured: practice !== null,
       // The account id is an identifier, not a secret — surfacing it lets the
       // user confirm which account was auto-discovered via account/list.
-      webullAccountId: live?.encAccountId
-        ? this.crypto.decrypt(live.encAccountId)
-        : null,
+      webullAccountId: live?.encAccountId ? this.crypto.decrypt(live.encAccountId) : null,
       webullPracticeAccountId: practice?.encAccountId
         ? this.crypto.decrypt(practice.encAccountId)
         : null,

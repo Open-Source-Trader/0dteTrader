@@ -119,10 +119,7 @@ export function signRequest(params: SignRequestParams): Record<string, string> {
     stringToSign += `&${bodyHash}`;
   }
 
-  const signature = createHmac(
-    legacy ? 'sha1' : 'sha256',
-    `${params.appSecret}&`,
-  )
+  const signature = createHmac(legacy ? 'sha1' : 'sha256', `${params.appSecret}&`)
     .update(strictPercentEncode(stringToSign), 'utf8')
     .digest('base64');
 

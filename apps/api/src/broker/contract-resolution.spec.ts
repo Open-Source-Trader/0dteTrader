@@ -66,9 +66,7 @@ describe('pickExpiration', () => {
   });
 
   it('rejects an unknown expiration', () => {
-    expect(() => pickExpiration(expirations, '2027-01-01')).toThrow(
-      /not available/,
-    );
+    expect(() => pickExpiration(expirations, '2027-01-01')).toThrow(/not available/);
   });
 
   it('rejects an empty expiration list', () => {

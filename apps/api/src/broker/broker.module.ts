@@ -36,8 +36,7 @@ import { WebullSessionController } from './webull-session.controller';
         credentials: CredentialsService,
         prisma: PrismaService,
         tokenStore: WebullTokenStore,
-      ): BrokerGateway =>
-        new WebullBrokerGateway(credentials, config, events, prisma, tokenStore),
+      ): BrokerGateway => new WebullBrokerGateway(credentials, config, events, prisma, tokenStore),
     },
   ],
   exports: [BROKER_GATEWAY, OrderEventsService],

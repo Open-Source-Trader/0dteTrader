@@ -182,8 +182,18 @@ export function DrawingLayer({ chart, series, store, candles, intervalSec }: Dra
 
       if (drawing.kind === 'rect') {
         ctx.fillStyle = colors.rectFill;
-        ctx.fillRect(Math.min(a.x, b.x), Math.min(a.y, b.y), Math.abs(b.x - a.x), Math.abs(b.y - a.y));
-        ctx.strokeRect(Math.min(a.x, b.x), Math.min(a.y, b.y), Math.abs(b.x - a.x), Math.abs(b.y - a.y));
+        ctx.fillRect(
+          Math.min(a.x, b.x),
+          Math.min(a.y, b.y),
+          Math.abs(b.x - a.x),
+          Math.abs(b.y - a.y),
+        );
+        ctx.strokeRect(
+          Math.min(a.x, b.x),
+          Math.min(a.y, b.y),
+          Math.abs(b.x - a.x),
+          Math.abs(b.y - a.y),
+        );
       } else {
         let endX = b.x;
         let endY = b.y;
@@ -286,10 +296,7 @@ export function DrawingLayer({ chart, series, store, candles, intervalSec }: Dra
 
   // MARK: - Hit testing (cursor mode)
 
-  const hitTest = (
-    x: number,
-    y: number,
-  ): { id: string; mode: DragState['mode'] } | null => {
+  const hitTest = (x: number, y: number): { id: string; mode: DragState['mode'] } | null => {
     const state = store.getState();
     // Alerts first (thin lines on top).
     for (const alert of [...state.alerts].reverse()) {
@@ -306,7 +313,8 @@ export function DrawingLayer({ chart, series, store, candles, intervalSec }: Dra
         return { id: drawing.id, mode: 'p2' };
       }
       if (drawing.kind === 'hline') {
-        if (a.y !== null && Math.abs(y - a.y) <= HIT_DISTANCE) return { id: drawing.id, mode: 'whole' };
+        if (a.y !== null && Math.abs(y - a.y) <= HIT_DISTANCE)
+          return { id: drawing.id, mode: 'whole' };
         continue;
       }
       if (!b || a.x === null || a.y === null || b.x === null || b.y === null) continue;

@@ -49,7 +49,12 @@ export interface TwcSmcResult {
  * Pine leg(): 0 = bearish leg (new high `size` bars back), 1 = bullish leg.
  * A leg flips when the bar `size` back exceeds every bar since.
  */
-function legAt(values: { highs: number[]; lows: number[] }, i: number, size: number, prevLeg: number): number {
+function legAt(
+  values: { highs: number[]; lows: number[] },
+  i: number,
+  size: number,
+  prevLeg: number,
+): number {
   if (i < size) return prevLeg;
   let windowHigh = -Infinity;
   let windowLow = Infinity;
@@ -90,18 +95,37 @@ export function computeSmc(candles: TwcCandle[], settings: TwcHeatmapSettings): 
       Math.abs(highs[i] - prevClose),
       Math.abs(lows[i] - prevClose),
     );
-    const measure =
-      settings.orderBlockFilter === 'Atr' ? atr200[i] : cumTrueRange / Math.max(i, 1);
+    const measure = settings.orderBlockFilter === 'Atr' ? atr200[i] : cumTrueRange / Math.max(i, 1);
     const highVolatility = measure !== null && highs[i] - lows[i] >= 2 * measure;
     parsedHighs[i] = highVolatility ? lows[i] : highs[i];
     parsedLows[i] = highVolatility ? highs[i] : lows[i];
   }
 
   // ── Fold state (Pine `var`s) ──
-  const swingHigh: PivotState = { currentLevel: null, prevBarLevel: null, crossed: false, barIndex: 0 };
-  const swingLow: PivotState = { currentLevel: null, prevBarLevel: null, crossed: false, barIndex: 0 };
-  const internalHigh: PivotState = { currentLevel: null, prevBarLevel: null, crossed: false, barIndex: 0 };
-  const internalLow: PivotState = { currentLevel: null, prevBarLevel: null, crossed: false, barIndex: 0 };
+  const swingHigh: PivotState = {
+    currentLevel: null,
+    prevBarLevel: null,
+    crossed: false,
+    barIndex: 0,
+  };
+  const swingLow: PivotState = {
+    currentLevel: null,
+    prevBarLevel: null,
+    crossed: false,
+    barIndex: 0,
+  };
+  const internalHigh: PivotState = {
+    currentLevel: null,
+    prevBarLevel: null,
+    crossed: false,
+    barIndex: 0,
+  };
+  const internalLow: PivotState = {
+    currentLevel: null,
+    prevBarLevel: null,
+    crossed: false,
+    barIndex: 0,
+  };
   let swingTrendBias = 0;
   let internalTrendBias = 0;
   let legSwing = 0;
@@ -113,7 +137,12 @@ export function computeSmc(candles: TwcCandle[], settings: TwcHeatmapSettings): 
   const swingOrderBlocks: OrderBlock[] = [];
   const internalOrderBlocks: OrderBlock[] = [];
 
-  const storeOrderBlock = (pivot: PivotState, internal: boolean, bias: number, barIndex: number): void => {
+  const storeOrderBlock = (
+    pivot: PivotState,
+    internal: boolean,
+    bias: number,
+    barIndex: number,
+  ): void => {
     if (internal ? !wantInternalOB : !wantSwingOB) return;
     // Bearish blocks anchor at the highest parsed high since the broken
     // pivot; bullish at the lowest parsed low (Pine storeOrdeBlock).
@@ -127,7 +156,12 @@ export function computeSmc(candles: TwcCandle[], settings: TwcHeatmapSettings): 
     }
     const blocks = internal ? internalOrderBlocks : swingOrderBlocks;
     if (blocks.length >= MAX_ORDER_BLOCKS) blocks.pop();
-    blocks.unshift({ barHigh: parsedHighs[anchor], barLow: parsedLows[anchor], barIndex: anchor, bias });
+    blocks.unshift({
+      barHigh: parsedHighs[anchor],
+      barLow: parsedLows[anchor],
+      barIndex: anchor,
+      bias,
+    });
   };
 
   const deleteOrderBlocks = (blocks: OrderBlock[], i: number): void => {
@@ -284,7 +318,13 @@ export function computeSmc(candles: TwcCandle[], settings: TwcHeatmapSettings): 
     const equilibriumBottom = 0.525 * bottom + 0.475 * top;
     const discountTop = 0.95 * bottom + 0.05 * top;
 
-    const zone = (yTop: number, yBottom: number, fill: string, text: string, textColor: string): void => {
+    const zone = (
+      yTop: number,
+      yBottom: number,
+      fill: string,
+      text: string,
+      textColor: string,
+    ): void => {
       bands.push({ x1: leftIdx, x2: rightIdx, yTop, yBottom, fillColor: fill });
       labels.push({
         barIndex: rightIdx,
@@ -295,7 +335,13 @@ export function computeSmc(candles: TwcCandle[], settings: TwcHeatmapSettings): 
       });
     };
     zone(top, premiumBottom, TWC_COLORS.premiumZone, 'Premium', TWC_COLORS.premiumText);
-    zone(equilibriumTop, equilibriumBottom, TWC_COLORS.equilibriumZone, 'Equilibrium', TWC_COLORS.equilibriumText);
+    zone(
+      equilibriumTop,
+      equilibriumBottom,
+      TWC_COLORS.equilibriumZone,
+      'Equilibrium',
+      TWC_COLORS.equilibriumText,
+    );
     zone(discountTop, bottom, TWC_COLORS.discountZone, 'Discount', TWC_COLORS.discountText);
   }
 

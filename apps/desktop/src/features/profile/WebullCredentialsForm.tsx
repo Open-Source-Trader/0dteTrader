@@ -66,8 +66,7 @@ export function WebullCredentialsForm({
       {renderField('appKey', `wb-${environment}-app-key`, 'App Key', appKey)}
       {renderField('appSecret', `wb-${environment}-app-secret`, 'App Secret', appSecret)}
       <div className="grouped-row footnote" style={{ color: 'var(--text-secondary)' }}>
-        Your account is detected automatically after you approve the
-        connection in the Webull app.
+        Your account is detected automatically after you approve the connection in the Webull app.
       </div>
       <button
         type="button"

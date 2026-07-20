@@ -68,13 +68,20 @@ export function TwcSettingsView({ settings, onChange, onBack, onDismiss }: TwcSe
     </div>
   );
 
-  const menuRow = <T extends string>(label: string, key: keyof TwcHeatmapSettings, options: readonly T[]): ReactNode => (
+  const menuRow = <T extends string>(
+    label: string,
+    key: keyof TwcHeatmapSettings,
+    options: readonly T[],
+  ): ReactNode => (
     <div className="grouped-row">
       <span>{label}</span>
       <span className="row-value">
         <Menu
           trigger={
-            <button className="row-menu-trigger" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <button
+              className="row-menu-trigger"
+              style={{ display: 'flex', alignItems: 'center', gap: 4 }}
+            >
               {settings[key] as string}
               <ChevronDownIcon size={11} />
             </button>
@@ -298,7 +305,9 @@ export function TwcSettingsView({ settings, onChange, onBack, onDismiss }: TwcSe
               {toggleRow('Show HTF x3', 'showHTF3')}
               {toggleRow('Show HTF x4', 'showHTF4')}
               {toggleRow('Use Custom HTF ATR Length', 'useCustomHTFAtrLength')}
-              {settings.useCustomHTFAtrLength ? stepperRow('HTF ATR Length', 'htfAtrLength', 1, 50) : null}
+              {settings.useCustomHTFAtrLength
+                ? stepperRow('HTF ATR Length', 'htfAtrLength', 1, 50)
+                : null}
             </>,
           )}
           {section(
@@ -329,7 +338,9 @@ export function TwcSettingsView({ settings, onChange, onBack, onDismiss }: TwcSe
             'Order Blocks',
             <>
               {toggleRow('Swing Order Blocks', 'showSwingOrderBlocks')}
-              {settings.showSwingOrderBlocks ? stepperRow('Swing Blocks Shown', 'swingOrderBlocksSize', 1, 20) : null}
+              {settings.showSwingOrderBlocks
+                ? stepperRow('Swing Blocks Shown', 'swingOrderBlocksSize', 1, 20)
+                : null}
               {toggleRow('Internal Order Blocks', 'showInternalOrderBlocks')}
               {settings.showInternalOrderBlocks
                 ? stepperRow('Internal Blocks Shown', 'internalOrderBlocksSize', 1, 20)

@@ -2,15 +2,15 @@
 
 ## 1. Threat Model
 
-| Asset | Threat | Mitigation |
-|---|---|---|
-| Webull app key/secret | Extracted from app bundle | Never shipped to the app; stored server-side only |
-| Webull creds at rest | DB breach | AES-256-GCM per-field encryption; data key from env/KMS, never in repo or DB |
-| Webull creds in transit | MITM | TLS 1.2+ everywhere; cert pinning app→backend |
-| Passwords | DB breach | Argon2id hashing |
-| JWTs | Theft/replay | 15-min access tokens; rotating refresh tokens (reuse revokes the chain); refresh stored in iOS Keychain |
-| Orders | Fat-finger, replay, double submit | Arm-then-confirm UI; idempotency keys; server-side re-validation; rate limits |
-| Account | Rogue trading after compromise | Per-user kill switch (`trading_disabled`), honored by every order path; full audit log |
+| Asset                   | Threat                            | Mitigation                                                                                              |
+| ----------------------- | --------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| Webull app key/secret   | Extracted from app bundle         | Never shipped to the app; stored server-side only                                                       |
+| Webull creds at rest    | DB breach                         | AES-256-GCM per-field encryption; data key from env/KMS, never in repo or DB                            |
+| Webull creds in transit | MITM                              | TLS 1.2+ everywhere; cert pinning app→backend                                                           |
+| Passwords               | DB breach                         | Argon2id hashing                                                                                        |
+| JWTs                    | Theft/replay                      | 15-min access tokens; rotating refresh tokens (reuse revokes the chain); refresh stored in iOS Keychain |
+| Orders                  | Fat-finger, replay, double submit | Arm-then-confirm UI; idempotency keys; server-side re-validation; rate limits                           |
+| Account                 | Rogue trading after compromise    | Per-user kill switch (`trading_disabled`), honored by every order path; full audit log                  |
 
 ## 2. Credential Encryption
 

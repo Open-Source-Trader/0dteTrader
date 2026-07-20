@@ -64,7 +64,12 @@ export function DrawToolsMenu({ store }: { store: DrawingsStore }) {
                 key: 'clear',
                 label: (
                   <span
-                    style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--pnl-negative)' }}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8,
+                      color: 'var(--pnl-negative)',
+                    }}
                   >
                     <TrashIcon size={14} />
                     {selectedId ? 'Delete selection' : 'Clear all drawings'}

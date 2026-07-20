@@ -19,14 +19,12 @@ export const brokerErrors = {
     new BrokerError('BROKER_AUTH_FAILED', message, 401),
   insufficientBuyingPower: (message = 'Insufficient buying power') =>
     new BrokerError('INSUFFICIENT_BUYING_POWER', message, 400),
-  orderRejected: (message = 'Order rejected') =>
-    new BrokerError('ORDER_REJECTED', message, 400),
+  orderRejected: (message = 'Order rejected') => new BrokerError('ORDER_REJECTED', message, 400),
   rateLimited: (message = 'Broker rate limit exceeded') =>
     new BrokerError('BROKER_RATE_LIMITED', message, 503),
   unavailable: (message = 'Broker is unreachable') =>
     new BrokerError('BROKER_UNAVAILABLE', message, 503),
-  marketClosed: (message = 'Market is closed') =>
-    new BrokerError('MARKET_CLOSED', message, 400),
+  marketClosed: (message = 'Market is closed') => new BrokerError('MARKET_CLOSED', message, 400),
   orderNotFound: (orderId: string) =>
     new BrokerError('ORDER_NOT_FOUND', `Order not found: ${orderId}`, 404),
   orderNotOpen: (orderId: string, status: string) =>
@@ -35,10 +33,8 @@ export const brokerErrors = {
       `Order ${orderId} cannot be cancelled in status ${status}`,
       400,
     ),
-  contractNotFound: (message: string) =>
-    new BrokerError('CONTRACT_NOT_FOUND', message, 400),
+  contractNotFound: (message: string) => new BrokerError('CONTRACT_NOT_FOUND', message, 400),
   /** Market-data quote subscription missing on the Webull app (not an auth
    *  failure — 403 so clients don't treat it as session expiry). */
-  permissionDenied: (message: string) =>
-    new BrokerError('BROKER_PERMISSION_DENIED', message, 403),
+  permissionDenied: (message: string) => new BrokerError('BROKER_PERMISSION_DENIED', message, 403),
 };

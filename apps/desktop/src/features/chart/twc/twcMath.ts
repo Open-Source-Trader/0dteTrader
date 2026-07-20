@@ -225,7 +225,11 @@ export interface SupertrendResult {
 }
 
 /** Pine ta.supertrend reference algorithm over hl2 with band ratcheting. */
-export function supertrend(candles: TwcCandle[], factor: number, atrPeriod: number): SupertrendResult {
+export function supertrend(
+  candles: TwcCandle[],
+  factor: number,
+  atrPeriod: number,
+): SupertrendResult {
   const value: (number | null)[] = candles.map(() => null);
   const direction: (number | null)[] = candles.map(() => null);
   const atrArr = pineAtr(candles, atrPeriod);
@@ -310,7 +314,11 @@ export function timeframeSeconds(tf: string): number {
  * which is the best available approximation of a finer timeframe. Weekly
  * buckets anchor to the epoch week — close enough for direction votes.
  */
-export function resampleTo(candles: TwcCandle[], targetSeconds: number, chartIntervalSeconds: number): HtfResample {
+export function resampleTo(
+  candles: TwcCandle[],
+  targetSeconds: number,
+  chartIntervalSeconds: number,
+): HtfResample {
   if (targetSeconds <= chartIntervalSeconds) {
     return { htfCandles: candles.map((c) => ({ ...c })), chartToHtf: candles.map((_, i) => i) };
   }
@@ -341,7 +349,10 @@ export function resampleTo(candles: TwcCandle[], targetSeconds: number, chartInt
  * Pine's f_confirmedSupertrend (expr[1] + lookahead_on) yields. Values never
  * change retroactively as the developing bucket updates.
  */
-export function mapConfirmedHtf(htfValues: (number | null)[], chartToHtf: number[]): (number | null)[] {
+export function mapConfirmedHtf(
+  htfValues: (number | null)[],
+  chartToHtf: number[],
+): (number | null)[] {
   return chartToHtf.map((k) => (k >= 1 ? htfValues[k - 1] : null));
 }
 

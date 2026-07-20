@@ -2,28 +2,15 @@
   "log": [
     {
       "name": "01-risk-disclaimer",
-      "buttons": [
-        "I Understand and Accept"
-      ],
+      "buttons": ["I Understand and Accept"],
       "inputs": [],
-      "headings": [
-        "Risk Disclosure"
-      ]
+      "headings": ["Risk Disclosure"]
     },
     {
       "name": "02-login",
-      "buttons": [
-        "Show password",
-        "Log In",
-        "Create an account"
-      ],
-      "inputs": [
-        "Email",
-        "Password"
-      ],
-      "headings": [
-        "0dteTrader"
-      ]
+      "buttons": ["Show password", "Log In", "Create an account"],
+      "inputs": ["Email", "Password"],
+      "headings": ["0dteTrader"]
     },
     {
       "name": "03-register",
@@ -36,16 +23,8 @@
         "Show password",
         "Create Account"
       ],
-      "inputs": [
-        "Email",
-        "Password",
-        "Email",
-        "Password",
-        "Confirm password"
-      ],
-      "headings": [
-        "0dteTrader"
-      ]
+      "inputs": ["Email", "Password", "Email", "Password", "Confirm password"],
+      "headings": ["0dteTrader"]
     },
     {
       "name": "04-after-register",
@@ -228,15 +207,8 @@
         "Save Credentials",
         "Log Out"
       ],
-      "inputs": [
-        "Required",
-        "Required",
-        "Required"
-      ],
-      "headings": [
-        "Account",
-        "Webull API"
-      ]
+      "inputs": ["Required", "Required", "Required"],
+      "headings": ["Account", "Webull API"]
     },
     {
       "name": "10-history",

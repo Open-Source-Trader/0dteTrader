@@ -41,112 +41,114 @@ export function LoginView({ store }: { store: AuthStore }) {
         }}
         noValidate
       >
-      <div
-        style={{
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          gap: 'var(--space-2)',
-          animation: ENTRANCE,
-        }}
-      >
         <div
-          aria-hidden="true"
-          className="hud-clip"
           style={{
-            width: 56,
-            height: 56,
-            background: 'linear-gradient(135deg, var(--app-accent), var(--app-accent-fill))',
-            boxShadow: 'inset 0 0 12px rgba(5, 10, 20, 0.6)',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            gap: 'var(--space-2)',
+            animation: ENTRANCE,
           }}
-        />
-        <h1 className="hud-title" style={{ fontSize: 'var(--fs-title)' }}>
-          0dteTrader
-        </h1>
-        <span className="text-secondary" style={{ fontSize: 'var(--fs-subheadline)' }}>
-          Rapid options trading
-        </span>
-      </div>
+        >
+          <div
+            aria-hidden="true"
+            className="hud-clip"
+            style={{
+              width: 56,
+              height: 56,
+              background: 'linear-gradient(135deg, var(--app-accent), var(--app-accent-fill))',
+              boxShadow: 'inset 0 0 12px rgba(5, 10, 20, 0.6)',
+            }}
+          />
+          <h1 className="hud-title" style={{ fontSize: 'var(--fs-title)' }}>
+            0dteTrader
+          </h1>
+          <span className="text-secondary" style={{ fontSize: 'var(--fs-subheadline)' }}>
+            Rapid options trading
+          </span>
+        </div>
 
-      <div
-        style={{
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 'var(--space-4)',
-          animation: ENTRANCE,
-          animationDelay: '60ms',
-        }}
-      >
-        <input
-          className="field"
-          type="email"
-          placeholder="Email"
-          aria-label="Email"
-          aria-invalid={errorMessage ? true : undefined}
-          aria-describedby={errorMessage ? 'login-error' : undefined}
-          autoComplete="username"
-          autoCapitalize="off"
-          spellCheck={false}
-          autoFocus
-          value={email}
-          onChange={(event) => setEmail(event.target.value)}
-        />
-        <PasswordField
-          placeholder="Password"
-          autoComplete="current-password"
-          value={password}
-          onChange={setPassword}
-          ariaLabel="Password"
-          ariaInvalid={!!errorMessage}
-          ariaDescribedBy={errorMessage ? 'login-error' : undefined}
-        />
-      </div>
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 'var(--space-4)',
+            animation: ENTRANCE,
+            animationDelay: '60ms',
+          }}
+        >
+          <input
+            className="field"
+            type="email"
+            placeholder="Email"
+            aria-label="Email"
+            aria-invalid={errorMessage ? true : undefined}
+            aria-describedby={errorMessage ? 'login-error' : undefined}
+            autoComplete="username"
+            autoCapitalize="off"
+            spellCheck={false}
+            autoFocus
+            value={email}
+            onChange={(event) => setEmail(event.target.value)}
+          />
+          <PasswordField
+            placeholder="Password"
+            autoComplete="current-password"
+            value={password}
+            onChange={setPassword}
+            ariaLabel="Password"
+            ariaInvalid={!!errorMessage}
+            ariaDescribedBy={errorMessage ? 'login-error' : undefined}
+          />
+        </div>
 
-      {/* Slot is always rendered so an error doesn't recenter the column. */}
-      <div
-        id="login-error"
-        role="alert"
-        style={{
-          fontSize: 'var(--fs-footnote)',
-          color: 'var(--pnl-negative)',
-          textAlign: 'center',
-          minHeight: 16,
-          visibility: errorMessage ? 'visible' : 'hidden',
-        }}
-      >
-        {errorMessage ?? ' '}
-      </div>
+        {/* Slot is always rendered so an error doesn't recenter the column. */}
+        <div
+          id="login-error"
+          role="alert"
+          style={{
+            fontSize: 'var(--fs-footnote)',
+            color: 'var(--pnl-negative)',
+            textAlign: 'center',
+            minHeight: 16,
+            visibility: errorMessage ? 'visible' : 'hidden',
+          }}
+        >
+          {errorMessage ?? ' '}
+        </div>
 
-      <button
-        type="submit"
-        className={`button-primary${!isFormValid || isLoading ? ' dimmed' : ''}`}
-        disabled={!isFormValid || isLoading}
-        aria-busy={isLoading}
-        style={{ animation: ENTRANCE, animationDelay: '120ms' }}
-      >
-        {isLoading ? <Spinner white /> : 'Log In'}
-      </button>
+        <button
+          type="submit"
+          className={`button-primary${!isFormValid || isLoading ? ' dimmed' : ''}`}
+          disabled={!isFormValid || isLoading}
+          aria-busy={isLoading}
+          style={{ animation: ENTRANCE, animationDelay: '120ms' }}
+        >
+          {isLoading ? <Spinner white /> : 'Log In'}
+        </button>
 
-      <button
-        type="button"
-        style={{
-          fontSize: 'var(--fs-subheadline)',
-          color: 'var(--app-accent)',
-          alignSelf: 'center',
-          minHeight: 44,
-          padding: '0 var(--space-4)',
-        }}
-        onClick={() => {
-          store.clearError();
-          setShowRegister(true);
-        }}
-      >
-        Create an account
-      </button>
+        <button
+          type="button"
+          style={{
+            fontSize: 'var(--fs-subheadline)',
+            color: 'var(--app-accent)',
+            alignSelf: 'center',
+            minHeight: 44,
+            padding: '0 var(--space-4)',
+          }}
+          onClick={() => {
+            store.clearError();
+            setShowRegister(true);
+          }}
+        >
+          Create an account
+        </button>
       </form>
 
       {/* Rendered outside the <form>: RegisterView has its own form, and nested forms are invalid HTML. */}
-      {showRegister ? <RegisterView store={store} onDismiss={() => setShowRegister(false)} /> : null}
+      {showRegister ? (
+        <RegisterView store={store} onDismiss={() => setShowRegister(false)} />
+      ) : null}
     </>
   );
 }

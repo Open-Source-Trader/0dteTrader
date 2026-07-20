@@ -19,11 +19,7 @@ describe('CredentialsService', () => {
 
   it('stores one credential set per environment', async () => {
     await service.save('u1', { appKey: 'lak', appSecret: 'lsk', accountId: 'lacct' });
-    await service.save(
-      'u1',
-      { appKey: 'pak', appSecret: 'psk', accountId: 'pacct' },
-      'practice',
-    );
+    await service.save('u1', { appKey: 'pak', appSecret: 'psk', accountId: 'pacct' }, 'practice');
     expect(prisma.credentials).toHaveLength(2);
 
     const live = await service.getDecrypted('u1');
@@ -34,11 +30,7 @@ describe('CredentialsService', () => {
 
   it('upserts within an environment without touching the other', async () => {
     await service.save('u1', { appKey: 'lak', appSecret: 'lsk', accountId: 'lacct' });
-    await service.save(
-      'u1',
-      { appKey: 'pak', appSecret: 'psk', accountId: 'pacct' },
-      'practice',
-    );
+    await service.save('u1', { appKey: 'pak', appSecret: 'psk', accountId: 'pacct' }, 'practice');
     await service.save(
       'u1',
       { appKey: 'pak2', appSecret: 'psk2', accountId: 'pacct2' },
@@ -53,11 +45,7 @@ describe('CredentialsService', () => {
 
   it('remove is environment-scoped and idempotent', async () => {
     await service.save('u1', { appKey: 'lak', appSecret: 'lsk', accountId: 'lacct' });
-    await service.save(
-      'u1',
-      { appKey: 'pak', appSecret: 'psk', accountId: 'pacct' },
-      'practice',
-    );
+    await service.save('u1', { appKey: 'pak', appSecret: 'psk', accountId: 'pacct' }, 'practice');
 
     await service.remove('u1', 'practice');
     await service.remove('u1', 'practice'); // idempotent

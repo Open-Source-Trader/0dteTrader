@@ -8,19 +8,19 @@ Derived from navigation code: iOS `apps/ios/0dteTrader/App/RootView.swift` + `Fe
 - **iOS (all screens):** `UNVERIFIED-VISUAL` — this machine is Linux; no Xcode/iOS Simulator. Code-driven layout reconstruction only.
 - **Desktop:** real screenshots captured via headless Chrome (430×932 @2x, `docs/ui-audit/shots/`) against the Vite dev server + local API (mock broker). Authenticated screens were reached via a throwaway registered account. Because no Webull credentials were on file, the chart area shows its error state and BUY/SELL stayed disabled — these states are captured as-is (valuable for state-coverage audit), and `OrderConfirmSheet` could not be triggered → `UNVERIFIED-VISUAL`.
 
-| Shot | Screen | State |
-|---|---|---|
-| `shots/01-risk-disclaimer.png` | Risk disclaimer | first-launch |
-| `shots/02-login.png` | Login | empty form |
-| `shots/03-register.png` | Register sheet | empty form (over login) |
-| `shots/04-after-register.png` | Trade screen | split layout, chart error state (no broker creds) |
-| `shots/05-trade-split.png` | Trade screen — Layout B (split) | chart error state, trade panel visible |
-| `shots/06-symbol-search.png` | Symbol search sheet | list populated |
-| `shots/07-indicator-settings.png` | Indicator settings sheet | default settings |
-| `shots/08-trade-fullscreen.png` | Trade screen — Layout A (fullscreen) | floating SELL/BUY, chart error state |
-| `shots/09-profile.png` | Profile sheet | account + Webull API sections |
-| `shots/10-history.png` | Trade history sheet | empty state |
-| `shots/11-buy-disabled.png` | Trade screen | AUTO enabled, BUY disabled (no contract) |
+| Shot                              | Screen                               | State                                             |
+| --------------------------------- | ------------------------------------ | ------------------------------------------------- |
+| `shots/01-risk-disclaimer.png`    | Risk disclaimer                      | first-launch                                      |
+| `shots/02-login.png`              | Login                                | empty form                                        |
+| `shots/03-register.png`           | Register sheet                       | empty form (over login)                           |
+| `shots/04-after-register.png`     | Trade screen                         | split layout, chart error state (no broker creds) |
+| `shots/05-trade-split.png`        | Trade screen — Layout B (split)      | chart error state, trade panel visible            |
+| `shots/06-symbol-search.png`      | Symbol search sheet                  | list populated                                    |
+| `shots/07-indicator-settings.png` | Indicator settings sheet             | default settings                                  |
+| `shots/08-trade-fullscreen.png`   | Trade screen — Layout A (fullscreen) | floating SELL/BUY, chart error state              |
+| `shots/09-profile.png`            | Profile sheet                        | account + Webull API sections                     |
+| `shots/10-history.png`            | Trade history sheet                  | empty state                                       |
+| `shots/11-buy-disabled.png`       | Trade screen                         | AUTO enabled, BUY disabled (no contract)          |
 
 ## iOS screens — `apps/ios/`
 

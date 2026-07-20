@@ -1,4 +1,5 @@
 # Screen i8: Floating trade buttons
+
 - **App:** iOS
 - **Location:** `apps/ios/0dteTrader/Features/Trade/FloatingTradeButtons.swift:6-21`, `apps/ios/0dteTrader/DesignSystem/TradeButtons.swift:5-51`; layout host `apps/ios/0dteTrader/Features/Trade/TradeScreenView.swift:161-172`; tokens `DesignSystem/AppColors.swift:35-50`, `DesignSystem/AppTypography.swift`
 - **Visual:** screenshot `docs/ui-audit/shots/08-trade-fullscreen.png` (desktop clone, disabled state — verified pixels) + mathematical reconstruction of enabled state from code (no macOS/Xcode)
@@ -18,6 +19,7 @@
 ## Findings
 
 ### [P1] — White label on `buyGreen` is 2.6:1 — fails WCAG AA even for large text (needs 3:1)
+
 - **What/Why:** `foregroundStyle(.white)` (TradeButtons.swift:18) over dark-mode `buyGreen` `UIColor(red: 0.098, green: 0.722, blue: 0.357)` (AppColors.swift:38). Relative luminance L≈0.353 → contrast = 1.05/0.403 ≈ **2.6:1**; AA large-text floor is 3:1, normal text 4.5:1. The BUY label — the app's #1 money action — is the least legible text on screen. Violates Color & A11y. The same applies in light mode (3.56:1, below 4.5:1).
 - **Location:** `apps/ios/0dteTrader/DesignSystem/AppColors.swift:35-41`
 - **Exact fix:** darken the dark-mode green to the light-mode value (3.56:1, passes AA large text and matches cross-mode brand):
@@ -33,6 +35,7 @@
   (Single-value `UIColor(red: 0.078, green: 0.612, blue: 0.302, alpha: 1)` is equivalent; keep the closure only if modes may diverge later.)
 
 ### [P1] — Zero visual press feedback on the app's two most important buttons
+
 - **What/Why:** `.buttonStyle(.plain)` (TradeButtons.swift:24) with no custom style → touch-down produces no scale, opacity, or brightness change; only the haptic fires. Violates Motion (120–250ms eased press state) — this is the Robinhood-grade micro-interaction bar. Also nothing respects Reduce Motion because there is no motion to reduce.
 - **Location:** `apps/ios/0dteTrader/DesignSystem/TradeButtons.swift:11-27`
 - **Exact fix:** add a style in TradeButtons.swift and use it:
@@ -50,6 +53,7 @@
   then replace `.buttonStyle(.plain)` with `.buttonStyle(TradeActionButtonStyle())` at TradeButtons.swift:24.
 
 ### [P1] — Floating buttons occlude the last-price line; no scrim, no chart bottom inset
+
 - **What/Why:** In `ZStack(alignment: .bottom)` (TradeScreenView.swift:163-172) the chart gets no bottom content inset, and the button stack has no background protection. Verified in `shots/08-trade-fullscreen.png`: the dashed last-price line runs straight behind the SELL/BUY buttons (y≈1742px of 1864). On a 0DTE chart the latest price is the highest-value pixel; it can hide under a 52pt button. Violates DataViz and Composition.
 - **Location:** `apps/ios/0dteTrader/Features/Trade/TradeScreenView.swift:163-172`
 - **Exact fix:** convert the overlay to a `safeAreaInset` (reserves chart space) with a gradient scrim:
@@ -77,6 +81,7 @@
   ```
 
 ### [P1] — `QuickChipButton` hit target ≈32pt — below the 44pt HIG minimum
+
 - **What/Why:** caption font (~13pt line box) + `.padding(.vertical, 8)` (TradeButtons.swift:44) ⇒ ~29–32pt tall target. These chips step order quantity — a mis-tap changes order size. Violates Platform (≥44pt) and A11y hit areas. It also has no `isEnabled` support, unlike its sibling.
 - **Location:** `apps/ios/0dteTrader/DesignSystem/TradeButtons.swift:35-50`
 - **Exact fix:** keep the capsule look, expand the hit area:
@@ -93,7 +98,8 @@
   (drop `.padding(.vertical, 8)`; the 44pt frame replaces it.)
 
 ### [P2] — Disabled state is muddy, inverted, and unexplained
-- **What/Why:** `background(isEnabled ? color : color.opacity(0.35))` (TradeButtons.swift:20) dims only the fill while text stays full white — affordance inversion (the label is now the brightest element, contrast ~10:1 against the washed fill). Worse, nothing says *why* they're dead: `canTrade` (TradeScreenView.swift:267-274) is false when no contract is selected, and the screenshot shows the explanation stranded as chart-center text. Violates States (actionable) and Color.
+
+- **What/Why:** `background(isEnabled ? color : color.opacity(0.35))` (TradeButtons.swift:20) dims only the fill while text stays full white — affordance inversion (the label is now the brightest element, contrast ~10:1 against the washed fill). Worse, nothing says _why_ they're dead: `canTrade` (TradeScreenView.swift:267-274) is false when no contract is selected, and the screenshot shows the explanation stranded as chart-center text. Violates States (actionable) and Color.
 - **Location:** `apps/ios/0dteTrader/DesignSystem/TradeButtons.swift:16-25`, `apps/ios/0dteTrader/Features/Trade/TradeScreenView.swift:266-274`
 - **Exact fix:** dim the whole control uniformly and add a reason hint:
   ```swift
@@ -113,6 +119,7 @@
   ```
 
 ### [P2] — VoiceOver gets bare "SELL"/"BUY" with no action context
+
 - **What/Why:** `.accessibilityLabel(title)` (TradeButtons.swift:26) tells a VoiceOver user the word but not the consequence (arms a ticket with AUTO +1 OTM defaults and opens a confirm sheet) nor why it's dimmed. Violates A11y (color/state-independent meaning, actionable labels).
 - **Location:** `apps/ios/0dteTrader/DesignSystem/TradeButtons.swift:26`
 - **Exact fix:**
@@ -124,6 +131,7 @@
   ```
 
 ### [P2] — Buttons appear live while the quote socket is down
+
 - **What/Why:** `canTrade` only checks contract selection (TradeScreenView.swift:267-274); `QuoteSocketClient.connectionState` (Core/Networking/QuoteSocketClient.swift:17) is ignored, so with a disconnected socket the user arms a ticket priced off stale data. Violates State Coverage (offline).
 - **Location:** `apps/ios/0dteTrader/Features/Trade/TradeScreenView.swift:266-274`
 - **Exact fix:**
@@ -139,11 +147,13 @@
   and surface the reason in the disabled caption from finding #5: `"Reconnecting to quotes…"` when `connectionState != .connected`.
 
 ### [P2] — 10pt stack spacing breaks the 4pt grid
+
 - **What/Why:** `VStack(spacing: 10)` between positions strip and buttons (TradeScreenView.swift:165) is the only non-4pt-multiple in the block (16, 20, 52, 12 all conform). Invisible in isolation, corrosive to rhythm when the strip wraps to two rows. Violates Composition.
 - **Location:** `apps/ios/0dteTrader/Features/Trade/TradeScreenView.swift:165`
 - **Exact fix:** `VStack(spacing: 12)` (pairs with the existing `.padding(.bottom, 12)` for a consistent 12pt vertical rhythm).
 
 ### [P3] — Nine inline magic numbers; zero spacing/radius/opacity tokens
+
 - **What/Why:** 16 & 20 (FloatingTradeButtons.swift:11,19), 52, 12, 0.35 (TradeButtons.swift:19,20,21), 14 & 8 (TradeButtons.swift:43-44), 10 & 12 (TradeScreenView.swift:165,171) — plus hardcoded `.white` (TradeButtons.swift:18). The design system has colors and type only; every new screen re-rolls these dice. Violates Consistency.
 - **Location:** `apps/ios/0dteTrader/Features/Trade/FloatingTradeButtons.swift:11,19`; `apps/ios/0dteTrader/DesignSystem/TradeButtons.swift:18-21,43-44`
 - **Exact fix:** add to the design system and adopt here:
@@ -162,6 +172,7 @@
   then `HStack(spacing: AppMetrics.stackM)`, `.padding(.horizontal, AppMetrics.gutter)`, `minHeight: AppMetrics.actionHeight`, `cornerRadius: AppMetrics.radiusM`, `.opacity(isEnabled ? 1 : AppMetrics.disabledOpacity)`.
 
 ### [P3] — No elevation: flat buttons sit directly on chart ink
+
 - **What/Why:** A floating control over a live chart needs separation; these have no shadow (TradeButtons.swift:19-21), so gridlines visually intersect the fill at fill edges (visible in the screenshot around both buttons). Violates Composition/Platform (iOS floating-element idiom).
 - **Location:** `apps/ios/0dteTrader/DesignSystem/TradeButtons.swift:19-21`
 - **Exact fix:** after `.clipShape(...)`:
@@ -171,6 +182,7 @@
   (harmless alongside the scrim from finding #3 — the scrim handles content legibility, the shadow handles element separation.)
 
 ### [P3] — Buttons carry no price context; identical haptics for opposite actions
+
 - **What/Why:** TradingView/Robinhood quick-trade surfaces the actionable number on the button ("BUY 545.20") and differentiates direction. Here both buttons fire the same `Haptics.impact(.medium)` (TradeButtons.swift:13) and show a bare verb — the user must glance elsewhere to know what price they're arming at. This is the "holy shit" gap. Violates Density/Motion polish.
 - **Location:** `apps/ios/0dteTrader/Features/Trade/FloatingTradeButtons.swift:12-17`, `apps/ios/0dteTrader/DesignSystem/TradeButtons.swift:12-14`
 - **Exact fix:** extend `TradeActionButton` with an optional subtitle and per-side haptic:
@@ -191,6 +203,7 @@
 ## Quick wins vs structural work
 
 **<1 hour:**
+
 - Darken `buyGreen` dark variant (finding #1) — one-line token change.
 - Add `TradeActionButtonStyle` press feedback (#2) — ~10 lines.
 - Uniform `.opacity(0.45)` disabled treatment + "Select a contract to trade" caption (#5).
@@ -198,6 +211,7 @@
 - VoiceOver hints (#6), shadow (#10), QuickChip 44pt frame (#4).
 
 **Structural:**
+
 - `safeAreaInset` + scrim re-layout of the fullscreen case (#3) — touches chart geometry; verify indicator panes/divider math.
 - Connectivity-aware `canTrade` (#7) — needs the view model/container observed object to republish `connectionState` into `TradeScreenView`'s view hierarchy.
 - `AppMetrics` token introduction (#9) — mechanical but should be swept across all screens at once to avoid two conventions coexisting.

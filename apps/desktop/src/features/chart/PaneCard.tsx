@@ -16,7 +16,10 @@ interface PaneCardProps {
  *  live value readouts in the header (mockup: `RSI (14) 46.21`). */
 export function PaneCard({ title, readouts, children }: PaneCardProps) {
   return (
-    <div className="hud-card hud-card--flat" style={{ margin: '0 8px 3px', padding: 0, flex: 'none' }}>
+    <div
+      className="hud-card hud-card--flat"
+      style={{ margin: '0 8px 3px', padding: 0, flex: 'none' }}
+    >
       <div
         style={{
           display: 'flex',

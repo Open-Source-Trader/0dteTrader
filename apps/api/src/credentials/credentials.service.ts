@@ -27,9 +27,7 @@ export class CredentialsService {
     // No manual account id: store null and let the gateway discover it via
     // GET /openapi/account/list. Re-saving key/secret clears a previously
     // discovered id on purpose — it may belong to the old application.
-    const encAccountId = input.accountId
-      ? this.crypto.encrypt(input.accountId)
-      : null;
+    const encAccountId = input.accountId ? this.crypto.encrypt(input.accountId) : null;
 
     await this.prisma.webullCredential.upsert({
       where: { userId_environment: { userId, environment } },
@@ -51,10 +49,7 @@ export class CredentialsService {
     });
   }
 
-  async remove(
-    userId: string,
-    environment: TradingMode = 'live',
-  ): Promise<void> {
+  async remove(userId: string, environment: TradingMode = 'live'): Promise<void> {
     try {
       await this.prisma.webullCredential.delete({
         where: { userId_environment: { userId, environment } },
@@ -82,9 +77,7 @@ export class CredentialsService {
     return {
       appKey: this.crypto.decrypt(row.encAppKey),
       appSecret: this.crypto.decrypt(row.encAppSecret),
-      accountId: row.encAccountId
-        ? this.crypto.decrypt(row.encAccountId)
-        : undefined,
+      accountId: row.encAccountId ? this.crypto.decrypt(row.encAccountId) : undefined,
     };
   }
 }

@@ -10,7 +10,14 @@
 import { TWC_COLORS } from './twcColors';
 import type { TwcHeatmapSettings } from './twcSettings';
 import type { TwcBand, TwcLabel, TwcSegment } from './twcTypes';
-import { highestBarsOffset, lowestBarsOffset, pineAtr, pivotHigh, pivotLow, type TwcCandle } from './twcMath';
+import {
+  highestBarsOffset,
+  lowestBarsOffset,
+  pineAtr,
+  pivotHigh,
+  pivotLow,
+  type TwcCandle,
+} from './twcMath';
 
 const FIB_NEG_0618 = -0.618033988749895;
 const FIB_0618 = 0.618033988749895;
@@ -128,7 +135,9 @@ export function fibDirectionSeries(candles: TwcCandle[], settings: TwcHeatmapSet
       if (pendingBar !== null && i - pendingBar >= prd && pendingVal !== null) {
         let stillValid = true;
         for (let j = 0; j <= Math.min(prd - 1, i); j++) {
-          if (pendingDir === 1 ? highs[i - j] > highs[pendingIdx] : lows[i - j] < lows[pendingIdx]) {
+          if (
+            pendingDir === 1 ? highs[i - j] > highs[pendingIdx] : lows[i - j] < lows[pendingIdx]
+          ) {
             stillValid = false;
             break;
           }
@@ -139,7 +148,10 @@ export function fibDirectionSeries(candles: TwcCandle[], settings: TwcHeatmapSet
           if (!skip) {
             if (pendingDir !== dir || zz.length === 0) {
               zzAdd(pendingVal, pendingIdx);
-            } else if ((pendingDir === 1 && pendingVal > zz[0]) || (pendingDir === -1 && pendingVal < zz[0])) {
+            } else if (
+              (pendingDir === 1 && pendingVal > zz[0]) ||
+              (pendingDir === -1 && pendingVal < zz[0])
+            ) {
               zz[0] = pendingVal;
               zz[1] = pendingIdx;
             }
@@ -412,7 +424,11 @@ export function computeFib(
     }
 
     // Gann Auto-ATR scale freezes on the first bar with a valid ATR
-    if (settings.gannScaleMethod === 'Auto (ATR-based)' && gannFixedScale === null && atr14[i] !== null) {
+    if (
+      settings.gannScaleMethod === 'Auto (ATR-based)' &&
+      gannFixedScale === null &&
+      atr14[i] !== null
+    ) {
       gannFixedScale = (atr14[i] as number) * settings.gannATRMultiplier;
     }
 
@@ -467,7 +483,8 @@ export function computeFib(
       }
     }
 
-    const pivotChanged = b !== prevBase || l !== prevLast || bIdx !== prevBaseIdx || lIdx !== prevLastIdx;
+    const pivotChanged =
+      b !== prevBase || l !== prevLast || bIdx !== prevBaseIdx || lIdx !== prevLastIdx;
     if (swingFlip || pivotChanged || forceRebuild) {
       hit0618Ret = false;
     }
@@ -524,7 +541,8 @@ export function computeFib(
     }
 
     // Track "rebuild" prev-state like Pine (only relevant for latch semantics)
-    const ptChanged = allowMaxPT !== prevAllowMaxPT || hit0618Ret !== prevBand0 || maxHitRange !== prevMaxHit;
+    const ptChanged =
+      allowMaxPT !== prevAllowMaxPT || hit0618Ret !== prevBand0 || maxHitRange !== prevMaxHit;
     if (swingFlip || pivotChanged || prevBase === null || forceRebuild || ptChanged) {
       prevBase = b;
       prevLast = l;
@@ -570,7 +588,9 @@ export function computeFib(
   const gannXL = clampStart(finalLastIdx);
   const gannXR = Math.min(gannXL + gannWidth, lastBar + 500);
 
-  const extensionBars = settings.showGannFan ? Math.max(FIB_PROJ_X_RIGHT, gannXR - lastBar) : FIB_PROJ_X_RIGHT;
+  const extensionBars = settings.showGannFan
+    ? Math.max(FIB_PROJ_X_RIGHT, gannXR - lastBar)
+    : FIB_PROJ_X_RIGHT;
   const xRight = lastBar + extensionBars;
 
   const segments: TwcSegment[] = [];
@@ -599,11 +619,20 @@ export function computeFib(
     ratioX1.set(entry.ratio, x1);
     if (!ratioVisible(entry.ratio)) continue;
     const level = finalBase + diff * entry.ratio;
-    segments.push({ x1, y1: level, x2: xRight, y2: level, color: entry.color, width: 2, style: 'solid' });
+    segments.push({
+      x1,
+      y1: level,
+      x2: xRight,
+      y2: level,
+      color: entry.color,
+      width: 2,
+      style: 'solid',
+    });
 
     if (settings.showFibRatioLabels || settings.showFibPriceLabels) {
       const parts: string[] = [];
-      if (settings.showFibRatioLabels) parts.push(entry.ratio.toFixed(4).replace(/\.?0+$/, '') || '0');
+      if (settings.showFibRatioLabels)
+        parts.push(entry.ratio.toFixed(4).replace(/\.?0+$/, '') || '0');
       if (settings.showFibPriceLabels) {
         const price = level.toFixed(2);
         parts.push(settings.showFibRatioLabels ? `(${price})` : price);
@@ -675,10 +704,25 @@ export function computeFib(
       { on: settings.gann8x1, ratio: 8 },
       { on: settings.gann1x8, ratio: 0.125 },
     ];
-    const cornerRay = (cx: number, cy: number, dxSign: number, dySign: number, ratio: number): void => {
-      const endX = ratio <= 1 ? cx + dxSign * boxW : cx + dxSign * Math.max(1, Math.round(boxW / ratio));
+    const cornerRay = (
+      cx: number,
+      cy: number,
+      dxSign: number,
+      dySign: number,
+      ratio: number,
+    ): void => {
+      const endX =
+        ratio <= 1 ? cx + dxSign * boxW : cx + dxSign * Math.max(1, Math.round(boxW / ratio));
       const endY = ratio <= 1 ? cy + dySign * ratio * boxH : cy + dySign * boxH;
-      segments.push({ x1: cx, y1: cy, x2: endX, y2: endY, color: TWC_COLORS.gannFan, width: 1, style: 'dotted' });
+      segments.push({
+        x1: cx,
+        y1: cy,
+        x2: endX,
+        y2: endY,
+        color: TWC_COLORS.gannFan,
+        width: 1,
+        style: 'dotted',
+      });
     };
     for (let k = 0; k <= Math.max(0, finalMaxHitRange); k++) {
       const yA = finalBase + diff * k;
@@ -694,10 +738,42 @@ export function computeFib(
       }
       if (settings.showGannBox) {
         const frame = TWC_COLORS.gannBox;
-        segments.push({ x1: gannXL, y1: yTop, x2: gannXR, y2: yTop, color: frame, width: 1, style: 'dashed' });
-        segments.push({ x1: gannXL, y1: yBot, x2: gannXR, y2: yBot, color: frame, width: 1, style: 'dashed' });
-        segments.push({ x1: gannXL, y1: yTop, x2: gannXL, y2: yBot, color: frame, width: 1, style: 'dashed' });
-        segments.push({ x1: gannXR, y1: yTop, x2: gannXR, y2: yBot, color: frame, width: 1, style: 'dashed' });
+        segments.push({
+          x1: gannXL,
+          y1: yTop,
+          x2: gannXR,
+          y2: yTop,
+          color: frame,
+          width: 1,
+          style: 'dashed',
+        });
+        segments.push({
+          x1: gannXL,
+          y1: yBot,
+          x2: gannXR,
+          y2: yBot,
+          color: frame,
+          width: 1,
+          style: 'dashed',
+        });
+        segments.push({
+          x1: gannXL,
+          y1: yTop,
+          x2: gannXL,
+          y2: yBot,
+          color: frame,
+          width: 1,
+          style: 'dashed',
+        });
+        segments.push({
+          x1: gannXR,
+          y1: yTop,
+          x2: gannXR,
+          y2: yBot,
+          color: frame,
+          width: 1,
+          style: 'dashed',
+        });
       }
     }
   }

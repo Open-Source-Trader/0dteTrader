@@ -21,8 +21,13 @@ async function clickFirst(selectors) {
   for (const sel of selectors) {
     try {
       const loc = page.locator(sel).first();
-      if (await loc.count()) { await loc.click({ timeout: 2500 }); return sel; }
-    } catch { /* next */ }
+      if (await loc.count()) {
+        await loc.click({ timeout: 2500 });
+        return sel;
+      }
+    } catch {
+      /* next */
+    }
   }
   errors.push(`none of: ${selectors.join(' | ')}`);
   return null;
@@ -58,13 +63,23 @@ try {
 
   // Dismiss via whatever affordance exists; then also grab a toast if any.
   const ocButtons = await page.evaluate(() =>
-    [...document.querySelectorAll('button')].filter((b) => b.offsetParent).map((b) => b.textContent.trim()));
+    [...document.querySelectorAll('button')]
+      .filter((b) => b.offsetParent)
+      .map((b) => b.textContent.trim()),
+  );
   log.push({ ocButtons });
-  await clickFirst(['button:has-text("Cancel")', 'button:has-text("Close")', '[aria-label="Close"]']);
+  await clickFirst([
+    'button:has-text("Cancel")',
+    'button:has-text("Close")',
+    '[aria-label="Close"]',
+  ]);
 } catch (err) {
   errors.push(String(err));
 }
 
-fs.writeFileSync(new URL('capture2-log.json', import.meta.url), JSON.stringify({ log, errors }, null, 2));
+fs.writeFileSync(
+  new URL('capture2-log.json', import.meta.url),
+  JSON.stringify({ log, errors }, null, 2),
+);
 console.log(JSON.stringify({ log, errors }, null, 2));
 await browser.close();

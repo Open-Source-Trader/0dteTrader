@@ -75,9 +75,7 @@ class StubBrokerGateway implements BrokerGateway {
       const strike = price + k;
       for (const optionType of ['call', 'put'] as OptionType[]) {
         const intrinsic =
-          optionType === 'call'
-            ? Math.max(0, price - strike)
-            : Math.max(0, strike - price);
+          optionType === 'call' ? Math.max(0, price - strike) : Math.max(0, strike - price);
         const last = round2(intrinsic + 1);
         contracts.push({
           symbol: formatOccSymbol(symbol, chosen, optionType, strike),
@@ -102,9 +100,7 @@ class StubBrokerGateway implements BrokerGateway {
   async previewOrder(userId: string, order: OrderRequest): Promise<OrderPreview> {
     const resolved = await this.resolveContract(userId, order);
     const price =
-      order.orderType === 'market'
-        ? resolved.last
-        : computeMid(resolved.bid, resolved.ask);
+      order.orderType === 'market' ? resolved.last : computeMid(resolved.bid, resolved.ask);
     return {
       resolved: {
         contractSymbol: resolved.contractSymbol,
@@ -162,20 +158,10 @@ class StubBrokerGateway implements BrokerGateway {
   private async resolveContract(userId: string, order: OrderRequest) {
     const { optionType } = order.selection;
     if (!optionType) {
-      throw brokerErrors.orderRejected(
-        'selection.optionType is required for option orders',
-      );
+      throw brokerErrors.orderRejected('selection.optionType is required for option orders');
     }
-    const chain = await this.getOptionsChain(
-      userId,
-      order.underlying,
-      order.selection.expiration,
-    );
-    const contract = findExplicitOption(
-      chain.contracts,
-      optionType,
-      order.selection.strike ?? NaN,
-    );
+    const chain = await this.getOptionsChain(userId, order.underlying, order.selection.expiration);
+    const contract = findExplicitOption(chain.contracts, optionType, order.selection.strike ?? NaN);
     if (!contract) {
       throw brokerErrors.contractNotFound(
         `No ${optionType} contract at strike ${order.selection.strike} ` +
@@ -233,11 +219,7 @@ describe('TradingService', () => {
 
       // Server-side resolution: lowest call strike strictly above the last.
       const strikes = [
-        ...new Set(
-          chain.contracts
-            .filter((c) => c.optionType === 'call')
-            .map((c) => c.strike),
-        ),
+        ...new Set(chain.contracts.filter((c) => c.optionType === 'call').map((c) => c.strike)),
       ].sort((a, b) => a - b);
       const expected = strikes.find((s) => s > quote.last)!;
       const sent = placeSpy.mock.calls[0][1] as OrderRequest;
@@ -291,11 +273,7 @@ describe('TradingService', () => {
         .find((c) => c.strike > quote.last)!;
       const expectedMid = Math.round(((call.bid + call.ask) / 2) * 100) / 100;
 
-      const result = await trading.place(
-        userId,
-        autoOtmCall({ orderType: 'mid' }),
-        'idem-mid-1',
-      );
+      const result = await trading.place(userId, autoOtmCall({ orderType: 'mid' }), 'idem-mid-1');
       expect(result.status).toBe('submitted');
       expect(result.limitPrice).toBe(expectedMid);
     });
@@ -329,54 +307,48 @@ describe('TradingService', () => {
         release = resolve;
       });
       const original = gateway.placeOrder.bind(gateway);
-      jest
-        .spyOn(gateway, 'placeOrder')
-        .mockImplementation(async (u, o, k) => {
-          await gate;
-          return original(u, o, k);
-        });
+      jest.spyOn(gateway, 'placeOrder').mockImplementation(async (u, o, k) => {
+        await gate;
+        return original(u, o, k);
+      });
 
       const first = trading.place(userId, autoOtmCall(), 'idem-flight');
       // Let the first call reach the broker before firing the duplicate.
       await new Promise((resolve) => setTimeout(resolve, 0));
-      await expect(
-        trading.place(userId, autoOtmCall(), 'idem-flight'),
-      ).rejects.toMatchObject({ status: 409, code: 'ORDER_IN_FLIGHT' });
+      await expect(trading.place(userId, autoOtmCall(), 'idem-flight')).rejects.toMatchObject({
+        status: 409,
+        code: 'ORDER_IN_FLIGHT',
+      });
 
       release();
       const result = await first;
       expect(result.status).toBe('filled');
       // And once settled, the key replays the original result.
-      await expect(
-        trading.place(userId, autoOtmCall(), 'idem-flight'),
-      ).resolves.toEqual(result);
+      await expect(trading.place(userId, autoOtmCall(), 'idem-flight')).resolves.toEqual(result);
     });
 
     it('frees the key when execution fails so the client can retry', async () => {
-      jest
-        .spyOn(gateway, 'placeOrder')
-        .mockRejectedValueOnce(new Error('broker down'));
-      await expect(
-        trading.place(userId, autoOtmCall(), 'idem-retry'),
-      ).rejects.toThrow('broker down');
+      jest.spyOn(gateway, 'placeOrder').mockRejectedValueOnce(new Error('broker down'));
+      await expect(trading.place(userId, autoOtmCall(), 'idem-retry')).rejects.toThrow(
+        'broker down',
+      );
 
       const result = await trading.place(userId, autoOtmCall(), 'idem-retry');
       expect(result.status).toBe('filled');
 
       // The failure left only an unkeyed error audit behind.
       const audits = await prisma.orderAudit.findMany({ where: { userId } });
-      expect(
-        audits.filter((a) => a.idempotencyKey === 'idem-retry'),
-      ).toHaveLength(1);
+      expect(audits.filter((a) => a.idempotencyKey === 'idem-retry')).toHaveLength(1);
     });
   });
 
   describe('kill switch', () => {
     it('returns 403 TRADING_DISABLED and audit-logs the blocked attempt', async () => {
       prisma.setTradingDisabled(userId, true);
-      await expect(
-        trading.place(userId, autoOtmCall(), 'idem-blocked'),
-      ).rejects.toMatchObject({ status: 403, code: 'TRADING_DISABLED' });
+      await expect(trading.place(userId, autoOtmCall(), 'idem-blocked')).rejects.toMatchObject({
+        status: 403,
+        code: 'TRADING_DISABLED',
+      });
 
       const audits = await prisma.orderAudit.findMany({ where: { userId } });
       expect(audits).toHaveLength(1);
@@ -402,32 +374,19 @@ describe('TradingService', () => {
   describe('auditing', () => {
     it('records every preview/place/cancel attempt', async () => {
       await trading.preview(userId, autoOtmCall());
-      const placed = await trading.place(
-        userId,
-        autoOtmCall({ orderType: 'mid' }),
-        'idem-audit',
-      );
+      const placed = await trading.place(userId, autoOtmCall({ orderType: 'mid' }), 'idem-audit');
       await trading.cancel(userId, placed.orderId);
 
       const audits = await prisma.orderAudit.findMany({ where: { userId } });
-      expect(audits.map((a) => a.request.action).sort()).toEqual([
-        'cancel',
-        'place',
-        'preview',
-      ]);
-      expect(audits.every((a) => a.status === 'ok' || a.status === 'submitted')).toBe(
-        true,
-      );
+      expect(audits.map((a) => a.request.action).sort()).toEqual(['cancel', 'place', 'preview']);
+      expect(audits.every((a) => a.status === 'ok' || a.status === 'submitted')).toBe(true);
     });
   });
 
   describe('validation', () => {
     it('requires optionType for option orders', async () => {
       await expect(
-        trading.preview(
-          userId,
-          autoOtmCall({ selection: { mode: 'auto_otm' } }) ,
-        ),
+        trading.preview(userId, autoOtmCall({ selection: { mode: 'auto_otm' } })),
       ).rejects.toMatchObject({ status: 400, code: 'VALIDATION_ERROR' });
     });
 

@@ -11,43 +11,43 @@
 
 ## 1. Master scorecard (worst → best)
 
-| # | Screen | App | Overall | P0 | P1 | P2 | P3 |
-|---|--------|-----|--------:|---:|---:|---:|---:|
-| 1 | Drawing overlay | iOS | **40** | 0 | 5 | 7 | 4 |
-| 2 | Chart view + panes | iOS | **43** | 1 | 5 | 5 | 3 |
-| 3 | Trade — fullscreen (Layout A) | Desktop | **43** | 0 | 5 | 6 | 4 |
-| 4 | Design system | Desktop | **44** | 1 | 4 | 8 | 4 |
-| 5 | Trade panel | Desktop | **46** | 2 | 7 | 3 | 4 |
-| 6 | Chart view + panes | Desktop | **47** | 0 | 8 | 5 | 2 |
-| 7 | Risk disclaimer | Desktop | **48** | 0 | 3 | 3 | 4 |
-| 8 | Drawing layer + toolbar | Desktop | **48** | 0 | 4 | 4 | 4 |
-| 9 | Root / lock overlay | iOS | **48** | 0 | 3 | 4 | 3 |
-| 10 | Register | iOS | **48** | 0 | 6 | 5 | 1 |
-| 11 | History | iOS | **48** | 0 | 5 | 4 | 3 |
-| 12 | Positions strip | iOS | **48** | 0 | 4 | 4 | 3 |
-| 13 | Design system | iOS | **48** | 0 | 5 | 6 | 5 |
-| 14 | Login | iOS | **49** | 0 | 7 | 5 | 2 |
-| 15 | Trade — fullscreen (Layout A) | iOS | **49** | 0 | 4 | 5 | 1 |
-| 16 | Risk disclaimer | iOS | **50** | 0 | 4 | 3 | 2 |
-| 17 | Order confirm | Desktop | **50** | 0 | 6 | 6 | 3 |
-| 18 | Positions strip | Desktop | **50** | 0 | 4 | 5 | 5 |
-| 19 | Order confirm | iOS | **51** | 0 | 5 | 6 | 1 |
-| 20 | Register | Desktop | **53** | 0 | 5 | 6 | 2 |
-| 21 | Floating trade buttons | iOS | **54** | 0 | 4 | 4 | 3 |
-| 22 | Toast | iOS | **54** | 1 | 2 | 4 | 2 |
-| 23 | Trade — split (Layout B) | Desktop | **55** | 0 | 3 | 4 | 3 |
-| 24 | Phone shell + status bar | Desktop | **55** | 0 | 3 | 6 | 3 |
-| 25 | Trade panel | iOS | **55** | 1 | 4 | 6 | 3 |
-| 26 | Trade — split (Layout B) | iOS | **56** | 1 | 3 | 3 | 1 |
-| 27 | Symbol search | iOS | **56** | 0 | 4 | 4 | 3 |
-| 28 | Login | Desktop | **56** | 0 | 5 | 4 | 3 |
-| 29 | History | Desktop | **56** | 0 | 4 | 5 | 3 |
-| 30 | Profile | Desktop | **56** | 0 | 5 | 6 | 3 |
-| 31 | Indicator settings | iOS | **60** | 0 | 4 | 5 | 4 |
-| 32 | Indicator settings | Desktop | **60** | 0 | 3 | 7 | 5 |
-| 33 | Symbol search | Desktop | **61** | 0 | 4 | 5 | 5 |
-| 34 | Toast | Desktop | **63** | 0 | 2 | 3 | 4 |
-| 35 | Profile | iOS | **64** | 0 | 3 | 6 | 5 |
+| #   | Screen                        | App     | Overall |  P0 |  P1 |  P2 |  P3 |
+| --- | ----------------------------- | ------- | ------: | --: | --: | --: | --: |
+| 1   | Drawing overlay               | iOS     |  **40** |   0 |   5 |   7 |   4 |
+| 2   | Chart view + panes            | iOS     |  **43** |   1 |   5 |   5 |   3 |
+| 3   | Trade — fullscreen (Layout A) | Desktop |  **43** |   0 |   5 |   6 |   4 |
+| 4   | Design system                 | Desktop |  **44** |   1 |   4 |   8 |   4 |
+| 5   | Trade panel                   | Desktop |  **46** |   2 |   7 |   3 |   4 |
+| 6   | Chart view + panes            | Desktop |  **47** |   0 |   8 |   5 |   2 |
+| 7   | Risk disclaimer               | Desktop |  **48** |   0 |   3 |   3 |   4 |
+| 8   | Drawing layer + toolbar       | Desktop |  **48** |   0 |   4 |   4 |   4 |
+| 9   | Root / lock overlay           | iOS     |  **48** |   0 |   3 |   4 |   3 |
+| 10  | Register                      | iOS     |  **48** |   0 |   6 |   5 |   1 |
+| 11  | History                       | iOS     |  **48** |   0 |   5 |   4 |   3 |
+| 12  | Positions strip               | iOS     |  **48** |   0 |   4 |   4 |   3 |
+| 13  | Design system                 | iOS     |  **48** |   0 |   5 |   6 |   5 |
+| 14  | Login                         | iOS     |  **49** |   0 |   7 |   5 |   2 |
+| 15  | Trade — fullscreen (Layout A) | iOS     |  **49** |   0 |   4 |   5 |   1 |
+| 16  | Risk disclaimer               | iOS     |  **50** |   0 |   4 |   3 |   2 |
+| 17  | Order confirm                 | Desktop |  **50** |   0 |   6 |   6 |   3 |
+| 18  | Positions strip               | Desktop |  **50** |   0 |   4 |   5 |   5 |
+| 19  | Order confirm                 | iOS     |  **51** |   0 |   5 |   6 |   1 |
+| 20  | Register                      | Desktop |  **53** |   0 |   5 |   6 |   2 |
+| 21  | Floating trade buttons        | iOS     |  **54** |   0 |   4 |   4 |   3 |
+| 22  | Toast                         | iOS     |  **54** |   1 |   2 |   4 |   2 |
+| 23  | Trade — split (Layout B)      | Desktop |  **55** |   0 |   3 |   4 |   3 |
+| 24  | Phone shell + status bar      | Desktop |  **55** |   0 |   3 |   6 |   3 |
+| 25  | Trade panel                   | iOS     |  **55** |   1 |   4 |   6 |   3 |
+| 26  | Trade — split (Layout B)      | iOS     |  **56** |   1 |   3 |   3 |   1 |
+| 27  | Symbol search                 | iOS     |  **56** |   0 |   4 |   4 |   3 |
+| 28  | Login                         | Desktop |  **56** |   0 |   5 |   4 |   3 |
+| 29  | History                       | Desktop |  **56** |   0 |   4 |   5 |   3 |
+| 30  | Profile                       | Desktop |  **56** |   0 |   5 |   6 |   3 |
+| 31  | Indicator settings            | iOS     |  **60** |   0 |   4 |   5 |   4 |
+| 32  | Indicator settings            | Desktop |  **60** |   0 |   3 |   7 |   5 |
+| 33  | Symbol search                 | Desktop |  **61** |   0 |   4 |   5 |   5 |
+| 34  | Toast                         | Desktop |  **63** |   0 |   2 |   3 |   4 |
+| 35  | Profile                       | iOS     |  **64** |   0 |   3 |   6 |   5 |
 
 **Averages: iOS 51.2 / desktop 52.4.** Weakest criteria fleet-wide: Motion (avg ≈3.5), A11y (≈3.7), State coverage (≈4.4). Strongest: Density (≈6.6). Nothing scores ≥8 on Motion anywhere — there is no motion system.
 
@@ -91,26 +91,26 @@ Neither platform has dimensional tokens today (spacing/radius/elevation/motion) 
 
 **Color — split every action hue into text vs fill variants** (measured, WCAG AA-passing):
 
-| Token | Value | White-text contrast | Use |
-|---|---|---|---|
-| `--buy-green` | `#19b85b` | 2.61:1 ✗ (7.49:1 as text on bg ✓) | text, borders, chart candles |
-| `--buy-green-fill` | `#0e7c3a` | **5.30:1** ✓ | BUY/Confirm button fills |
-| `--sell-red` | `#e13a43` | 4.30:1 ✗ (4.55:1 as text ✓) | text, borders |
-| `--sell-red-fill` | `#c62830` | **5.60:1** ✓ | SELL button fills |
-| `--app-accent` | `#568ff7` | 3.15:1 ✗ | text, icons, links |
-| `--app-accent-fill` | `#2f6be0` | **4.88:1** ✓ | primary button fills |
+| Token               | Value     | White-text contrast               | Use                          |
+| ------------------- | --------- | --------------------------------- | ---------------------------- |
+| `--buy-green`       | `#19b85b` | 2.61:1 ✗ (7.49:1 as text on bg ✓) | text, borders, chart candles |
+| `--buy-green-fill`  | `#0e7c3a` | **5.30:1** ✓                      | BUY/Confirm button fills     |
+| `--sell-red`        | `#e13a43` | 4.30:1 ✗ (4.55:1 as text ✓)       | text, borders                |
+| `--sell-red-fill`   | `#c62830` | **5.60:1** ✓                      | SELL button fills            |
+| `--app-accent`      | `#568ff7` | 3.15:1 ✗                          | text, icons, links           |
+| `--app-accent-fill` | `#2f6be0` | **4.88:1** ✓                      | primary button fills         |
 
 **Spacing (8pt grid):** `2 / 4 / 8 / 12 / 16 / 20 / 24 / 32` — snap offenders: 7→8, 14→12 or 16, 22→24.
 **Radius:** `sm 8 · md 10 · lg 12` (+2.5 one-off for the divider grabber).
 **Elevation:** `toast: black 40%, radius 8, y 4`; sheet: `black 50%, radius 16, y 8`. Add a z-index scale on desktop (`base 0 · chart-overlay 10 · sheet 20 · toast 30`).
 **Motion:** iOS `quick = .snappy(0.15)`, `standard = .spring(response: 0.3, dampingFraction: 0.8)`; desktop `120–200ms cubic-bezier(0.2, 0, 0, 1)` for hovers/presses, `200–250ms` for sheets/toasts; `prefers-reduced-motion` / Reduce-Motion fallbacks everywhere (spinner, toast, sheets, layout toggle).
-**Typography:** one rule — *every* price, P&L, quantity, and percentage uses tabular figures (iOS `Font.priceMedium/Small`, desktop `font-variant-numeric: tabular-nums` + `--font-mono`), plus thousands grouping in `Formatters.swift` / `format.ts`.
+**Typography:** one rule — _every_ price, P&L, quantity, and percentage uses tabular figures (iOS `Font.priceMedium/Small`, desktop `font-variant-numeric: tabular-nums` + `--font-mono`), plus thousands grouping in `Formatters.swift` / `format.ts`.
 **Opacity:** single `disabled = 0.35` token (hand-duplicated in 4 iOS files today) + a rule that disabled buttons also dim the fill, not just the label.
 
 ## 4. "Holy shit" opportunities (highest leverage)
 
 1. **Fix the trade ticket end-to-end.** It is the app's reason to exist and holds 4 of 7 P0s: clipped actions, illegible CTAs, silent chain failures, tiny hit targets. A ticket that is always visible, legible in sunlight, springs under the finger with haptics, and explains itself when broken is the single biggest quality leap. (Screens: trade-panel ×2, order-confirm ×2, floating-buttons.)
-2. **Make the chart TradingView-grade.** Sync indicator pane viewports (iOS P0 + desktop P1), add crosshair + OHLC legend, skeleton loading that matches final layout, chart bottom inset so floating buttons never occlude the last-price line, and route all chart colors through the dead `--chart-*` tokens. The chart occupies ~60% of the primary screen — it *is* the product's first impression.
+2. **Make the chart TradingView-grade.** Sync indicator pane viewports (iOS P0 + desktop P1), add crosshair + OHLC legend, skeleton loading that matches final layout, chart bottom inset so floating buttons never occlude the last-price line, and route all chart colors through the dead `--chart-*` tokens. The chart occupies ~60% of the primary screen — it _is_ the product's first impression.
 3. **Build the motion system.** Currently zero press states, zero springs, hard cuts on layout toggle, instant toast exit, unconditional spinner/rAF loops. One token layer (§3) + a press-state modifier applied to every custom control + spring-based sheet/toast transitions would transform feel more than any visual restyle — this is the Robinhood gap.
 4. **Give every destructive or async action a designed state.** Skeletons over spinners, actionable error cards (reason + retry + where to fix), undo/confirm for "Clear all drawings", submission locks on order confirm, offline/timeout state for session restore. This converts the app's worst moments (its current dead ends) into trust-builders.
 5. **Symbol search → market-data command palette.** Rows currently show a bare ticker; free text is accepted and fails silently downstream. Add name, last price, day change, and a sparkline per row, keyboard navigation with Enter-commits-top-match, and validation against the shared catalog (deduplicate the hardcoded 31-symbol list across platforms). Cheap to build, disproportionately premium feel.

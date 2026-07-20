@@ -152,14 +152,7 @@
   background: var(--app-surface);
   border-top: 1px solid var(--hud-stroke);
   box-shadow: 0 -6px 24px rgba(46, 143, 255, 0.18);
-  clip-path: polygon(
-    10px 0,
-    calc(100% - 10px) 0,
-    100% 10px,
-    100% 100%,
-    0 100%,
-    0 10px
-  );
+  clip-path: polygon(10px 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 0 100%, 0 10px);
   animation: sheet-up var(--sheet-anim);
   z-index: calc(var(--z-sheet) + 1);
   display: flex;

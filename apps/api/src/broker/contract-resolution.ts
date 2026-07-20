@@ -17,10 +17,7 @@ export const OPTION_MULTIPLIER = 100;
  * Picks the expiration to trade. Defaults to the nearest (first) expiration
  * in the chain; a requested expiration must exist in the chain.
  */
-export function pickExpiration(
-  expirations: string[],
-  requested?: string,
-): string {
+export function pickExpiration(expirations: string[], requested?: string): string {
   if (expirations.length === 0) {
     throw errors.validation('No expirations available for this underlying');
   }
@@ -50,9 +47,7 @@ export function resolveAutoOtm(
   optionType: OptionType,
   last: number,
 ): OptionContract {
-  const candidates = contracts
-    .filter((c) => c.optionType === optionType)
-    .map((c) => c.strike);
+  const candidates = contracts.filter((c) => c.optionType === optionType).map((c) => c.strike);
 
   let target: number | undefined;
   if (optionType === 'call') {
@@ -67,9 +62,7 @@ export function resolveAutoOtm(
         `the underlying price ${last} in this chain`,
     );
   }
-  return contracts.find(
-    (c) => c.optionType === optionType && c.strike === target,
-  )!;
+  return contracts.find((c) => c.optionType === optionType && c.strike === target)!;
 }
 
 /** Finds an explicitly requested option contract in the chain. */
@@ -78,9 +71,7 @@ export function findExplicitOption(
   optionType: OptionType,
   strike: number,
 ): OptionContract | undefined {
-  return contracts.find(
-    (c) => c.optionType === optionType && c.strike === strike,
-  );
+  return contracts.find((c) => c.optionType === optionType && c.strike === strike);
 }
 
 // ---------------------------------------------------------------------------
@@ -119,9 +110,7 @@ export function formatOccSymbol(
   return `${underlying.toUpperCase()}${y.slice(2)}${m}${d}${cp}${strikeField}`;
 }
 
-export function parseOccSymbol(
-  symbol: string,
-): {
+export function parseOccSymbol(symbol: string): {
   underlying: string;
   expiration: string;
   optionType: OptionType;
@@ -142,9 +131,6 @@ export function parseOccSymbol(
 // Buying power estimate
 // ---------------------------------------------------------------------------
 
-export function estimateBuyingPower(
-  quantity: number,
-  price: number,
-): number {
+export function estimateBuyingPower(quantity: number, price: number): number {
   return quantity * price * OPTION_MULTIPLIER;
 }

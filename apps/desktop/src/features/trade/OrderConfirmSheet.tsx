@@ -31,11 +31,7 @@ export function OrderConfirmSheet({ tradeStore, ticket }: OrderConfirmSheetProps
   // own Enter); Sheet itself owns Escape.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (
-        event.key === 'Enter' &&
-        confirmEnabled &&
-        !(event.target instanceof HTMLButtonElement)
-      ) {
+      if (event.key === 'Enter' && confirmEnabled && !(event.target instanceof HTMLButtonElement)) {
         void tradeStore.confirmArmedOrder();
       }
     };

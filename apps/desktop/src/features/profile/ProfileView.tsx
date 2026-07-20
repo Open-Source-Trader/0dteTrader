@@ -28,16 +28,11 @@ export function ProfileView({ onLogout, onDismiss }: ProfileViewProps) {
     void store.load();
   }, [store]);
 
-  const renderCredentialsSection = (
-    environment: TradingMode,
-    configured: boolean,
-  ) => {
+  const renderCredentialsSection = (environment: TradingMode, configured: boolean) => {
     const env = state[environment];
     const title = environment === 'live' ? 'Webull API — Live' : 'Webull API — Practice';
     const accountId =
-      environment === 'live'
-        ? state.me?.webullAccountId
-        : state.me?.webullPracticeAccountId;
+      environment === 'live' ? state.me?.webullAccountId : state.me?.webullPracticeAccountId;
     return (
       <div className="grouped-section" key={environment}>
         <div className="section-header">{title}</div>

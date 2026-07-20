@@ -27,9 +27,7 @@ export function redact<T>(input: T, depth = 0): T {
   if (typeof input === 'object') {
     const out: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(input as Record<string, unknown>)) {
-      out[key] = SENSITIVE_KEYS.has(key.toLowerCase())
-        ? REDACTED
-        : redact(value, depth + 1);
+      out[key] = SENSITIVE_KEYS.has(key.toLowerCase()) ? REDACTED : redact(value, depth + 1);
     }
     return out as unknown as T;
   }

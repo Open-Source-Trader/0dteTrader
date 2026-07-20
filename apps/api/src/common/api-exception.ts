@@ -23,8 +23,7 @@ export const errors = {
     new ApiException(HttpStatus.FORBIDDEN, code, message),
   notFound: (code: string, message: string) =>
     new ApiException(HttpStatus.NOT_FOUND, code, message),
-  conflict: (code: string, message: string) =>
-    new ApiException(HttpStatus.CONFLICT, code, message),
+  conflict: (code: string, message: string) => new ApiException(HttpStatus.CONFLICT, code, message),
   badRequest: (code: string, message: string) =>
     new ApiException(HttpStatus.BAD_REQUEST, code, message),
   unavailable: (code: string, message: string) =>
@@ -33,9 +32,5 @@ export const errors = {
 
 /** True for Prisma P2002 unique-constraint violations (and test fakes). */
 export function isUniqueViolation(err: unknown): boolean {
-  return (
-    typeof err === 'object' &&
-    err !== null &&
-    (err as { code?: string }).code === 'P2002'
-  );
+  return typeof err === 'object' && err !== null && (err as { code?: string }).code === 'P2002';
 }

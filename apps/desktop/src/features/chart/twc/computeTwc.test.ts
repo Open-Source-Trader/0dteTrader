@@ -19,7 +19,14 @@ const MINUTE = 60;
 // Base time divisible by 360 so 1m bars align cleanly with 6-minute HTF buckets
 const BASE_TIME = 1_699_999_920;
 
-function candle(i: number, open: number, high: number, low: number, close: number, volume = 1000): TwcCandle {
+function candle(
+  i: number,
+  open: number,
+  high: number,
+  low: number,
+  close: number,
+  volume = 1000,
+): TwcCandle {
   return { time: BASE_TIME + i * MINUTE, open, high, low, close, volume };
 }
 
@@ -198,7 +205,9 @@ describe('fib zigzag engine', () => {
       for (let k = 0; k < bars; k++) {
         const open = price;
         price += step;
-        fixture.push(candle(i++, open, Math.max(open, price) + 0.1, Math.min(open, price) - 0.1, price));
+        fixture.push(
+          candle(i++, open, Math.max(open, price) + 0.1, Math.min(open, price) - 0.1, price),
+        );
       }
     };
     leg(60, -1); // 300 -> 240 (pivot low)
@@ -227,7 +236,10 @@ describe('SMC engine', () => {
   const candles = zigzagFixture();
 
   it('draws premium/discount/equilibrium zones with labels', () => {
-    const smc = computeSmc(candles, settings({ showPremiumDiscountZones: true, showSwingOrderBlocks: false }));
+    const smc = computeSmc(
+      candles,
+      settings({ showPremiumDiscountZones: true, showSwingOrderBlocks: false }),
+    );
     const zoneLabels = smc.labels.map((l) => l.text);
     expect(zoneLabels).toContain('Premium');
     expect(zoneLabels).toContain('Equilibrium');
@@ -241,7 +253,11 @@ describe('SMC engine', () => {
   it('stores swing order blocks on structure breaks and caps the visible count', () => {
     const smc = computeSmc(
       candles,
-      settings({ showSwingOrderBlocks: true, swingOrderBlocksSize: 4, showPremiumDiscountZones: false }),
+      settings({
+        showSwingOrderBlocks: true,
+        swingOrderBlocksSize: 4,
+        showPremiumDiscountZones: false,
+      }),
     );
     // The long final leg breaks the swing high -> at least one bullish block
     expect(smc.bands.length).toBeGreaterThanOrEqual(1);
@@ -250,7 +266,10 @@ describe('SMC engine', () => {
   });
 
   it('publishes per-bar structure bias for the confluence engine', () => {
-    const smc = computeSmc(candles, settings({ showSwingOrderBlocks: false, showPremiumDiscountZones: false }));
+    const smc = computeSmc(
+      candles,
+      settings({ showSwingOrderBlocks: false, showPremiumDiscountZones: false }),
+    );
     expect(smc.swingBias.length).toBe(candles.length);
     // The sustained final rally flips the swing bias bullish
     expect(smc.swingBias[candles.length - 1]).toBe(1);
@@ -284,7 +303,11 @@ describe('confluence engine', () => {
     expect(off.markers.some((m) => m.text === 'CL' || m.text === 'CS')).toBe(false);
     // With the gate off, CL/CS mirror the ST-gated signals — assert no crash
     // and pill-only markers when enabled (signals may or may not fire here).
-    const on = computeTwc(candles, settings({ showConfMarkers: true, useConfluenceGate: false }), MINUTE)!;
+    const on = computeTwc(
+      candles,
+      settings({ showConfMarkers: true, useConfluenceGate: false }),
+      MINUTE,
+    )!;
     for (const m of on.markers.filter((mk) => mk.text === 'CL' || mk.text === 'CS')) {
       expect(['labelUp', 'labelDown']).toContain(m.shape);
     }
@@ -373,7 +396,11 @@ describe('computeTwc', () => {
   });
 
   it('respects showMarkers for diamonds/triangles', () => {
-    const model = computeTwc(candles, settings({ showMarkers: false, showMacdAlign: false }), MINUTE)!;
+    const model = computeTwc(
+      candles,
+      settings({ showMarkers: false, showMacdAlign: false }),
+      MINUTE,
+    )!;
     expect(model.markers.filter((m) => m.shape === 'diamond')).toHaveLength(0);
   });
 });

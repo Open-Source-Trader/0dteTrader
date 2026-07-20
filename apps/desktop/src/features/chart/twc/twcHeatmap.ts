@@ -89,9 +89,12 @@ export function computeHeatmap(
     let unChop = 0;
     let unBear = 0;
     if (zr !== null && zv !== null) {
-      unBull = priBull * gaussPdf(zr, MU_RET.bull, SD_RET.bull) * gaussPdf(zv, MU_VOL.bull, SD_VOL.bull);
-      unChop = priChop * gaussPdf(zr, MU_RET.chop, SD_RET.chop) * gaussPdf(zv, MU_VOL.chop, SD_VOL.chop);
-      unBear = priBear * gaussPdf(zr, MU_RET.bear, SD_RET.bear) * gaussPdf(zv, MU_VOL.bear, SD_VOL.bear);
+      unBull =
+        priBull * gaussPdf(zr, MU_RET.bull, SD_RET.bull) * gaussPdf(zv, MU_VOL.bull, SD_VOL.bull);
+      unChop =
+        priChop * gaussPdf(zr, MU_RET.chop, SD_RET.chop) * gaussPdf(zv, MU_VOL.chop, SD_VOL.chop);
+      unBear =
+        priBear * gaussPdf(zr, MU_RET.bear, SD_RET.bear) * gaussPdf(zv, MU_VOL.bear, SD_VOL.bear);
       unSum = unBull + unChop + unBear;
     }
     if (unSum > 0) {
@@ -186,7 +189,9 @@ export function computeHeatmap(
 
   // ── Per-bar signal derivation ──
   const markers: TwcMarker[] = [];
-  const candleColors: (string | null)[] | null = settings.colorBars ? new Array(n).fill(null) : null;
+  const candleColors: (string | null)[] | null = settings.colorBars
+    ? new Array(n).fill(null)
+    : null;
   const ctfDirOut: number[] = new Array(n).fill(0);
   const stackDirOut: number[] = new Array(n).fill(0);
   const crossUpOut: boolean[] = new Array(n).fill(false);
@@ -222,7 +227,11 @@ export function computeHeatmap(
     const bearCount =
       (included3 && h3 !== null && h3 > 0 ? 1 : 0) + (included4 && h4 !== null && h4 > 0 ? 1 : 0);
     stackDirOut[i] =
-      enabledCount > 0 && bullCount === enabledCount ? 1 : enabledCount > 0 && bearCount === enabledCount ? -1 : 0;
+      enabledCount > 0 && bullCount === enabledCount
+        ? 1
+        : enabledCount > 0 && bearCount === enabledCount
+          ? -1
+          : 0;
 
     // ST-gated heatmap triggers (independent of showMarkers; feed CL/CS too)
     const rawUp = crossesOver(msi, i, settings.msiBullThr) && hmmDominant[i] === 1;
@@ -238,7 +247,11 @@ export function computeHeatmap(
         const conv = Math.max(0, Math.min(1, Math.abs(m - 50) / 50));
         const transparency = Math.round(80 - conv * 70);
         const base =
-          hmmDominant[i] === 1 ? TWC_COLORS.bull : hmmDominant[i] === -1 ? TWC_COLORS.bear : TWC_COLORS.chop;
+          hmmDominant[i] === 1
+            ? TWC_COLORS.bull
+            : hmmDominant[i] === -1
+              ? TWC_COLORS.bear
+              : TWC_COLORS.chop;
         candleColors[i] = withOpacity(base, (100 - transparency) / 100);
       }
     }
@@ -247,18 +260,42 @@ export function computeHeatmap(
       // Regime flip diamonds
       const prevDom = i > 0 ? hmmDominant[i - 1] : 0;
       if (hmmDominant[i] === 1 && prevDom !== 1) {
-        markers.push({ barIndex: i, placement: 'belowBar', shape: 'diamond', color: TWC_COLORS.bull, size: 'tiny' });
+        markers.push({
+          barIndex: i,
+          placement: 'belowBar',
+          shape: 'diamond',
+          color: TWC_COLORS.bull,
+          size: 'tiny',
+        });
       }
       if (hmmDominant[i] === -1 && prevDom !== -1) {
-        markers.push({ barIndex: i, placement: 'aboveBar', shape: 'diamond', color: TWC_COLORS.bear, size: 'tiny' });
+        markers.push({
+          barIndex: i,
+          placement: 'aboveBar',
+          shape: 'diamond',
+          color: TWC_COLORS.bear,
+          size: 'tiny',
+        });
       }
 
       // ST-gated heatmap LONG/SHORT triangles
       if (crossUpOut[i]) {
-        markers.push({ barIndex: i, placement: 'belowBar', shape: 'triangleUp', color: TWC_COLORS.bull, size: 'small' });
+        markers.push({
+          barIndex: i,
+          placement: 'belowBar',
+          shape: 'triangleUp',
+          color: TWC_COLORS.bull,
+          size: 'small',
+        });
       }
       if (crossDnOut[i]) {
-        markers.push({ barIndex: i, placement: 'aboveBar', shape: 'triangleDown', color: TWC_COLORS.bear, size: 'small' });
+        markers.push({
+          barIndex: i,
+          placement: 'aboveBar',
+          shape: 'triangleDown',
+          color: TWC_COLORS.bear,
+          size: 'small',
+        });
       }
     }
 
@@ -272,9 +309,23 @@ export function computeHeatmap(
       const zPrevAbs = zPrev === null ? 0 : Math.abs(zPrev);
       if (z !== null && Math.abs(z) >= settings.vwapWarn && zPrevAbs < settings.vwapWarn) {
         if (z > 0) {
-          markers.push({ barIndex: i, placement: 'aboveBar', shape: 'labelDown', color: TWC_COLORS.vwapRip, size: 'tiny', text: 'RIP' });
+          markers.push({
+            barIndex: i,
+            placement: 'aboveBar',
+            shape: 'labelDown',
+            color: TWC_COLORS.vwapRip,
+            size: 'tiny',
+            text: 'RIP',
+          });
         } else {
-          markers.push({ barIndex: i, placement: 'belowBar', shape: 'labelUp', color: TWC_COLORS.vwapRip, size: 'tiny', text: 'RIP' });
+          markers.push({
+            barIndex: i,
+            placement: 'belowBar',
+            shape: 'labelUp',
+            color: TWC_COLORS.vwapRip,
+            size: 'tiny',
+            text: 'RIP',
+          });
         }
       }
     }
@@ -282,10 +333,22 @@ export function computeHeatmap(
     // MACD + SuperTrend alignment triangles (own toggle, not showMarkers)
     if (settings.showMacdAlign) {
       if (seriesCrossOver(macdValues.macdLine, macdValues.signalLine, i) && stackAgreeBull) {
-        markers.push({ barIndex: i, placement: 'belowBar', shape: 'triangleUp', color: TWC_COLORS.macdBull, size: 'small' });
+        markers.push({
+          barIndex: i,
+          placement: 'belowBar',
+          shape: 'triangleUp',
+          color: TWC_COLORS.macdBull,
+          size: 'small',
+        });
       }
       if (seriesCrossUnder(macdValues.macdLine, macdValues.signalLine, i) && stackAgreeBear) {
-        markers.push({ barIndex: i, placement: 'aboveBar', shape: 'triangleDown', color: TWC_COLORS.macdBear, size: 'small' });
+        markers.push({
+          barIndex: i,
+          placement: 'aboveBar',
+          shape: 'triangleDown',
+          color: TWC_COLORS.macdBear,
+          size: 'small',
+        });
       }
     }
 
@@ -322,11 +385,33 @@ export function computeHeatmap(
       const lowerArr = useThird ? bb3.lower : bb2.lower;
       const u1 = upperArr[i - 1];
       const l1 = lowerArr[i - 1];
-      if (u1 !== null && candles[i - 1].high > u1 && candles[i - 1].close < u1 && closes[i] < closes[i - 1]) {
-        markers.push({ barIndex: i - 1, placement: 'aboveBar', shape: 'triangleDown', color: TWC_COLORS.stBear, size: 'tiny' });
+      if (
+        u1 !== null &&
+        candles[i - 1].high > u1 &&
+        candles[i - 1].close < u1 &&
+        closes[i] < closes[i - 1]
+      ) {
+        markers.push({
+          barIndex: i - 1,
+          placement: 'aboveBar',
+          shape: 'triangleDown',
+          color: TWC_COLORS.stBear,
+          size: 'tiny',
+        });
       }
-      if (l1 !== null && candles[i - 1].low < l1 && candles[i - 1].close > l1 && closes[i] > closes[i - 1]) {
-        markers.push({ barIndex: i - 1, placement: 'belowBar', shape: 'triangleUp', color: TWC_COLORS.stBull, size: 'tiny' });
+      if (
+        l1 !== null &&
+        candles[i - 1].low < l1 &&
+        candles[i - 1].close > l1 &&
+        closes[i] > closes[i - 1]
+      ) {
+        markers.push({
+          barIndex: i - 1,
+          placement: 'belowBar',
+          shape: 'triangleUp',
+          color: TWC_COLORS.stBull,
+          size: 'tiny',
+        });
       }
     }
   }
@@ -334,7 +419,11 @@ export function computeHeatmap(
   // ── Line + fill series ──
   const lines: TwcLine[] = [];
   const fills: TwcAreaFill[] = [];
-  const splitByDir = (values: (number | null)[], dirs: (number | null)[], wantBull: boolean): (number | null)[] =>
+  const splitByDir = (
+    values: (number | null)[],
+    dirs: (number | null)[],
+    wantBull: boolean,
+  ): (number | null)[] =>
     values.map((v, i) => {
       const d = dirs[i];
       if (v === null || d === null) return null;
@@ -342,8 +431,18 @@ export function computeHeatmap(
     });
 
   if (settings.showCTFLine) {
-    lines.push({ id: 'ctfBull', values: splitByDir(ctf.value, ctf.direction, true), color: TWC_COLORS.stBull, lineWidth: 2 });
-    lines.push({ id: 'ctfBear', values: splitByDir(ctf.value, ctf.direction, false), color: TWC_COLORS.stBear, lineWidth: 2 });
+    lines.push({
+      id: 'ctfBull',
+      values: splitByDir(ctf.value, ctf.direction, true),
+      color: TWC_COLORS.stBull,
+      lineWidth: 2,
+    });
+    lines.push({
+      id: 'ctfBear',
+      values: splitByDir(ctf.value, ctf.direction, false),
+      color: TWC_COLORS.stBear,
+      lineWidth: 2,
+    });
   }
   if (settings.showTransparentHighlight) {
     const opacity = (100 - settings.highlightTransparency) / 100;
@@ -358,12 +457,32 @@ export function computeHeatmap(
     });
   }
   if (settings.showHTF3) {
-    lines.push({ id: 'htf3Bull', values: splitByDir(htf3Value, htf3Dir, true), color: TWC_COLORS.stBull, lineWidth: 2 });
-    lines.push({ id: 'htf3Bear', values: splitByDir(htf3Value, htf3Dir, false), color: TWC_COLORS.stBear, lineWidth: 2 });
+    lines.push({
+      id: 'htf3Bull',
+      values: splitByDir(htf3Value, htf3Dir, true),
+      color: TWC_COLORS.stBull,
+      lineWidth: 2,
+    });
+    lines.push({
+      id: 'htf3Bear',
+      values: splitByDir(htf3Value, htf3Dir, false),
+      color: TWC_COLORS.stBear,
+      lineWidth: 2,
+    });
   }
   if (settings.showHTF4) {
-    lines.push({ id: 'htf4Bull', values: splitByDir(htf4Value, htf4Dir, true), color: TWC_COLORS.stBull, lineWidth: 2 });
-    lines.push({ id: 'htf4Bear', values: splitByDir(htf4Value, htf4Dir, false), color: TWC_COLORS.stBear, lineWidth: 2 });
+    lines.push({
+      id: 'htf4Bull',
+      values: splitByDir(htf4Value, htf4Dir, true),
+      color: TWC_COLORS.stBull,
+      lineWidth: 2,
+    });
+    lines.push({
+      id: 'htf4Bear',
+      values: splitByDir(htf4Value, htf4Dir, false),
+      color: TWC_COLORS.stBear,
+      lineWidth: 2,
+    });
   }
   if (settings.showBB2 || settings.showBB3) {
     lines.push({ id: 'bbBasis', values: bb2.middle, color: TWC_COLORS.bbBasis, lineWidth: 1 });
@@ -371,19 +490,37 @@ export function computeHeatmap(
   if (settings.showBB2) {
     lines.push({ id: 'bbUpper2', values: bb2.upper, color: TWC_COLORS.bbSigma2, lineWidth: 1 });
     lines.push({ id: 'bbLower2', values: bb2.lower, color: TWC_COLORS.bbSigma2, lineWidth: 1 });
-    fills.push({ id: 'bb2Fill', top: bb2.upper, bottom: bb2.lower, colors: bb2.upper.map((v) => (v === null ? null : TWC_COLORS.bbSigma2Fill)) });
+    fills.push({
+      id: 'bb2Fill',
+      top: bb2.upper,
+      bottom: bb2.lower,
+      colors: bb2.upper.map((v) => (v === null ? null : TWC_COLORS.bbSigma2Fill)),
+    });
   }
   if (settings.showBB3) {
     lines.push({ id: 'bbUpper3', values: bb3.upper, color: TWC_COLORS.bbSigma3, lineWidth: 1 });
     lines.push({ id: 'bbLower3', values: bb3.lower, color: TWC_COLORS.bbSigma3, lineWidth: 1 });
-    fills.push({ id: 'bb3Fill', top: bb3.upper, bottom: bb3.lower, colors: bb3.upper.map((v) => (v === null ? null : TWC_COLORS.bbSigma3Fill)) });
+    fills.push({
+      id: 'bb3Fill',
+      top: bb3.upper,
+      bottom: bb3.lower,
+      colors: bb3.upper.map((v) => (v === null ? null : TWC_COLORS.bbSigma3Fill)),
+    });
   }
 
   // ── Bias banner (last bar stack agreement) ──
   const banner: TwcBanner | null = settings.showBiasBanner
     ? {
-        text: lastStackBull ? settings.biasLongText : lastStackBear ? settings.biasShortText : settings.biasChopText,
-        color: lastStackBull ? TWC_COLORS.bannerLong : lastStackBear ? TWC_COLORS.bannerShort : TWC_COLORS.bannerChop,
+        text: lastStackBull
+          ? settings.biasLongText
+          : lastStackBear
+            ? settings.biasShortText
+            : settings.biasChopText,
+        color: lastStackBull
+          ? TWC_COLORS.bannerLong
+          : lastStackBear
+            ? TWC_COLORS.bannerShort
+            : TWC_COLORS.bannerChop,
         position: settings.biasBannerPosition,
         size: settings.biasBannerSize,
       }

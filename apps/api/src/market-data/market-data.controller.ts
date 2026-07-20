@@ -1,34 +1,26 @@
 import { Controller, Get, Inject, Query } from '@nestjs/common';
 import { Candle, OptionsChain, Quote } from '@0dtetrader/shared-types';
-import {
-  BROKER_GATEWAY,
-  BrokerGateway,
-} from '../broker/broker-gateway.interface';
-import {
-  AuthenticatedUser,
-  CurrentUser,
-} from '../common/current-user.decorator';
-import {
-  CandlesQueryDto,
-  OptionsChainQueryDto,
-  QuoteQueryDto,
-} from './dto/market-query.dto';
+import { BROKER_GATEWAY, BrokerGateway } from '../broker/broker-gateway.interface';
+import { AuthenticatedUser, CurrentUser } from '../common/current-user.decorator';
+import { CandlesQueryDto, OptionsChainQueryDto, QuoteQueryDto } from './dto/market-query.dto';
 import { CryptoDataService } from './crypto-data.service';
+import { IndexDataService } from './index-data.service';
 
 @Controller('market')
 export class MarketDataController {
   constructor(
     @Inject(BROKER_GATEWAY) private readonly broker: BrokerGateway,
     private readonly crypto: CryptoDataService,
+    private readonly index: IndexDataService,
   ) {}
 
   @Get('quote')
-  getQuote(
-    @CurrentUser() user: AuthenticatedUser,
-    @Query() query: QuoteQueryDto,
-  ): Promise<Quote> {
+  getQuote(@CurrentUser() user: AuthenticatedUser, @Query() query: QuoteQueryDto): Promise<Quote> {
     if (this.crypto.isCryptoSymbol(query.symbol)) {
       return this.crypto.getQuote(query.symbol);
+    }
+    if (this.index.isIndexSymbol(query.symbol)) {
+      return this.index.getQuote(query.symbol);
     }
     return this.broker.getQuote(user.userId, query.symbol);
   }
@@ -40,6 +32,9 @@ export class MarketDataController {
   ): Promise<Candle[]> {
     if (this.crypto.isCryptoSymbol(query.symbol)) {
       return this.crypto.getCandles(query.symbol, query.interval, query.from, query.to);
+    }
+    if (this.index.isIndexSymbol(query.symbol)) {
+      return this.index.getCandles(query.symbol, query.interval, query.from, query.to);
     }
     return this.broker.getCandles(user.userId, query.symbol, {
       interval: query.interval,

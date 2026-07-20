@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Candle, CandleInterval, Quote } from '@0dtetrader/shared-types';
 import { brokerErrors } from '../common/broker-error';
+import { AGGREGATION_PLANS, aggregateCandles } from './candle-aggregation';
 
 /**
  * Live cryptocurrency market data from Coinbase Exchange's public REST API
@@ -28,13 +29,13 @@ export class CryptoDataService {
 
   static readonly SYMBOLS = Object.keys(CryptoDataService.PRODUCTS);
 
-  private static readonly GRANULARITY: Record<CandleInterval, number> = {
+  /** Coinbase Exchange only supports these granularities; 30m/4h/1w are
+   *  aggregated server-side from the next-smaller native interval. */
+  private static readonly GRANULARITY: Partial<Record<CandleInterval, number>> = {
     '1m': 60,
     '5m': 300,
     '15m': 900,
-    '30m': 1800,
     '1h': 3600,
-    '4h': 14400,
     '1d': 86400,
   };
 
@@ -72,34 +73,62 @@ export class CryptoDataService {
     from?: string,
     to?: string,
   ): Promise<Candle[]> {
+    const plan = AGGREGATION_PLANS[interval];
+    const source = plan?.source ?? interval;
+    // Coinbase caps responses at 300 buckets per request; aggregated intervals
+    // fetch a second backward page so the chart still gets useful depth
+    // (e.g. 600 15m bars → 300 30m bars).
+    const pages = plan ? 2 : 1;
+    const candles = await this.fetchCandlePages(symbol, source, pages, from, to);
+    return plan ? aggregateCandles(candles, interval) : candles;
+  }
+
+  private async fetchCandlePages(
+    symbol: string,
+    interval: CandleInterval,
+    pages: number,
+    from?: string,
+    to?: string,
+  ): Promise<Candle[]> {
     const product = this.product(symbol);
     const granularity = CryptoDataService.GRANULARITY[interval];
-    // Coinbase caps responses at 300 buckets per request.
-    const end = to ? new Date(to) : new Date();
-    const maxSpanMs = granularity * 300 * 1000;
-    let start = from ? new Date(from) : new Date(end.getTime() - maxSpanMs);
-    if (end.getTime() - start.getTime() > maxSpanMs) {
-      start = new Date(end.getTime() - maxSpanMs);
+    if (!granularity) {
+      throw brokerErrors.unavailable(`Unsupported crypto interval: ${interval}`);
     }
-    const query = new URLSearchParams({
-      granularity: String(granularity),
-      start: start.toISOString(),
-      end: end.toISOString(),
-    });
-    // Rows: [bucketStartEpochSeconds, low, high, open, close, volume], newest first.
-    const rows = await this.fetchJson<[number, number, number, number, number, number][]>(
-      `/products/${product}/candles?${query.toString()}`,
-    );
-    return rows
-      .map(([time, low, high, open, close, volume]) => ({
-        time: new Date(time * 1000).toISOString(),
-        open,
-        high,
-        low,
-        close,
-        volume: Math.round(volume),
-      }))
-      .reverse();
+    const maxSpanMs = granularity * 300 * 1000;
+    const floor = from ? Date.parse(from) : Number.NEGATIVE_INFINITY;
+    let end = to ? new Date(to) : new Date();
+    const result: Candle[] = [];
+    for (let page = 0; page < pages && end.getTime() > floor; page += 1) {
+      const start = new Date(Math.max(end.getTime() - maxSpanMs, floor));
+      const query = new URLSearchParams({
+        granularity: String(granularity),
+        start: start.toISOString(),
+        end: end.toISOString(),
+      });
+      // Rows: [bucketStartEpochSeconds, low, high, open, close, volume], newest first.
+      const rows = await this.fetchJson<[number, number, number, number, number, number][]>(
+        `/products/${product}/candles?${query.toString()}`,
+      );
+      result.unshift(
+        ...rows
+          // start/end are inclusive: drop the boundary bucket already covered
+          // by the previous (newer) page.
+          .filter(([time]) => page === 0 || time * 1000 < end.getTime())
+          .map(([time, low, high, open, close, volume]) => ({
+            time: new Date(time * 1000).toISOString(),
+            open,
+            high,
+            low,
+            close,
+            volume: Math.round(volume),
+          }))
+          .reverse(),
+      );
+      if (rows.length === 0) break;
+      end = start;
+    }
+    return result;
   }
 
   private product(symbol: string): string {

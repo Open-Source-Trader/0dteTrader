@@ -3,6 +3,7 @@ import { Quote } from '@0dtetrader/shared-types';
 import { BrokerGateway } from '../broker/broker-gateway.interface';
 import { OrderEventsService } from '../broker/order-events.service';
 import { CryptoDataService } from './crypto-data.service';
+import { IndexDataService } from './index-data.service';
 import { StreamGateway } from './stream.gateway';
 
 function fakeSocket(): { readyState: number; send: jest.Mock } {
@@ -25,6 +26,7 @@ function quoteFor(symbol: string, last: number): Quote {
 describe('StreamGateway.tickSymbol', () => {
   let broker: { getQuote: jest.Mock };
   let crypto: { isCryptoSymbol: jest.Mock; getQuote: jest.Mock };
+  let index: { isIndexSymbol: jest.Mock; getQuote: jest.Mock };
   let gateway: StreamGateway;
 
   beforeEach(() => {
@@ -39,13 +41,20 @@ describe('StreamGateway.tickSymbol', () => {
       isCryptoSymbol: jest.fn(() => false),
       getQuote: jest.fn(async (symbol: string) => quoteFor(symbol, 300)),
     };
+    index = {
+      isIndexSymbol: jest.fn(() => false),
+      getQuote: jest.fn(async (symbol: string) => quoteFor(symbol, 400)),
+    };
     gateway = new StreamGateway(
       broker as unknown as BrokerGateway,
       crypto as unknown as CryptoDataService,
+      index as unknown as IndexDataService,
       // jwt/config are only used during connection auth, not by ticks.
       {} as never,
       {} as never,
-      { events$: { subscribe: () => ({ unsubscribe: () => undefined }) } } as unknown as OrderEventsService,
+      {
+        events$: { subscribe: () => ({ unsubscribe: () => undefined }) },
+      } as unknown as OrderEventsService,
     );
   });
 
@@ -116,6 +125,24 @@ describe('StreamGateway.tickSymbol', () => {
     expect(crypto.getQuote).toHaveBeenCalledTimes(1);
     expect(broker.getQuote).not.toHaveBeenCalled();
     expect(socket1.send).toHaveBeenCalledTimes(1);
+    expect(socket2.send).toHaveBeenCalledTimes(1);
+  });
+
+  it('index symbols use one shared user-independent Tradier fetch', async () => {
+    index.isIndexSymbol.mockReturnValue(true);
+    const socket1 = fakeSocket();
+    const socket2 = fakeSocket();
+    subscribe('SPX', [
+      [socket1, 'u1'],
+      [socket2, 'u2'],
+    ]);
+
+    await (gateway as unknown as { tickSymbol(symbol: string): Promise<void> }).tickSymbol('SPX');
+
+    expect(index.getQuote).toHaveBeenCalledTimes(1);
+    expect(broker.getQuote).not.toHaveBeenCalled();
+    expect(socket1.send).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(socket1.send.mock.calls[0][0]).data.last).toBe(400);
     expect(socket2.send).toHaveBeenCalledTimes(1);
   });
 });

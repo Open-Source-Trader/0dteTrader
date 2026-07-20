@@ -12,7 +12,7 @@ export class CandlesQueryDto {
   @Matches(/^[A-Za-z0-9.]{1,20}$/)
   symbol!: string;
 
-  @IsIn(['1m', '5m', '15m', '30m', '1h', '4h', '1d'])
+  @IsIn(['1m', '5m', '15m', '30m', '1h', '4h', '1d', '1w'])
   interval!: CandleInterval;
 
   @IsOptional()

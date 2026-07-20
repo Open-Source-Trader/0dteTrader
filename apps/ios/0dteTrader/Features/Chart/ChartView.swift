@@ -493,6 +493,15 @@ struct ChartView: View {
 
             Spacer()
 
+            if let progress = viewModel.tickProgress {
+                Text("\(progress.count)/\(progress.size) ticks")
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(Color.secondary)
+                    .accessibilityLabel(
+                        "Building candle: \(progress.count) of \(progress.size) ticks"
+                    )
+            }
+
             if let tradingMode {
                 modeBadge(tradingMode)
             }

@@ -83,7 +83,7 @@ export function toCandle(bar: WebullBar): Candle {
   };
 }
 
-export const INTERVAL_TO_TIMESPAN: Record<CandleInterval, string> = {
+export const INTERVAL_TO_TIMESPAN: Record<Exclude<CandleInterval, '1w'>, string> = {
   '1m': 'M1',
   '5m': 'M5',
   '15m': 'M15',

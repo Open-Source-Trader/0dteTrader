@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { createHash } from 'node:crypto';
 import {
   Candle,
+  CandleInterval,
   CandleRequest,
   OptionsChain,
   OptionType,
@@ -14,6 +15,7 @@ import {
   TradingMode,
 } from '@0dtetrader/shared-types';
 import { brokerErrors } from '../../common/broker-error';
+import { AGGREGATION_PLANS, aggregateCandles } from '../../market-data/candle-aggregation';
 import { CredentialsService } from '../../credentials/credentials.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
@@ -106,11 +108,11 @@ function tradingDay(): string {
 @Injectable()
 export class WebullBrokerGateway implements BrokerGateway, OnModuleDestroy {
   private readonly logger = new Logger(WebullBrokerGateway.name);
-  private readonly clients = new Map<
-    string,
-    { fingerprint: string; client: WebullClient }
-  >();
+  private readonly clients = new Map<string, { fingerprint: string; client: WebullClient }>();
   private readonly pollTimers = new Map<string, NodeJS.Timeout>();
+  /** Timespans the live API rejected or returned empty (native-first fallback
+   *  memo for 30m/4h — see getCandles). */
+  private readonly unsupportedTimespans = new Set<CandleInterval>();
 
   constructor(
     private readonly credentials: CredentialsService,
@@ -202,15 +204,10 @@ export class WebullBrokerGateway implements BrokerGateway, OnModuleDestroy {
    * the user — after authentication it is discovered once via
    * GET /openapi/account/list and persisted alongside the credentials.
    */
-  private async accountIdFor(
-    userId: string,
-    client: WebullClient,
-  ): Promise<string> {
+  private async accountIdFor(userId: string, client: WebullClient): Promise<string> {
     if (client.hasAccountId()) return client.accountId;
     const payload = await client.request('accountList');
-    const rows = Array.isArray(payload)
-      ? payload
-      : asArray(asObject(payload)?.accounts);
+    const rows = Array.isArray(payload) ? payload : asArray(asObject(payload)?.accounts);
     const accountId = rows
       .map((row) => asObject(row)?.account_id)
       .find((id): id is string => typeof id === 'string' && id.length > 0);
@@ -222,23 +219,19 @@ export class WebullBrokerGateway implements BrokerGateway, OnModuleDestroy {
     client.setAccountId(accountId);
     const mode = await this.tradingModeFor(userId);
     await this.credentials.saveDiscoveredAccountId(userId, mode, accountId);
-    this.logger.log(
-      `Discovered Webull ${mode} account (…${accountId.slice(-4)}) via account/list`,
-    );
+    this.logger.log(`Discovered Webull ${mode} account (…${accountId.slice(-4)}) via account/list`);
     return accountId;
   }
 
   private hosts(mode: TradingMode): WebullHosts {
     if (mode === 'live') {
-      const api =
-        this.config.get<string>('webull.liveApiBaseUrl') || WEBULL_PROD_HOSTS.api;
+      const api = this.config.get<string>('webull.liveApiBaseUrl') || WEBULL_PROD_HOSTS.api;
       const data =
         this.config.get<string>('webull.liveMarketDataBaseUrl') ||
         api.replace(/^https:\/\/api\./, 'https://data-api.');
       return { api, data };
     }
-    const api =
-      this.config.get<string>('webull.apiBaseUrl') || WEBULL_SANDBOX_HOSTS.api;
+    const api = this.config.get<string>('webull.apiBaseUrl') || WEBULL_SANDBOX_HOSTS.api;
     // Market data lives on a separate host family (api.* → data-api.*). An
     // explicit WEBULL_MARKET_DATA_BASE_URL always wins (read through the
     // config layer like every other override).
@@ -279,40 +272,84 @@ export class WebullBrokerGateway implements BrokerGateway, OnModuleDestroy {
     return toQuote(symbol, first);
   }
 
-  async getCandles(
-    userId: string,
-    symbol: string,
-    req: CandleRequest,
-  ): Promise<Candle[]> {
+  async getCandles(userId: string, symbol: string, req: CandleRequest): Promise<Candle[]> {
     const client = await this.clientFor(userId);
     const occ = parseOccSymbol(symbol);
     const endpoint = occ ? 'optionBars' : 'stockBars';
     const category = occ ? CATEGORY.option : CATEGORY.stock;
-    // Verified against the live API: stock bars take `symbol` (singular), but
-    // option bars require `symbols` (plural) — singular gets a
-    // 400 "Parameters not valid".
-    const query: Record<string, string> = {
-      [occ ? 'symbols' : 'symbol']: symbol,
-      category,
-      timespan: TIMESPAN[req.interval],
-      count: '200',
+
+    const fetchBars = async (timespan: string, count: number): Promise<Candle[]> => {
+      // Verified against the live API: stock bars take `symbol` (singular), but
+      // option bars require `symbols` (plural) — singular gets a
+      // 400 "Parameters not valid".
+      const query: Record<string, string> = {
+        [occ ? 'symbols' : 'symbol']: symbol,
+        category,
+        timespan,
+        count: String(count),
+      };
+      if (req.from) query.start_time = String(Date.parse(req.from));
+      if (req.to) query.end_time = String(Date.parse(req.to));
+      let raw = await client.request(endpoint, { query });
+      // A window covering no trading session (weekend/holiday) returns []; fall
+      // back to the latest bars so the chart still renders the last session.
+      if (asArray(raw).length === 0 && (req.from || req.to)) {
+        delete query.start_time;
+        delete query.end_time;
+        raw = await client.request(endpoint, { query });
+      }
+      // Webull returns bars newest-first; chart clients require ascending
+      // (lightweight-charts setData throws on unsorted input, DGCharts mirrors
+      // the same assumption) — sort by bucket start.
+      return asArray(raw)
+        .map((b) => toCandle(b as WebullBar))
+        .sort((a, b) => a.time.localeCompare(b.time));
     };
-    if (req.from) query.start_time = String(Date.parse(req.from));
-    if (req.to) query.end_time = String(Date.parse(req.to));
-    let raw = await client.request(endpoint, { query });
-    // A window covering no trading session (weekend/holiday) returns []; fall
-    // back to the latest bars so the chart still renders the last session.
-    if (asArray(raw).length === 0 && (req.from || req.to)) {
-      delete query.start_time;
-      delete query.end_time;
-      raw = await client.request(endpoint, { query });
+
+    // Whether Webull accepts count > 200 is unverified; if the larger request
+    // fails, settle for the documented cap (fewer but correct bars).
+    const fetchAggregated = async (
+      source: Exclude<CandleInterval, '1w'>,
+      count: number,
+      target: CandleInterval,
+    ): Promise<Candle[]> => {
+      let bars: Candle[];
+      try {
+        bars = await fetchBars(TIMESPAN[source], count);
+      } catch (err) {
+        if (count <= 200) throw err;
+        this.logger.warn(
+          `bars count=${count} rejected for ${symbol} ${source} — retrying with 200: ${(err as Error).message}`,
+        );
+        bars = await fetchBars(TIMESPAN[source], 200);
+      }
+      return aggregateCandles(bars, target);
+    };
+
+    // Webull has no verified weekly timespan — always build 1w from daily bars.
+    if (req.interval === '1w') {
+      return fetchAggregated('1d', 600, '1w');
     }
-    // Webull returns bars newest-first; chart clients require ascending
-    // (lightweight-charts setData throws on unsorted input, DGCharts mirrors
-    // the same assumption) — sort by bucket start.
-    return asArray(raw)
-      .map((b) => toCandle(b as WebullBar))
-      .sort((a, b) => a.time.localeCompare(b.time));
+    const plan = AGGREGATION_PLANS[req.interval];
+    const planSource = plan?.source as Exclude<CandleInterval, '1w'> | undefined;
+    if (!plan || !planSource) {
+      return fetchBars(TIMESPAN[req.interval], 200);
+    }
+    // Native M30/M240 support is unverified against the live API: try it once,
+    // and on error or an empty result remember the failure for the process
+    // lifetime and aggregate from the next-smaller supported timespan.
+    if (!this.unsupportedTimespans.has(req.interval)) {
+      try {
+        const native = await fetchBars(TIMESPAN[req.interval], 200);
+        if (native.length > 0) return native;
+      } catch (err) {
+        this.logger.warn(
+          `native timespan ${TIMESPAN[req.interval]} failed for ${symbol} — aggregating from ${planSource}: ${(err as Error).message}`,
+        );
+      }
+      this.unsupportedTimespans.add(req.interval);
+    }
+    return fetchAggregated(planSource, 200 * plan.factor, req.interval);
   }
 
   /**
@@ -385,14 +422,7 @@ export class WebullBrokerGateway implements BrokerGateway, OnModuleDestroy {
     const contracts = candidates
       .filter((c) => bySymbol.has(c.symbol))
       .map((c) =>
-        toOptionContract(
-          c.symbol,
-          symbol,
-          chosen,
-          c.strike,
-          c.optionType,
-          bySymbol.get(c.symbol)!,
-        ),
+        toOptionContract(c.symbol, symbol, chosen, c.strike, c.optionType, bySymbol.get(c.symbol)!),
       );
     return {
       underlying: symbol.toUpperCase(),
@@ -410,15 +440,10 @@ export class WebullBrokerGateway implements BrokerGateway, OnModuleDestroy {
     const client = await this.clientFor(userId);
     const resolved = await this.resolveContract(userId, order);
     const price =
-      order.orderType === 'market'
-        ? resolved.last
-        : computeMid(resolved.bid, resolved.ask);
+      order.orderType === 'market' ? resolved.last : computeMid(resolved.bid, resolved.ask);
 
     const warnings: string[] = [];
-    if (
-      resolved.optionTerms &&
-      resolved.optionTerms.expiration === tradingDay()
-    ) {
+    if (resolved.optionTerms && resolved.optionTerms.expiration === tradingDay()) {
       warnings.push('0DTE contract — expires today');
     }
     if (order.assetClass === 'option' && order.orderType === 'market') {
@@ -443,9 +468,7 @@ export class WebullBrokerGateway implements BrokerGateway, OnModuleDestroy {
       });
       estBuyingPower = parsePreviewCost(raw);
     } catch (err) {
-      warnings.push(
-        `Broker preview unavailable: ${(err as Error).message} — local estimate used`,
-      );
+      warnings.push(`Broker preview unavailable: ${(err as Error).message} — local estimate used`);
     }
     if (estBuyingPower === undefined) {
       estBuyingPower = estimateBuyingPower(order.quantity, price);
@@ -458,9 +481,7 @@ export class WebullBrokerGateway implements BrokerGateway, OnModuleDestroy {
       }),
     );
     if (buyingPower !== undefined && estBuyingPower > buyingPower) {
-      warnings.push(
-        `Estimated buying power ${estBuyingPower} exceeds available ${buyingPower}`,
-      );
+      warnings.push(`Estimated buying power ${estBuyingPower} exceeds available ${buyingPower}`);
     }
 
     return {
@@ -481,18 +502,10 @@ export class WebullBrokerGateway implements BrokerGateway, OnModuleDestroy {
     const client = await this.clientFor(userId);
     const resolved = await this.resolveContract(userId, order);
     const limitPrice =
-      order.orderType === 'market'
-        ? undefined
-        : computeMid(resolved.bid, resolved.ask);
+      order.orderType === 'market' ? undefined : computeMid(resolved.bid, resolved.ask);
 
     const clientOrderId = toClientOrderId(userId, idempotencyKey);
-    const newOrder = await this.buildNewOrder(
-      userId,
-      order,
-      resolved,
-      clientOrderId,
-      limitPrice,
-    );
+    const newOrder = await this.buildNewOrder(userId, order, resolved, clientOrderId, limitPrice);
     const raw = await client.request('orderPlace', {
       body: {
         account_id: await this.accountIdFor(userId, client),
@@ -554,9 +567,7 @@ export class WebullBrokerGateway implements BrokerGateway, OnModuleDestroy {
     });
     return this.flattenOrders(raw)
       .map((o) => toOrderResult(o))
-      .filter(
-        (o) => o.status === 'submitted' || o.status === 'partially_filled',
-      );
+      .filter((o) => o.status === 'submitted' || o.status === 'partially_filled');
   }
 
   // -------------------------------------------------------------------------
@@ -574,31 +585,16 @@ export class WebullBrokerGateway implements BrokerGateway, OnModuleDestroy {
     if (!resolved.optionTerms) {
       throw brokerErrors.orderRejected('Option contract terms were not resolved');
     }
-    const intent = await this.optionPositionIntent(
-      userId,
-      order,
-      resolved.contractSymbol,
-    );
-    return buildOptionOrder(
-      order,
-      resolved.optionTerms,
-      clientOrderId,
-      limitPrice,
-      intent,
-    );
+    const intent = await this.optionPositionIntent(userId, order, resolved.contractSymbol);
+    return buildOptionOrder(order, resolved.optionTerms, clientOrderId, limitPrice, intent);
   }
 
   /** BUY/SELL_TO_CLOSE when flattening an existing position, else *_TO_OPEN. */
-  private async optionPositionIntent(
-    userId: string,
-    order: OrderRequest,
-    contractSymbol: string,
-  ) {
+  private async optionPositionIntent(userId: string, order: OrderRequest, contractSymbol: string) {
     let existing = 0;
     try {
       const positions = await this.getPositions(userId);
-      existing =
-        positions.find((p) => p.symbol === contractSymbol)?.quantity ?? 0;
+      existing = positions.find((p) => p.symbol === contractSymbol)?.quantity ?? 0;
     } catch (err) {
       this.logger.warn(
         `position lookup failed; defaulting intent to open: ${(err as Error).message}`,
@@ -608,28 +604,17 @@ export class WebullBrokerGateway implements BrokerGateway, OnModuleDestroy {
   }
 
   /** Resolves any OrderRequest to a concrete, live-quoted contract. */
-  private async resolveContract(
-    userId: string,
-    order: OrderRequest,
-  ): Promise<ResolvedContract> {
+  private async resolveContract(userId: string, order: OrderRequest): Promise<ResolvedContract> {
     const { optionType } = order.selection;
     if (!optionType) {
-      throw brokerErrors.orderRejected(
-        'selection.optionType is required for option orders',
-      );
+      throw brokerErrors.orderRejected('selection.optionType is required for option orders');
     }
-    const chain = await this.getOptionsChain(
-      userId,
-      order.underlying,
-      order.selection.expiration,
-    );
+    const chain = await this.getOptionsChain(userId, order.underlying, order.selection.expiration);
     const contract =
       order.selection.mode === 'auto_otm'
         ? resolveAutoOtm(chain.contracts, optionType, chain.underlyingPrice)
         : chain.contracts.find(
-            (c) =>
-              c.optionType === optionType &&
-              c.strike === order.selection.strike,
+            (c) => c.optionType === optionType && c.strike === order.selection.strike,
           );
     if (!contract) {
       throw brokerErrors.contractNotFound(
@@ -674,11 +659,7 @@ export class WebullBrokerGateway implements BrokerGateway, OnModuleDestroy {
    * Polls order/detail after placement until a terminal status (fills
    * otherwise arrive only via Webull's gRPC events, out of scope for P4).
    */
-  private startStatusPoll(
-    userId: string,
-    client: WebullClient,
-    result: OrderResult,
-  ): void {
+  private startStatusPoll(userId: string, client: WebullClient, result: OrderResult): void {
     const key = `${userId}:${result.orderId}`;
     let attempts = 0;
     const tick = async (): Promise<void> => {
@@ -705,9 +686,7 @@ export class WebullBrokerGateway implements BrokerGateway, OnModuleDestroy {
           return;
         }
       } catch (err) {
-        this.logger.debug(
-          `status poll for ${result.orderId} failed: ${(err as Error).message}`,
-        );
+        this.logger.debug(`status poll for ${result.orderId} failed: ${(err as Error).message}`);
       }
       if (attempts < STATUS_POLL_MAX_ATTEMPTS) {
         this.schedulePoll(key, tick);

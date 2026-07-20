@@ -111,8 +111,10 @@ export const CATEGORY = {
   option: 'US_OPTION',
 } as const;
 
-/** Candle interval → Webull `timespan`. [verified: SDK Timespan] */
-export const TIMESPAN: Record<CandleInterval, string> = {
+/** Candle interval → Webull `timespan`. [verified: SDK Timespan]
+ *  No verified weekly timespan exists — '1w' is aggregated from daily bars
+ *  in the gateway (candle-aggregation.ts). */
+export const TIMESPAN: Record<Exclude<CandleInterval, '1w'>, string> = {
   '1m': 'M1',
   '5m': 'M5',
   '15m': 'M15',

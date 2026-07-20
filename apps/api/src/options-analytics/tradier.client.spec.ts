@@ -583,3 +583,115 @@ describe('TradierClient normalization', () => {
     expect(chain.warnings.join(' ')).not.toContain('STALE-DIAGNOSTIC-99');
   });
 });
+
+describe('TradierClient chart data (index symbols)', () => {
+  it('getChartQuote accepts a delayed index quote with no NBBO', async () => {
+    const fetchImpl = jest.fn().mockResolvedValue(
+      response({
+        quotes: {
+          quote: {
+            symbol: 'SPX',
+            last: 6_300.5,
+            volume: 0,
+            trade_date: NOW.getTime() - 20 * 60_000, // stale for analytics, fine for charts
+            delayed: true,
+          },
+        },
+      }),
+    );
+    const client = new TradierClient('token', 'https://api.tradier.com', fetchImpl, () => NOW);
+
+    const quote = await client.getChartQuote('SPX');
+
+    expect(quote.symbol).toBe('SPX');
+    expect(quote.last).toBe(6_300.5);
+    expect(quote.bid).toBe(0);
+    expect(quote.ask).toBe(0);
+    expect(quote.timestamp).toBe(new Date(NOW.getTime() - 20 * 60_000).toISOString());
+  });
+
+  it('getChartQuote throws only when no finite price exists at all', async () => {
+    const fetchImpl = jest
+      .fn()
+      .mockResolvedValue(response({ quotes: { quote: { symbol: 'SPX', last: null } } }));
+    const client = new TradierClient('token', 'https://api.tradier.com', fetchImpl, () => NOW);
+
+    await expect(client.getChartQuote('SPX')).rejects.toThrow(/no finite price/);
+  });
+
+  it('strict getQuote still rejects the stale quote getChartQuote accepts', async () => {
+    const fetchImpl = jest.fn().mockResolvedValue(
+      response({
+        quotes: {
+          quote: {
+            symbol: 'SPX',
+            last: 6_300.5,
+            trade_date: NOW.getTime() - 40 * 60_000,
+          },
+        },
+      }),
+    );
+    const client = new TradierClient('token', 'https://api.tradier.com', fetchImpl, () => NOW);
+
+    await expect(client.getQuote('SPX')).rejects.toThrow();
+  });
+
+  it('getDailyHistory maps day rows to UTC-midnight candles and skips bad rows', async () => {
+    const fetchImpl = jest.fn().mockResolvedValue(
+      response({
+        history: {
+          day: [
+            { date: '2026-07-16', open: 1, high: 2, low: 0.5, close: 1.5, volume: 100 },
+            { date: '2026-07-17', open: 1.5, high: 3, low: 1, close: 2.5 }, // volume absent → 0
+            { open: 9, high: 9, low: 9, close: 9 }, // no date → skipped
+          ],
+        },
+      }),
+    );
+    const client = new TradierClient('token', 'https://api.tradier.com', fetchImpl, () => NOW);
+
+    const candles = await client.getDailyHistory('SPX', '2026-07-01', '2026-07-18');
+
+    expect(candles).toEqual([
+      { time: '2026-07-16T00:00:00.000Z', open: 1, high: 2, low: 0.5, close: 1.5, volume: 100 },
+      { time: '2026-07-17T00:00:00.000Z', open: 1.5, high: 3, low: 1, close: 2.5, volume: 0 },
+    ]);
+  });
+
+  it('getTimeSales uses the epoch timestamp field and Eastern-formatted range params', async () => {
+    const epoch = Math.floor(FRIDAY_CLOSE_QUOTE_TIME / 1000);
+    const fetchImpl = jest.fn().mockResolvedValue(
+      response({
+        series: {
+          data: [
+            { timestamp: epoch, open: 1, high: 2, low: 0.5, close: 1.5, volume: 10 },
+            { time: '2026-07-17T15:45:00', open: 9, high: 9, low: 9, close: 9 }, // no epoch → skipped
+          ],
+        },
+      }),
+    );
+    const client = new TradierClient('token', 'https://api.tradier.com', fetchImpl, () => NOW);
+
+    const candles = await client.getTimeSales(
+      'SPX',
+      '15min',
+      new Date('2026-07-17T13:30:00.000Z'),
+      new Date('2026-07-17T20:00:00.000Z'),
+    );
+
+    expect(candles).toEqual([
+      {
+        time: new Date(epoch * 1000).toISOString(),
+        open: 1,
+        high: 2,
+        low: 0.5,
+        close: 1.5,
+        volume: 10,
+      },
+    ]);
+    const url = fetchImpl.mock.calls[0][0] as string;
+    // 13:30Z on 2026-07-17 is 09:30 Eastern (EDT).
+    expect(url).toContain('interval=15min');
+    expect(url).toContain(encodeURIComponent('2026-07-17 09:30'));
+  });
+});

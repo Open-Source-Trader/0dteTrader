@@ -9,6 +9,7 @@ enum ChartInterval: String, CaseIterable, Sendable {
     case h1 = "1h"
     case h4 = "4h"
     case d1 = "1d"
+    case w1 = "1w"
 
     var seconds: TimeInterval {
         switch self {
@@ -19,26 +20,46 @@ enum ChartInterval: String, CaseIterable, Sendable {
         case .h1: return 3_600
         case .h4: return 14_400
         case .d1: return 86_400
+        case .w1: return 604_800
         }
+    }
+
+    /// 1970-01-01 is a Thursday; shift 4 days so weekly buckets start Monday 00:00 UTC.
+    private static let mondayEpochOffset: TimeInterval = 345_600
+
+    /// Live-quote bucket start — must match the server's candle-aggregation math
+    /// so streamed quotes append to the buckets REST history produced.
+    func bucketStart(forEpochSeconds epochSeconds: TimeInterval) -> TimeInterval {
+        if self == .w1 {
+            return ((epochSeconds - Self.mondayEpochOffset) / seconds).rounded(.down) * seconds
+                + Self.mondayEpochOffset
+        }
+        return (epochSeconds / seconds).rounded(.down) * seconds
     }
 }
 
 enum TickInterval: String, CaseIterable, Sendable {
-    case t500 = "500t"
-    case t1000 = "1000t"
-    case t2500 = "2500t"
-    case t5000 = "5000t"
-    case t10000 = "10000t"
+    case t10 = "10t"
+    case t25 = "25t"
+    case t50 = "50t"
+    case t100 = "100t"
+    case t250 = "250t"
 
     var tickSize: Int {
         switch self {
-        case .t500: return 500
-        case .t1000: return 1_000
-        case .t2500: return 2_500
-        case .t5000: return 5_000
-        case .t10000: return 10_000
+        case .t10: return 10
+        case .t25: return 25
+        case .t50: return 50
+        case .t100: return 100
+        case .t250: return 250
         }
     }
+}
+
+/// Tick intervals only: quotes accumulated toward the next candle.
+struct TickProgress: Equatable, Sendable {
+    let count: Int
+    let size: Int
 }
 
 enum AnyChartInterval: Hashable, Sendable {
@@ -101,6 +122,7 @@ final class ChartViewModel: ObservableObject {
     @Published private(set) var isLoading = false
     @Published var errorMessage: String?
     @Published private(set) var alertNotice: ChartAlertNotice?
+    @Published private(set) var tickProgress: TickProgress?
 
     /// Exact-expiration options structure snapshot for the current chart key.
     @Published private(set) var optionsAnalyticsSnapshot: OptionsAnalyticsSnapshotDTO?
@@ -150,16 +172,7 @@ final class ChartViewModel: ObservableObject {
     /// Upper bound on rendered candles so live appends stay cheap.
     private let maxCandles = 600
 
-    private struct TickAccumulator {
-        var count: Int
-        var open: Double
-        var high: Double
-        var low: Double
-        var close: Double
-        var firstTimestamp: Date
-    }
-
-    private var tickAccumulator: TickAccumulator?
+    private var tickAccumulator: TickAccumulatorState?
 
     init(
         apiClient: APIClient,
@@ -209,7 +222,25 @@ final class ChartViewModel: ObservableObject {
 
         if case .tick(let tickInterval) = interval {
             tickAccumulator = nil
-            candles = TickStorage.load(symbol: symbol, interval: tickInterval)
+            tickProgress = nil
+            let stored = TickStorage.load(symbol: symbol, interval: tickInterval)
+            tickAccumulator = stored.accumulator
+            var loaded = stored.candles
+            if loaded.isEmpty {
+                // Never show a blank chart while ticks accumulate (a 250t candle
+                // takes ~4 min of 1/sec quotes): seed with recent 1m history.
+                let from = Date().addingTimeInterval(-3_600)
+                if let dtos = try? await apiClient.candles(
+                    symbol: symbol, interval: "1m", from: from
+                ) {
+                    loaded = dtos.map(Candle.init(dto:))
+                }
+            }
+            candles = loaded
+            tickProgress = TickProgress(
+                count: stored.accumulator?.count ?? 0,
+                size: tickInterval.tickSize
+            )
             return
         }
 
@@ -239,6 +270,7 @@ final class ChartViewModel: ObservableObject {
         settingsStore.lastSymbol = normalized
         drawings.setSymbol(normalized)
         tickAccumulator = nil
+        tickProgress = nil
         quote = nil
         candles = []
         socket.subscribe(symbols: [normalized])
@@ -252,6 +284,7 @@ final class ChartViewModel: ObservableObject {
     func selectInterval(_ newInterval: AnyChartInterval) {
         guard newInterval != interval else { return }
         tickAccumulator = nil
+        tickProgress = nil
         interval = newInterval
         Task { await loadCandles() }
     }
@@ -451,9 +484,11 @@ final class ChartViewModel: ObservableObject {
 
         guard !candles.isEmpty else { return }
         guard quote.timestamp.timeIntervalSince1970 > 0 else { return }
+        guard case .candle(let candleInterval) = interval else { return }
 
-        let seconds = interval.seconds
-        let bucketSeconds = (quote.timestamp.timeIntervalSince1970 / seconds).rounded(.down) * seconds
+        let bucketSeconds = candleInterval.bucketStart(
+            forEpochSeconds: quote.timestamp.timeIntervalSince1970
+        )
         let bucketStart = Date(timeIntervalSince1970: bucketSeconds)
         var last = candles[candles.count - 1]
 
@@ -482,27 +517,28 @@ final class ChartViewModel: ObservableObject {
     private func handleTickQuote(_ quote: Quote, tickInterval: TickInterval) {
         let price = quote.last
         guard quote.timestamp.timeIntervalSince1970 > 0 else { return }
+        let size = tickInterval.tickSize
 
-        if tickAccumulator == nil {
-            tickAccumulator = TickAccumulator(
-                count: 1, open: price, high: price, low: price,
-                close: price, firstTimestamp: quote.timestamp
+        if var accumulator = tickAccumulator {
+            accumulator.count += 1
+            accumulator.close = price
+            accumulator.high = max(accumulator.high, price)
+            accumulator.low = min(accumulator.low, price)
+            tickAccumulator = accumulator
+        } else {
+            tickAccumulator = TickAccumulatorState(
+                count: 1, open: price, high: price, low: price, close: price,
+                firstTimestamp: quote.timestamp.timeIntervalSince1970
             )
-            return
         }
 
-        tickAccumulator!.count += 1
-        tickAccumulator!.close = price
-        tickAccumulator!.high = max(tickAccumulator!.high, price)
-        tickAccumulator!.low = min(tickAccumulator!.low, price)
-
-        if tickAccumulator!.count >= tickInterval.tickSize {
+        if let accumulator = tickAccumulator, accumulator.count >= size {
             let candle = Candle(
-                time: tickAccumulator!.firstTimestamp,
-                open: tickAccumulator!.open,
-                high: tickAccumulator!.high,
-                low: tickAccumulator!.low,
-                close: tickAccumulator!.close,
+                time: Date(timeIntervalSince1970: accumulator.firstTimestamp),
+                open: accumulator.open,
+                high: accumulator.high,
+                low: accumulator.low,
+                close: accumulator.close,
                 volume: 0
             )
             candles.append(candle)
@@ -510,8 +546,17 @@ final class ChartViewModel: ObservableObject {
                 candles.removeFirst(candles.count - maxCandles)
             }
             tickAccumulator = nil
-            TickStorage.save(symbol: symbol, interval: tickInterval, candles: candles)
+            tickProgress = TickProgress(count: 0, size: size)
+        } else {
+            tickProgress = TickProgress(count: tickAccumulator?.count ?? 0, size: size)
         }
+        // Persist candles and the in-progress accumulator on every quote
+        // (≤1/sec) so a restart resumes the partial candle instead of losing it.
+        TickStorage.save(
+            symbol: symbol,
+            interval: tickInterval,
+            state: StoredTickState(candles: candles, accumulator: tickAccumulator)
+        )
     }
 
     // MARK: - Indicator series for rendering

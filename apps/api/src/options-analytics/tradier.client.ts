@@ -1,5 +1,5 @@
 import { Logger } from '@nestjs/common';
-import type { OptionsAnalyticsFeedMode } from '@0dtetrader/shared-types';
+import type { Candle, OptionsAnalyticsFeedMode, Quote } from '@0dtetrader/shared-types';
 import {
   isEarlyCloseTradingDay,
   isTradingDay,
@@ -26,6 +26,22 @@ interface FetchResponse {
 }
 
 export type TradierFetch = (url: string, init: Record<string, unknown>) => Promise<FetchResponse>;
+
+/** Tradier timesales start/end are Eastern local time, "YYYY-MM-DD HH:MM". */
+function easternMinute(date: Date): string {
+  // sv-SE formats as "YYYY-MM-DD HH:MM:SS" — trim the seconds.
+  return new Intl.DateTimeFormat('sv-SE', {
+    timeZone: 'America/New_York',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  })
+    .format(date)
+    .slice(0, 16);
+}
 
 export interface TradierQuote {
   symbol: string;
@@ -304,6 +320,108 @@ export class TradierClient {
       feedMode,
       warnings,
     };
+  }
+
+  /**
+   * Chart-quote parse for index symbols (SPX/NDX/VIX): tolerant where the
+   * analytics getQuote above is strict. Indices often publish no NBBO and may
+   * be delayed after hours — accept any finite price and default the rest to
+   * 0 rather than throwing.
+   */
+  async getChartQuote(symbol: string): Promise<Quote> {
+    const body = record(await this.get(`/markets/quotes?symbols=${encodeURIComponent(symbol)}`));
+    const quoteContainer = record(body?.['quotes']);
+    const quoteValue = quoteContainer?.['quote'];
+    const quote = record(Array.isArray(quoteValue) ? quoteValue[0] : quoteValue);
+    const bid = positive(quote?.['bid']);
+    const ask = positive(quote?.['ask']);
+    const last = finite(quote?.['last']);
+    const price = last ?? (bid !== null && ask !== null && ask >= bid ? (bid + ask) / 2 : null);
+    if (price === null) {
+      throw new Error(`Tradier returned no finite price for ${symbol}`);
+    }
+    const time = timestamp(quote?.['trade_date']) ?? timestamp(quote?.['bid_date']) ?? this.now();
+    return {
+      symbol: symbol.toUpperCase(),
+      bid: bid ?? 0,
+      ask: ask ?? 0,
+      last: price,
+      bidSize: nonNegative(quote?.['bidsize']) ?? 0,
+      askSize: nonNegative(quote?.['asksize']) ?? 0,
+      volume: Math.round(nonNegative(quote?.['volume']) ?? 0),
+      timestamp: time.toISOString(),
+    };
+  }
+
+  /** Daily bars from /markets/history. Dates are stamped T00:00:00Z so the
+   *  Monday-aligned weekly aggregation buckets them exactly. */
+  async getDailyHistory(symbol: string, start: string, end: string): Promise<Candle[]> {
+    const body = record(
+      await this.get(
+        `/markets/history?symbol=${encodeURIComponent(symbol)}&interval=daily&start=${start}&end=${end}`,
+      ),
+    );
+    const history = record(body?.['history']);
+    const rawDays = history?.['day'];
+    const days = rawDays ? (Array.isArray(rawDays) ? rawDays : [rawDays]) : [];
+    const candles: Candle[] = [];
+    for (const value of days) {
+      const day = record(value);
+      const date = typeof day?.['date'] === 'string' ? day['date'] : null;
+      const open = finite(day?.['open']);
+      const high = finite(day?.['high']);
+      const low = finite(day?.['low']);
+      const close = finite(day?.['close']);
+      if (!date || open === null || high === null || low === null || close === null) continue;
+      candles.push({
+        time: `${date}T00:00:00.000Z`,
+        open,
+        high,
+        low,
+        close,
+        volume: Math.round(nonNegative(day?.['volume']) ?? 0),
+      });
+    }
+    return candles;
+  }
+
+  /** Intraday bars from /markets/timesales (1min ~20 days back, 5/15min ~40). */
+  async getTimeSales(
+    symbol: string,
+    interval: '1min' | '5min' | '15min',
+    start: Date,
+    end: Date,
+  ): Promise<Candle[]> {
+    const query =
+      `symbol=${encodeURIComponent(symbol)}&interval=${interval}` +
+      `&start=${encodeURIComponent(easternMinute(start))}&end=${encodeURIComponent(easternMinute(end))}`;
+    const body = record(await this.get(`/markets/timesales?${query}`));
+    const series = record(body?.['series']);
+    const rawData = series?.['data'];
+    const rows = rawData ? (Array.isArray(rawData) ? rawData : [rawData]) : [];
+    const candles: Candle[] = [];
+    for (const value of rows) {
+      const row = record(value);
+      // `timestamp` is epoch seconds — authoritative over the offset-less
+      // Eastern `time` string.
+      const epoch = finite(row?.['timestamp']);
+      const open = finite(row?.['open']);
+      const high = finite(row?.['high']);
+      const low = finite(row?.['low']);
+      const close = finite(row?.['close']);
+      if (epoch === null || open === null || high === null || low === null || close === null) {
+        continue;
+      }
+      candles.push({
+        time: new Date(epoch * 1000).toISOString(),
+        open,
+        high,
+        low,
+        close,
+        volume: Math.round(nonNegative(row?.['volume']) ?? 0),
+      });
+    }
+    return candles;
   }
 
   async getChain(symbol: string, expiration: string): Promise<TradierChain> {

@@ -9,7 +9,8 @@ export interface SymbolSection {
  * packages/shared-types.
  */
 export const SYMBOL_SECTIONS: SymbolSection[] = [
-  { title: 'Indices & ETFs', symbols: ['SPY', 'QQQ', 'SPX', 'IWM', 'DIA', 'VXX'] },
+  // SPX/NDX/VIX are index quotes from Tradier via the backend (not tradeable).
+  { title: 'Indices & ETFs', symbols: ['SPY', 'QQQ', 'SPX', 'NDX', 'VIX', 'IWM', 'DIA', 'VXX'] },
   // Live 24/7 data from Coinbase via the backend's crypto data source.
   { title: 'Crypto', symbols: ['BTC', 'ETH', 'SOL', 'XRP', 'DOGE', 'ADA', 'AVAX', 'LINK', 'LTC'] },
   {

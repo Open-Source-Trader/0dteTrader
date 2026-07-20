@@ -44,6 +44,7 @@ const INTERVAL_SHORTCUTS: Record<string, ChartInterval> = {
   H: '1h',
   '4': '4h',
   D: '1d',
+  W: '1w',
 };
 
 const INTERVAL_HINTS: Partial<Record<ChartInterval, string>> = {
@@ -54,6 +55,7 @@ const INTERVAL_HINTS: Partial<Record<ChartInterval, string>> = {
   '1h': '⇧H',
   '4h': '4',
   '1d': '⇧D',
+  '1w': '⇧W',
 };
 
 // Seeded pseudo-random bar heights for the empty-chart loading skeleton.
@@ -80,6 +82,7 @@ export function ChartView({
     isLoading,
     errorMessage,
     isStale,
+    tickProgress,
     indicatorSettings,
     twcSettings,
     optionsAnalytics,
@@ -331,6 +334,15 @@ export function ChartView({
         ) : null}
 
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
+          {tickProgress ? (
+            <span
+              className="quick-chip"
+              style={{ fontSize: 'var(--fs-caption)', color: 'var(--label-secondary)' }}
+              aria-label={`Building candle: ${tickProgress.count} of ${tickProgress.size} ticks`}
+            >
+              {tickProgress.count}/{tickProgress.size} ticks
+            </span>
+          ) : null}
           <button
             className={tradingMode === 'live' ? 'hud-badge hud-badge--live' : 'hud-badge'}
             onClick={onToggleMode}

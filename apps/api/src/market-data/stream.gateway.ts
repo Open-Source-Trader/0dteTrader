@@ -1,30 +1,20 @@
-import {
-  Inject,
-  Logger,
-  OnModuleDestroy,
-} from '@nestjs/common';
+import { Inject, Logger, OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
-import {
-  OnGatewayConnection,
-  OnGatewayDisconnect,
-  WebSocketGateway,
-} from '@nestjs/websockets';
+import { OnGatewayConnection, OnGatewayDisconnect, WebSocketGateway } from '@nestjs/websockets';
 import { IncomingMessage } from 'node:http';
 import { WebSocket } from 'ws';
 import { StreamServerMessage } from '@0dtetrader/shared-types';
-import {
-  BROKER_GATEWAY,
-  BrokerGateway,
-} from '../broker/broker-gateway.interface';
-import {
-  OrderEventsService,
-  OrderUpdateEvent,
-} from '../broker/order-events.service';
+import { BROKER_GATEWAY, BrokerGateway } from '../broker/broker-gateway.interface';
+import { OrderEventsService, OrderUpdateEvent } from '../broker/order-events.service';
 import { Subscription } from 'rxjs';
 import { CryptoDataService } from './crypto-data.service';
+import { IndexDataService } from './index-data.service';
 
 const QUOTE_TICK_MS = 1000;
+/** Index quotes poll slower: Tradier allows ~120 market-data req/min shared
+ *  with options analytics, so 3 indices at 5s cost only 36 req/min. */
+const INDEX_QUOTE_TICK_MS = 5000;
 /** Abuse guards: each subscribed symbol costs broker/API calls every second. */
 const MAX_SUBSCRIPTIONS_PER_CLIENT = 50;
 const MAX_TRACKED_SYMBOLS = 500;
@@ -46,9 +36,7 @@ interface ClientState {
  * (docs/WEBULL-INTEGRATION.md §3).
  */
 @WebSocketGateway({ path: '/v1/stream' })
-export class StreamGateway
-  implements OnGatewayConnection, OnGatewayDisconnect, OnModuleDestroy
-{
+export class StreamGateway implements OnGatewayConnection, OnGatewayDisconnect, OnModuleDestroy {
   private readonly logger = new Logger(StreamGateway.name);
   private readonly clients = new Map<WebSocket, ClientState>();
   private readonly subscribers = new Map<string, Set<WebSocket>>();
@@ -62,13 +50,12 @@ export class StreamGateway
   constructor(
     @Inject(BROKER_GATEWAY) private readonly broker: BrokerGateway,
     private readonly crypto: CryptoDataService,
+    private readonly index: IndexDataService,
     private readonly jwt: JwtService,
     private readonly config: ConfigService,
     orderEvents: OrderEventsService,
   ) {
-    this.orderEventsSub = orderEvents.events$.subscribe((event) =>
-      this.pushOrderUpdate(event),
-    );
+    this.orderEventsSub = orderEvents.events$.subscribe((event) => this.pushOrderUpdate(event));
   }
 
   onModuleDestroy(): void {
@@ -125,9 +112,7 @@ export class StreamGateway
     }
 
     const symbols = Array.isArray(msg.symbols)
-      ? msg.symbols.filter(
-          (s): s is string => typeof s === 'string' && SYMBOL_PATTERN.test(s),
-        )
+      ? msg.symbols.filter((s): s is string => typeof s === 'string' && SYMBOL_PATTERN.test(s))
       : [];
     const state = this.clients.get(client);
     if (!state) return;
@@ -147,11 +132,7 @@ export class StreamGateway
     }
   }
 
-  private addSubscriber(
-    symbol: string,
-    client: WebSocket,
-    state: ClientState,
-  ): void {
+  private addSubscriber(symbol: string, client: WebSocket, state: ClientState): void {
     if (state.symbols.has(symbol)) return;
     if (state.symbols.size >= MAX_SUBSCRIPTIONS_PER_CLIENT) {
       this.send(client, {
@@ -182,20 +163,17 @@ export class StreamGateway
     }
     set.add(client);
     if (!this.timers.has(symbol)) {
+      const tickMs = this.index.isIndexSymbol(symbol) ? INDEX_QUOTE_TICK_MS : QUOTE_TICK_MS;
       this.timers.set(
         symbol,
-        setInterval(() => void this.tickSymbol(symbol), QUOTE_TICK_MS),
+        setInterval(() => void this.tickSymbol(symbol), tickMs),
       );
       // Emit an immediate first tick so subscribers do not wait a full second.
       void this.tickSymbol(symbol);
     }
   }
 
-  private removeSubscriber(
-    symbol: string,
-    client: WebSocket,
-    state?: ClientState,
-  ): void {
+  private removeSubscriber(symbol: string, client: WebSocket, state?: ClientState): void {
     state?.symbols.delete(symbol);
     const set = this.subscribers.get(symbol);
     if (!set) return;
@@ -226,6 +204,17 @@ export class StreamGateway
       if (this.crypto.isCryptoSymbol(symbol)) {
         try {
           this.broadcast(set, { type: 'quote', data: await this.crypto.getQuote(symbol) });
+          this.tickWarnings.delete(symbol);
+        } catch (err) {
+          this.warnTickOnce(symbol, `quote tick failed for ${symbol}: ${(err as Error).message}`);
+        }
+        return;
+      }
+
+      // Index quotes (Tradier) are likewise user-independent.
+      if (this.index.isIndexSymbol(symbol)) {
+        try {
+          this.broadcast(set, { type: 'quote', data: await this.index.getQuote(symbol) });
           this.tickWarnings.delete(symbol);
         } catch (err) {
           this.warnTickOnce(symbol, `quote tick failed for ${symbol}: ${(err as Error).message}`);

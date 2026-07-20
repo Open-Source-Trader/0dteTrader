@@ -1,11 +1,15 @@
-import type { ChartInterval, TickInterval, Quote } from '@0dtetrader/shared-types';
+import type { Candle, ChartInterval, TickInterval, Quote } from '@0dtetrader/shared-types';
 import type { ApiClient } from '../../core/api/ApiClient';
 import { errorMessage } from '../../core/api/ApiError';
 import type { QuoteSocket } from '../../core/api/QuoteSocket';
 import { parseDateTime } from '../../core/models/dates';
 import { Store } from '../../core/observable';
 import type { SettingsStore } from '../../core/storage/SettingsStore';
-import { loadTickCandles, saveTickCandles } from '../../core/storage/tickStorage';
+import {
+  loadTickState,
+  saveTickState,
+  type TickAccumulatorState,
+} from '../../core/storage/tickStorage';
 import type { IndicatorSettings } from './indicatorSettings';
 import { capSubPanes } from './indicatorSettings';
 import type { OptionsAnalyticsSettings } from './optionsAnalytics/optionsAnalyticsSettings';
@@ -19,14 +23,15 @@ export const CHART_INTERVALS: ChartInterval[] = [
   '1h',
   '4h',
   '1d',
-  '500t',
-  '1000t',
-  '2500t',
-  '5000t',
-  '10000t',
+  '1w',
+  '10t',
+  '25t',
+  '50t',
+  '100t',
+  '250t',
 ];
 
-export const TICK_INTERVALS: TickInterval[] = ['500t', '1000t', '2500t', '5000t', '10000t'];
+export const TICK_INTERVALS: TickInterval[] = ['10t', '25t', '50t', '100t', '250t'];
 
 export function isTickInterval(interval: ChartInterval): interval is TickInterval {
   return interval.endsWith('t');
@@ -53,7 +58,24 @@ export function intervalSeconds(interval: ChartInterval): number {
       return 14400;
     case '1d':
       return 86400;
+    case '1w':
+      return 604800;
   }
+}
+
+/** 1970-01-01 is a Thursday; shift 4 days so weekly buckets start Monday 00:00 UTC. */
+const MONDAY_EPOCH_OFFSET = 345600;
+
+/** Live-quote bucket start — must match the server's candle-aggregation math
+ *  so streamed quotes append to the buckets REST history produced. */
+export function bucketStartSeconds(epochSeconds: number, interval: ChartInterval): number {
+  const seconds = intervalSeconds(interval);
+  if (interval === '1w') {
+    return (
+      Math.floor((epochSeconds - MONDAY_EPOCH_OFFSET) / seconds) * seconds + MONDAY_EPOCH_OFFSET
+    );
+  }
+  return Math.floor(epochSeconds / seconds) * seconds;
 }
 
 /** Chart candle with epoch-seconds time, ready for lightweight-charts. */
@@ -66,6 +88,23 @@ export interface ChartCandle {
   volume: number;
 }
 
+function toChartCandles(dtos: Candle[]): ChartCandle[] {
+  const candles: ChartCandle[] = [];
+  for (const dto of dtos) {
+    const ms = parseDateTime(dto.time);
+    if (ms === null) continue;
+    candles.push({
+      time: Math.floor(ms / 1000),
+      open: dto.open,
+      high: dto.high,
+      low: dto.low,
+      close: dto.close,
+      volume: dto.volume,
+    });
+  }
+  return candles;
+}
+
 interface ChartStoreState {
   symbol: string;
   interval: ChartInterval;
@@ -75,6 +114,8 @@ interface ChartStoreState {
   errorMessage: string | null;
   /** Quote socket is not connected: displayed prices may be frozen. */
   isStale: boolean;
+  /** Tick intervals only: quotes accumulated toward the next candle. */
+  tickProgress: { count: number; size: number } | null;
   indicatorSettings: IndicatorSettings;
   twcSettings: TwcHeatmapSettings;
   optionsAnalytics: OptionsAnalyticsSettings;
@@ -91,14 +132,7 @@ export class ChartStore extends Store<ChartStoreState> {
   /** Invalidates in-flight candle loads when a newer one starts — the same
    *  generation guard ChainStore uses for chain loads. */
   private loadGeneration = 0;
-  private tickAccumulator: {
-    count: number;
-    open: number;
-    high: number;
-    low: number;
-    close: number;
-    firstTimestamp: number;
-  } | null = null;
+  private tickAccumulator: TickAccumulatorState | null = null;
 
   constructor(
     private readonly apiClient: ApiClient,
@@ -119,6 +153,7 @@ export class ChartStore extends Store<ChartStoreState> {
       isLoading: false,
       errorMessage: null,
       isStale: socket.getState().connectionState !== 'connected',
+      tickProgress: null,
       indicatorSettings,
       twcSettings: settingsStore.twcSettings,
       optionsAnalytics: settingsStore.optionsAnalytics,
@@ -144,32 +179,37 @@ export class ChartStore extends Store<ChartStoreState> {
 
     if (isTickInterval(interval)) {
       this.tickAccumulator = null;
-      this.set({ isLoading: true, errorMessage: null });
-      const stored = await loadTickCandles(symbol, interval);
+      this.set({ isLoading: true, errorMessage: null, tickProgress: null });
+      const stored = await loadTickState(symbol, interval);
       if (generation !== this.loadGeneration) return;
-      this.set({ candles: stored, isLoading: false });
+      this.tickAccumulator = stored.accumulator;
+      let candles = stored.candles;
+      if (candles.length === 0) {
+        // Never show a blank chart while ticks accumulate (a 250t candle takes
+        // ~4 min of 1/sec quotes): seed with recent 1m history.
+        try {
+          const from = new Date(Date.now() - 60 * 60 * 1000);
+          const dtos = await this.apiClient.candles(symbol, '1m', from);
+          if (generation !== this.loadGeneration) return;
+          candles = toChartCandles(dtos);
+        } catch {
+          // Seeding is best-effort; the chart fills from live ticks.
+        }
+      }
+      this.set({
+        candles,
+        isLoading: false,
+        tickProgress: { count: stored.accumulator?.count ?? 0, size: tickSize(interval) },
+      });
       return;
     }
 
-    this.set({ isLoading: true, errorMessage: null });
+    this.set({ isLoading: true, errorMessage: null, tickProgress: null });
     try {
       const from = new Date(Date.now() - intervalSeconds(interval) * 400 * 1000);
       const dtos = await this.apiClient.candles(symbol, interval, from);
       if (generation !== this.loadGeneration) return;
-      const candles: ChartCandle[] = [];
-      for (const dto of dtos) {
-        const ms = parseDateTime(dto.time);
-        if (ms === null) continue;
-        candles.push({
-          time: Math.floor(ms / 1000),
-          open: dto.open,
-          high: dto.high,
-          low: dto.low,
-          close: dto.close,
-          volume: dto.volume,
-        });
-      }
-      this.set({ candles });
+      this.set({ candles: toChartCandles(dtos) });
     } catch (error) {
       if (generation !== this.loadGeneration) return;
       this.set({ errorMessage: errorMessage(error) });
@@ -185,7 +225,7 @@ export class ChartStore extends Store<ChartStoreState> {
     this.socket.unsubscribeSymbols([symbol]);
     this.settingsStore.lastSymbol = normalized;
     this.tickAccumulator = null;
-    this.set({ symbol: normalized, quote: null, candles: [] });
+    this.set({ symbol: normalized, quote: null, candles: [], tickProgress: null });
     this.socket.subscribeSymbols([normalized]);
     void this.loadCandles();
   }
@@ -229,9 +269,7 @@ export class ChartStore extends Store<ChartStoreState> {
 
     const timestampMs = parseDateTime(quote.timestamp);
     if (timestampMs === null) return;
-    const timestampSeconds = timestampMs / 1000;
-    const seconds = intervalSeconds(interval);
-    const bucketStart = Math.floor(timestampSeconds / seconds) * seconds;
+    const bucketStart = bucketStartSeconds(timestampMs / 1000, interval);
     const last = candles[candles.length - 1];
 
     if (bucketStart === last.time) {
@@ -277,14 +315,14 @@ export class ChartStore extends Store<ChartStoreState> {
         close: price,
         firstTimestamp: timestampSeconds,
       };
-      return;
+    } else {
+      this.tickAccumulator.count += 1;
+      this.tickAccumulator.close = price;
+      this.tickAccumulator.high = Math.max(this.tickAccumulator.high, price);
+      this.tickAccumulator.low = Math.min(this.tickAccumulator.low, price);
     }
 
-    this.tickAccumulator.count += 1;
-    this.tickAccumulator.close = price;
-    this.tickAccumulator.high = Math.max(this.tickAccumulator.high, price);
-    this.tickAccumulator.low = Math.min(this.tickAccumulator.low, price);
-
+    let next = candles;
     if (this.tickAccumulator.count >= size) {
       const candle: ChartCandle = {
         time: this.tickAccumulator.firstTimestamp,
@@ -294,13 +332,17 @@ export class ChartStore extends Store<ChartStoreState> {
         close: this.tickAccumulator.close,
         volume: 0,
       };
-      let next = [...candles, candle];
+      next = [...candles, candle];
       if (next.length > MAX_CANDLES) {
         next = next.slice(next.length - MAX_CANDLES);
       }
-      this.set({ candles: next });
       this.tickAccumulator = null;
-      void saveTickCandles(symbol, interval, next);
+      this.set({ candles: next, tickProgress: { count: 0, size } });
+    } else {
+      this.set({ tickProgress: { count: this.tickAccumulator.count, size } });
     }
+    // Persist candles and the in-progress accumulator on every quote (≤1/sec)
+    // so a restart resumes the partial candle instead of losing it.
+    void saveTickState(symbol, interval, { candles: next, accumulator: this.tickAccumulator });
   }
 }

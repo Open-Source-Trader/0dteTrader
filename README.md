@@ -10,6 +10,12 @@ Rapid options quick-trade iOS (and desktop) app backed by the official Webull Op
 
 > **Risk warning:** Trading involves substantial risk of loss. This software places real orders when connected to a live brokerage account. Always validate against a paper (practice) account first.
 
+## Why I built this
+
+Traditional brokers and trading platforms weren't built for the speed 0DTE options demand. Getting an order in means tabbing through option chains, order tickets, and confirmation screens — and by the time you're done, the move you were trading is gone. The data problem is just as bad: the numbers that actually drive intraday options decisions — open-interest walls, gamma exposure, implied ranges, liquidity — are scattered across tables and separate tabs instead of living where the decision happens: on the chart.
+
+0dteTrader is my answer to both. Orders go out in a tap, with the strike auto-selected and validated server-side. And the options data is curated down to what carries value — walls, breakevens, expected range, per-strike OI and gamma — and drawn directly on the price chart, so you see what you need the instant you need it.
+
 ## Screenshots
 
 The iOS app running against the production backend (SPX hourly chart via Tradier index data; captured on the iPhone simulator):

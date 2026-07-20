@@ -45,7 +45,11 @@ function optionalPercent(value: number | null): string {
   return value === null ? 'n/a' : `${(value * 100).toFixed(1)}%`;
 }
 
-/** Point-in-time structure rail. All price shading is limited to the right edge. */
+/**
+ * Point-in-time structure overlay. Price levels (walls, breakevens, ranges)
+ * span the full chart width like standard charting level lines; the strike
+ * profile bars stay anchored to the chart's right edge.
+ */
 export function OptionsAnalyticsOverlay({
   chart,
   series,
@@ -88,7 +92,7 @@ export function OptionsAnalyticsOverlay({
       context.lineWidth = 1;
       context.setLineDash(dash);
       context.beginPath();
-      context.moveTo(railStart, y);
+      context.moveTo(0, y);
       context.lineTo(width, y);
       context.stroke();
       context.setLineDash([]);
@@ -135,7 +139,7 @@ export function OptionsAnalyticsOverlay({
         const lower = yAt(presentation.impliedRange.lower);
         if (upper !== null && lower !== null) {
           context.fillStyle = `rgba(${COLORS.range}, 0.09)`;
-          context.fillRect(railStart, upper, pane.width - railStart, lower - upper);
+          context.fillRect(0, upper, pane.width, lower - upper);
         }
         drawPriceLine(
           context,

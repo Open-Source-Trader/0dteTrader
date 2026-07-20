@@ -1,8 +1,9 @@
 import DGCharts
 import UIKit
 
-/// Current-snapshot structure rail. Geometry is confined to the chart's
-/// right edge so a point-in-time options snapshot never looks historical.
+/// Current-snapshot structure overlay. Price levels (walls, breakevens,
+/// ranges) span the full chart width like standard charting level lines;
+/// the strike profile bars stay anchored to the chart's right edge.
 final class OptionsAnalyticsOverlayView: UIView {
     private struct RailLine {
         let price: Double
@@ -64,11 +65,6 @@ final class OptionsAnalyticsOverlayView: UIView {
             width: railWidth,
             height: content.height
         )
-        context.setFillColor(UIColor.black.withAlphaComponent(0.12).cgColor)
-        context.fill(rail)
-        context.setStrokeColor(UIColor.hudStroke.withAlphaComponent(0.35).cgColor)
-        context.setLineWidth(0.5)
-        context.stroke(rail)
 
         drawRanges(snapshot: snapshot, rail: rail, content: content, in: context)
         drawWalls(snapshot: snapshot, rail: rail, content: content, in: context)
@@ -250,8 +246,8 @@ final class OptionsAnalyticsOverlayView: UIView {
         context.setStrokeColor(line.color.cgColor)
         context.setLineWidth(1)
         context.setLineDash(phase: 0, lengths: line.dashed ? [4, 3] : [])
-        context.move(to: CGPoint(x: rail.minX, y: y))
-        context.addLine(to: CGPoint(x: rail.maxX, y: y))
+        context.move(to: CGPoint(x: content.minX, y: y))
+        context.addLine(to: CGPoint(x: content.maxX, y: y))
         context.strokePath()
         context.setLineDash(phase: 0, lengths: [])
         let text = line.label as NSString

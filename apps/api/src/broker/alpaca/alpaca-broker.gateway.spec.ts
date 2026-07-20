@@ -37,9 +37,14 @@ describe('AlpacaBrokerGateway', () => {
   let fetchImpl: FetchImpl;
   let gateway: AlpacaBrokerGateway;
   let events: OrderEventsService;
+  /** Per-user trading mode the fake Prisma reports. */
+  let tradingMode: string;
+  /** Fake credential store (flipped per test). */
+  let credentials: ConstructorParameters<typeof AlpacaBrokerGateway>[0];
 
   beforeEach(() => {
     calls = [];
+    tradingMode = 'live';
     fetchImpl = jest.fn(async (url: string, init) => {
       let parsedBody: Record<string, unknown> | undefined;
       try {
@@ -167,14 +172,50 @@ describe('AlpacaBrokerGateway', () => {
       },
     });
     const prisma = {
-      user: { findUnique: jest.fn(async () => ({ id: 'u1', tradingMode: 'live' })) },
+      user: { findUnique: jest.fn(async () => ({ id: 'u1', tradingMode })) },
     } as unknown as ConstructorParameters<typeof AlpacaBrokerGateway>[3];
-    const credentials = {
-      getDecrypted: jest.fn(async () => ({ provider: 'alpaca', apiKey: 'AK', apiSecret: 'AS' })),
+    credentials = {
+      getDecrypted: jest.fn(
+        async (_u: string, _p: 'webull' | 'alpaca', environment: 'live' | 'practice') =>
+          environment === 'practice'
+            ? { provider: 'alpaca', apiKey: 'PAK', apiSecret: 'PAS' }
+            : { provider: 'alpaca', apiKey: 'AK', apiSecret: 'AS' },
+      ),
     } as unknown as ConstructorParameters<typeof AlpacaBrokerGateway>[0];
     events = { emit: jest.fn() } as unknown as OrderEventsService;
 
     gateway = new AlpacaBrokerGateway(credentials, config, events, prisma, fetchImpl);
+  });
+
+  describe('trading mode (live / practice)', () => {
+    it('live mode uses the live hosts and the live credential set', async () => {
+      await gateway.getQuote('u1', SYMBOL);
+      expect(calls.some((c) => c.url.startsWith('https://data.alpaca.markets'))).toBe(true);
+      await gateway.getPositions('u1');
+      expect(calls.some((c) => c.url.startsWith('https://api.alpaca.markets'))).toBe(true);
+      expect((credentials.getDecrypted as jest.Mock).mock.calls.some((c) => c[2] === 'live')).toBe(
+        true,
+      );
+    });
+
+    it('practice mode uses the paper hosts and the practice credential set', async () => {
+      tradingMode = 'practice';
+      await gateway.getQuote('u1', SYMBOL);
+      expect(calls.some((c) => c.url.startsWith('https://paper-data.alpaca.markets'))).toBe(true);
+      await gateway.getPositions('u1');
+      expect(calls.some((c) => c.url.startsWith('https://paper-api.alpaca.markets'))).toBe(true);
+      expect(
+        (credentials.getDecrypted as jest.Mock).mock.calls.some((c) => c[2] === 'practice'),
+      ).toBe(true);
+    });
+
+    it('practice mode fails with an auth error when no practice credentials exist', async () => {
+      tradingMode = 'practice';
+      (credentials.getDecrypted as jest.Mock).mockResolvedValue(null);
+      await expect(gateway.getQuote('u1', SYMBOL)).rejects.toMatchObject({
+        code: 'BROKER_AUTH_FAILED',
+      });
+    });
   });
 
   it('GETs a stock snapshot from the data host', async () => {

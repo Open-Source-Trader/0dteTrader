@@ -19,6 +19,7 @@ struct TradeScreenView: View {
     @State private var showIndicatorSettings = false
     @State private var showProfile = false
     @State private var showHistory = false
+    @State private var showAIAnalysis = false
     // 'nil' until /v1/me answers; the server value wins (desktop parity).
     @State private var tradingMode: TradingMode?
     @State private var showModeConfirmation = false
@@ -76,6 +77,9 @@ struct TradeScreenView: View {
                         .accessibilityLabel("Trade history")
                     }
                     ToolbarItem(placement: .topBarTrailing) {
+                        AIAnalysisButton { showAIAnalysis = true }
+                    }
+                    ToolbarItem(placement: .topBarTrailing) {
                         Button {
                             toggleLayout()
                         } label: {
@@ -115,6 +119,16 @@ struct TradeScreenView: View {
         }
         .sheet(isPresented: $showHistory) {
             HistoryView(apiClient: container.apiClient)
+        }
+        .sheet(isPresented: $showAIAnalysis) {
+            #if canImport(FoundationModels)
+            if #available(iOS 26, *) {
+                AIAnalysisSheet(
+                    chartViewModel: chartViewModel,
+                    chainViewModel: chainViewModel
+                )
+            }
+            #endif
         }
         .task {
             await chartViewModel.start()
@@ -213,32 +227,39 @@ struct TradeScreenView: View {
 
     @ViewBuilder
     private var layoutContent: some View {
-        switch layout {
-        case .fullscreen:
-            // Layout A — FR-10.
-            ZStack(alignment: .bottom) {
-                chartView
-                VStack(spacing: AppSpacing.sm) {
-                    positionsStrip
-                    FloatingTradeButtons(isEnabled: canTrade) { side in
-                        tradeViewModel.arm(side: side, underlying: chartViewModel.symbol, chainViewModel: chainViewModel)
+        // One reader for both layouts. `safeAreaInsets` reports only the
+        // insets remaining at this position, so reserving
+        // `safeAreaInsets.bottom` below keeps the panel/dock out of the
+        // home-indicator (swipe-up) strip exactly like the desktop frame's
+        // 34px strip: 0 (no-op) where an ancestor already applied the safe
+        // area, ~34pt under edge-to-edge (iOS 26) layout.
+        GeometryReader { geometry in
+            let insetBottom = geometry.safeAreaInsets.bottom
+            switch layout {
+            case .fullscreen:
+                // Layout A — FR-10.
+                ZStack(alignment: .bottom) {
+                    chartView
+                    VStack(spacing: AppSpacing.sm) {
+                        positionsStrip
+                        FloatingTradeButtons(isEnabled: canTrade) { side in
+                            tradeViewModel.arm(side: side, underlying: chartViewModel.symbol, chainViewModel: chainViewModel)
+                        }
                     }
+                    .padding(.bottom, AppSpacing.lg + insetBottom)
+                    .background(
+                        LinearGradient(colors: [.clear, Color.appBackground],
+                                       startPoint: .top, endPoint: .bottom)
+                            .ignoresSafeArea(edges: .bottom)
+                    )
                 }
-                .padding(.bottom, AppSpacing.lg)
-                .background(
-                    LinearGradient(colors: [.clear, Color.appBackground],
-                                   startPoint: .top, endPoint: .bottom)
-                        .ignoresSafeArea(edges: .bottom)
-                )
-            }
 
-        case .split:
-            // Layout B — automatic sizing based on indicator count (desktop parity).
-            GeometryReader { geometry in
-                let totalHeight = geometry.size.height
+            case .split:
+                // Layout B — automatic sizing based on indicator count (desktop parity).
+                let usableHeight = geometry.size.height - insetBottom
                 let fraction = Self.panelFractions[min(paneCount, Self.panelFractions.count - 1)]
-                let panelHeight = (totalHeight * fraction).rounded()
-                let chartHeight = max(totalHeight - panelHeight - 1, 96)
+                let panelHeight = (usableHeight * fraction).rounded()
+                let chartHeight = max(usableHeight - panelHeight - 1, 96)
                 VStack(spacing: 0) {
                     chartView
                         .frame(height: chartHeight)
@@ -259,7 +280,9 @@ struct TradeScreenView: View {
                     .frame(height: panelHeight)
                     .clipped()
                 }
-                .frame(height: totalHeight)
+                // Reserve the swipe-up strip so BUY/SELL never enter it.
+                .padding(.bottom, insetBottom)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: paneCount)
             }
         }

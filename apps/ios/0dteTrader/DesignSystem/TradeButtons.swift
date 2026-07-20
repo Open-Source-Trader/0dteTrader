@@ -51,9 +51,11 @@ struct TradeActionButton: View {
 }
 
 /// Small chamfered button used for quantity quick-steppers (1 / 5 / 10).
-/// Hit target is at least 44pt per HIG.
+/// Hit target is at least 44pt per HIG; the trade panel's density tiers
+/// shrink it (desktop parity: .quick-chip padding shrinks when dense).
 struct QuickChipButton: View {
     let title: String
+    var minHeight: CGFloat = 44
     let action: () -> Void
 
     var body: some View {
@@ -65,7 +67,7 @@ struct QuickChipButton: View {
                 .font(.chipLabel)
                 .foregroundStyle(Color.appAccent)
                 .padding(.horizontal, AppSpacing.md)
-                .frame(minWidth: 44, minHeight: 44)
+                .frame(minWidth: 44, minHeight: minHeight)
                 .background {
                     HudPanelShape(chamfer: 6)
                         .fill(Color.hudPanel)

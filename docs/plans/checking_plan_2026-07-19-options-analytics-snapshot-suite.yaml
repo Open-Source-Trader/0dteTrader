@@ -245,7 +245,21 @@ live_progress:
     phase: final-spec-and-code-quality-review
     status: completed
     evidence: Production residue scans find no old GEX endpoint/types/settings, premium-flow label, constant-IV fallback, or dealer proxy in fact rows. Negative tests intentionally retain the old strings. Independent standard-library pricing vectors and the published NYSE calendar match the implementation; no P0 or P1 remains open.
+  - at: '2026-07-19T22:45:00-04:00'
+    phase: main-integration
+    status: completed-with-baseline-residual
+    evidence: Main was merged into the feature branch before final delivery. Conflict resolution preserves main's independent pane zoom/reset behavior and the fact-first Options Structure UI. Main's new AI Analysis context now consumes OptionsAnalyticsSnapshotDTO with explicit quality and scenario labels. Regenerating the ignored Xcode project from project.yml added main's new source files; the focused iOS suite passes 44 of 44 and the full suite passes 123 of 124 with only BASE-003; SwiftLint reports 0 violations.
 findings:
+  - id: INTEGRATION-001
+    severity: P1
+    description: Main's newly added AI Analysis path referenced the deleted GexLevels contract and described inferred positioning as options flow after the breaking Options Analytics migration.
+    file: apps/ios/0dteTrader/Features/AIAnalysis/AIAnalysisModels.swift
+    reproduction_steps: Merge main at ce01d41 into the feature branch and compile the AI Analysis snapshot and prompt construction against the breaking shared contract.
+    impact: The merged iOS client would not compile against the deleted type, and preserving the old prompt would present OI-based positioning assumptions as observed flow.
+    suggested_fix: Pass the exact OptionsAnalyticsSnapshotDTO into AI Analysis, summarize observed call/put/gross structure and quality first, and include dealer positioning only under its explicit scenario name and assumption text.
+    blocker: true
+    remediation_status: resolved
+    remediation_evidence: The merged model compiles with the new DTO, the focused six-suite iOS run passes 44 of 44, SwiftLint reports 0 violations, and production GEX residue scanning finds only the deliberate old-endpoint rejection test.
   - id: PARTIAL-002
     severity: P1
     description: The engine still threw when every quote-valid contract lacked a solvable local IV, so an all-observed snapshot could not return valid OI, volume, sizes, marked-OI value, or liquidity.
@@ -808,6 +822,16 @@ evidence_log:
       id: E29,
       command: parse live checking plan and audit every finding status,
       result: no open P0 or P1; only documented unrelated P2 dependency iOS-selector and repository-format baselines remain,
+    }
+  - {
+      id: E30,
+      command: merge main into feature then regenerate XcodeGen project and run the six focused Options Analytics iOS suites,
+      result: merge conflicts resolved without GEX compatibility code; generated target includes AI Analysis; 44 of 44 tests pass and SwiftLint reports 0 violations,
+    }
+  - {
+      id: E31,
+      command: full iOS xcodebuild after main integration,
+      result: 123 of 124 tests pass and SwiftLint reports 0 violations; the sole failure is the unchanged AutoContractSelector expectation documented as BASE-003,
     }
 remediation_policy:
   fix_all_scoped_findings: true

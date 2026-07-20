@@ -33,12 +33,6 @@ export interface OverlaySeries {
   gaps?: boolean;
 }
 
-/** Logical visible range, mirrored to sub-panes so x-axes stay aligned. */
-export interface VisibleRange {
-  from: number;
-  to: number;
-}
-
 interface CandleChartProps {
   candles: ChartCandle[];
   overlays: OverlaySeries[];
@@ -54,8 +48,6 @@ interface CandleChartProps {
   optionsAnalyticsSnapshot?: OptionsAnalyticsSnapshot | null;
   optionsAnalyticsSettings?: OptionsAnalyticsSettings | null;
   optionsAnalyticsRetained?: boolean;
-  /** Fires on pan/zoom/snap so sub-panes can mirror the x-range. */
-  onVisibleRangeChange?: (range: VisibleRange | null) => void;
 }
 
 const VISIBLE_CANDLES = 120;
@@ -88,7 +80,6 @@ export function CandleChart({
   optionsAnalyticsSnapshot = null,
   optionsAnalyticsSettings = null,
   optionsAnalyticsRetained = false,
-  onVisibleRangeChange,
 }: CandleChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -100,8 +91,6 @@ export function CandleChart({
   const lastBarRef = useRef<ChartCandle | null>(null);
   const intervalRef = useRef(interval);
   intervalRef.current = interval;
-  const onVisibleRangeChangeRef = useRef(onVisibleRangeChange);
-  onVisibleRangeChangeRef.current = onVisibleRangeChange;
   const [apis, setApis] = useState<{
     chart: IChartApi;
     series: ISeriesApi<'Candlestick'>;
@@ -172,11 +161,6 @@ export function CandleChart({
     chartRef.current = chart;
     candleSeriesRef.current = candleSeries;
     setApis({ chart, series: candleSeries });
-
-    // Mirror the visible x-range to the sub-panes via ChartView state.
-    chart.timeScale().subscribeVisibleLogicalRangeChange((range) => {
-      onVisibleRangeChangeRef.current?.(range ? { from: range.from, to: range.to } : null);
-    });
 
     return () => {
       chart.remove();
@@ -335,6 +319,15 @@ export function CandleChart({
     }
   }, [candles, overlays]);
 
+  const resetView = () => {
+    const chart = chartRef.current;
+    if (!chart || candles.length === 0) return;
+    chart.timeScale().setVisibleLogicalRange({
+      from: Math.max(0, candles.length - VISIBLE_CANDLES),
+      to: candles.length + 12,
+    });
+  };
+
   const lastBar = candles.length > 0 ? candles[candles.length - 1] : null;
 
   return (
@@ -349,6 +342,32 @@ export function CandleChart({
           : `${symbol} chart, no data`
       }
     >
+      <button
+        onClick={resetView}
+        aria-label="Reset chart view"
+        style={{
+          position: 'absolute',
+          bottom: 28,
+          right: 8,
+          zIndex: 5,
+          width: 24,
+          height: 24,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          border: '1px solid var(--hud-stroke-dim)',
+          borderRadius: 4,
+          background: 'var(--app-surface)',
+          color: 'var(--label-secondary)',
+          fontSize: 11,
+          fontWeight: 600,
+          fontFamily: 'var(--font-mono)',
+          cursor: 'pointer',
+          opacity: 0.7,
+        }}
+      >
+        A
+      </button>
       {apis && candles.length > 0 && twcModel ? (
         <TwcOverlay chart={apis.chart} series={apis.series} model={twcModel} candles={candles} />
       ) : null}

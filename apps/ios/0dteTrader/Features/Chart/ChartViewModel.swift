@@ -101,8 +101,6 @@ final class ChartViewModel: ObservableObject {
     @Published private(set) var isLoading = false
     @Published var errorMessage: String?
     @Published private(set) var alertNotice: ChartAlertNotice?
-    /// The main chart's visible candle-index window; indicator panes track it.
-    @Published var visibleXRange: ClosedRange<Double>?
 
     /// Exact-expiration options structure snapshot for the current chart key.
     @Published private(set) var optionsAnalyticsSnapshot: OptionsAnalyticsSnapshotDTO?

@@ -9,7 +9,6 @@ import {
   type UTCTimestamp,
 } from 'lightweight-charts';
 import { chartPalette } from './chartColors';
-import type { VisibleRange } from './CandleChart';
 import type { ChartCandle } from './ChartStore';
 
 export interface PaneSeries {
@@ -30,23 +29,13 @@ interface IndicatorPaneProps {
   guideLines?: number[];
   /** Fixed y range (RSI 0–100). */
   yRange?: [number, number];
-  /** Main chart's visible x-range; keeps the pane aligned while panning. */
-  visibleRange?: VisibleRange | null;
 }
 
 /**
- * Non-interactive sub-pane (IndicatorPaneRepresentable analog): no pan/zoom,
- * no time axis — matching iOS. Mirrors the main chart's visible x-range when
- * provided; otherwise shows the full candle range (fitContent).
+ * Sub-pane for indicators (RSI, MACD, etc.). Mirrors the main chart's visible
+ * x-range and also allows independent zoom/pan, broadcasting changes back.
  */
-export function IndicatorPane({
-  height,
-  candles,
-  series,
-  guideLines,
-  yRange,
-  visibleRange,
-}: IndicatorPaneProps) {
+export function IndicatorPane({ height, candles, series, guideLines, yRange }: IndicatorPaneProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<Map<string, ISeriesApi<'Line' | 'Histogram'>>>(new Map());
@@ -76,8 +65,8 @@ export function IndicatorPane({
         vertLine: { visible: false, labelVisible: false },
         horzLine: { visible: false, labelVisible: false },
       },
-      handleScroll: false,
-      handleScale: false,
+      handleScroll: true,
+      handleScale: true,
       autoSize: true,
     });
     chartRef.current = chart;
@@ -170,13 +159,41 @@ export function IndicatorPane({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [candles, series]);
 
-  // View sync: cheap range application while the user pans the main chart.
-  useEffect(() => {
+  const resetView = () => {
     const chart = chartRef.current;
     if (!chart) return;
-    if (visibleRange) chart.timeScale().setVisibleLogicalRange(visibleRange);
-    else chart.timeScale().fitContent();
-  }, [visibleRange]);
+    chart.timeScale().fitContent();
+  };
 
-  return <div ref={containerRef} style={{ height, flex: 'none', position: 'relative' }} />;
+  return (
+    <div style={{ height, flex: 'none', position: 'relative' }}>
+      <div ref={containerRef} style={{ position: 'absolute', inset: 0 }} />
+      <button
+        onClick={resetView}
+        aria-label="Reset pane view"
+        style={{
+          position: 'absolute',
+          bottom: 4,
+          right: 8,
+          zIndex: 5,
+          width: 20,
+          height: 20,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          border: '1px solid var(--hud-stroke-dim)',
+          borderRadius: 3,
+          background: 'var(--app-surface)',
+          color: 'var(--label-secondary)',
+          fontSize: 9,
+          fontWeight: 600,
+          fontFamily: 'var(--font-mono)',
+          cursor: 'pointer',
+          opacity: 0.7,
+        }}
+      >
+        A
+      </button>
+    </div>
+  );
 }

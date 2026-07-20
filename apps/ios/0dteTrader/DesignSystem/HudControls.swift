@@ -20,6 +20,9 @@ struct HudSegmentedControl<Value: Hashable>: View {
     let options: [Option]
     @Binding var selection: Value
     var accent: Color = .hudStroke
+    /// Segment min height — the trade panel's density tiers shrink this
+    /// (desktop parity: .segmented 36/32/30px per roomy/compact/dense).
+    var minHeight: CGFloat = 34
 
     var body: some View {
         HStack(spacing: AppSpacing.xs) {
@@ -35,7 +38,7 @@ struct HudSegmentedControl<Value: Hashable>: View {
                         .font(.panelLabel)
                         .fontWeight(.semibold)
                         .foregroundStyle(isSelected ? tint : Color.secondary)
-                        .frame(maxWidth: .infinity, minHeight: 34)
+                        .frame(maxWidth: .infinity, minHeight: minHeight)
                         .background {
                             if isSelected {
                                 HudPanelShape(chamfer: 6)

@@ -382,7 +382,9 @@ export class TradierClient {
         volume: Math.round(nonNegative(day?.['volume']) ?? 0),
       });
     }
-    return candles;
+    // Chart clients and aggregation both require ascending bars — do not
+    // trust the provider's ordering.
+    return candles.sort((a, b) => a.time.localeCompare(b.time));
   }
 
   /** Intraday bars from /markets/timesales (1min ~20 days back, 5/15min ~40). */
@@ -421,7 +423,9 @@ export class TradierClient {
         volume: Math.round(nonNegative(row?.['volume']) ?? 0),
       });
     }
-    return candles;
+    // Chart clients and aggregation both require ascending bars — do not
+    // trust the provider's ordering.
+    return candles.sort((a, b) => a.time.localeCompare(b.time));
   }
 
   async getChain(symbol: string, expiration: string): Promise<TradierChain> {

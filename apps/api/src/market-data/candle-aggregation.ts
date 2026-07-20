@@ -8,7 +8,7 @@ import { Candle, CandleInterval } from '@0dtetrader/shared-types';
  * append to the same buckets the server produced.
  */
 
-export const WEEK_SECONDS = 604_800;
+const WEEK_SECONDS = 604_800;
 /** 1970-01-01 is a Thursday; shift 4 days so weekly buckets start Monday 00:00 UTC. */
 export const MONDAY_EPOCH_OFFSET = 345_600;
 
@@ -22,10 +22,6 @@ const INTERVAL_SECONDS: Record<CandleInterval, number> = {
   '1d': 86_400,
   '1w': WEEK_SECONDS,
 };
-
-export function intervalSeconds(interval: CandleInterval): number {
-  return INTERVAL_SECONDS[interval];
-}
 
 export function bucketStartSeconds(epochSeconds: number, interval: CandleInterval): number {
   if (interval === '1w') {

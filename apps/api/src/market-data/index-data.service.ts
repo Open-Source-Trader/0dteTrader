@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { Candle, CandleInterval, Quote } from '@0dtetrader/shared-types';
 import { ymd } from '../broker/expiration-calendar';
+import { brokerErrors } from '../common/broker-error';
 import { TradierClient } from '../options-analytics/tradier.client';
 import { aggregateCandles } from './candle-aggregation';
 
@@ -46,9 +47,23 @@ export class IndexDataService {
     if (cached && Date.now() - cached.at < IndexDataService.QUOTE_TTL_MS) {
       return cached.quote;
     }
-    const quote = await this.tradier.getChartQuote(key);
+    const quote = await this.wrap(() => this.tradier.getChartQuote(key));
     this.quoteCache.set(key, { quote, at: Date.now() });
     return quote;
+  }
+
+  /** Tradier failures surface as the same user-safe broker errors the crypto
+   *  path uses, not raw 500s. */
+  private async wrap<T>(operation: () => Promise<T>): Promise<T> {
+    try {
+      return await operation();
+    } catch (err) {
+      const message = (err as Error).message ?? '';
+      if (/rate limit/i.test(message)) {
+        throw brokerErrors.rateLimited('Index data source rate limit exceeded');
+      }
+      throw brokerErrors.unavailable(`Index data source error: ${message}`);
+    }
   }
 
   async getCandles(
@@ -63,7 +78,7 @@ export class IndexDataService {
     if (interval === '1d' || interval === '1w') {
       const floor = end.getTime() - DAILY_LOOKBACK_MS;
       const start = new Date(Math.max(from ? Date.parse(from) : floor, floor));
-      const daily = await this.tradier.getDailyHistory(key, ymd(start), ymd(end));
+      const daily = await this.wrap(() => this.tradier.getDailyHistory(key, ymd(start), ymd(end)));
       return interval === '1w' ? aggregateCandles(daily, '1w') : daily;
     }
 
@@ -71,7 +86,7 @@ export class IndexDataService {
     const source = TRADIER_INTRADAY[interval] ?? '15min';
     const floor = end.getTime() - TIMESALES_LOOKBACK_DAYS[source] * DAY_MS;
     const start = new Date(Math.max(from ? Date.parse(from) : floor, floor));
-    const rows = await this.tradier.getTimeSales(key, source, start, end);
+    const rows = await this.wrap(() => this.tradier.getTimeSales(key, source, start, end));
     return TRADIER_INTRADAY[interval] ? rows : aggregateCandles(rows, interval);
   }
 }

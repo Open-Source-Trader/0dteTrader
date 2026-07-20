@@ -149,6 +149,23 @@ describe('tick charts', () => {
     );
   });
 
+  it('bumps a completed tick candle sharing a second with the last seed candle', async () => {
+    const seedTime = Math.floor(Date.parse('2026-07-17T14:30:00Z') / 1000);
+    (loadTickState as Mock).mockResolvedValueOnce({
+      candles: [{ time: seedTime, open: 1, high: 1, low: 1, close: 1, volume: 0 }],
+      accumulator: { count: 9, open: 1, high: 2, low: 1, close: 2, firstTimestamp: seedTime },
+    });
+    const store = makeStore();
+    (store as unknown as { set(patch: object): void }).set({ interval: '10t', candles: [] });
+    await store.loadCandles();
+    liveQuote(store, quote('2026-07-17T14:30:00Z', 502));
+
+    const candles = store.getState().candles;
+    expect(candles).toHaveLength(2);
+    // Strictly ascending: the collision with the seed candle is bumped by 1s.
+    expect(candles.at(-1)!.time).toBe(seedTime + 1);
+  });
+
   it('seeds an empty tick chart from recent 1m history', async () => {
     (loadTickState as Mock).mockResolvedValueOnce({ candles: [], accumulator: null });
     const apiClient = {

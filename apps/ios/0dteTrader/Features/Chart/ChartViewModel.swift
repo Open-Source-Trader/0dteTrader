@@ -533,8 +533,14 @@ final class ChartViewModel: ObservableObject {
         }
 
         if let accumulator = tickAccumulator, accumulator.count >= size {
+            // The chart requires strictly ascending times; a 1m seed candle can
+            // share the same second as the first live tick candle.
+            var candleTime = Date(timeIntervalSince1970: accumulator.firstTimestamp)
+            if let previous = candles.last, candleTime <= previous.time {
+                candleTime = previous.time.addingTimeInterval(1)
+            }
             let candle = Candle(
-                time: Date(timeIntervalSince1970: accumulator.firstTimestamp),
+                time: candleTime,
                 open: accumulator.open,
                 high: accumulator.high,
                 low: accumulator.low,

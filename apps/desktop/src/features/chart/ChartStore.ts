@@ -324,8 +324,14 @@ export class ChartStore extends Store<ChartStoreState> {
 
     let next = candles;
     if (this.tickAccumulator.count >= size) {
+      const previous = candles[candles.length - 1];
       const candle: ChartCandle = {
-        time: this.tickAccumulator.firstTimestamp,
+        // lightweight-charts requires strictly ascending times; a 1m seed
+        // candle can share the same second as the first live tick candle.
+        time:
+          previous && this.tickAccumulator.firstTimestamp <= previous.time
+            ? previous.time + 1
+            : this.tickAccumulator.firstTimestamp,
         open: this.tickAccumulator.open,
         high: this.tickAccumulator.high,
         low: this.tickAccumulator.low,

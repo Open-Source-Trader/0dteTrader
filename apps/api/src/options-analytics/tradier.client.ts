@@ -144,14 +144,17 @@ function isUsableSourceTimestamp(
 ): boolean {
   const completedSession = policy.latestCompletedSession;
   if (completedSession === null) return isFresh(value, now, maximumAgeMs);
+  // After-hours activity stamps quotes past the regular close (equities trade
+  // until 8pm ET), so the usable window runs from shortly before the completed
+  // session's close up to the present — not just to the close itself.
   const ageAtClose = completedSession.close.getTime() - value.getTime();
-  return ageAtClose >= -MAX_FUTURE_SKEW_MS && ageAtClose <= maximumAgeMs;
+  return ageAtClose <= maximumAgeMs && now.getTime() - value.getTime() >= -MAX_FUTURE_SKEW_MS;
 }
 
 function closedSessionWarning(policy: SourceTimestampPolicy): string | null {
   const completedSession = policy.latestCompletedSession;
   if (completedSession === null) return null;
-  return `Market is closed; using latest completed regular-session quotes from ${completedSession.date}; source timestamps and ages remain visible`;
+  return `Market is closed; using latest available quotes from the ${completedSession.date} session (regular or after-hours); source timestamps and ages remain visible`;
 }
 
 function isFresh(value: Date, now: Date, maximumAgeMs = MAX_SOURCE_AGE_MS): boolean {

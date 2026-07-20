@@ -264,6 +264,38 @@ describe('TradierClient normalization', () => {
     });
   });
 
+  it('accepts after-hours quotes stamped after the completed session close on Sunday', async () => {
+    const fridayAfterHours = Date.parse('2026-07-17T23:55:00.000Z'); // 7:55pm ET Friday
+    const fetchImpl = jest.fn().mockResolvedValue(
+      response({
+        quotes: {
+          quote: {
+            symbol: 'TSLA',
+            bid: 330,
+            ask: 330.4,
+            bid_date: fridayAfterHours,
+            ask_date: fridayAfterHours + 500,
+            last: 330.2,
+            trade_date: fridayAfterHours,
+            delayed: false,
+          },
+        },
+      }),
+    );
+    const client = new TradierClient(
+      'token',
+      'https://api.tradier.com',
+      fetchImpl,
+      () => SUNDAY_NIGHT,
+    );
+
+    await expect(client.getQuote('TSLA')).resolves.toMatchObject({
+      spot: 330.2,
+      quoteAsOf: new Date(fridayAfterHours).toISOString(),
+      warnings: [expect.stringMatching(/market is closed.*2026-07-17/i)],
+    });
+  });
+
   it('accepts latest completed-session option quotes but rejects an older session', async () => {
     const fetchImpl = jest.fn().mockResolvedValue(
       response({

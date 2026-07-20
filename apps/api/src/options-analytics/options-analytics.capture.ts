@@ -155,9 +155,8 @@ export class OptionsAnalyticsCaptureService implements OnModuleInit, OnModuleDes
       return;
     }
     this.captureRunning = true;
-    let ownsLease = false;
     try {
-      ownsLease = await this.acquireLease(
+      const ownsLease = await this.acquireLease(
         'options-analytics-minute-capture',
         now,
         55_000,
@@ -197,7 +196,8 @@ export class OptionsAnalyticsCaptureService implements OnModuleInit, OnModuleDes
     } finally {
       this.captureRunning = false;
     }
-    if (!ownsLease) return;
+    // Reaching here implies the minute-capture lease was owned — the try
+    // block returns early when acquisition fails and rethrows on error.
     const day = newYorkDate(now);
     if (this.lastMaintenanceDay !== day) {
       const maintenanceLeaseName = `options-analytics-daily-maintenance:${day}`;

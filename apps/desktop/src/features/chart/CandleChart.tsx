@@ -1,7 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import {
+  CandlestickSeries,
   ColorType,
   createChart,
+  HistogramSeries,
+  LineSeries,
   type CandlestickData,
   type HistogramData,
   type IChartApi,
@@ -142,7 +145,7 @@ export function CandleChart({
       },
       autoSize: true,
     });
-    const candleSeries = chart.addCandlestickSeries({
+    const candleSeries = chart.addSeries(CandlestickSeries, {
       upColor: colors.candleUp,
       downColor: colors.candleDown,
       wickUpColor: colors.candleUp,
@@ -180,7 +183,7 @@ export function CandleChart({
     const chart = chartRef.current;
     if (!chart) return;
     if (showVolume && !volumeSeriesRef.current) {
-      const series = chart.addHistogramSeries({
+      const series = chart.addSeries(HistogramSeries, {
         priceScaleId: 'volume',
         priceFormat: { type: 'volume' },
         priceLineVisible: false,
@@ -303,7 +306,7 @@ export function CandleChart({
     for (const entry of expanded) {
       let series = existing.get(entry.id);
       if (!series) {
-        series = chart.addLineSeries({
+        series = chart.addSeries(LineSeries, {
           color: entry.color,
           lineWidth: entry.lineWidth,
           priceScaleId: 'left',

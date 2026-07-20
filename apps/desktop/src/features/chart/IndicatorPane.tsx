@@ -2,6 +2,8 @@ import { useEffect, useRef } from 'react';
 import {
   ColorType,
   createChart,
+  HistogramSeries,
+  LineSeries,
   type HistogramData,
   type IChartApi,
   type ISeriesApi,
@@ -107,8 +109,8 @@ export function IndicatorPane({ height, candles, series, guideLines, yRange }: I
         };
         api =
           spec.kind === 'histogram'
-            ? chart.addHistogramSeries({ ...common, base: 0 })
-            : chart.addLineSeries({
+            ? chart.addSeries(HistogramSeries, { ...common, base: 0 })
+            : chart.addSeries(LineSeries, {
                 ...common,
                 color: spec.color,
                 lineWidth: 1,
@@ -156,7 +158,6 @@ export function IndicatorPane({ height, candles, series, guideLines, yRange }: I
         (api as ISeriesApi<'Line'>).setData(data);
       }
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [candles, series]);
 
   const resetView = () => {

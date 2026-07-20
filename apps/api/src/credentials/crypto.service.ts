@@ -1,11 +1,6 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import {
-  createCipheriv,
-  createDecipheriv,
-  createHash,
-  randomBytes,
-} from 'node:crypto';
+import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
 
 const IV_BYTES = 12; // 96-bit nonce, the GCM recommendation
 const TAG_BYTES = 16;
@@ -35,9 +30,7 @@ export class CryptoService implements OnModuleInit {
     if (configured) {
       const decoded = Buffer.from(configured, 'base64');
       if (decoded.length !== KEY_BYTES) {
-        throw new Error(
-          'CRED_ENCRYPTION_KEY must decode to exactly 32 bytes (base64)',
-        );
+        throw new Error('CRED_ENCRYPTION_KEY must decode to exactly 32 bytes (base64)');
       }
       this.key = decoded;
       return;
@@ -52,21 +45,21 @@ export class CryptoService implements OnModuleInit {
   }
 
   /** Encrypt UTF-8 text; returns iv || authTag || ciphertext. */
-  encrypt(plaintext: string): Buffer {
+  // Prisma 7 types Bytes columns as Uint8Array<ArrayBuffer>, so the blob is
+  // copied out of Buffer's pooled ArrayBufferLike backing store.
+  encrypt(plaintext: string): Uint8Array<ArrayBuffer> {
     const iv = randomBytes(IV_BYTES);
     const cipher = createCipheriv('aes-256-gcm', this.key, iv);
-    const ciphertext = Buffer.concat([
-      cipher.update(plaintext, 'utf8'),
-      cipher.final(),
-    ]);
-    return Buffer.concat([iv, cipher.getAuthTag(), ciphertext]);
+    const ciphertext = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()]);
+    return new Uint8Array(Buffer.concat([iv, cipher.getAuthTag(), ciphertext]));
   }
 
   /**
    * Decrypt a blob produced by encrypt(). Throws on any tampering or key
    * mismatch (GCM authentication failure).
    */
-  decrypt(blob: Buffer): string {
+  decrypt(bytes: Uint8Array): string {
+    const blob = Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes);
     if (blob.length < IV_BYTES + TAG_BYTES) {
       throw new Error('Invalid encrypted blob (too short)');
     }
@@ -76,10 +69,7 @@ export class CryptoService implements OnModuleInit {
     const decipher = createDecipheriv('aes-256-gcm', this.key, iv);
     decipher.setAuthTag(authTag);
     try {
-      return Buffer.concat([
-        decipher.update(ciphertext),
-        decipher.final(),
-      ]).toString('utf8');
+      return Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString('utf8');
     } catch {
       throw new Error(
         'Credential decryption failed: data is corrupt, tampered, or the key is wrong',

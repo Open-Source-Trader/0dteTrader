@@ -59,13 +59,18 @@ export function Sheet({ detent = 'large', onDismiss, children }: SheetProps) {
       window.removeEventListener('keydown', onKey);
       previouslyFocused?.focus();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount once; see onDismissRef.
   }, []);
 
   return (
     <>
       <div className="sheet-backdrop" onClick={() => onDismissRef.current()} />
-      <div ref={panelRef} className={`sheet-panel ${detent}`} role="dialog" aria-modal="true" tabIndex={-1}>
+      <div
+        ref={panelRef}
+        className={`sheet-panel ${detent}`}
+        role="dialog"
+        aria-modal="true"
+        tabIndex={-1}
+      >
         {children}
       </div>
     </>

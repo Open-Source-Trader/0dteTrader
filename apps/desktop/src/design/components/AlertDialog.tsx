@@ -54,11 +54,16 @@ export function AlertDialog({ title, message, actions, onDismiss }: AlertDialogP
       window.removeEventListener('keydown', onKey);
       previouslyFocused?.focus();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount once; see onDismissRef.
   }, []);
 
   return (
-    <div ref={backdropRef} className="alert-backdrop" role="alertdialog" aria-modal="true" aria-label={title}>
+    <div
+      ref={backdropRef}
+      className="alert-backdrop"
+      role="alertdialog"
+      aria-modal="true"
+      aria-label={title}
+    >
       <div className="alert-card">
         <div className="alert-title">{title}</div>
         {message ? <div className="alert-message">{message}</div> : null}

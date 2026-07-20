@@ -1,4 +1,5 @@
 import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { PrismaPg } from '@prisma/adapter-pg';
 import { PrismaClient } from '@prisma/client';
 
 /**
@@ -15,6 +16,13 @@ import { PrismaClient } from '@prisma/client';
  */
 @Injectable()
 export class PrismaService extends PrismaClient implements OnModuleInit, OnModuleDestroy {
+  constructor() {
+    // Prisma 7 requires a driver adapter for direct connections; DATABASE_URL
+    // is already in process.env because ConfigModule.forRoot() runs dotenv
+    // during module evaluation, before DI constructs this provider.
+    super({ adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL }) });
+  }
+
   async onModuleInit(): Promise<void> {
     await this.$connect();
   }

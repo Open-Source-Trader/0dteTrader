@@ -94,3 +94,5 @@ xcodebuild test -scheme 0dteTrader -destination 'platform=iOS Simulator,name=iPh
 - The desktop Electron mode requires the Vite dev server running first (`npm run dev:desktop`, then `npm run electron` in `apps/desktop/`).
 - Docker must be running before `npm run dev` (Postgres + Redis are required).
 - The options chain and GEX/DEX endpoints need a `TRADIER_API_TOKEN` in `.env` — without it, chart and order functionality still works but options analytics fail.
+
+**Always update the IOS and Electron app as a pair, when needed. Never just one or the other**

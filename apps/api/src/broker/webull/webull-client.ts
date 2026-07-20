@@ -1,12 +1,7 @@
 import { Logger } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { BrokerError, brokerErrors } from '../../common/broker-error';
-import {
-  EP,
-  EndpointKey,
-  parseErrorBody,
-  WebullHosts,
-} from './webull-endpoints';
+import { EP, EndpointKey, parseErrorBody, WebullHosts } from './webull-endpoints';
 import { compactJson, signRequest } from './webull-signer';
 
 export interface WebullCredentials {
@@ -123,17 +118,14 @@ export class WebullClient {
     private readonly options: WebullClientOptions,
   ) {
     this.fetchImpl = options.fetchImpl ?? (defaultFetch as FetchImpl);
-    this.sleep =
-      options.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
+    this.sleep = options.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
     this.uuid = options.uuid ?? (() => randomUUID());
     this.now = options.now ?? (() => new Date());
   }
 
   get accountId(): string {
     if (!this.creds.accountId) {
-      throw brokerErrors.authFailed(
-        'Webull account id not yet discovered — authenticate first',
-      );
+      throw brokerErrors.authFailed('Webull account id not yet discovered — authenticate first');
     }
     return this.creds.accountId;
   }
@@ -184,8 +176,7 @@ export class WebullClient {
     } = {},
   ): Promise<unknown> {
     const ep = EP[endpoint];
-    const base =
-      ep.host === 'api' ? this.options.hosts.api : this.options.hosts.data;
+    const base = ep.host === 'api' ? this.options.hosts.api : this.options.hosts.data;
     const url = new URL(ep.path, base);
     for (const [k, v] of Object.entries(opts.query ?? {})) {
       url.searchParams.set(k, v);
@@ -247,7 +238,9 @@ export class WebullClient {
         body,
         accessToken,
         nonce: this.uuid(),
-        timestamp: this.now().toISOString().replace(/\.\d{3}Z$/, 'Z'),
+        timestamp: this.now()
+          .toISOString()
+          .replace(/\.\d{3}Z$/, 'Z'),
       }),
       'content-type': 'application/json',
       ...extraHeaders,
@@ -262,9 +255,7 @@ export class WebullClient {
         body: body !== undefined ? compactJson(body) : undefined,
       });
     } catch (err) {
-      throw brokerErrors.unavailable(
-        `Webull request failed: ${(err as Error).message}`,
-      );
+      throw brokerErrors.unavailable(`Webull request failed: ${(err as Error).message}`);
     }
     const payload = await res.json().catch(() => undefined);
     const retryAfterRaw = res.headers?.get('retry-after');
@@ -272,9 +263,7 @@ export class WebullClient {
     return {
       status: res.status,
       payload,
-      retryAfter: Number.isFinite(retryAfterSec)
-        ? retryAfterSec * 1000
-        : undefined,
+      retryAfter: Number.isFinite(retryAfterSec) ? retryAfterSec * 1000 : undefined,
     };
   }
 
@@ -289,19 +278,14 @@ export class WebullClient {
       this.storeHydration = this.options.tokenStore.load().then((persisted) => {
         if (persisted && !this.cachedToken) {
           this.cachedToken = persisted;
-          this.logger.log(
-            `Webull access token restored from store (status ${persisted.status})`,
-          );
+          this.logger.log(`Webull access token restored from store (status ${persisted.status})`);
         }
       });
     }
     if (this.storeHydration) await this.storeHydration;
 
     const cached = this.cachedToken;
-    if (
-      cached &&
-      cached.expiresAt - this.now().getTime() > TOKEN_REFRESH_MARGIN_MS
-    ) {
+    if (cached && cached.expiresAt - this.now().getTime() > TOKEN_REFRESH_MARGIN_MS) {
       if (cached.status === 'NORMAL') return cached.token;
       if (cached.status === 'PENDING') {
         return this.awaitPendingVerification(cached);
@@ -430,10 +414,7 @@ export class WebullClient {
     return token.token;
   }
 
-  private async requestToken(
-    path: string,
-    body: Record<string, unknown>,
-  ): Promise<unknown> {
+  private async requestToken(path: string, body: Record<string, unknown>): Promise<unknown> {
     const url = new URL(path, this.options.hosts.api);
     let res: Awaited<ReturnType<FetchImpl>>;
     try {
@@ -448,19 +429,23 @@ export class WebullClient {
             query: {},
             body,
             nonce: this.uuid(),
-            timestamp: this.now().toISOString().replace(/\.\d{3}Z$/, 'Z'),
+            timestamp: this.now()
+              .toISOString()
+              .replace(/\.\d{3}Z$/, 'Z'),
           }),
           'content-type': 'application/json',
         },
         body: compactJson(body),
       });
     } catch (err) {
-      throw brokerErrors.unavailable(
-        `Webull token request failed: ${(err as Error).message}`,
-      );
+      throw brokerErrors.unavailable(`Webull token request failed: ${(err as Error).message}`);
     }
     const payload = await res.json().catch(() => undefined);
     if (res.status === 401 || res.status === 403) {
+      const { code, message } = parseErrorBody(payload);
+      this.logger.error(
+        `Webull token ${res.status}: code=${code} message=${message} body=${JSON.stringify(payload)}`,
+      );
       throw brokerErrors.authFailed(
         'Webull rejected the app key/secret — re-enter credentials in the app',
       );
@@ -526,10 +511,7 @@ export class WebullClient {
     // to X quotes") are entitlements on the Webull app, not credential/token
     // failures and never a buying-power problem — regardless of the status
     // they arrive with, keep the token and surface the actionable message.
-    if (
-      haystack.includes('INSUFFICIENT PERMISSION') ||
-      haystack.includes('SUBSCRIBE')
-    ) {
+    if (haystack.includes('INSUFFICIENT PERMISSION') || haystack.includes('SUBSCRIBE')) {
       return brokerErrors.permissionDenied(
         `Webull market-data permission missing — ${sanitize(message)} ` +
           '(enable it for your app in the Webull OpenAPI console)',
@@ -552,9 +534,7 @@ export class WebullClient {
       return brokerErrors.authFailed(this.reauthRequired);
     }
     if (status === 429) {
-      return brokerErrors.rateLimited(
-        `Webull rate limit persisted after retries (${path})`,
-      );
+      return brokerErrors.rateLimited(`Webull rate limit persisted after retries (${path})`);
     }
     // Buying-power failures only make sense on order endpoints; a 400 from
     // /market-data/* mentioning "insufficient" is a parameter problem.
@@ -575,9 +555,7 @@ export class WebullClient {
       return brokerErrors.marketClosed(sanitize(message));
     }
     if (isTradeEndpoint && (status === 400 || status === 417 || status === 422)) {
-      return brokerErrors.orderRejected(
-        sanitize(message ?? (code ? `Webull error ${code}` : '')),
-      );
+      return brokerErrors.orderRejected(sanitize(message ?? (code ? `Webull error ${code}` : '')));
     }
     return new BrokerError(
       'BROKER_ERROR',

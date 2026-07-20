@@ -11,7 +11,7 @@ export class HealthController {
   @Get()
   async check(
     @Res({ passthrough: true }) res: Response,
-  ): Promise<{ status: string; db: string; uptime: number }> {
+  ): Promise<{ status: string; db: string; uptime: number; outboundIp: string }> {
     let dbStatus = 'ok';
     try {
       await this.prisma.$queryRawUnsafe('SELECT 1');
@@ -23,6 +23,13 @@ export class HealthController {
     if (dbStatus !== 'ok') {
       res.status(HttpStatus.SERVICE_UNAVAILABLE);
     }
-    return { status, db: dbStatus, uptime: process.uptime() };
+    let outboundIp = 'unknown';
+    try {
+      const resp = await fetch('https://api.ipify.org');
+      outboundIp = await resp.text();
+    } catch {
+      // Best-effort: leave outboundIp as 'unknown' if the lookup fails.
+    }
+    return { status, db: dbStatus, uptime: process.uptime(), outboundIp };
   }
 }

@@ -179,3 +179,5 @@ Real secrets live only in `.env`, which is gitignored. Never commit credentials.
 ## License
 
 MIT License — see [LICENSE](LICENSE).
+
+## Testing the new rules of git.

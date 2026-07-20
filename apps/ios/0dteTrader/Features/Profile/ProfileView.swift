@@ -4,6 +4,7 @@ struct ProfileView: View {
     @ObservedObject var viewModel: ProfileViewModel
     @Environment(\.dismiss) private var dismiss
     @State private var showDeleteConfirmation = false
+    @State private var showAlpacaDeleteConfirmation = false
     @State private var showLogoutConfirmation = false
 
     var body: some View {
@@ -11,7 +12,12 @@ struct ProfileView: View {
             ScrollView {
                 VStack(spacing: AppSpacing.xl) {
                     accountCard
-                    webullCard
+                    providerCard
+                    if viewModel.tradingProvider == .alpaca {
+                        alpacaCard
+                    } else {
+                        webullCard
+                    }
                     securityCard
                     logoutCard
                 }
@@ -55,6 +61,18 @@ struct ProfileView: View {
                 Button("Cancel", role: .cancel) {}
             } message: {
                 Text("Trading will stop working until new credentials are saved.")
+            }
+            .confirmationDialog(
+                "Remove Alpaca credentials?",
+                isPresented: $showAlpacaDeleteConfirmation,
+                titleVisibility: .visible
+            ) {
+                Button("Delete Credentials", role: .destructive) {
+                    Task { await viewModel.deleteAlpacaCredentials() }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Trading with Alpaca will stop working until new credentials are saved.")
             }
         }
     }
@@ -271,6 +289,172 @@ struct ProfileView: View {
                 .buttonStyle(HudActionButtonStyle(accent: .pnlNegative.opacity(0.6), chamfer: 6))
                 .disabled(viewModel.isDeletingCredentials)
                 .sensoryFeedback(.warning, trigger: showDeleteConfirmation)
+            }
+        }
+    }
+
+    // MARK: - Provider selector
+
+    private var providerCard: some View {
+        VStack(alignment: .leading, spacing: AppSpacing.md) {
+            sectionHeader("Trading Provider", icon: "arrow.left.arrow.right.circle")
+            HStack(spacing: AppSpacing.sm) {
+                providerButton(.webull, label: "Webull")
+                providerButton(.alpaca, label: "Alpaca")
+            }
+            .padding(AppSpacing.md)
+            .background(Color.appSurface, in: HudPanelShape(chamfer: 6))
+            .overlay(HudPanelShape(chamfer: 6).strokeBorder(Color.hudStrokeDim, lineWidth: 1))
+            Text("Switch providers any time. Credentials for the other provider stay saved.")
+                .font(.chipLabel)
+                .foregroundStyle(.secondary)
+        }
+        .padding(AppSpacing.lg)
+        .hudCard(glow: false)
+    }
+
+    private func providerButton(_ provider: BrokerProvider, label: String) -> some View {
+        let selected = viewModel.tradingProvider == provider
+        return Button {
+            Task { await viewModel.setTradingProvider(provider) }
+        } label: {
+            Text(label)
+                .font(.panelLabel)
+                .foregroundStyle(selected ? Color.black : Color.appAccent)
+                .frame(maxWidth: .infinity, minHeight: 40)
+        }
+        .buttonStyle(HudActionButtonStyle(accent: selected ? .appAccent : .hudStrokeDim, chamfer: 6))
+    }
+
+    // MARK: - Alpaca card
+
+    private var alpacaCard: some View {
+        VStack(alignment: .leading, spacing: AppSpacing.md) {
+            sectionHeader("Alpaca API", icon: "key.fill")
+
+            if viewModel.isLoading && viewModel.me == nil {
+                VStack(spacing: AppSpacing.sm) {
+                    ForEach(0..<4, id: \.self) { _ in
+                        SkeletonView()
+                            .frame(height: 20)
+                            .padding(.vertical, AppSpacing.xs)
+                    }
+                }
+            } else if let me = viewModel.me, me.alpacaConfigured == true, !viewModel.isEditingAlpacaCredentials {
+                alpacaConfiguredView(me: me)
+            } else {
+                AlpacaCredentialsForm(viewModel: viewModel)
+                if viewModel.me?.alpacaConfigured == true {
+                    Button {
+                        viewModel.isEditingAlpacaCredentials = false
+                    } label: {
+                        Text("Cancel Update")
+                            .font(.panelLabel)
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, minHeight: 40)
+                    }
+                    .buttonStyle(AppPressStyle())
+                }
+            }
+
+            if let successMessage = viewModel.successMessage {
+                HStack(spacing: AppSpacing.sm) {
+                    Image(systemName: "checkmark.circle.fill")
+                    Text(successMessage)
+                        .font(.chipLabel)
+                }
+                .foregroundStyle(Color.pnlPositive)
+                .accessibilityAddTraits(.isStaticText)
+            }
+            if let errorMessage = viewModel.errorMessage {
+                HStack(spacing: AppSpacing.sm) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                    Text(errorMessage)
+                        .font(.chipLabel)
+                }
+                .foregroundStyle(Color.pnlNegative)
+            }
+
+            Text("Your API key and secret come from the Alpaca dashboard (use the matching live or paper key).")
+                .font(.chipLabel)
+                .foregroundStyle(.secondary)
+        }
+        .padding(AppSpacing.lg)
+        .hudCard(glow: false)
+        .animation(AppMotion.standard, value: viewModel.isLoading)
+        .animation(AppMotion.standard, value: viewModel.me?.alpacaConfigured)
+        .animation(AppMotion.standard, value: viewModel.isEditingAlpacaCredentials)
+        .sensoryFeedback(.success, trigger: viewModel.successMessage)
+        .sensoryFeedback(.error, trigger: viewModel.errorMessage)
+        .onChange(of: viewModel.successMessage) { _, message in
+            guard let message else { return }
+            Task {
+                try? await Task.sleep(for: .seconds(4))
+                if viewModel.successMessage == message {
+                    viewModel.successMessage = nil
+                }
+            }
+        }
+    }
+
+    private func alpacaConfiguredView(me: MeDTO) -> some View {
+        VStack(alignment: .leading, spacing: AppSpacing.md) {
+            HStack(spacing: AppSpacing.sm) {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(Color.pnlPositive)
+                Text("Configured")
+                    .font(.panelLabel)
+                    .foregroundStyle(Color.pnlPositive)
+            }
+            .padding(AppSpacing.md)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.pnlPositive.opacity(0.08), in: HudPanelShape(chamfer: 6))
+            .overlay(
+                HudPanelShape(chamfer: 6)
+                    .strokeBorder(Color.pnlPositive.opacity(0.35), lineWidth: 1)
+            )
+
+            HStack {
+                Text("Account")
+                    .font(.panelLabel)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text(me.alpacaAccountId ?? "key-scoped (no account id)")
+                    .font(.priceSmall)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(AppSpacing.md)
+            .background(Color.appSurface, in: HudPanelShape(chamfer: 6))
+            .overlay(
+                HudPanelShape(chamfer: 6)
+                    .strokeBorder(Color.hudStrokeDim.opacity(0.5), lineWidth: 1)
+            )
+
+            Text("Credentials are stored encrypted on the server and are never displayed here.")
+                .font(.chipLabel)
+                .foregroundStyle(.secondary)
+
+            VStack(spacing: AppSpacing.sm) {
+                Button {
+                    viewModel.isEditingAlpacaCredentials = true
+                } label: {
+                    Text("Update Credentials")
+                        .font(.panelLabel)
+                        .foregroundStyle(Color.appAccent)
+                        .frame(maxWidth: .infinity, minHeight: 40)
+                }
+                .buttonStyle(HudActionButtonStyle(accent: .appAccent, chamfer: 6))
+
+                Button {
+                    showAlpacaDeleteConfirmation = true
+                } label: {
+                    Text("Delete Credentials")
+                        .font(.panelLabel)
+                        .foregroundStyle(Color.pnlNegative)
+                        .frame(maxWidth: .infinity, minHeight: 40)
+                }
+                .buttonStyle(HudActionButtonStyle(accent: .pnlNegative.opacity(0.6), chamfer: 6))
+                .disabled(viewModel.isDeletingAlpacaCredentials)
             }
         }
     }

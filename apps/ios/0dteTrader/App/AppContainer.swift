@@ -52,6 +52,11 @@ final class AppContainer: ObservableObject {
     }
 
     func makeProfileViewModel(onLogout: @escaping () async -> Void) -> ProfileViewModel {
-        ProfileViewModel(apiClient: apiClient, settingsStore: settingsStore, onLogout: onLogout)
+        ProfileViewModel(
+            apiClient: apiClient,
+            settingsStore: settingsStore,
+            quoteSocket: quoteSocket,
+            onLogout: onLogout
+        )
     }
 }

@@ -18,17 +18,31 @@ final class ProfileViewModel: ObservableObject {
     @Published var isEditingCredentials = false
     @Published private(set) var isReconnecting = false
 
+    @Published var tradingProvider: BrokerProvider = .webull
+    @Published var alpacaApiKey = ""
+    @Published var alpacaApiSecret = ""
+    @Published var isEditingAlpacaCredentials = false
+    @Published private(set) var isSavingAlpacaCredentials = false
+    @Published private(set) var isDeletingAlpacaCredentials = false
+
     @Published var appLockEnabled: Bool {
         didSet { settingsStore.appLockEnabled = appLockEnabled }
     }
 
     private let apiClient: APIClient
     private let settingsStore: SettingsStore
+    private let quoteSocket: QuoteSocketClient
     private let onLogout: () async -> Void
 
-    init(apiClient: APIClient, settingsStore: SettingsStore, onLogout: @escaping () async -> Void) {
+    init(
+        apiClient: APIClient,
+        settingsStore: SettingsStore,
+        quoteSocket: QuoteSocketClient,
+        onLogout: @escaping () async -> Void
+    ) {
         self.apiClient = apiClient
         self.settingsStore = settingsStore
+        self.quoteSocket = quoteSocket
         self.onLogout = onLogout
         self.appLockEnabled = settingsStore.appLockEnabled
     }
@@ -48,6 +62,7 @@ final class ProfileViewModel: ObservableObject {
         defer { isLoading = false }
         do {
             me = try await apiClient.me()
+            tradingProvider = me?.tradingProvider ?? .webull
         } catch {
             // Surfaced in the Account section with a retry affordance, not as
             // a Webull credential error.
@@ -135,5 +150,72 @@ final class ProfileViewModel: ObservableObject {
 
     func logout() async {
         await onLogout()
+    }
+
+    // MARK: - Alpaca credentials (generic broker-credentials endpoint)
+
+    var canSaveAlpacaCredentials: Bool {
+        !alpacaApiKey.trimmingCharacters(in: .whitespaces).isEmpty
+            && !alpacaApiSecret.isEmpty
+    }
+
+    func setTradingProvider(_ provider: BrokerProvider) async {
+        errorMessage = nil
+        successMessage = nil
+        do {
+            let updated = try await apiClient.updateTradingProvider(provider)
+            tradingProvider = updated.tradingProvider ?? provider
+            await load()
+            // Re-establish the market-data stream so live quotes use the newly
+            // selected provider immediately.
+            quoteSocket.reconnect()
+        } catch let error as APIError {
+            errorMessage = error.userMessage
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func saveAlpacaCredentials() async {
+        guard canSaveAlpacaCredentials, !isSavingAlpacaCredentials else { return }
+        isSavingAlpacaCredentials = true
+        errorMessage = nil
+        successMessage = nil
+        defer { isSavingAlpacaCredentials = false }
+        do {
+            try await apiClient.putAlpacaCredentials(
+                AlpacaCredentialsInputDTO(
+                    apiKey: alpacaApiKey.trimmingCharacters(in: .whitespaces),
+                    apiSecret: alpacaApiSecret
+                )
+            )
+            // Write-only: wipe the fields, never render them back (FR-4).
+            alpacaApiKey = ""
+            alpacaApiSecret = ""
+            isEditingAlpacaCredentials = false
+            successMessage = "Alpaca credentials saved."
+            await load()
+        } catch let error as APIError {
+            errorMessage = error.userMessage
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func deleteAlpacaCredentials() async {
+        guard !isDeletingAlpacaCredentials else { return }
+        isDeletingAlpacaCredentials = true
+        errorMessage = nil
+        successMessage = nil
+        defer { isDeletingAlpacaCredentials = false }
+        do {
+            try await apiClient.deleteBrokerCredentials(provider: .alpaca)
+            successMessage = "Alpaca credentials removed."
+            await load()
+        } catch let error as APIError {
+            errorMessage = error.userMessage
+        } catch {
+            errorMessage = error.localizedDescription
+        }
     }
 }

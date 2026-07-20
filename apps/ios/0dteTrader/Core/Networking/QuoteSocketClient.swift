@@ -65,6 +65,19 @@ final class QuoteSocketClient: ObservableObject {
         openConnection()
     }
 
+    /// Force a fresh connection, re-subscribing the current symbols. Called after
+    /// the trading provider changes so live quotes immediately use the new provider
+    /// (the dispatcher resolves the provider per call, but an already-established
+    /// subscription keeps serving the old provider until re-connected).
+    func reconnect() {
+        teardownConnection()
+        connectionState = .disconnected
+        reconnectAttempt = 0
+        reconnectTask?.cancel()
+        reconnectTask = nil
+        openConnection()
+    }
+
     // MARK: - Subscriptions
 
     func subscribe(symbols: [String]) {

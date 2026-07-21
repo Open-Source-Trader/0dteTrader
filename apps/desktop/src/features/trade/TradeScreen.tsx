@@ -528,6 +528,7 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
           onLogout={onLogout}
           onDismiss={() => {
             setShowProfile(false);
+            quoteSocket.reconnect();
             void refreshTradingContext();
           }}
         />

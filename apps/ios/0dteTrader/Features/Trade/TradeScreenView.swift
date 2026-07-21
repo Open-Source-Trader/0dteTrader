@@ -517,6 +517,7 @@ struct TradeScreenView: View {
         do {
             let me = try await container.apiClient.updateTradingMode(next)
             tradingMode = me.tradingMode ?? next
+            self.me = me
             // Practice and live chart orders are separate sets; clearing first
             // means the chart never shows a line that cannot fire in this mode.
             chartOrdersModel.reset()
@@ -524,6 +525,7 @@ struct TradeScreenView: View {
             await tradeViewModel.refreshTradingData()
             await chainViewModel.load(underlying: chartViewModel.symbol)
             await chartOrdersModel.load()
+            container.quoteSocket.reconnect()
         } catch {
             tradeViewModel.showToast("Mode switch failed. Try again.", style: .error)
         }
@@ -534,6 +536,7 @@ struct TradeScreenView: View {
             tradingMode = me.tradingMode ?? tradingMode
             self.me = me
             await tradeViewModel.refreshTradingData()
+            container.quoteSocket.reconnect()
         }
     }
 

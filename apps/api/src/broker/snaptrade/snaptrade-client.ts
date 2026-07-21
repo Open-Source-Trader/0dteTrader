@@ -14,6 +14,7 @@ import {
   BrokerageAuthorizationRefreshConfirmation,
 } from 'snaptrade-typescript-sdk';
 import { TradingMode } from '@0dtetrader/shared-types';
+import { brokerErrors } from '../../common/broker-error';
 import { SnaptradeError } from 'snaptrade-typescript-sdk';
 
 const SNAPTRADE_ERROR_CODES: Record<number, string> = {
@@ -37,7 +38,16 @@ export class SnapTradeClient {
     this.consumerKey = config.get<string>('snaptrade.consumerKey') ?? '';
   }
 
+  private ensureConfigured(): void {
+    if (!this.clientId || !this.consumerKey) {
+      throw brokerErrors.unavailable(
+        'SnapTrade is not configured on this server — set SNAPTRADE_CLIENT_ID and SNAPTRADE_CONSUMER_KEY',
+      );
+    }
+  }
+
   private sdk(mode: TradingMode): Snaptrade {
+    this.ensureConfigured();
     const baseUrl =
       mode === 'practice'
         ? (this.config.get<string>('snaptrade.sandboxBaseUrl') ??

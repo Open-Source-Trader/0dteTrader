@@ -1,9 +1,10 @@
 import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import {
   Candle,
   CandleInterval,
   CandleRequest,
+  OptionContract,
+  OptionType,
   OptionsChain,
   OrderPreview,
   OrderRequest,
@@ -12,8 +13,10 @@ import {
   Quote,
   TradingMode,
 } from '@0dtetrader/shared-types';
-import { brokerErrors } from '../../common/broker-error';
-import { AGGREGATION_PLANS, aggregateCandles } from '../../market-data/candle-aggregation';
+import { Alpaca, TimeFrame, TimeFrameUnit, timeFrame } from '@alpacahq/alpaca-trade-api';
+import { createHash } from 'crypto';
+import { BrokerError, brokerErrors } from '../../common/broker-error';
+import { aggregateCandles } from '../../market-data/candle-aggregation';
 import { CredentialsService } from '../../credentials/credentials.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
@@ -23,81 +26,69 @@ import {
   resolveAutoOtm,
 } from '../contract-resolution';
 import { BrokerGateway } from '../broker-gateway.interface';
-import { optionExpirations } from '../expiration-calendar';
 import { OrderEventsService } from '../order-events.service';
+import { optionExpirations } from '../expiration-calendar';
 import {
-  alpacaClientOrderId,
-  AlpacaHosts,
-  ALPACA_LIVE_HOSTS,
-  ALPACA_PAPER_HOSTS,
-  asArray,
-  asObject,
-  buildOptionOrder,
-  EndpointKey,
-  ResolvedOptionTerms,
-  TIMEFRAME,
-} from './alpaca-endpoints';
-import { AlpacaClient, AlpacaSecrets, FetchImpl } from './alpaca-client';
-import {
-  AlpacaSnapshot,
-  toCandle,
-  toOptionContract,
-  toOrderResult,
-  toPosition,
-  toQuote,
-} from './alpaca-mappers';
+  AlpacaClientLike,
+  AlpacaFactory,
+  AlpacaSecrets,
+  SdkBarsRequest,
+  SdkOrderInput,
+} from './alpaca-sdk.types';
+import { toCandle, toOptionContract, toOrderResult, toPosition, toQuote } from './alpaca-mappers';
+
+interface ResolvedContract {
+  contractSymbol: string;
+  bid: number;
+  ask: number;
+  last: number;
+  optionTerms?: {
+    underlying: string;
+    expiration: string;
+    strike: number;
+    optionType: OptionType;
+  };
+}
+
+const STATUS_POLL_INTERVAL_MS = 2500;
+const STATUS_POLL_MAX_ATTEMPTS = 90;
+/** Keep quote ticks responsive: the SDK's own retry/timeout protects GETs, but
+ *  we bound it so a stalled option snapshot can't hang a streaming tick. */
+const SDK_TIMEOUT_MS = 10_000;
 
 /**
- * Alpaca v2 gateway. Alpaca is simpler than Webull: HTTP Basic auth (no HMAC
- * signer), no token lifecycle / SMS-2FA, no account-id discovery (orders and
- * positions are scoped to the API key's account), and a real options-chain
- * endpoint that replaces Webull's strike-grid probe.
+ * Alpaca broker adapter backed by the official `@alpacahq/alpaca-trade-api` SDK.
  *
- * - Per-user AlpacaClient built from decrypted (apiKey, apiSecret) for the
- *   user's current trading mode (live → api.alpaca.markets, practice →
- *   paper-api.alpaca.markets); clients are cached per (user, mode) and
- *   rebuilt when credentials change.
- * - `reauthenticate` is a no-op: Alpaca keys are long-lived, so there is
- *   nothing to refresh.
- * - Order idempotency mirrors Webull exactly: client_order_id = md5(userId +
- *   idempotency key), and cancel operates on that id.
+ * The SDK owns all HTTP transport, endpoint paths, response parsing, auth, and
+ * retry/rate-limit handling — replacing the hand-rolled client/endpoints/mappers
+ * that previously drifted from Alpaca's real API (e.g. options market data lives
+ * under `/v1beta1/options/*`, not `/v2/options/*`).
  */
 @Injectable()
 export class AlpacaBrokerGateway implements BrokerGateway, OnModuleDestroy {
   private readonly logger = new Logger(AlpacaBrokerGateway.name);
-  private readonly clients = new Map<string, { fingerprint: string; client: AlpacaClient }>();
-  private readonly pollTimers = new Map<string, NodeJS.Timeout>();
-  /** Timespans the live API rejected or returned empty (native-first fallback
-   *  memo for 30m/4h — see getCandles). */
-  private readonly unsupportedTimespans = new Set<CandleInterval>();
+  private readonly clients = new Map<string, { fingerprint: string; client: AlpacaClientLike }>();
+  private readonly pollTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   constructor(
     private readonly credentials: CredentialsService,
-    private readonly config: ConfigService,
     private readonly events: OrderEventsService,
     private readonly prisma: PrismaService,
-    private readonly fetchImpl?: FetchImpl,
+    private readonly alpacaFactory: AlpacaFactory = (secrets, mode) =>
+      new Alpaca({
+        keyId: secrets.apiKey,
+        secret: secrets.apiSecret,
+        paper: mode === 'practice',
+        timeoutMs: SDK_TIMEOUT_MS,
+      }) as unknown as AlpacaClientLike,
   ) {}
 
-  onModuleDestroy(): void {
+  async onModuleDestroy(): Promise<void> {
     for (const timer of this.pollTimers.values()) clearTimeout(timer);
     this.pollTimers.clear();
   }
 
-  /**
-   * No-op for Alpaca: keys are long-lived and never expire, so there is no
-   * token to refresh. Returns the user's current trading mode for parity with
-   * the Webull reauthenticate contract (the app's Reconnect flow still works).
-   */
-  async reauthenticate(userId: string): Promise<TradingMode> {
-    const mode = await this.tradingModeFor(userId);
-    this.logger.log(`Alpaca reauthenticate (no-op) for ${userId} mode ${mode}`);
-    return mode;
-  }
-
-  // -------------------------------------------------------------------------
-  // Client factory (per-user, per-environment, credentials-aware)
-  // -------------------------------------------------------------------------
+  // -- credential / client resolution ---------------------------------------
 
   private async tradingModeFor(userId: string): Promise<TradingMode> {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
@@ -116,127 +107,83 @@ export class AlpacaBrokerGateway implements BrokerGateway, OnModuleDestroy {
     if (stored.provider !== 'alpaca') {
       throw brokerErrors.authFailed('Stored credentials are not Alpaca credentials');
     }
-    return stored as AlpacaSecrets;
+    return { apiKey: stored.apiKey, apiSecret: stored.apiSecret };
   }
 
-  private async clientFor(userId: string): Promise<AlpacaClient> {
+  private async clientFor(userId: string): Promise<AlpacaClientLike> {
     const mode = await this.tradingModeFor(userId);
     const secrets = await this.credentialsFor(userId, mode);
-    const fingerprint = `${secrets.apiKey}:${secrets.apiSecret}`;
-    const cacheKey = `${userId}:${mode}`;
-    const existing = this.clients.get(cacheKey);
-    if (existing && existing.fingerprint === fingerprint) {
-      return existing.client;
-    }
-    const client = new AlpacaClient(secrets, {
-      hosts: this.hosts(mode),
-      fetchImpl: this.fetchImpl,
-    });
-    this.clients.set(cacheKey, { fingerprint, client });
+    const fingerprint = `${secrets.apiKey}:${secrets.apiSecret}:${mode}`;
+    const existing = this.clients.get(userId);
+    if (existing && existing.fingerprint === fingerprint) return existing.client;
+    const client = this.alpacaFactory(secrets, mode);
+    this.clients.set(userId, { fingerprint, client });
     return client;
   }
 
-  private hosts(mode: TradingMode): AlpacaHosts {
-    if (mode === 'live') {
-      const trading = this.config.get<string>('alpaca.tradingBaseUrl') || ALPACA_LIVE_HOSTS.trading;
-      const data = this.config.get<string>('alpaca.dataBaseUrl') || ALPACA_LIVE_HOSTS.data;
-      return { trading, data };
+  /** Wrap an SDK call so transport/API errors surface as typed BrokerErrors. */
+  private async guard<T>(fn: () => Promise<T>): Promise<T> {
+    try {
+      return await fn();
+    } catch (err) {
+      throw mapSdkError(err);
     }
-    const trading =
-      this.config.get<string>('alpaca.paperTradingBaseUrl') || ALPACA_PAPER_HOSTS.trading;
-    const data = this.config.get<string>('alpaca.paperDataBaseUrl') || ALPACA_PAPER_HOSTS.data;
-    return { trading, data };
   }
 
-  // -------------------------------------------------------------------------
-  // Market data
-  // -------------------------------------------------------------------------
+  // -- market data ----------------------------------------------------------
 
   async getQuote(userId: string, symbol: string): Promise<Quote> {
     const client = await this.clientFor(userId);
     const occ = parseOccSymbol(symbol);
-    const key: EndpointKey = occ ? 'optionSnapshots' : 'stockSnapshots';
-    const raw = await client.request(key, { query: { symbols: symbol } });
-    // Stocks snapshots are keyed by symbol at the top level; options snapshots
-    // (Alpaca v1beta1) are nested under a `snapshots` wrapper. Tolerate both.
-    const obj = asObject(raw) as Record<string, unknown>;
-    const snapMap = (obj.snapshots as Record<string, unknown> | undefined) ?? obj;
-    const snap = snapMap[symbol] as AlpacaSnapshot | undefined;
-    if (!snap) {
-      throw brokerErrors.contractNotFound(
-        occ ? `Unknown option: ${symbol}` : `Unknown symbol: ${symbol}`,
+    if (occ) {
+      const snaps = await this.guard(() =>
+        client.marketData.collectOptionSnapshotsBySymbol({ symbols: [symbol] }),
       );
+      const snap = snaps[symbol];
+      if (!snap) throw brokerErrors.contractNotFound(`Unknown option: ${symbol}`);
+      return toQuote(symbol, snap);
     }
+    const snaps = await this.guard(() => client.marketData.stockSnapshots({ symbols: [symbol] }));
+    const snap = snaps[symbol];
+    if (!snap) throw brokerErrors.contractNotFound(`Unknown symbol: ${symbol}`);
     return toQuote(symbol, snap);
   }
 
   async getCandles(userId: string, symbol: string, req: CandleRequest): Promise<Candle[]> {
     const client = await this.clientFor(userId);
     const occ = parseOccSymbol(symbol);
-    const endpoint: EndpointKey = occ ? 'optionBars' : 'stockBars';
-
-    const fetchBars = async (timeframe: string, count: number): Promise<Candle[]> => {
-      const query: Record<string, string> = {
-        timeframe,
-        limit: String(count),
-      };
-      if (req.from) query.start = new Date(req.from).toISOString();
-      if (req.to) query.end = new Date(req.to).toISOString();
-      const buildOpts = (q: Record<string, string>) =>
-        occ ? { query: { ...q, symbols: symbol } } : { query: q, pathParams: { symbol } };
-      const requestOpts = buildOpts(query);
-      const barsOf = (r: unknown): unknown => (occ ? optionBarsForSymbol(r, symbol) : r);
-      let raw = await client.request(endpoint, requestOpts);
-      // A window covering no session returns []; fall back to the latest bars.
-      if (asArray(barsOf(raw)).length === 0 && (req.from || req.to)) {
-        delete query.start;
-        delete query.end;
-        raw = await client.request(endpoint, buildOpts(query));
-      }
-      // Alpaca returns bars newest-first; chart clients require ascending.
-      return asArray(barsOf(raw))
-        .map((b) => toCandle(b as never))
-        .sort((a, b) => a.time.localeCompare(b.time));
-    };
-
-    const fetchAggregated = async (
-      source: Exclude<CandleInterval, '1w'>,
-      count: number,
-      target: CandleInterval,
-    ): Promise<Candle[]> => {
-      let bars: Candle[];
-      try {
-        bars = await fetchBars(TIMEFRAME[source], count);
-      } catch (err) {
-        if (count <= 200) throw err;
-        this.logger.warn(
-          `bars count=${count} rejected for ${symbol} ${source} — retrying with 200: ${(err as Error).message}`,
-        );
-        bars = await fetchBars(TIMEFRAME[source], 200);
-      }
-      return aggregateCandles(bars, target);
-    };
-
+    // Weekly bars are sparse from the API; aggregate from daily to stay stable.
     if (req.interval === '1w') {
-      return fetchAggregated('1d', 600, '1w');
+      const daily = await this.fetchBars(client, occ, symbol, TimeFrame.Day, 600, {});
+      return aggregateCandles(daily, '1w');
     }
-    const plan = AGGREGATION_PLANS[req.interval];
-    const planSource = plan?.source as Exclude<CandleInterval, '1w'> | undefined;
-    if (!plan || !planSource) {
-      return fetchBars(TIMEFRAME[req.interval], 200);
+    return this.fetchBars(client, occ, symbol, timeFrameFor(req.interval), 200, req);
+  }
+
+  private async fetchBars(
+    client: AlpacaClientLike,
+    occ: ReturnType<typeof parseOccSymbol>,
+    symbol: string,
+    timeframe: string,
+    count: number,
+    range: { from?: string; to?: string },
+  ): Promise<Candle[]> {
+    const query: SdkBarsRequest = { timeframe, limit: count };
+    if (range.from) query.start = new Date(range.from);
+    if (range.to) query.end = new Date(range.to);
+    const get = () =>
+      occ
+        ? client.marketData.getOptionBarsFor(symbol, query)
+        : client.marketData.getStockBarsFor(symbol, query);
+    let raw = await this.guard(get);
+    // If a window was requested but returned nothing, retry without the window
+    // (Alpaca only serves a bounded lookback; out-of-range windows return empty).
+    if (raw.length === 0 && (range.from || range.to)) {
+      delete query.start;
+      delete query.end;
+      raw = await this.guard(get);
     }
-    if (!this.unsupportedTimespans.has(req.interval)) {
-      try {
-        const native = await fetchBars(TIMEFRAME[req.interval], 200);
-        if (native.length > 0) return native;
-      } catch (err) {
-        this.logger.warn(
-          `native timeframe ${TIMEFRAME[req.interval]} failed for ${symbol} — aggregating from ${planSource}: ${(err as Error).message}`,
-        );
-      }
-      this.unsupportedTimespans.add(req.interval);
-    }
-    return fetchAggregated(planSource, 200 * plan.factor, req.interval);
+    return raw.map(toCandle).sort((a, b) => a.time.localeCompare(b.time));
   }
 
   async getOptionsChain(
@@ -248,17 +195,17 @@ export class AlpacaBrokerGateway implements BrokerGateway, OnModuleDestroy {
     const expirations = optionExpirations(symbol, new Date());
     const chosen = expiration ?? expirations[0];
     if (!expirations.includes(chosen)) {
-      throw brokerErrors.contractNotFound(
-        `No chain for expiration ${chosen}. Available: ${expirations.join(', ')}`,
-      );
+      throw brokerErrors.contractNotFound(`No options chain for ${symbol} on ${chosen}`);
     }
-    const raw = await client.request('optionChain', {
-      query: { symbol, expiration_date: chosen },
-    });
-    const options = asArray(asObject(raw).options);
+    const chain = await this.guard(() =>
+      client.marketData.collectOptionChainBySymbol({
+        underlyingSymbol: symbol,
+        expirationDate: new Date(chosen),
+      }),
+    );
     const underlyingQuote = await this.getQuote(userId, symbol);
-    const contracts = options
-      .map((o) => toOptionContract(o as never, symbol, chosen))
+    const contracts: OptionContract[] = Object.entries(chain)
+      .map(([occ, snap]) => toOptionContract(occ, snap))
       .filter((c) => c.symbol.length > 0);
     return {
       underlying: symbol.toUpperCase(),
@@ -268,15 +215,12 @@ export class AlpacaBrokerGateway implements BrokerGateway, OnModuleDestroy {
     };
   }
 
-  // -------------------------------------------------------------------------
-  // Trading
-  // -------------------------------------------------------------------------
+  // -- trading --------------------------------------------------------------
 
   async previewOrder(userId: string, order: OrderRequest): Promise<OrderPreview> {
     const resolved = await this.resolveContract(userId, order);
     const price =
       order.orderType === 'market' ? resolved.last : computeMid(resolved.bid, resolved.ask);
-
     const warnings: string[] = [];
     if (resolved.optionTerms && resolved.optionTerms.expiration === tradingDay()) {
       warnings.push('0DTE contract — expires today');
@@ -284,11 +228,7 @@ export class AlpacaBrokerGateway implements BrokerGateway, OnModuleDestroy {
     if (order.assetClass === 'option' && order.orderType === 'market') {
       warnings.push('Market order on an option contract — fills at last price');
     }
-
-    // Alpaca v2 has no preview endpoint that returns a buying-power effect;
-    // fall back to a local estimate (mirrors Webull's local-estimate path).
     const estBuyingPower = estimateBuyingPower(order.quantity, price);
-
     return {
       resolved: {
         contractSymbol: resolved.contractSymbol,
@@ -308,24 +248,21 @@ export class AlpacaBrokerGateway implements BrokerGateway, OnModuleDestroy {
     const resolved = await this.resolveContract(userId, order);
     const limitPrice =
       order.orderType === 'market' ? undefined : computeMid(resolved.bid, resolved.ask);
-
     const clientOrderId = alpacaClientOrderId(userId, idempotencyKey);
-    const newOrder = this.buildNewOrder(order, resolved, clientOrderId, limitPrice);
-    const raw = await client.request('orders', {
-      body: newOrder as unknown as Record<string, unknown>,
-    });
-    const placed = asObject(raw);
-
-    const result: OrderResult = {
-      // Cancel/replace operate on client_order_id, so that is our order id.
-      orderId: (placed.client_order_id as string) ?? clientOrderId,
-      status: 'submitted',
-      contractSymbol: resolved.contractSymbol,
+    const input: SdkOrderInput = {
+      type: order.orderType === 'market' ? 'market' : 'limit',
+      symbol: resolved.contractSymbol,
+      qty: order.quantity,
       side: order.side,
-      quantity: order.quantity,
-      orderType: order.orderType,
-      limitPrice,
-      timestamp: new Date().toISOString(),
+      assetClass: 'us_option',
+      timeInForce: 'day',
+      clientOrderId,
+      ...(limitPrice !== undefined ? { limitPrice } : {}),
+    };
+    const placed = await this.guard(() => client.trading.orders.submit(input));
+    const result: OrderResult = {
+      ...toOrderResult(placed),
+      orderId: placed.client_order_id ?? clientOrderId,
     };
     this.events.emit(userId, result);
     this.startStatusPoll(userId, client, result);
@@ -337,48 +274,42 @@ export class AlpacaBrokerGateway implements BrokerGateway, OnModuleDestroy {
     const open = await this.getOpenOrders(userId);
     const target = open.find((o) => o.orderId === orderId);
     if (!target) throw brokerErrors.orderNotFound(orderId);
-    await client.request('orderCancelClient', { pathParams: { clientId: orderId } });
+    const ord = await this.guard(() =>
+      client.trading.orders.getOrderByClientOrderId({ clientOrderId: orderId }),
+    );
+    if (!ord.id) throw brokerErrors.orderNotFound(orderId);
+    await this.guard(() => client.trading.orders.deleteOrderByOrderID({ orderId: ord.id! }));
     this.stopStatusPoll(userId, orderId);
     this.events.emit(userId, { ...target, status: 'cancelled' });
   }
 
   async getPositions(userId: string): Promise<Position[]> {
     const client = await this.clientFor(userId);
-    const raw = await client.request('positions');
-    return asArray(raw)
-      .map((p) => toPosition(p as never))
-      .filter((p): p is Position => p !== null);
+    const raw = await this.guard(() => client.trading.positions.getAllOpenPositions());
+    return raw.map(toPosition).filter((p): p is Position => p !== null);
   }
 
   async getOpenOrders(userId: string): Promise<OrderResult[]> {
     const client = await this.clientFor(userId);
-    const raw = await client.request('ordersOpen', { query: { status: 'open', limit: '100' } });
-    return asArray(raw)
-      .map((o) => toOrderResult(o as never))
+    const raw = await this.guard(() =>
+      client.trading.orders.getAllOrders({ status: 'open', limit: 100 }),
+    );
+    return raw
+      .map((o) => toOrderResult(o))
       .filter((o) => o.status === 'submitted' || o.status === 'partially_filled');
   }
 
-  // -------------------------------------------------------------------------
-  // Internals
-  // -------------------------------------------------------------------------
-
-  private buildNewOrder(
-    order: OrderRequest,
-    resolved: ResolvedContract,
-    clientOrderId: string,
-    limitPrice?: number,
-  ) {
-    if (!resolved.optionTerms) {
-      throw brokerErrors.orderRejected('Option contract terms were not resolved');
-    }
-    return buildOptionOrder(order, resolved.optionTerms, clientOrderId, limitPrice);
+  async reauthenticate(userId: string): Promise<TradingMode> {
+    // Alpaca credentials are static API keys; no OAuth refresh needed.
+    return this.tradingModeFor(userId);
   }
+
+  // -- helpers --------------------------------------------------------------
 
   private async resolveContract(userId: string, order: OrderRequest): Promise<ResolvedContract> {
     const { optionType } = order.selection;
-    if (!optionType) {
+    if (!optionType)
       throw brokerErrors.orderRejected('selection.optionType is required for option orders');
-    }
     const chain = await this.getOptionsChain(userId, order.underlying, order.selection.expiration);
     const contract =
       order.selection.mode === 'auto_otm'
@@ -388,8 +319,7 @@ export class AlpacaBrokerGateway implements BrokerGateway, OnModuleDestroy {
           );
     if (!contract) {
       throw brokerErrors.contractNotFound(
-        `No ${optionType} contract at strike ${order.selection.strike ?? '(auto)'} ` +
-          `for ${order.underlying} ${chain.expirations[0]}`,
+        `No ${optionType} contract at strike ${order.selection.strike} for ${order.underlying}`,
       );
     }
     return {
@@ -406,15 +336,17 @@ export class AlpacaBrokerGateway implements BrokerGateway, OnModuleDestroy {
     };
   }
 
-  private startStatusPoll(userId: string, client: AlpacaClient, result: OrderResult): void {
+  private startStatusPoll(userId: string, client: AlpacaClientLike, result: OrderResult): void {
     const key = `${userId}:${result.orderId}`;
     let attempts = 0;
     const tick = async (): Promise<void> => {
       this.pollTimers.delete(key);
       attempts += 1;
       try {
-        const raw = await client.request('orderById', { pathParams: { id: result.orderId } });
-        const detail = toOrderResult(raw as never);
+        const raw = await client.trading.orders.getOrderByClientOrderId({
+          clientOrderId: result.orderId,
+        });
+        const detail = toOrderResult(raw);
         if (
           detail.status === 'filled' ||
           detail.status === 'cancelled' ||
@@ -430,17 +362,16 @@ export class AlpacaBrokerGateway implements BrokerGateway, OnModuleDestroy {
       } catch (err) {
         this.logger.debug(`status poll for ${result.orderId} failed: ${(err as Error).message}`);
       }
-      if (attempts < STATUS_POLL_MAX_ATTEMPTS) {
-        this.schedulePoll(key, tick);
-      }
+      if (attempts < STATUS_POLL_MAX_ATTEMPTS) this.schedulePoll(key, tick);
     };
     this.schedulePoll(key, tick);
   }
 
-  private schedulePoll(key: string, tick: () => Promise<void>): void {
-    const timer = setTimeout(() => void tick(), STATUS_POLL_INTERVAL_MS);
-    timer.unref?.();
-    this.pollTimers.set(key, timer);
+  private schedulePoll(key: string, tick: () => void): void {
+    this.pollTimers.set(
+      key,
+      setTimeout(() => void tick(), STATUS_POLL_INTERVAL_MS),
+    );
   }
 
   private stopStatusPoll(userId: string, orderId: string): void {
@@ -453,33 +384,63 @@ export class AlpacaBrokerGateway implements BrokerGateway, OnModuleDestroy {
   }
 }
 
-interface ResolvedContract {
-  contractSymbol: string;
-  bid: number;
-  ask: number;
-  last: number;
-  optionTerms?: ResolvedOptionTerms;
-}
-
-/**
- * Extract the bar array for one symbol from an Alpaca v1beta1 options-bars
- * response, which is `{ bars: { SYMBOL: [...] } }` (object keyed by symbol),
- * not a bare array like the stocks endpoint.
- */
-function optionBarsForSymbol(raw: unknown, symbol: string): unknown {
-  const bars = (asObject(raw).bars as Record<string, unknown> | undefined) ?? {};
-  return bars[symbol] ?? [];
-}
-
-/** Today's date in the US options market timezone (0DTE warnings). */
 function tradingDay(): string {
-  return new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'America/New_York',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(new Date());
+  return new Date().toISOString().slice(0, 10);
 }
 
-const STATUS_POLL_INTERVAL_MS = 1_000;
-const STATUS_POLL_MAX_ATTEMPTS = 60;
+function alpacaClientOrderId(userId: string, idempotencyKey: string): string {
+  return createHash('md5').update(`${userId}:${idempotencyKey}`).digest('hex').slice(0, 32);
+}
+
+/** Map an Alpaca SDK error (or any thrown error) to a typed BrokerError. */
+function mapSdkError(err: unknown): BrokerError {
+  if (err instanceof BrokerError) return err;
+  const e = err as { status?: number; code?: string; message?: string };
+  const status = e.status;
+  const haystack = `${e.code ?? ''} ${e.message ?? ''}`.toUpperCase();
+  if (status === 401 || status === 403) {
+    return brokerErrors.authFailed(`Alpaca rejected credentials (${e.message ?? ''})`.trim());
+  }
+  if (status === 429) {
+    return brokerErrors.rateLimited(`Alpaca rate limit (${e.message ?? ''})`.trim());
+  }
+  if (status === 404) {
+    return brokerErrors.contractNotFound(e.message ?? 'Alpaca contract not found');
+  }
+  if (status === 400 || status === 422) {
+    if (haystack.includes('INSUFFICIENT') || haystack.includes('BUYING_POWER')) {
+      return brokerErrors.insufficientBuyingPower(e.message ?? 'Alpaca buying-power check failed');
+    }
+    return brokerErrors.orderRejected(e.message ?? 'Order rejected');
+  }
+  if (
+    haystack.includes('MARKET_CLOSED') ||
+    haystack.includes('NOT_TRADABLE') ||
+    haystack.includes('OUTSIDE_REGULAR') ||
+    haystack.includes('CLOSED')
+  ) {
+    return brokerErrors.marketClosed(e.message ?? 'Market closed');
+  }
+  return brokerErrors.unavailable(`Alpaca request failed: ${e.message ?? 'network error'}`);
+}
+
+function timeFrameFor(interval: CandleInterval): string {
+  switch (interval) {
+    case '1m':
+      return TimeFrame.Minute;
+    case '5m':
+      return timeFrame(5, TimeFrameUnit.Minute);
+    case '15m':
+      return timeFrame(15, TimeFrameUnit.Minute);
+    case '30m':
+      return timeFrame(30, TimeFrameUnit.Minute);
+    case '1h':
+      return TimeFrame.Hour;
+    case '4h':
+      return timeFrame(4, TimeFrameUnit.Hour);
+    case '1d':
+      return TimeFrame.Day;
+    case '1w':
+      return TimeFrame.Week;
+  }
+}

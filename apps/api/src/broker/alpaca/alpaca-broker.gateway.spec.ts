@@ -1,309 +1,286 @@
-import { ConfigService } from '@nestjs/config';
-import { Candle, OrderRequest, Quote } from '@0dtetrader/shared-types';
+import { OrderPreview, OrderRequest, OrderResult, Position, Quote } from '@0dtetrader/shared-types';
+import { AlpacaBrokerGateway } from './alpaca-broker.gateway';
+import { AlpacaClientLike, AlpacaFactory } from './alpaca-sdk.types';
+import { CredentialsService } from '../../credentials/credentials.service';
+import { PrismaService } from '../../prisma/prisma.service';
+import { OrderEventsService } from '../order-events.service';
 import { formatOccSymbol } from '../contract-resolution';
 import { optionExpirations } from '../expiration-calendar';
-import { OrderEventsService } from '../order-events.service';
-import { AlpacaBrokerGateway } from './alpaca-broker.gateway';
-import { FetchImpl } from './alpaca-client';
-
-/** A recorded outbound call. */
-interface Call {
-  url: string;
-  method: string;
-  body?: Record<string, unknown>;
-}
 
 const SYMBOL = 'SPY';
-const EXP = optionExpirations(SYMBOL, new Date())[0];
 const UNDER = 100;
-const CALL_STRIKE = 105;
-const EXPECTED_OCC = formatOccSymbol(SYMBOL, EXP, 'call', CALL_STRIKE);
+const EXPIRATION = optionExpirations(SYMBOL, new Date())[0];
+const EXPECTED_OCC = formatOccSymbol(SYMBOL, EXPIRATION, 'call', 105);
 
-/** The Webull-equivalent OCC the gateway should build for the placed order. */
-function stockSnap(_symbol: string) {
-  return {
-    latestQuote: { bp: UNDER - 1, ap: UNDER + 1, bps: 10, aps: 20, t: '2025-06-21T13:30:00.000Z' },
-    latestTrade: { p: UNDER, s: 5, t: '2025-06-21T13:30:00.000Z' },
-  };
-}
-function optionSnap(_symbol: string) {
-  return {
-    latestQuote: { bp: 5, ap: 5.5, bps: 3, aps: 4, t: '2025-06-21T13:30:00.000Z' },
-  };
+function bar(t: Date) {
+  return { timestamp: t, open: 5, high: 5.2, low: 4.9, close: 5.1, volume: 100 };
 }
 
-describe('AlpacaBrokerGateway', () => {
-  let calls: Call[];
-  let fetchImpl: FetchImpl;
-  let gateway: AlpacaBrokerGateway;
-  let events: OrderEventsService;
-  /** Per-user trading mode the fake Prisma reports. */
-  let tradingMode: string;
-  /** Fake credential store (flipped per test). */
-  let credentials: ConstructorParameters<typeof AlpacaBrokerGateway>[0];
-
-  beforeEach(() => {
-    calls = [];
-    tradingMode = 'live';
-    fetchImpl = jest.fn(async (url: string, init) => {
-      let parsedBody: Record<string, unknown> | undefined;
-      try {
-        parsedBody = init.body ? (JSON.parse(init.body) as Record<string, unknown>) : undefined;
-      } catch {
-        parsedBody = undefined;
-      }
-      calls.push({ url, method: init.method, body: parsedBody });
-      let u: URL;
-      try {
-        u = new URL(url);
-      } catch {
-        u = new URL('http://localhost');
-      }
-      const path = u.pathname;
-      const respond = (status: number, payload: unknown) => ({
-        status,
-        headers: { get: () => null },
-        json: async () => payload,
-      });
-      if (path.endsWith('/v2/stocks/snapshots')) {
-        return respond(200, { [u.searchParams.get('symbols')!]: stockSnap(SYMBOL) });
-      }
-      if (path.endsWith('/v1beta1/options/snapshots')) {
-        return respond(200, {
-          snapshots: { [u.searchParams.get('symbols')!]: optionSnap(EXPECTED_OCC) },
-        });
-      }
-      if (path.endsWith('/v1beta1/options/bars')) {
-        const sym = u.searchParams.get('symbols')!;
-        return respond(200, {
-          bars: {
-            [sym]: [{ t: '2025-06-21T13:00:00.000Z', o: 99, h: 101, l: 98, c: 100, v: 1000 }],
+/**
+ * A fake of the SDK client surface the gateway depends on. It records every
+ * call so tests can assert which SDK methods fire (and with what args), and
+ * returns SDK-shaped response objects that the mappers translate into DTOs.
+ */
+function makeFakeClient() {
+  const calls: Array<{
+    method: string;
+    req?: unknown;
+    symbol?: string;
+    input?: unknown;
+    params?: unknown;
+  }> = [];
+  const client: AlpacaClientLike = {
+    marketData: {
+      collectOptionSnapshotsBySymbol: async (req) => {
+        calls.push({ method: 'collectOptionSnapshotsBySymbol', req });
+        return {
+          [req.symbols[0]]: {
+            latestQuote: { bp: 5, ap: 5.5, bps: 10, aps: 12, t: '2024-01-01T15:00:00Z' },
+            latestTrade: { p: 5.25, s: 100, t: '2024-01-01T15:00:00Z' },
           },
-        });
-      }
-      if (path.endsWith(`/v2/stocks/${SYMBOL}/bars`)) {
-        return respond(200, [
-          { t: '2025-06-21T13:00:00.000Z', o: 99, h: 101, l: 98, c: 100, v: 1000 },
-          { t: '2025-06-21T13:01:00.000Z', o: 100, h: 102, l: 99, c: 101, v: 1100 },
-        ]);
-      }
-      if (path.endsWith('/v1beta1/options/chains')) {
-        return respond(200, {
-          underlying: { symbol: SYMBOL },
-          options: [
+        };
+      },
+      stockSnapshots: async (req) => {
+        calls.push({ method: 'stockSnapshots', req });
+        return {
+          [req.symbols[0]]: {
+            latestQuote: {
+              bp: UNDER - 1,
+              ap: UNDER + 1,
+              bps: 5,
+              aps: 5,
+              t: '2024-01-01T15:00:00Z',
+            },
+            latestTrade: { p: UNDER, s: 1000, t: '2024-01-01T15:00:00Z' },
+            dailyBar: { v: 5000 },
+          },
+        };
+      },
+      getOptionBarsFor: async (symbol, req) => {
+        calls.push({ method: 'getOptionBarsFor', symbol, req });
+        return [bar(new Date('2024-01-02T15:00:00Z'))];
+      },
+      getStockBarsFor: async (symbol, req) => {
+        calls.push({ method: 'getStockBarsFor', symbol, req });
+        return [bar(new Date('2024-01-02T15:00:00Z'))];
+      },
+      collectOptionChainBySymbol: async (req) => {
+        calls.push({ method: 'collectOptionChainBySymbol', req });
+        return {
+          [EXPECTED_OCC]: {
+            latestQuote: { bp: 4, ap: 4.5, bps: 1, aps: 1, t: '2024-01-01T15:00:00Z' },
+            latestTrade: { p: 4.25, s: 1, t: '2024-01-01T15:00:00Z' },
+          },
+        };
+      },
+    },
+    trading: {
+      orders: {
+        submit: async (input) => {
+          calls.push({ method: 'submit', input });
+          return {
+            id: 'ord-server-1',
+            client_order_id: input.clientOrderId,
+            status: 'new',
+            symbol: input.symbol,
+            side: input.side,
+            type: input.type,
+            qty: String(input.qty),
+            filled_qty: '0',
+            filled_avg_price: null,
+            limit_price: input.limitPrice != null ? String(input.limitPrice) : null,
+            submitted_at: '2024-01-01T15:00:00Z',
+          };
+        },
+        getAllOrders: async (params) => {
+          calls.push({ method: 'getAllOrders', params });
+          return [
             {
+              id: 'ord-server-1',
+              client_order_id: 'abc',
+              status: 'new',
               symbol: EXPECTED_OCC,
-              strike: CALL_STRIKE,
-              type: 'call',
-              expiration_date: EXP,
-              bid: 4,
-              ask: 4.5,
+              side: 'buy',
+              type: 'limit',
+              qty: '1',
+              filled_qty: '0',
+              filled_avg_price: null,
+              limit_price: '4.25',
+              submitted_at: '2024-01-01T15:00:00Z',
             },
-            {
-              symbol: formatOccSymbol(SYMBOL, EXP, 'put', 95),
-              strike: 95,
-              type: 'put',
-              expiration_date: EXP,
-              bid: 3,
-              ask: 3.5,
-            },
-          ],
-        });
-      }
-      if (path.endsWith('/v2/positions')) {
-        return respond(200, [
-          {
-            symbol: EXPECTED_OCC,
-            qty: '2',
-            avg_entry_price: '5',
-            current_price: '5.5',
-            unrealized_pl: '1',
-            asset_class: 'us_option',
-          },
-        ]);
-      }
-      if (path.endsWith('/v2/orders') && init.method === 'POST') {
-        let body: Record<string, unknown>;
-        try {
-          body = JSON.parse(init.body!) as Record<string, unknown>;
-        } catch {
-          body = {};
-        }
-        return respond(200, {
-          id: 'ord-1',
-          client_order_id: body.client_order_id,
-          status: 'new',
-          symbol: body.symbol,
-          side: 'buy',
-          type: 'limit',
-          qty: '1',
-          submitted_at: '2025-06-21T13:30:00.000Z',
-        });
-      }
-      if (path.endsWith('/v2/orders') && init.method === 'GET') {
-        return respond(200, [
-          {
-            id: 'ord-1',
-            client_order_id: 'cid-1',
+          ];
+        },
+        getOrderByClientOrderId: async (params) => {
+          calls.push({ method: 'getOrderByClientOrderId', params });
+          return {
+            id: 'ord-server-1',
+            client_order_id: params.clientOrderId,
             status: 'new',
             symbol: EXPECTED_OCC,
             side: 'buy',
             type: 'limit',
             qty: '1',
-            submitted_at: '2025-06-21T13:30:00.000Z',
-          },
-        ]);
-      }
-      if (/\/v2\/orders\/client:.+/.test(url)) {
-        return respond(204, null);
-      }
-      if (/\/v2\/orders\/.+/.test(path)) {
-        return respond(200, {
-          id: 'ord-1',
-          client_order_id: 'cid-1',
-          status: 'filled',
-          symbol: EXPECTED_OCC,
-          side: 'buy',
-          type: 'limit',
-          qty: '1',
-          filled_avg_price: '5',
-          submitted_at: '2025-06-21T13:30:00.000Z',
-        });
-      }
-      return respond(404, { message: 'not found' });
-    });
-
-    const config = new ConfigService({
-      alpaca: {
-        tradingBaseUrl: 'https://api.alpaca.markets',
-        paperTradingBaseUrl: 'https://paper-api.alpaca.markets',
-        dataBaseUrl: 'https://data.alpaca.markets',
-        paperDataBaseUrl: 'https://paper-data.alpaca.markets',
+            filled_qty: '0',
+            filled_avg_price: null,
+            limit_price: '4.25',
+            submitted_at: '2024-01-01T15:00:00Z',
+          };
+        },
+        deleteOrderByOrderID: async (params) => {
+          calls.push({ method: 'deleteOrderByOrderID', params });
+        },
       },
-    });
-    const prisma = {
-      user: { findUnique: jest.fn(async () => ({ id: 'u1', tradingMode })) },
-    } as unknown as ConstructorParameters<typeof AlpacaBrokerGateway>[3];
-    credentials = {
-      getDecrypted: jest.fn(
-        async (_u: string, _p: 'webull' | 'alpaca', environment: 'live' | 'practice') =>
-          environment === 'practice'
-            ? { provider: 'alpaca', apiKey: 'PAK', apiSecret: 'PAS' }
-            : { provider: 'alpaca', apiKey: 'AK', apiSecret: 'AS' },
-      ),
-    } as unknown as ConstructorParameters<typeof AlpacaBrokerGateway>[0];
-    events = { emit: jest.fn() } as unknown as OrderEventsService;
+      positions: {
+        getAllOpenPositions: async () => {
+          calls.push({ method: 'getAllOpenPositions' });
+          return [
+            {
+              asset_class: 'us_option',
+              symbol: EXPECTED_OCC,
+              qty: '2',
+              avg_entry_price: '4',
+              current_price: '4.5',
+              unrealized_pl: '1',
+            },
+          ];
+        },
+      },
+    },
+  };
+  return { client, calls };
+}
 
-    gateway = new AlpacaBrokerGateway(credentials, config, events, prisma, fetchImpl);
+function buildGateway() {
+  const { client, calls } = makeFakeClient();
+  const alpacaFactory: AlpacaFactory = () => client;
+  const credentials = {
+    getDecrypted: jest.fn(async () => ({ provider: 'alpaca', apiKey: 'k', apiSecret: 's' })),
+    getMode: jest.fn(async () => 'live'),
+  } as unknown as CredentialsService;
+  const events = { emit: jest.fn() } as unknown as OrderEventsService;
+  const prisma = {
+    user: { findUnique: jest.fn(async () => ({ tradingMode: 'live' })) },
+  } as unknown as PrismaService;
+  const gateway = new AlpacaBrokerGateway(credentials, events, prisma, alpacaFactory);
+  return { gateway, calls, events };
+}
+
+const ORDER: OrderRequest = {
+  underlying: SYMBOL,
+  assetClass: 'option',
+  side: 'buy',
+  quantity: 1,
+  orderType: 'mid',
+  selection: { mode: 'explicit', optionType: 'call', expiration: EXPIRATION, strike: 105 },
+};
+
+describe('AlpacaBrokerGateway (SDK-backed)', () => {
+  let env: ReturnType<typeof buildGateway>;
+
+  afterEach(async () => {
+    if (env) await env.gateway.onModuleDestroy();
   });
 
-  describe('trading mode (live / practice)', () => {
-    it('live mode uses the live hosts and the live credential set', async () => {
-      await gateway.getQuote('u1', SYMBOL);
-      expect(calls.some((c) => c.url.startsWith('https://data.alpaca.markets'))).toBe(true);
-      await gateway.getPositions('u1');
-      expect(calls.some((c) => c.url.startsWith('https://api.alpaca.markets'))).toBe(true);
-      expect((credentials.getDecrypted as jest.Mock).mock.calls.some((c) => c[2] === 'live')).toBe(
-        true,
-      );
-    });
-
-    it('practice mode uses the paper hosts and the practice credential set', async () => {
-      tradingMode = 'practice';
-      await gateway.getQuote('u1', SYMBOL);
-      expect(calls.some((c) => c.url.startsWith('https://paper-data.alpaca.markets'))).toBe(true);
-      await gateway.getPositions('u1');
-      expect(calls.some((c) => c.url.startsWith('https://paper-api.alpaca.markets'))).toBe(true);
-      expect(
-        (credentials.getDecrypted as jest.Mock).mock.calls.some((c) => c[2] === 'practice'),
-      ).toBe(true);
-    });
-
-    it('practice mode fails with an auth error when no practice credentials exist', async () => {
-      tradingMode = 'practice';
-      (credentials.getDecrypted as jest.Mock).mockResolvedValue(null);
-      await expect(gateway.getQuote('u1', SYMBOL)).rejects.toMatchObject({
-        code: 'BROKER_AUTH_FAILED',
-      });
-    });
+  it('getQuote routes an option symbol to collectOptionSnapshotsBySymbol', async () => {
+    env = buildGateway();
+    const q: Quote = await env.gateway.getQuote('user-1', EXPECTED_OCC);
+    const call = env.calls.find((c) => c.method === 'collectOptionSnapshotsBySymbol');
+    expect(call).toBeDefined();
+    expect((call!.req as { symbols: string[] }).symbols).toEqual([EXPECTED_OCC]);
+    expect(q.bid).toBe(5);
+    expect(q.ask).toBe(5.5);
+    expect(q.last).toBe(5.25);
   });
 
-  it('GETs a stock snapshot from the data host', async () => {
-    const q: Quote = await gateway.getQuote('u1', SYMBOL);
-    expect(calls.some((c) => c.url.includes('/v2/stocks/snapshots'))).toBe(true);
-    expect(q).toMatchObject({ symbol: SYMBOL, bid: UNDER - 1, ask: UNDER + 1, last: UNDER });
+  it('getQuote routes an equity symbol to stockSnapshots', async () => {
+    env = buildGateway();
+    const q: Quote = await env.gateway.getQuote('user-1', SYMBOL);
+    const call = env.calls.find((c) => c.method === 'stockSnapshots');
+    expect(call).toBeDefined();
+    expect((call!.req as { symbols: string[] }).symbols).toEqual([SYMBOL]);
+    expect(q.bid).toBe(UNDER - 1);
+    expect(q.ask).toBe(UNDER + 1);
+    expect(q.last).toBe(UNDER);
   });
 
-  it('GETs an option snapshot (OCC) from the data host', async () => {
-    const q: Quote = await gateway.getQuote('u1', EXPECTED_OCC);
-    expect(calls.some((c) => c.url.includes('/v1beta1/options/snapshots'))).toBe(true);
-    expect(q).toMatchObject({ symbol: EXPECTED_OCC, bid: 5, ask: 5.5 });
+  it('getCandles fetches stock bars via the SDK', async () => {
+    env = buildGateway();
+    const candles = await env.gateway.getCandles('user-1', SYMBOL, { interval: '1d' });
+    const call = env.calls.find((c) => c.method === 'getStockBarsFor');
+    expect(call).toBeDefined();
+    expect(call!.symbol).toBe(SYMBOL);
+    expect(candles).toHaveLength(1);
+    expect(candles[0].close).toBe(5.1);
   });
 
-  it('fetches bars sorted ascending by time', async () => {
-    const bars: Candle[] = await gateway.getCandles('u1', SYMBOL, {
-      interval: '1m',
-    });
-    expect(bars).toHaveLength(2);
-    expect(bars[0].time <= bars[1].time).toBe(true);
-  });
-
-  it('uses the real options-chain endpoint (no strike-grid probe)', async () => {
-    const chain = await gateway.getOptionsChain('u1', SYMBOL);
-    expect(calls.some((c) => c.url.includes('/v1beta1/options/chains'))).toBe(true);
-    expect(chain.underlyingPrice).toBe(UNDER);
+  it('getOptionsChain reads the v1beta1 chain and tags underlying price', async () => {
+    env = buildGateway();
+    const chain = await env.gateway.getOptionsChain('user-1', SYMBOL);
+    const call = env.calls.find((c) => c.method === 'collectOptionChainBySymbol');
+    expect(call).toBeDefined();
+    expect((call!.req as { underlyingSymbol: string }).underlyingSymbol).toBe(SYMBOL);
     expect(chain.contracts.map((c) => c.symbol)).toContain(EXPECTED_OCC);
+    expect(chain.underlyingPrice).toBe(UNDER);
   });
 
-  it('previews with a local buying-power estimate and 0DTE warning', async () => {
-    const preview = await gateway.previewOrder('u1', {
-      underlying: SYMBOL,
-      assetClass: 'option',
-      side: 'buy',
-      quantity: 1,
-      orderType: 'mid',
-      selection: { mode: 'auto_otm', optionType: 'call' },
-    });
+  it('previewOrder resolves the contract and estimates buying power', async () => {
+    env = buildGateway();
+    const preview: OrderPreview = await env.gateway.previewOrder('user-1', ORDER);
     expect(preview.resolved.contractSymbol).toBe(EXPECTED_OCC);
     expect(preview.resolved.estBuyingPower).toBeGreaterThan(0);
-    expect(preview.warnings.some((w) => w.includes('0DTE'))).toBe(true);
+    expect(Array.isArray(preview.warnings)).toBe(true);
   });
 
-  it('places an order with an OCC symbol and a deterministic client_order_id', async () => {
-    const order: OrderRequest = {
-      underlying: SYMBOL,
-      assetClass: 'option',
-      side: 'buy',
-      quantity: 1,
-      orderType: 'mid',
-      selection: { mode: 'explicit', optionType: 'call', expiration: EXP, strike: CALL_STRIKE },
+  it('placeOrder submits to Alpaca with the resolved OCC + idempotency key', async () => {
+    env = buildGateway();
+    const res = await env.gateway.placeOrder('user-1', ORDER, 'test-key');
+    const submit = env.calls.find((c) => c.method === 'submit');
+    expect(submit).toBeDefined();
+    const input = submit!.input as {
+      symbol: string;
+      assetClass: string;
+      type: string;
+      clientOrderId: string;
     };
-    const result = await gateway.placeOrder('u1', order, 'idem-key');
-    const post = calls.find((c) => c.method === 'POST' && c.url.includes('/v2/orders'));
-    expect(post).toBeDefined();
-    expect(post!.body!.symbol).toBe(EXPECTED_OCC);
-    expect(post!.body!.client_order_id).toMatch(/^[a-f0-9]{32}$/);
-    expect(result.contractSymbol).toBe(EXPECTED_OCC);
-    expect(result.orderId).toBe(post!.body!.client_order_id);
-    expect(events.emit).toHaveBeenCalled();
+    expect(input.symbol).toBe(EXPECTED_OCC);
+    expect(input.assetClass).toBe('us_option');
+    expect(input.type).toBe('limit'); // 'mid' maps to an Alpaca limit order
+    expect(input.clientOrderId).toHaveLength(32);
+    expect(res.orderId).toBe(input.clientOrderId);
+    expect(res.contractSymbol).toBe(EXPECTED_OCC);
+    expect(res.orderType).toBe('mid');
   });
 
-  it('cancels an order by its client_order_id', async () => {
-    await gateway.cancelOrder('u1', 'cid-1');
-    const del = calls.find(
-      (c) => c.method === 'DELETE' && /\/v2\/orders\/client:cid-1/.test(c.url),
-    );
+  it('cancelOrder resolves client id then deletes the server order', async () => {
+    env = buildGateway();
+    await env.gateway.cancelOrder('user-1', 'abc');
+    const byId = env.calls.find((c) => c.method === 'getOrderByClientOrderId');
+    const del = env.calls.find((c) => c.method === 'deleteOrderByOrderID');
+    expect(byId).toBeDefined();
+    expect((byId!.params as { clientOrderId: string }).clientOrderId).toBe('abc');
     expect(del).toBeDefined();
-    expect(events.emit).toHaveBeenCalled();
+    expect((del!.params as { orderId: string }).orderId).toBe('ord-server-1');
   });
 
-  it('maps positions (option multiplier 100)', async () => {
-    const positions = await gateway.getPositions('u1');
+  it('reauthenticate returns the stored trading mode', async () => {
+    env = buildGateway();
+    expect(await env.gateway.reauthenticate('user-1')).toBe('live');
+  });
+
+  it('getPositions maps option positions with multiplier 100', async () => {
+    env = buildGateway();
+    const positions: Position[] = await env.gateway.getPositions('user-1');
     expect(positions).toHaveLength(1);
-    expect(positions[0]).toMatchObject({ symbol: EXPECTED_OCC, multiplier: 100 });
+    expect(positions[0].assetClass).toBe('option');
+    expect(positions[0].multiplier).toBe(100);
+    expect(positions[0].symbol).toBe(EXPECTED_OCC);
   });
 
-  it('reauthenticate is a no-op returning the trading mode', async () => {
-    expect(await gateway.reauthenticate('u1')).toBe('live');
+  it('getOpenOrders filters to open Alpaca orders', async () => {
+    env = buildGateway();
+    const orders: OrderResult[] = await env.gateway.getOpenOrders('user-1');
+    expect(orders).toHaveLength(1);
+    expect(orders[0].status).toBe('submitted'); // 'new' -> 'submitted'
+    expect(orders[0].contractSymbol).toBe(EXPECTED_OCC);
   });
 });

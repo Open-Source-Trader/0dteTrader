@@ -362,6 +362,10 @@ describe('0dteTrader API (e2e)', () => {
       alpacaPracticeAccountId: null,
       tradierConfigured: false,
       tradierPracticeConfigured: false,
+      snaptradeConfigured: false,
+      snaptradePracticeConfigured: false,
+      snaptradeAccountId: null,
+      snaptradePracticeAccountId: null,
     });
   });
 
@@ -391,6 +395,21 @@ describe('0dteTrader API (e2e)', () => {
       .send({ tradingMode: 'live' })
       .expect(200);
     expect(back.body.tradingMode).toBe('live');
+  });
+
+  it('accepts SnapTrade as the active provider', async () => {
+    const patched = await request(server)
+      .patch('/v1/me')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({ tradingProvider: 'snaptrade' })
+      .expect(200);
+    expect(patched.body.tradingProvider).toBe('snaptrade');
+
+    const me = await request(server)
+      .get('/v1/me')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .expect(200);
+    expect(me.body.tradingProvider).toBe('snaptrade');
   });
 
   it('saves Webull credentials (never echoed back) and reflects it in /me', async () => {

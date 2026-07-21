@@ -9,6 +9,6 @@ export class UpdateMeDto {
   /** Active trading provider. Optional so the same endpoint can flip the
    *  mode, the provider, or both in one PATCH. */
   @IsOptional()
-  @IsIn(['webull', 'alpaca'])
+  @IsIn(['webull', 'alpaca', 'snaptrade'])
   tradingProvider?: BrokerProvider;
 }

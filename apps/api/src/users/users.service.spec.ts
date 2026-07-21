@@ -67,6 +67,10 @@ describe('UsersService', () => {
       alpacaPracticeConfigured: false,
       alpacaAccountId: null,
       alpacaPracticeAccountId: null,
+      snaptradeConfigured: false,
+      snaptradePracticeConfigured: false,
+      snaptradeAccountId: null,
+      snaptradePracticeAccountId: null,
     });
 
     addCredential(userId, 'practice');
@@ -113,5 +117,25 @@ describe('UsersService', () => {
     expect(me.alpacaConfigured).toBe(true);
     expect(me.alpacaPracticeConfigured).toBe(false);
     expect(me.alpacaAccountId).toBeNull();
+  });
+
+  it('reports SnapTrade connection flags from broker_connections', async () => {
+    const userId = await seedUser();
+    prisma.brokerConnections.push({
+      id: 'snaptrade-conn',
+      userId,
+      provider: 'snaptrade',
+      connectionId: 'conn-1',
+      accountIds: ['acct-1'],
+      selectedAccountId: 'acct-1',
+      status: 'active',
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    const me = await users.getMe(userId);
+    expect(me.snaptradeConfigured).toBe(true);
+    expect(me.snaptradePracticeConfigured).toBe(true);
+    expect(me.snaptradeAccountId).toBe('acct-1');
+    expect(me.snaptradePracticeAccountId).toBe('acct-1');
   });
 });

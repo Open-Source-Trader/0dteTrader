@@ -193,6 +193,12 @@ export class TradeStore extends Store<TradeStoreState> {
     };
     const idempotencyKey = newIdempotencyKey();
     if (bypassConfirmation) {
+      // Clear any stale ticket/preview state before bypassing
+      this.set({
+        armedTicket: null,
+        preview: null,
+        previewError: null,
+      });
       void this.placeDirect(request, idempotencyKey, side);
       return;
     }

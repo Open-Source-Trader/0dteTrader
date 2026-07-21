@@ -133,14 +133,20 @@ final class TradeViewModel: ObservableObject {
             orderType: orderType.rawValue,
             selection: selection
         )
+        let idempotencyKey = UUID().uuidString
         if bypass {
-            Task { await placeDirect(request, side: side) }
+            // Clear any stale ticket/preview state before bypassing
+            armedTicket = nil
+            preview = nil
+            previewError = nil
+            submitError = nil
+            Task { await placeDirect(request, idempotencyKey: idempotencyKey, side: side) }
             return
         }
         armedTicket = ArmedOrderTicket(
             id: UUID(),
             request: request,
-            idempotencyKey: UUID().uuidString,
+            idempotencyKey: idempotencyKey,
             side: side,
             summary: summary
         )
@@ -152,12 +158,12 @@ final class TradeViewModel: ObservableObject {
 
     /// Submits without the confirm sheet (bypass path). Failures surface as a
     /// toast since there is no sheet to hold a submit error.
-    private func placeDirect(_ request: OrderRequestDTO, side: OrderSide) async {
+    private func placeDirect(_ request: OrderRequestDTO, idempotencyKey: String, side: OrderSide) async {
         guard !isSubmitting else { return }
         isSubmitting = true
         defer { isSubmitting = false }
         do {
-            try await submitOrder(request, idempotencyKey: UUID().uuidString, side: side)
+            try await submitOrder(request, idempotencyKey: idempotencyKey, side: side)
         } catch let error as APIError {
             showToast(error.userMessage, style: .error)
         } catch {

@@ -20,7 +20,7 @@
     "lint": "npm run lint --workspaces --if-present",
     "db:up": "docker compose up -d",
     "db:down": "docker compose down",
-    "db:migrate": "prisma migrate deploy --schema apps/api/prisma/schema.prisma",
+    "db:migrate": "npm run db:migrate --workspace apps/api",
     "smoke:webull": "npm run smoke:webull --workspace apps/api",
     "smoke:snaptrade": "npm run smoke:snaptrade --workspace apps/api",
     "format": "prettier --write .",

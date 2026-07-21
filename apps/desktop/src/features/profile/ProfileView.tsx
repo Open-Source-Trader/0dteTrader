@@ -58,6 +58,7 @@ export function ProfileView({ onLogout, onDismiss }: ProfileViewProps) {
                 Credentials are stored encrypted on the server and are never displayed here.
               </div>
               <button
+                type="button"
                 className="grouped-row button-row"
                 onClick={() => store.setEditing(environment, true)}
               >
@@ -65,6 +66,7 @@ export function ProfileView({ onLogout, onDismiss }: ProfileViewProps) {
               </button>
               {state.me?.tradingMode === environment ? (
                 <button
+                  type="button"
                   className="grouped-row button-row"
                   disabled={env.isReconnecting}
                   onClick={() => void store.reconnect(environment)}
@@ -73,6 +75,7 @@ export function ProfileView({ onLogout, onDismiss }: ProfileViewProps) {
                 </button>
               ) : null}
               <button
+                type="button"
                 className="grouped-row destructive"
                 disabled={env.isDeleting}
                 onClick={() => setDeleteTarget({ provider: 'webull', environment })}
@@ -85,6 +88,7 @@ export function ProfileView({ onLogout, onDismiss }: ProfileViewProps) {
               <WebullCredentialsForm store={store} environment={environment} />
               {configured ? (
                 <button
+                  type="button"
                   className="grouped-row button-row"
                   onClick={() => store.setEditing(environment, false)}
                 >
@@ -141,12 +145,14 @@ export function ProfileView({ onLogout, onDismiss }: ProfileViewProps) {
                 Credentials are stored encrypted on the server and are never displayed here.
               </div>
               <button
+                type="button"
                 className="grouped-row button-row"
                 onClick={() => store.setAlpacaEditing(environment, true)}
               >
                 Update Credentials
               </button>
               <button
+                type="button"
                 className="grouped-row destructive"
                 disabled={env.isDeleting}
                 onClick={() => setDeleteTarget({ provider: 'alpaca', environment })}
@@ -159,6 +165,7 @@ export function ProfileView({ onLogout, onDismiss }: ProfileViewProps) {
               <AlpacaCredentialsForm store={store} environment={environment} />
               {configured ? (
                 <button
+                  type="button"
                   className="grouped-row button-row"
                   onClick={() => store.setAlpacaEditing(environment, false)}
                 >
@@ -241,6 +248,7 @@ export function ProfileView({ onLogout, onDismiss }: ProfileViewProps) {
                 Credentials are managed through SnapTrade's Connection Portal.
               </div>
               <button
+                type="button"
                 className="grouped-row button-row"
                 disabled={env.isReconnecting}
                 onClick={() =>
@@ -250,6 +258,7 @@ export function ProfileView({ onLogout, onDismiss }: ProfileViewProps) {
                 {env.isReconnecting ? <Spinner size={14} /> : 'Reconnect to Brokerage'}
               </button>
               <button
+                type="button"
                 className="grouped-row destructive"
                 disabled={env.isDisconnecting}
                 onClick={() =>
@@ -267,6 +276,7 @@ export function ProfileView({ onLogout, onDismiss }: ProfileViewProps) {
             <>
               <div className="grouped-row text-secondary">No brokerage connected yet.</div>
               <button
+                type="button"
                 className="grouped-row button-row"
                 disabled={env.isConnecting}
                 onClick={() => void store.connectSnapTrade(environment)}
@@ -302,7 +312,7 @@ export function ProfileView({ onLogout, onDismiss }: ProfileViewProps) {
         <NavBar
           title="Profile"
           trailing={
-            <button className="navbar-text-button" onClick={onDismiss}>
+            <button type="button" className="navbar-text-button" onClick={onDismiss}>
               Done
             </button>
           }
@@ -335,7 +345,11 @@ export function ProfileView({ onLogout, onDismiss }: ProfileViewProps) {
               ) : (
                 <>
                   <div className="grouped-row text-secondary">Account details unavailable</div>
-                  <button className="grouped-row button-row" onClick={() => void store.load()}>
+                  <button
+                    type="button"
+                    className="grouped-row button-row"
+                    onClick={() => void store.load()}
+                  >
                     Retry
                   </button>
                 </>
@@ -399,6 +413,7 @@ export function ProfileView({ onLogout, onDismiss }: ProfileViewProps) {
           <div className="grouped-section">
             <div className="section-card">
               <button
+                type="button"
                 className="grouped-row destructive"
                 disabled={isLoggingOut}
                 onClick={() => setShowLogoutConfirmation(true)}

@@ -316,9 +316,11 @@ struct TradeScreenView: View {
         do {
             let me = try await container.apiClient.updateTradingMode(next)
             tradingMode = me.tradingMode ?? next
+            self.me = me
             await chartViewModel.start()
             await tradeViewModel.refreshTradingData()
             await chainViewModel.load(underlying: chartViewModel.symbol)
+            container.quoteSocket.reconnect()
         } catch {
             tradeViewModel.showToast("Mode switch failed. Try again.", style: .error)
         }
@@ -329,6 +331,7 @@ struct TradeScreenView: View {
             tradingMode = me.tradingMode ?? tradingMode
             self.me = me
             await tradeViewModel.refreshTradingData()
+            container.quoteSocket.reconnect()
         }
     }
 

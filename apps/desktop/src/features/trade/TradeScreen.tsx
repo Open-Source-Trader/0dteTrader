@@ -63,15 +63,24 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
   // stored for the current trading mode — drives the provider-aware copy and
   // the "configure provider" empty state.
   const tradingProvider = me?.tradingProvider ?? 'webull';
-  const providerName = tradingProvider === 'alpaca' ? 'Alpaca' : 'Webull';
+  const providerName =
+    tradingProvider === 'alpaca'
+      ? 'Alpaca'
+      : tradingProvider === 'snaptrade'
+        ? 'SnapTrade'
+        : 'Webull';
   const activeProviderConfigured = me
     ? tradingProvider === 'alpaca'
       ? tradingMode === 'practice'
         ? Boolean(me.alpacaPracticeConfigured)
         : Boolean(me.alpacaConfigured)
-      : tradingMode === 'practice'
-        ? Boolean(me.webullPracticeConfigured)
-        : Boolean(me.webullConfigured)
+      : tradingProvider === 'snaptrade'
+        ? tradingMode === 'practice'
+          ? Boolean(me.snaptradePracticeConfigured)
+          : Boolean(me.snaptradeConfigured)
+        : tradingMode === 'practice'
+          ? Boolean(me.webullPracticeConfigured)
+          : Boolean(me.webullConfigured)
     : true;
   const needsProviderConfig = me != null && !activeProviderConfigured;
 
@@ -189,6 +198,16 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
     setContentHeight(element.clientHeight);
     return () => observer.disconnect();
   }, []);
+
+  const refreshTradingContext = async () => {
+    try {
+      const nextMe = await apiClient.me();
+      setMe(nextMe);
+      await tradeStore.refreshTradingData();
+    } catch {
+      // Ignore: the profile sheet surfaces failures directly.
+    }
+  };
 
   const toggleLayout = () => {
     const next: TradeLayout = layout === 'fullscreen' ? 'split' : 'fullscreen';
@@ -439,7 +458,13 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
         />
       ) : null}
       {showProfile ? (
-        <ProfileView onLogout={onLogout} onDismiss={() => setShowProfile(false)} />
+        <ProfileView
+          onLogout={onLogout}
+          onDismiss={() => {
+            setShowProfile(false);
+            void refreshTradingContext();
+          }}
+        />
       ) : null}
       {showHistory ? <HistoryView onDismiss={() => setShowHistory(false)} /> : null}
       {showModeConfirmation ? (

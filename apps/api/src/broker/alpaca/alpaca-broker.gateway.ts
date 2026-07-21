@@ -389,7 +389,7 @@ function tradingDay(): string {
 }
 
 function alpacaClientOrderId(userId: string, idempotencyKey: string): string {
-  return createHash('md5').update(`${userId}:${idempotencyKey}`).digest('hex').slice(0, 32);
+  return createHash('sha256').update(`${userId}:${idempotencyKey}`).digest('hex').slice(0, 32);
 }
 
 /** Map an Alpaca SDK error (or any thrown error) to a typed BrokerError. */

@@ -7,7 +7,15 @@ import Foundation
 /// To enable certificate pinning, populate `pinnedPublicKeyHashes` with
 /// the backend's SPKI SHA-256 hashes (base64).
 enum AppConfig {
-    static let apiBaseURL: URL = makeURL("https://caring-prosperity-production.up.railway.app")
+    private static let defaultAPIBaseURLString: String = {
+        #if DEBUG
+        "http://localhost:3000"
+        #else
+        "https://caring-prosperity-production.up.railway.app"
+        #endif
+    }()
+
+    static let apiBaseURL: URL = makeURL(ProcessInfo.processInfo.environment["API_BASE_URL"] ?? defaultAPIBaseURLString)
 
     /// WebSocket stream URL derived from `apiBaseURL` (http→ws, https→wss).
     static let streamURL: URL = makeStreamURL()

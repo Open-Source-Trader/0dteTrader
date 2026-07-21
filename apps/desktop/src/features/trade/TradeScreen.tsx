@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import type { OrderSide, TradingMode } from '@0dtetrader/shared-types';
+import type { OptionContract, OrderSide, TradingMode } from '@0dtetrader/shared-types';
 import { useContainer } from '../../app/container';
 import { useStore } from '../../core/observable';
 import { AlertDialog } from '../../design/components/AlertDialog';
@@ -96,7 +96,9 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
     void chartStore.start();
     void tradeStore.refreshTradingData();
     tradeStore.optionContractResolver = (symbol) =>
-      chainStore.getState().chain?.contracts.find((contract) => contract.symbol === symbol);
+      chainStore
+        .getState()
+        .chain?.contracts.find((contract: OptionContract) => contract.symbol === symbol);
     return quoteSocket.onOrderUpdate((update) => tradeStore.handleOrderUpdate(update));
   }, [chartStore, tradeStore, chainStore, quoteSocket]);
 

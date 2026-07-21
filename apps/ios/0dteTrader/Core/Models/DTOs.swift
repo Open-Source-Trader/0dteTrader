@@ -45,10 +45,11 @@ enum TradingMode: String, Codable, Equatable, Sendable, Hashable {
     }
 }
 
-/// Trading provider selected by the user (Webull or Alpaca).
+/// Trading provider selected by the user (Webull, Alpaca, or SnapTrade).
 enum BrokerProvider: String, Codable, Equatable, Sendable {
     case webull
     case alpaca
+    case snaptrade
 }
 
 struct MeDTO: Decodable, Equatable, Sendable {
@@ -72,6 +73,14 @@ struct MeDTO: Decodable, Equatable, Sendable {
     /// Alpaca v2 is key-scoped: no account id is stored.
     let alpacaAccountId: String?
     let alpacaPracticeAccountId: String?
+    /// Live SnapTrade brokerage connection is active.
+    let snaptradeConfigured: Bool?
+    /// Practice SnapTrade brokerage connection is active.
+    let snaptradePracticeConfigured: Bool?
+    /// Live SnapTrade trading account id (chosen from connected accounts).
+    let snaptradeAccountId: String?
+    /// Practice SnapTrade trading account id; nil until chosen.
+    let snaptradePracticeAccountId: String?
 }
 
 struct UpdateTradingModeDTO: Encodable, Sendable {
@@ -99,6 +108,43 @@ struct BrokerCredentialsSavedDTO: Decodable, Equatable, Sendable {
     let provider: BrokerProvider
     let configured: Bool
     let environment: TradingMode
+}
+
+// MARK: - SnapTrade connection
+
+struct SnapTradeConnectionRecordDTO: Decodable, Equatable, Sendable {
+    let connectionId: String
+    let brokerage: String
+    let name: String
+    let type: String
+    let status: String
+    let accountIds: [String]
+    let selectedAccountId: String?
+    let createdAt: String
+}
+
+struct SnapTradeConnectionStatusDTO: Decodable, Equatable, Sendable {
+    let configured: Bool
+    let selectedAccountId: String?
+}
+
+struct SnapTradeConnectionsResponseDTO: Decodable, Equatable, Sendable {
+    let connections: [SnapTradeConnectionRecordDTO]
+    let accounts: [String: [SnapTradeAccountDTO]]
+    let status: SnapTradeConnectionStatusDTO
+}
+
+struct SnapTradeAccountDTO: Decodable, Equatable, Sendable {
+    let accountId: String
+    let name: String
+}
+
+struct SnapTradeAuthorizeResponseDTO: Decodable, Equatable, Sendable {
+    let redirectUrl: String
+}
+
+struct SnapTradeSelectResponseDTO: Decodable, Equatable, Sendable {
+    let accountId: String
 }
 
 // MARK: - Market data

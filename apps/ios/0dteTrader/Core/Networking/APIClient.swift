@@ -250,4 +250,41 @@ struct APIClient: @unchecked Sendable {
     func positions() async throws -> [PositionDTO] {
         try await request(Endpoint(method: .get, path: "v1/positions"))
     }
+
+    // MARK: - SnapTrade connection lifecycle
+
+    func getSnapTradeConnections() async throws -> SnapTradeConnectionsResponseDTO {
+        try await request(Endpoint(method: .get, path: "v1/me/broker-connections/snaptrade"))
+    }
+
+    func authorizeSnapTrade(
+        brokerage: String? = nil,
+        reconnect: String? = nil,
+        connectionType: String = "trade"
+    ) async throws -> SnapTradeAuthorizeResponseDTO {
+        var query: [URLQueryItem] = []
+        if let brokerage { query.append(URLQueryItem(name: "brokerage", value: brokerage)) }
+        if let reconnect { query.append(URLQueryItem(name: "reconnect", value: reconnect)) }
+        query.append(URLQueryItem(name: "connectionType", value: connectionType))
+        return try await request(Endpoint(method: .post, path: "v1/me/broker-connections/snaptrade/authorize", query: query))
+    }
+
+    func reconnectSnapTrade(connectionId: String) async throws -> SnapTradeAuthorizeResponseDTO {
+        let query = [URLQueryItem(name: "connectionId", value: connectionId)]
+        return try await request(Endpoint(method: .post, path: "v1/me/broker-connections/snaptrade/reconnect", query: query))
+    }
+
+    func selectSnapTradeAccount(connectionId: String, accountId: String) async throws -> SnapTradeSelectResponseDTO {
+        let query = [
+            URLQueryItem(name: "connectionId", value: connectionId),
+            URLQueryItem(name: "accountId", value: accountId),
+        ]
+        return try await request(Endpoint(method: .post, path: "v1/me/broker-connections/snaptrade/select", query: query))
+    }
+
+    func deleteSnapTradeConnection(connectionId: String? = nil) async throws {
+        var query: [URLQueryItem] = []
+        if let connectionId { query.append(URLQueryItem(name: "connectionId", value: connectionId)) }
+        try await requestVoid(Endpoint(method: .delete, path: "v1/me/broker-connections/snaptrade", query: query))
+    }
 }

@@ -34,6 +34,7 @@ import {
   AlpacaSecrets,
   SdkBarsRequest,
   SdkOrderInput,
+  SdkStockSnapshot,
 } from './alpaca-sdk.types';
 import { toCandle, toOptionContract, toOrderResult, toPosition, toQuote } from './alpaca-mappers';
 
@@ -143,7 +144,7 @@ export class AlpacaBrokerGateway implements BrokerGateway, MarketDataProvider {
       if (!snap) throw brokerErrors.contractNotFound(`Unknown option: ${symbol}`);
       return toQuote(symbol, snap);
     }
-    const snaps = await this.guard(() => client.marketData.stockSnapshots({ symbols: [symbol] }));
+    const snaps = await this.guard(() => this.stockSnapshots(client, [symbol]));
     const snap = snaps[symbol];
     if (!snap) throw brokerErrors.contractNotFound(`Unknown symbol: ${symbol}`);
     return toQuote(symbol, snap);
@@ -158,6 +159,16 @@ export class AlpacaBrokerGateway implements BrokerGateway, MarketDataProvider {
       return aggregateCandles(daily, '1w');
     }
     return this.fetchBars(client, occ, symbol, timeFrameFor(req.interval), 200, req);
+  }
+
+  private stockSnapshots(
+    client: AlpacaClientLike,
+    symbols: string[],
+  ): Promise<Record<string, SdkStockSnapshot>> {
+    const stocks = client.marketData.stocks?.stockSnapshots;
+    if (stocks) return stocks({ symbols });
+    if (client.marketData.stockSnapshots) return client.marketData.stockSnapshots({ symbols });
+    throw brokerErrors.unavailable('Alpaca market data does not expose stock snapshots');
   }
 
   private async fetchBars(

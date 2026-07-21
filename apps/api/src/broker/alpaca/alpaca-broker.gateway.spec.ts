@@ -40,21 +40,23 @@ function makeFakeClient() {
           },
         };
       },
-      stockSnapshots: async (req) => {
-        calls.push({ method: 'stockSnapshots', req });
-        return {
-          [req.symbols[0]]: {
-            latestQuote: {
-              bp: UNDER - 1,
-              ap: UNDER + 1,
-              bps: 5,
-              aps: 5,
-              t: '2024-01-01T15:00:00Z',
+      stocks: {
+        stockSnapshots: async (req) => {
+          calls.push({ method: 'stockSnapshots', req });
+          return {
+            [req.symbols[0]]: {
+              latestQuote: {
+                bp: UNDER - 1,
+                ap: UNDER + 1,
+                bps: 5,
+                aps: 5,
+                t: '2024-01-01T15:00:00Z',
+              },
+              latestTrade: { p: UNDER, s: 1000, t: '2024-01-01T15:00:00Z' },
+              dailyBar: { v: 5000 },
             },
-            latestTrade: { p: UNDER, s: 1000, t: '2024-01-01T15:00:00Z' },
-            dailyBar: { v: 5000 },
-          },
-        };
+          };
+        },
       },
       getOptionBarsFor: async (symbol, req) => {
         calls.push({ method: 'getOptionBarsFor', symbol, req });

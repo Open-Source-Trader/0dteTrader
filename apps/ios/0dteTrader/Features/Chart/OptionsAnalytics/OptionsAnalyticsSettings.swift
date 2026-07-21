@@ -75,6 +75,6 @@ struct OptionsAnalyticsSettings: Codable, Equatable, Sendable {
 
 private extension ClosedRange where Bound == Int {
     func clamped(_ value: Int) -> Int {
-        min(upperBound, max(lowerBound, value))
+        Swift.min(upperBound, Swift.max(lowerBound, value))
     }
 }

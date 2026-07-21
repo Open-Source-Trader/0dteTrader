@@ -52,16 +52,17 @@ import { BrokerSessionController, WebullSessionController } from './webull-sessi
         tokenStore: WebullTokenStore,
       ): BrokerGateway => new WebullBrokerGateway(credentials, config, events, prisma, tokenStore),
     },
-    // Alpaca gateway: HTTP Basic auth, no token store, no account-id discovery.
+    // Alpaca gateway: backed by the official Alpaca SDK (it owns HTTP/endpoints).
+    // The SDK selects hosts from the user's trading mode (paper vs live), so no
+    // ConfigService is needed here.
     {
       provide: AlpacaBrokerGateway,
-      inject: [CredentialsService, ConfigService, OrderEventsService, PrismaService],
+      inject: [CredentialsService, OrderEventsService, PrismaService],
       useFactory: (
         credentials: CredentialsService,
-        config: ConfigService,
         events: OrderEventsService,
         prisma: PrismaService,
-      ): AlpacaBrokerGateway => new AlpacaBrokerGateway(credentials, config, events, prisma),
+      ): AlpacaBrokerGateway => new AlpacaBrokerGateway(credentials, events, prisma),
     },
     // The BROKER_GATEWAY token: routes by tradingProvider.
     {

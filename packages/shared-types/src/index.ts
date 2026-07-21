@@ -10,9 +10,8 @@
 
 export type AssetClass = 'option';
 export type TradingMode = 'live' | 'practice';
-/** Broker a user trades through. Webull is the only active provider in P1;
- *  Alpaca is added behind the same BrokerGateway seam. */
-export type BrokerProvider = 'webull' | 'alpaca';
+/** Broker a user trades through. */
+export type BrokerProvider = 'webull' | 'alpaca' | 'snaptrade';
 /** Providers a credential row can be stored for. Tradier is a market-data
  *  API key (needed alongside Webull, which has no index data), not a trading
  *  provider — it is storable but never selectable as `tradingProvider`. */
@@ -240,6 +239,14 @@ export interface Me {
   tradierConfigured?: boolean;
   /** Sandbox (practice) Tradier API key is stored. */
   tradierPracticeConfigured?: boolean;
+  /** Live SnapTrade brokerage connection is active. */
+  snaptradeConfigured?: boolean;
+  /** Practice SnapTrade brokerage connection is active. */
+  snaptradePracticeConfigured?: boolean;
+  /** Live SnapTrade trading account id (chosen from connected accounts). */
+  snaptradeAccountId?: string | null;
+  /** Practice SnapTrade trading account id; null until chosen. */
+  snaptradePracticeAccountId?: string | null;
 }
 
 export interface WebullAccount {
@@ -280,7 +287,12 @@ export interface TradierSecrets {
   provider: 'tradier';
   apiKey: string;
 }
-export type BrokerSecrets = WebullSecrets | AlpacaSecrets | TradierSecrets;
+export interface SnapTradeSecrets {
+  provider: 'snaptrade';
+  snaptradeUserId: string;
+  snaptradeUserSecret: string;
+}
+export type BrokerSecrets = WebullSecrets | AlpacaSecrets | TradierSecrets | SnapTradeSecrets;
 
 /** Provider-scoped credential input from the client. */
 export interface AlpacaCredentialsInput {
@@ -294,8 +306,18 @@ export interface TradierCredentialsInput {
   apiKey: string;
   environment?: TradingMode;
 }
+/** SnapTrade identity (server-minted; not user-entered). */
+export interface SnapTradeCredentialsInput {
+  provider: 'snaptrade';
+  snaptradeUserId: string;
+  snaptradeUserSecret: string;
+  environment?: TradingMode;
+}
 export type BrokerCredentialsInput =
-  WebullCredentialsInput | AlpacaCredentialsInput | TradierCredentialsInput;
+  | WebullCredentialsInput
+  | AlpacaCredentialsInput
+  | TradierCredentialsInput
+  | SnapTradeCredentialsInput;
 
 export interface WebullCredentialsSaved {
   webullConfigured: true;

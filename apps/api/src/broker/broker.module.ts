@@ -4,12 +4,22 @@ import { CredentialsModule } from '../credentials/credentials.module';
 import { OptionsAnalyticsModule } from '../options-analytics/options-analytics.module';
 import { CredentialsService } from '../credentials/credentials.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { BROKER_GATEWAY, BrokerGateway } from './broker-gateway.interface';
+import {
+  BROKER_GATEWAY,
+  BrokerGateway,
+  MARKET_DATA_PROVIDER,
+  MarketDataProvider,
+} from './broker-gateway.interface';
 import { OrderEventsService } from './order-events.service';
 import { AlpacaBrokerGateway } from './alpaca/alpaca-broker.gateway';
 import { DispatchingBrokerGateway } from './dispatching-broker.gateway';
 import { WebullBrokerGateway } from './webull/webull-broker.gateway';
 import { WebullTokenStore } from './webull/webull-token-store';
+import { SnapTradeClient } from './snaptrade/snaptrade-client';
+import { SnapTradeBrokerGateway } from './snaptrade/snaptrade-broker.gateway';
+import { SnapTradeConnectionService } from './snaptrade/snaptrade-connection.service';
+import { SnapTradeConnectionController } from './snaptrade/snaptrade-session.controller';
+import { SnapTradeWebhookController } from './snaptrade/snaptrade-webhook.controller';
 import {
   CredentialsController,
   BrokerCredentialsController,
@@ -35,10 +45,13 @@ import { WebullAccountController } from './webull-account.controller';
     CredentialsController,
     BrokerCredentialsController,
     WebullAccountController,
+    SnapTradeConnectionController,
+    SnapTradeWebhookController,
   ],
   providers: [
     OrderEventsService,
     WebullTokenStore,
+    SnapTradeClient,
     // Webull gateway: token store + legacy account-id discovery (api key/secret).
     {
       provide: WebullBrokerGateway,
@@ -69,15 +82,47 @@ import { WebullAccountController } from './webull-account.controller';
         prisma: PrismaService,
       ): AlpacaBrokerGateway => new AlpacaBrokerGateway(credentials, events, prisma),
     },
-    // The BROKER_GATEWAY token: routes by tradingProvider.
+    // SnapTrade gateway: handles execution + account data via SnapTrade SDK.
+    // Market-data methods are forwarded to the injected MarketDataProvider
+    // (resolves to Webull or Alpaca depending on the legacy provider binding).
+    {
+      provide: SnapTradeBrokerGateway,
+      inject: [
+        SnapTradeClient,
+        CredentialsService,
+        OrderEventsService,
+        PrismaService,
+        MARKET_DATA_PROVIDER,
+      ],
+      useFactory: (
+        client: SnapTradeClient,
+        credentials: CredentialsService,
+        prisma: PrismaService,
+        events: OrderEventsService,
+        marketData: MarketDataProvider,
+      ): SnapTradeBrokerGateway =>
+        new SnapTradeBrokerGateway(client, credentials, prisma, events, marketData),
+    },
+    // SnapTrade connection lifecycle (register, authorize, list, select, etc.).
+    SnapTradeConnectionService,
+    // MarketDataProvider token: the SnapTrade gateway injects this
+    // and forwards market-data calls to it. Today it is bound to Webull
+    // (the default legacy provider); in a follow-up it can be resolved
+    // per-user based on configured legacy credentials.
+    {
+      provide: MARKET_DATA_PROVIDER,
+      inject: [WebullBrokerGateway],
+      useFactory: (webull: WebullBrokerGateway): MarketDataProvider => webull,
+    },
     {
       provide: BROKER_GATEWAY,
-      inject: [PrismaService, WebullBrokerGateway, AlpacaBrokerGateway],
+      inject: [PrismaService, WebullBrokerGateway, AlpacaBrokerGateway, SnapTradeBrokerGateway],
       useFactory: (
         prisma: PrismaService,
         webull: WebullBrokerGateway,
         alpaca: AlpacaBrokerGateway,
-      ): BrokerGateway => new DispatchingBrokerGateway(prisma, webull, alpaca),
+        snaptrade: SnapTradeBrokerGateway,
+      ): BrokerGateway => new DispatchingBrokerGateway(prisma, webull, alpaca, snaptrade),
     },
   ],
   exports: [BROKER_GATEWAY, OrderEventsService],

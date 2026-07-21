@@ -160,6 +160,9 @@ async function createWindow() {
     minHeight: 520,
     autoHideMenuBar: true,
     backgroundColor: '#000000',
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.cjs'),
+    },
   });
   win.setAspectRatio(430 / 932);
   // External links (e.g. the "Deploy on Railway" link on the login screen)
@@ -200,3 +203,7 @@ process.on('exit', () => {
     }
   }
 });
+
+// Open external URLs (SnapTrade Connection Portal, etc.) in the system browser.
+const { ipcMain } = require('electron');
+ipcMain.handle('open-external', (_event, url) => shell.openExternal(url));

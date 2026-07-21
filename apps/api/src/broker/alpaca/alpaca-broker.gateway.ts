@@ -165,8 +165,8 @@ export class AlpacaBrokerGateway implements BrokerGateway, MarketDataProvider {
     client: AlpacaClientLike,
     symbols: string[],
   ): Promise<Record<string, SdkStockSnapshot>> {
-    const stocks = client.marketData.stocks?.stockSnapshots;
-    if (stocks) return stocks({ symbols });
+    const stocks = client.marketData.stocks;
+    if (stocks?.stockSnapshots) return stocks.stockSnapshots({ symbols });
     if (client.marketData.stockSnapshots) return client.marketData.stockSnapshots({ symbols });
     throw brokerErrors.unavailable('Alpaca market data does not expose stock snapshots');
   }

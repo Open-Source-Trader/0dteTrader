@@ -248,16 +248,16 @@ export class SnapTradeBrokerGateway implements BrokerGateway {
       select: {
         tradingProvider: true,
         tradingMode: true,
-        snaptradeAccountId: true,
-        snaptradePracticeAccountId: true,
       },
     });
     if (user?.tradingProvider !== 'snaptrade') {
       throw brokerErrors.authFailed('User is not configured for SnapTrade');
     }
     const mode = (user.tradingMode ?? 'live') as TradingMode;
-    const accountId =
-      mode === 'practice' ? user.snaptradePracticeAccountId : user.snaptradeAccountId;
+    const connection = await this.prisma.brokerConnection.findUnique({
+      where: { userId_provider: { userId, provider: 'snaptrade' } },
+    });
+    const accountId = connection?.selectedAccountId ?? connection?.accountIds[0] ?? null;
     if (!accountId) {
       throw brokerErrors.authFailed('No SnapTrade trading account selected');
     }

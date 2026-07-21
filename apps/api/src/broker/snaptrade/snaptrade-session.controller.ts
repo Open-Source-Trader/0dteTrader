@@ -75,15 +75,7 @@ export class SnapTradeConnectionController {
     @Query('connectionId') connectionId: string,
     @Query('accountId') accountId: string,
   ): Promise<{ accountId: string }> {
-    const mode = await this.tradingModeFor(user.userId);
     await this.connections.selectAccount(user.userId, connectionId, accountId);
-    await this.prisma.user.update({
-      where: { id: user.userId },
-      data:
-        mode === 'practice'
-          ? { snaptradePracticeAccountId: accountId }
-          : { snaptradeAccountId: accountId },
-    });
     return { accountId };
   }
 

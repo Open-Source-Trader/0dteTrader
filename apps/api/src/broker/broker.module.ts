@@ -20,6 +20,7 @@ import { SnapTradeBrokerGateway } from './snaptrade/snaptrade-broker.gateway';
 import { SnapTradeConnectionService } from './snaptrade/snaptrade-connection.service';
 import { SnapTradeConnectionController } from './snaptrade/snaptrade-session.controller';
 import { SnapTradeWebhookController } from './snaptrade/snaptrade-webhook.controller';
+import { SnapTradeMarketDataProvider } from './snaptrade/snaptrade-market-data.provider';
 import {
   CredentialsController,
   BrokerCredentialsController,
@@ -83,8 +84,8 @@ import { WebullAccountController } from './webull-account.controller';
       ): AlpacaBrokerGateway => new AlpacaBrokerGateway(credentials, events, prisma),
     },
     // SnapTrade gateway: handles execution + account data via SnapTrade SDK.
-    // Market-data methods are forwarded to the injected MarketDataProvider
-    // (resolves to Webull or Alpaca depending on the legacy provider binding).
+    // Market-data methods are forwarded to a thin router that prefers Alpaca
+    // when configured, falling back to Webull otherwise.
     {
       provide: SnapTradeBrokerGateway,
       inject: [
@@ -97,22 +98,25 @@ import { WebullAccountController } from './webull-account.controller';
       useFactory: (
         client: SnapTradeClient,
         credentials: CredentialsService,
-        prisma: PrismaService,
         events: OrderEventsService,
+        prisma: PrismaService,
         marketData: MarketDataProvider,
       ): SnapTradeBrokerGateway =>
         new SnapTradeBrokerGateway(client, credentials, prisma, events, marketData),
     },
     // SnapTrade connection lifecycle (register, authorize, list, select, etc.).
     SnapTradeConnectionService,
-    // MarketDataProvider token: the SnapTrade gateway injects this
-    // and forwards market-data calls to it. Today it is bound to Webull
-    // (the default legacy provider); in a follow-up it can be resolved
-    // per-user based on configured legacy credentials.
+    // MarketDataProvider token: the SnapTrade gateway injects this router,
+    // which prefers Alpaca when it has credentials and falls back to Webull.
     {
       provide: MARKET_DATA_PROVIDER,
-      inject: [WebullBrokerGateway],
-      useFactory: (webull: WebullBrokerGateway): MarketDataProvider => webull,
+      inject: [CredentialsService, PrismaService, AlpacaBrokerGateway, WebullBrokerGateway],
+      useFactory: (
+        credentials: CredentialsService,
+        prisma: PrismaService,
+        alpaca: AlpacaBrokerGateway,
+        webull: WebullBrokerGateway,
+      ): MarketDataProvider => new SnapTradeMarketDataProvider(credentials, prisma, alpaca, webull),
     },
     {
       provide: BROKER_GATEWAY,

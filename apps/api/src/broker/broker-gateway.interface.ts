@@ -27,10 +27,10 @@ export const MARKET_DATA_PROVIDER = 'MARKET_DATA_PROVIDER';
  *
  * SnapTrade cannot supply candles or a bulk options chain. Rather than
  * duplicating that logic, the SnapTrade gateway injects a
- * {@link MarketDataProvider} and forwards its 3 data calls to it. In Phase 2
- * the binding will resolve to whichever legacy provider is configured for
- * the user (Webull or Alpaca); until then `MARKET_DATA_PROVIDER` is bound
- * to {@link WebullBrokerGateway} as a safe default.
+ * {@link MarketDataProvider} and forwards its 3 data calls to it.
+ *
+ * The current binding prefers Alpaca when it has credentials and falls back
+ * to Webull otherwise.
  *
  * Both {@link WebullBrokerGateway} and {@link AlpacaBrokerGateway} satisfy
  * this interface natively — Alpaca via the Alpaca SDK's stock/option bars

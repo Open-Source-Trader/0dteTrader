@@ -271,6 +271,7 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
         leading={
           <>
             <button
+              type="button"
               className="navbar-icon-button"
               onClick={() => setShowProfile(true)}
               aria-label="Profile"
@@ -278,6 +279,7 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
               <PersonCircleIcon size={22} />
             </button>
             <button
+              type="button"
               className="navbar-icon-button"
               onClick={() => setShowHistory(true)}
               aria-label="Trade history"
@@ -288,6 +290,7 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
         }
         trailing={
           <button
+            type="button"
             className="navbar-icon-button"
             onClick={toggleLayout}
             aria-pressed={layout === 'split'}

@@ -70,6 +70,7 @@ export function AlertDialog({ title, message, actions, onDismiss }: AlertDialogP
         {actions.map((action) => (
           <button
             key={action.label}
+            type="button"
             className={`alert-button ${action.role ?? ''}`}
             onClick={() => {
               onDismiss();

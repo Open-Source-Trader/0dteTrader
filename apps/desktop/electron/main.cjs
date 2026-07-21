@@ -7,7 +7,7 @@
 // Production loads dist/ over a loopback HTTP server, not file:// — Chromium
 // blocks ES-module scripts and stylesheets on file:// origins (blank window),
 // and http keeps webSecurity intact (no CORS bypass needed).
-const { app, BrowserWindow, screen } = require('electron');
+const { app, BrowserWindow, screen, shell } = require('electron');
 const { spawn } = require('node:child_process');
 const path = require('node:path');
 const http = require('node:http');
@@ -160,6 +160,9 @@ async function createWindow() {
     minHeight: 520,
     autoHideMenuBar: true,
     backgroundColor: '#000000',
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.cjs'),
+    },
   });
   win.setAspectRatio(430 / 932);
 
@@ -193,3 +196,7 @@ process.on('exit', () => {
     }
   }
 });
+
+// Open external URLs (SnapTrade Connection Portal, etc.) in the system browser.
+const { ipcMain } = require('electron');
+ipcMain.handle('open-external', (_event, url) => shell.openExternal(url));

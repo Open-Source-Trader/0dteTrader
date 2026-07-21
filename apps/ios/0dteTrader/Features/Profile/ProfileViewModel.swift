@@ -23,6 +23,15 @@ final class ProfileViewModel: ObservableObject {
     @Published private(set) var deletingAlpaca: Set<TradingMode> = []
     @Published private(set) var editingAlpaca: Set<TradingMode> = []
 
+    @Published private(set) var connectingSnaptrade: Set<TradingMode> = []
+    @Published private(set) var disconnectingSnaptrade: Set<TradingMode> = []
+    @Published private(set) var reconnectingSnaptrade: Set<TradingMode> = []
+    @Published private(set) var snapTradeConnections: [SnapTradeConnectionRecordDTO] = []
+    @Published private(set) var snapTradeAccounts: [String: [SnapTradeAccountDTO]] = [:]
+    @Published private(set) var snapTradeStatus: SnapTradeConnectionStatusDTO = .init(configured: false, selectedAccountId: nil)
+    @Published var snapTradeRedirectURL: URL?
+    @Published var snapTradePendingRefreshEnvironment: TradingMode?
+
     /// Which section the current success/error message belongs to.
     @Published private(set) var messageEnv: TradingMode? = nil
 
@@ -210,6 +219,90 @@ final class ProfileViewModel: ObservableObject {
             try await apiClient.deleteBrokerCredentials(provider: .alpaca, environment: environment)
             successMessage = "Alpaca \(environment.label) credentials removed."
             await load()
+        } catch {
+            setError(error)
+        }
+    }
+
+    // MARK: - SnapTrade connection lifecycle
+
+    func loadSnapTradeConnections(environment: TradingMode) async {
+        let key = environment
+        connectingSnaptrade.remove(key)
+        reconnectingSnaptrade.remove(key)
+        errorMessage = nil
+        do {
+            let response = try await apiClient.getSnapTradeConnections()
+            snapTradeConnections = response.connections
+            snapTradeAccounts = response.accounts
+            snapTradeStatus = response.status
+        } catch {
+            setError(error)
+        }
+    }
+
+    func connectSnapTrade(environment: TradingMode) async {
+        let key = environment
+        guard !connectingSnaptrade.contains(key) else { return }
+        connectingSnaptrade.insert(key)
+        errorMessage = nil
+        successMessage = nil
+        messageEnv = key
+        defer { connectingSnaptrade.remove(key) }
+        do {
+            let response = try await apiClient.authorizeSnapTrade(connectionType: "trade")
+            snapTradeRedirectURL = URL(string: response.redirectUrl)
+            snapTradePendingRefreshEnvironment = key
+            successMessage = "SnapTrade brokerage connected."
+        } catch {
+            setError(error)
+        }
+    }
+
+    func reconnectSnapTrade(environment: TradingMode, connectionId: String) async {
+        let key = environment
+        guard !reconnectingSnaptrade.contains(key) else { return }
+        reconnectingSnaptrade.insert(key)
+        errorMessage = nil
+        successMessage = nil
+        messageEnv = key
+        defer { reconnectingSnaptrade.remove(key) }
+        do {
+            let response = try await apiClient.reconnectSnapTrade(connectionId: connectionId)
+            snapTradeRedirectURL = URL(string: response.redirectUrl)
+            snapTradePendingRefreshEnvironment = key
+            successMessage = "SnapTrade connection refreshed."
+        } catch {
+            setError(error)
+        }
+    }
+
+    func selectSnapTradeAccount(
+        environment: TradingMode,
+        connectionId: String,
+        accountId: String
+    ) async {
+        do {
+            _ = try await apiClient.selectSnapTradeAccount(connectionId: connectionId, accountId: accountId)
+            await loadSnapTradeConnections(environment: environment)
+            successMessage = "SnapTrade trading account selected."
+        } catch {
+            setError(error)
+        }
+    }
+
+    func disconnectSnapTrade(environment: TradingMode, connectionId: String) async {
+        let key = environment
+        guard !disconnectingSnaptrade.contains(key) else { return }
+        disconnectingSnaptrade.insert(key)
+        errorMessage = nil
+        successMessage = nil
+        messageEnv = key
+        defer { disconnectingSnaptrade.remove(key) }
+        do {
+            try await apiClient.deleteSnapTradeConnection(connectionId: connectionId)
+            await loadSnapTradeConnections(environment: key)
+            successMessage = "SnapTrade connection removed."
         } catch {
             setError(error)
         }

@@ -53,16 +53,34 @@ export class UsersService {
     return { exists: Boolean(broker), accountId: null };
   }
 
+  private async snapTradeCred(userId: string): Promise<{
+    exists: boolean;
+    accountId: string | null;
+    practiceAccountId: string | null;
+  }> {
+    const connections = await this.prisma.brokerConnection.findMany({
+      where: { userId, provider: 'snaptrade' },
+    });
+    const active = connections.find((connection) => connection.status === 'active') ?? null;
+    const accountId = active?.selectedAccountId ?? connections[0]?.selectedAccountId ?? null;
+    return {
+      exists: Boolean(active),
+      accountId,
+      practiceAccountId: accountId,
+    };
+  }
+
   async getMe(userId: string): Promise<Me> {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user) {
       throw errors.unauthorized('USER_NOT_FOUND', 'User no longer exists');
     }
-    const [live, practice, alpacaLive, alpacaPractice] = await Promise.all([
+    const [live, practice, alpacaLive, alpacaPractice, snaptrade] = await Promise.all([
       this.webullCred(userId, 'live'),
       this.webullCred(userId, 'practice'),
       this.alpacaCred(userId, 'live'),
       this.alpacaCred(userId, 'practice'),
+      this.snapTradeCred(userId),
     ]);
     return {
       id: user.id,
@@ -82,6 +100,10 @@ export class UsersService {
       alpacaPracticeConfigured: alpacaPractice.exists,
       alpacaAccountId: alpacaLive.accountId,
       alpacaPracticeAccountId: alpacaPractice.accountId,
+      snaptradeConfigured: snaptrade.exists,
+      snaptradePracticeConfigured: snaptrade.exists,
+      snaptradeAccountId: snaptrade.accountId,
+      snaptradePracticeAccountId: snaptrade.practiceAccountId,
     };
   }
 

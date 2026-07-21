@@ -1,4 +1,4 @@
-import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import {
   Candle,
   CandleInterval,
@@ -25,7 +25,7 @@ import {
   parseOccSymbol,
   resolveAutoOtm,
 } from '../contract-resolution';
-import { BrokerGateway } from '../broker-gateway.interface';
+import { BrokerGateway, MarketDataProvider } from '../broker-gateway.interface';
 import { OrderEventsService } from '../order-events.service';
 import { optionExpirations } from '../expiration-calendar';
 import {
@@ -34,6 +34,7 @@ import {
   AlpacaSecrets,
   SdkBarsRequest,
   SdkOrderInput,
+  SdkStockSnapshot,
 } from './alpaca-sdk.types';
 import { toCandle, toOptionContract, toOrderResult, toPosition, toQuote } from './alpaca-mappers';
 
@@ -65,7 +66,7 @@ const SDK_TIMEOUT_MS = 10_000;
  * under `/v1beta1/options/*`, not `/v2/options/*`).
  */
 @Injectable()
-export class AlpacaBrokerGateway implements BrokerGateway, OnModuleDestroy {
+export class AlpacaBrokerGateway implements BrokerGateway, MarketDataProvider {
   private readonly logger = new Logger(AlpacaBrokerGateway.name);
   private readonly clients = new Map<string, { fingerprint: string; client: AlpacaClientLike }>();
   private readonly pollTimers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -143,7 +144,7 @@ export class AlpacaBrokerGateway implements BrokerGateway, OnModuleDestroy {
       if (!snap) throw brokerErrors.contractNotFound(`Unknown option: ${symbol}`);
       return toQuote(symbol, snap);
     }
-    const snaps = await this.guard(() => client.marketData.stockSnapshots({ symbols: [symbol] }));
+    const snaps = await this.guard(() => this.stockSnapshots(client, [symbol]));
     const snap = snaps[symbol];
     if (!snap) throw brokerErrors.contractNotFound(`Unknown symbol: ${symbol}`);
     return toQuote(symbol, snap);
@@ -158,6 +159,16 @@ export class AlpacaBrokerGateway implements BrokerGateway, OnModuleDestroy {
       return aggregateCandles(daily, '1w');
     }
     return this.fetchBars(client, occ, symbol, timeFrameFor(req.interval), 200, req);
+  }
+
+  private stockSnapshots(
+    client: AlpacaClientLike,
+    symbols: string[],
+  ): Promise<Record<string, SdkStockSnapshot>> {
+    const stocks = client.marketData.stocks;
+    if (stocks?.stockSnapshots) return stocks.stockSnapshots({ symbols });
+    if (client.marketData.stockSnapshots) return client.marketData.stockSnapshots({ symbols });
+    throw brokerErrors.unavailable('Alpaca market data does not expose stock snapshots');
   }
 
   private async fetchBars(

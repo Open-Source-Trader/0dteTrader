@@ -86,12 +86,17 @@ export interface SdkBarsRequest {
   limit: number;
 }
 
+interface AlpacaStocksMarketData {
+  stockSnapshots(req: { symbols: string[] }): Promise<Record<string, SdkStockSnapshot>>;
+}
+
 /** The subset of the SDK's `MarketDataClient` this gateway uses. */
 export interface AlpacaMarketData {
   collectOptionSnapshotsBySymbol(req: {
     symbols: string[];
   }): Promise<Record<string, SdkOptionSnapshot>>;
-  stockSnapshots(req: { symbols: string[] }): Promise<Record<string, SdkStockSnapshot>>;
+  stocks?: AlpacaStocksMarketData;
+  stockSnapshots?(req: { symbols: string[] }): Promise<Record<string, SdkStockSnapshot>>;
   getOptionBarsFor(symbol: string, req: SdkBarsRequest): Promise<SdkBar[]>;
   getStockBarsFor(symbol: string, req: SdkBarsRequest): Promise<SdkBar[]>;
   collectOptionChainBySymbol(req: {

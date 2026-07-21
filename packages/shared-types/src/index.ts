@@ -10,9 +10,8 @@
 
 export type AssetClass = 'option';
 export type TradingMode = 'live' | 'practice';
-/** Broker a user trades through. Webull is the only active provider in P1;
- *  Alpaca is added behind the same BrokerGateway seam. */
-export type BrokerProvider = 'webull' | 'alpaca';
+/** Broker a user trades through. */
+export type BrokerProvider = 'webull' | 'alpaca' | 'snaptrade';
 export type OrderSide = 'buy' | 'sell';
 export type OrderType = 'mid' | 'market';
 export type OptionType = 'call' | 'put';
@@ -186,6 +185,14 @@ export interface Me {
   alpacaAccountId?: string | null;
   /** Practice Alpaca account id; null until known. */
   alpacaPracticeAccountId?: string | null;
+  /** Live SnapTrade brokerage connection is active. */
+  snaptradeConfigured?: boolean;
+  /** Practice SnapTrade brokerage connection is active. */
+  snaptradePracticeConfigured?: boolean;
+  /** Live SnapTrade trading account id (chosen from connected accounts). */
+  snaptradeAccountId?: string | null;
+  /** Practice SnapTrade trading account id; null until chosen. */
+  snaptradePracticeAccountId?: string | null;
 }
 
 export interface WebullCredentialsInput {
@@ -215,7 +222,12 @@ export interface AlpacaSecrets {
   apiKey: string;
   apiSecret: string;
 }
-export type BrokerSecrets = WebullSecrets | AlpacaSecrets;
+export interface SnapTradeSecrets {
+  provider: 'snaptrade';
+  snaptradeUserId: string;
+  snaptradeUserSecret: string;
+}
+export type BrokerSecrets = WebullSecrets | AlpacaSecrets | SnapTradeSecrets;
 
 /** Provider-scoped credential input from the client. */
 export interface AlpacaCredentialsInput {
@@ -224,7 +236,15 @@ export interface AlpacaCredentialsInput {
   apiSecret: string;
   environment?: TradingMode;
 }
-export type BrokerCredentialsInput = WebullCredentialsInput | AlpacaCredentialsInput;
+/** SnapTrade identity (server-minted; not user-entered). */
+export interface SnapTradeCredentialsInput {
+  provider: 'snaptrade';
+  snaptradeUserId: string;
+  snaptradeUserSecret: string;
+  environment?: TradingMode;
+}
+export type BrokerCredentialsInput =
+  WebullCredentialsInput | AlpacaCredentialsInput | SnapTradeCredentialsInput;
 
 export interface WebullCredentialsSaved {
   webullConfigured: true;

@@ -24,6 +24,7 @@ export function ProfileView({ onLogout, onDismiss }: ProfileViewProps) {
   const [deleteTarget, setDeleteTarget] = useState<{
     provider: BrokerProvider;
     environment: TradingMode;
+    connectionId?: string;
   } | null>(null);
   const [showLogoutConfirmation, setShowLogoutConfirmation] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
@@ -57,6 +58,7 @@ export function ProfileView({ onLogout, onDismiss }: ProfileViewProps) {
                 Credentials are stored encrypted on the server and are never displayed here.
               </div>
               <button
+                type="button"
                 className="grouped-row button-row"
                 onClick={() => store.setEditing(environment, true)}
               >
@@ -64,6 +66,7 @@ export function ProfileView({ onLogout, onDismiss }: ProfileViewProps) {
               </button>
               {state.me?.tradingMode === environment ? (
                 <button
+                  type="button"
                   className="grouped-row button-row"
                   disabled={env.isReconnecting}
                   onClick={() => void store.reconnect(environment)}
@@ -72,6 +75,7 @@ export function ProfileView({ onLogout, onDismiss }: ProfileViewProps) {
                 </button>
               ) : null}
               <button
+                type="button"
                 className="grouped-row destructive"
                 disabled={env.isDeleting}
                 onClick={() => setDeleteTarget({ provider: 'webull', environment })}
@@ -84,6 +88,7 @@ export function ProfileView({ onLogout, onDismiss }: ProfileViewProps) {
               <WebullCredentialsForm store={store} environment={environment} />
               {configured ? (
                 <button
+                  type="button"
                   className="grouped-row button-row"
                   onClick={() => store.setEditing(environment, false)}
                 >
@@ -140,12 +145,14 @@ export function ProfileView({ onLogout, onDismiss }: ProfileViewProps) {
                 Credentials are stored encrypted on the server and are never displayed here.
               </div>
               <button
+                type="button"
                 className="grouped-row button-row"
                 onClick={() => store.setAlpacaEditing(environment, true)}
               >
                 Update Credentials
               </button>
               <button
+                type="button"
                 className="grouped-row destructive"
                 disabled={env.isDeleting}
                 onClick={() => setDeleteTarget({ provider: 'alpaca', environment })}
@@ -158,6 +165,7 @@ export function ProfileView({ onLogout, onDismiss }: ProfileViewProps) {
               <AlpacaCredentialsForm store={store} environment={environment} />
               {configured ? (
                 <button
+                  type="button"
                   className="grouped-row button-row"
                   onClick={() => store.setAlpacaEditing(environment, false)}
                 >
@@ -189,13 +197,122 @@ export function ProfileView({ onLogout, onDismiss }: ProfileViewProps) {
     );
   };
 
+  const renderSnapTradeSection = (environment: TradingMode) => {
+    const env = store.snaptradeEnvironment(environment);
+    const title = environment === 'live' ? 'SnapTrade — Live' : 'SnapTrade — Practice';
+    const selectedAccountId = env.status.selectedAccountId;
+    const activeConnection = env.connections.find((c) => c.status === 'active');
+    return (
+      <div className="grouped-section" key={`snaptrade-${environment}`}>
+        <div className="section-header">{title}</div>
+        <div className="section-card">
+          {env.status.configured && activeConnection ? (
+            <>
+              <div className="grouped-row positive">
+                <CheckCircleFillIcon size={14} />
+                <span>Connected to {activeConnection.brokerage}</span>
+              </div>
+              <div className="grouped-row">
+                <span>Account</span>
+                <span className="row-value text-secondary">
+                  {selectedAccountId ?? 'not selected'}
+                </span>
+              </div>
+              {env.accounts[activeConnection.connectionId]?.length ? (
+                <div className="grouped-row">
+                  <span>Available accounts</span>
+                  <select
+                    className="select-input"
+                    value={selectedAccountId ?? ''}
+                    onChange={(event) => {
+                      const accountId = event.target.value;
+                      if (accountId) {
+                        void store.selectSnapTradeAccount(
+                          environment,
+                          activeConnection.connectionId,
+                          accountId,
+                        );
+                      }
+                    }}
+                  >
+                    <option value="">Select account…</option>
+                    {env.accounts[activeConnection.connectionId].map((account) => (
+                      <option key={account.accountId} value={account.accountId}>
+                        {account.name} ({account.accountId})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              ) : null}
+              <div className="grouped-row footnote text-secondary">
+                Credentials are managed through SnapTrade's Connection Portal.
+              </div>
+              <button
+                type="button"
+                className="grouped-row button-row"
+                disabled={env.isReconnecting}
+                onClick={() =>
+                  void store.reconnectSnapTrade(environment, activeConnection.connectionId)
+                }
+              >
+                {env.isReconnecting ? <Spinner size={14} /> : 'Reconnect to Brokerage'}
+              </button>
+              <button
+                type="button"
+                className="grouped-row destructive"
+                disabled={env.isDisconnecting}
+                onClick={() =>
+                  setDeleteTarget({
+                    provider: 'snaptrade',
+                    environment,
+                    connectionId: activeConnection.connectionId,
+                  })
+                }
+              >
+                {env.isDisconnecting ? <Spinner size={14} /> : 'Disconnect Brokerage'}
+              </button>
+            </>
+          ) : (
+            <>
+              <div className="grouped-row text-secondary">No brokerage connected yet.</div>
+              <button
+                type="button"
+                className="grouped-row button-row"
+                disabled={env.isConnecting}
+                onClick={() => void store.connectSnapTrade(environment)}
+              >
+                {env.isConnecting ? <Spinner size={14} /> : 'Connect Brokerage'}
+              </button>
+            </>
+          )}
+
+          {state.messageEnv === environment && state.successMessage ? (
+            <div className="grouped-row footnote positive" role="status">
+              <CheckCircleFillIcon size={14} />
+              <span>{state.successMessage}</span>
+            </div>
+          ) : null}
+          {state.messageEnv === environment && state.errorMessage ? (
+            <div className="grouped-row footnote negative" role="alert">
+              <WarningFillIcon size={14} />
+              <span>{state.errorMessage}</span>
+            </div>
+          ) : null}
+        </div>
+        <div className="section-footer">
+          Connect your brokerage account through SnapTrade's secure Connection Portal.
+        </div>
+      </div>
+    );
+  };
+
   return (
     <Sheet detent="large" onDismiss={onDismiss}>
       <div className="profile-view">
         <NavBar
           title="Profile"
           trailing={
-            <button className="navbar-text-button" onClick={onDismiss}>
+            <button type="button" className="navbar-text-button" onClick={onDismiss}>
               Done
             </button>
           }
@@ -228,7 +345,11 @@ export function ProfileView({ onLogout, onDismiss }: ProfileViewProps) {
               ) : (
                 <>
                   <div className="grouped-row text-secondary">Account details unavailable</div>
-                  <button className="grouped-row button-row" onClick={() => void store.load()}>
+                  <button
+                    type="button"
+                    className="grouped-row button-row"
+                    onClick={() => void store.load()}
+                  >
                     Retry
                   </button>
                 </>
@@ -241,7 +362,7 @@ export function ProfileView({ onLogout, onDismiss }: ProfileViewProps) {
             <div className="section-header">Trading Provider</div>
             <div className="section-card">
               <div className="segmented-control" role="group" aria-label="Trading provider">
-                {(['webull', 'alpaca'] as BrokerProvider[]).map((provider) => (
+                {(['webull', 'alpaca', 'snaptrade'] as BrokerProvider[]).map((provider) => (
                   <button
                     key={provider}
                     type="button"
@@ -255,7 +376,11 @@ export function ProfileView({ onLogout, onDismiss }: ProfileViewProps) {
                       container.quoteSocket.reconnect();
                     }}
                   >
-                    {provider === 'webull' ? 'Webull' : 'Alpaca'}
+                    {provider === 'webull'
+                      ? 'Webull'
+                      : provider === 'alpaca'
+                        ? 'Alpaca'
+                        : 'SnapTrade'}
                   </button>
                 ))}
               </div>
@@ -270,10 +395,15 @@ export function ProfileView({ onLogout, onDismiss }: ProfileViewProps) {
               {renderCredentialsSection('live', state.me?.webullConfigured === true)}
               {renderCredentialsSection('practice', state.me?.webullPracticeConfigured === true)}
             </>
-          ) : (
+          ) : state.tradingProvider === 'alpaca' ? (
             <>
               {renderAlpacaSection('live', state.me?.alpacaConfigured === true)}
               {renderAlpacaSection('practice', state.me?.alpacaPracticeConfigured === true)}
+            </>
+          ) : (
+            <>
+              {renderSnapTradeSection('live')}
+              {renderSnapTradeSection('practice')}
             </>
           )}
 
@@ -283,6 +413,7 @@ export function ProfileView({ onLogout, onDismiss }: ProfileViewProps) {
           <div className="grouped-section">
             <div className="section-card">
               <button
+                type="button"
                 className="grouped-row destructive"
                 disabled={isLoggingOut}
                 onClick={() => setShowLogoutConfirmation(true)}
@@ -296,7 +427,11 @@ export function ProfileView({ onLogout, onDismiss }: ProfileViewProps) {
         {deleteTarget ? (
           <AlertDialog
             title={`Remove ${deleteTarget.environment === 'live' ? 'Live' : 'Practice'} ${
-              deleteTarget.provider === 'webull' ? 'Webull' : 'Alpaca'
+              deleteTarget.provider === 'webull'
+                ? 'Webull'
+                : deleteTarget.provider === 'alpaca'
+                  ? 'Alpaca'
+                  : 'SnapTrade'
             } credentials?`}
             message={
               deleteTarget.provider === 'webull'
@@ -309,10 +444,18 @@ export function ProfileView({ onLogout, onDismiss }: ProfileViewProps) {
               {
                 label: 'Delete Credentials',
                 role: 'destructive',
-                onSelect: () =>
-                  deleteTarget.provider === 'webull'
-                    ? void store.deleteCredentials(deleteTarget.environment)
-                    : void store.deleteAlpacaCredentials(deleteTarget.environment),
+                onSelect: () => {
+                  if (deleteTarget.provider === 'webull') {
+                    void store.deleteCredentials(deleteTarget.environment);
+                  } else if (deleteTarget.provider === 'alpaca') {
+                    void store.deleteAlpacaCredentials(deleteTarget.environment);
+                  } else if (deleteTarget.connectionId) {
+                    void store.disconnectSnapTrade(
+                      deleteTarget.environment,
+                      deleteTarget.connectionId,
+                    );
+                  }
+                },
               },
               { label: 'Cancel', role: 'cancel' },
             ]}

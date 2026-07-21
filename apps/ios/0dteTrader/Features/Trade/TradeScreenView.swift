@@ -120,7 +120,9 @@ struct TradeScreenView: View {
             .presentationDetents([.medium, .large])
             .presentationDragIndicator(.visible)
         }
-        .sheet(isPresented: $showProfile) {
+        .sheet(isPresented: $showProfile, onDismiss: {
+            Task { await refreshTradingContext() }
+        }) {
             ProfileView(viewModel: profileViewModel)
         }
         .sheet(isPresented: $showHistory) {
@@ -314,11 +316,22 @@ struct TradeScreenView: View {
         do {
             let me = try await container.apiClient.updateTradingMode(next)
             tradingMode = me.tradingMode ?? next
+            self.me = me
             await chartViewModel.start()
             await tradeViewModel.refreshTradingData()
             await chainViewModel.load(underlying: chartViewModel.symbol)
+            container.quoteSocket.reconnect()
         } catch {
             tradeViewModel.showToast("Mode switch failed. Try again.", style: .error)
+        }
+    }
+
+    private func refreshTradingContext() async {
+        if let me = try? await container.apiClient.me() {
+            tradingMode = me.tradingMode ?? tradingMode
+            self.me = me
+            await tradeViewModel.refreshTradingData()
+            container.quoteSocket.reconnect()
         }
     }
 
@@ -357,17 +370,29 @@ struct TradeScreenView: View {
     // MARK: - Provider-aware copy + empty state
 
     private var tradingProvider: BrokerProvider { me?.tradingProvider ?? .webull }
-    private var providerName: String { tradingProvider == .alpaca ? "Alpaca" : "Webull" }
+    private var providerName: String {
+        switch tradingProvider {
+        case .alpaca: return "Alpaca"
+        case .snaptrade: return "SnapTrade"
+        case .webull: return "Webull"
+        }
+    }
     private var activeProviderConfigured: Bool {
         guard let me else { return true }
-        if tradingProvider == .alpaca {
+        switch tradingProvider {
+        case .alpaca:
             return tradingMode == .practice
                 ? (me.alpacaPracticeConfigured ?? false)
                 : (me.alpacaConfigured ?? false)
+        case .snaptrade:
+            return tradingMode == .practice
+                ? (me.snaptradePracticeConfigured ?? false)
+                : (me.snaptradeConfigured ?? false)
+        case .webull:
+            return tradingMode == .practice
+                ? (me.webullPracticeConfigured ?? false)
+                : (me.webullConfigured)
         }
-        return tradingMode == .practice
-            ? (me.webullPracticeConfigured ?? false)
-            : (me.webullConfigured)
     }
     private var needsProviderConfig: Bool { me != nil && !activeProviderConfigured }
 

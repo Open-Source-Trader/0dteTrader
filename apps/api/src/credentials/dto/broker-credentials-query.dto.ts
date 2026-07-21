@@ -4,7 +4,7 @@ import { BrokerProvider, TradingMode } from '@0dtetrader/shared-types';
 /** Query for the generic DELETE /me/broker-credentials. */
 export class BrokerCredentialsQueryDto {
   @IsOptional()
-  @IsIn(['webull', 'alpaca'])
+  @IsIn(['webull', 'alpaca', 'snaptrade'])
   provider?: BrokerProvider;
 
   @IsOptional()

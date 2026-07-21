@@ -51,6 +51,7 @@ export class InMemoryPrismaService {
   readonly scheduledJobLeases: any[] = [];
   readonly brokerCredentials: any[] = [];
   readonly brokerApiTokens: any[] = [];
+  readonly brokerConnections: any[] = [];
 
   readonly user = {
     findUnique: async ({ where }: any) => {
@@ -403,6 +404,44 @@ export class InMemoryPrismaService {
     },
   };
 
+  readonly brokerConnection = {
+    findUnique: async ({ where }: any) => {
+      const key = where.userId_provider ?? { userId: where.userId, provider: where.provider };
+      return (
+        this.brokerConnections.find(
+          (c) => c.userId === key.userId && c.provider === key.provider,
+        ) ?? null
+      );
+    },
+    findMany: async ({ where }: any = {}) =>
+      this.brokerConnections.filter((c) => matches(c, where)),
+    upsert: async ({ where, create, update }: any) => {
+      const key = where.userId_provider ?? { userId: where.userId, provider: where.provider };
+      const existing = this.brokerConnections.find(
+        (c) => c.userId === key.userId && c.provider === key.provider,
+      );
+      if (existing) {
+        Object.assign(existing, update, { updatedAt: new Date() });
+        return existing;
+      }
+      const now = new Date();
+      const row = { id: randomUUID(), createdAt: now, updatedAt: now, ...create };
+      this.brokerConnections.push(row);
+      return row;
+    },
+    delete: async ({ where }: any) => {
+      const key = where.userId_provider ?? { userId: where.userId, provider: where.provider };
+      const idx = this.brokerConnections.findIndex(
+        (c) => c.userId === key.userId && c.provider === key.provider,
+      );
+      if (idx === -1) {
+        throw Object.assign(new Error('Record not found'), { code: 'P2025' });
+      }
+      const [row] = this.brokerConnections.splice(idx, 1);
+      return row;
+    },
+  };
+
   // Prisma lifecycle no-ops.
   async $connect(): Promise<void> {}
   async $disconnect(): Promise<void> {}
@@ -420,6 +459,7 @@ export class InMemoryPrismaService {
     this.scheduledJobLeases.length = 0;
     this.brokerCredentials.length = 0;
     this.brokerApiTokens.length = 0;
+    this.brokerConnections.length = 0;
   }
 
   /** Test helper: flip the kill switch for a user. */

@@ -56,6 +56,36 @@ describe('0dteTrader API (e2e)', () => {
           feedMode: 'sandbox' as const,
           warnings: [],
         }),
+        getChartQuote: async (symbol: string) => ({
+          symbol: symbol.toUpperCase(),
+          bid: 99.5,
+          ask: 100.5,
+          last: 100,
+          bidSize: 10,
+          askSize: 10,
+          volume: 1000,
+          timestamp: new Date().toISOString(),
+        }),
+        getDailyHistory: async (_symbol: string, _start: string, _end: string) => [
+          {
+            time: new Date(Date.now() - 86_400_000).toISOString(),
+            open: 100,
+            high: 101,
+            low: 99,
+            close: 100.5,
+            volume: 1000,
+          },
+        ],
+        getTimeSales: async (_symbol: string, _interval: string, _start: Date, _end: Date) => [
+          {
+            time: new Date(Date.now() - 60_000).toISOString(),
+            open: 100,
+            high: 101,
+            low: 99,
+            close: 100.5,
+            volume: 1000,
+          },
+        ],
         getChain: async (symbol: string, expiration: string) => {
           const observedAt = new Date();
           const settlementAt = optionSettlementAt(expiration, symbol, symbol);
@@ -250,6 +280,10 @@ describe('0dteTrader API (e2e)', () => {
       alpacaPracticeConfigured: false,
       alpacaAccountId: null,
       alpacaPracticeAccountId: null,
+      snaptradeConfigured: false,
+      snaptradePracticeConfigured: false,
+      snaptradeAccountId: null,
+      snaptradePracticeAccountId: null,
     });
   });
 
@@ -279,6 +313,21 @@ describe('0dteTrader API (e2e)', () => {
       .send({ tradingMode: 'live' })
       .expect(200);
     expect(back.body.tradingMode).toBe('live');
+  });
+
+  it('accepts SnapTrade as the active provider', async () => {
+    const patched = await request(server)
+      .patch('/v1/me')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({ tradingProvider: 'snaptrade' })
+      .expect(200);
+    expect(patched.body.tradingProvider).toBe('snaptrade');
+
+    const me = await request(server)
+      .get('/v1/me')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .expect(200);
+    expect(me.body.tradingProvider).toBe('snaptrade');
   });
 
   it('saves Webull credentials (never echoed back) and reflects it in /me', async () => {

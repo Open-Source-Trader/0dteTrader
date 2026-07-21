@@ -56,6 +56,36 @@ describe('0dteTrader API (e2e)', () => {
           feedMode: 'sandbox' as const,
           warnings: [],
         }),
+        getChartQuote: async (symbol: string) => ({
+          symbol: symbol.toUpperCase(),
+          bid: 99.5,
+          ask: 100.5,
+          last: 100,
+          bidSize: 10,
+          askSize: 10,
+          volume: 1000,
+          timestamp: new Date().toISOString(),
+        }),
+        getDailyHistory: async (_symbol: string, _start: string, _end: string) => [
+          {
+            time: new Date(Date.now() - 86_400_000).toISOString(),
+            open: 100,
+            high: 101,
+            low: 99,
+            close: 100.5,
+            volume: 1000,
+          },
+        ],
+        getTimeSales: async (_symbol: string, _interval: string, _start: Date, _end: Date) => [
+          {
+            time: new Date(Date.now() - 60_000).toISOString(),
+            open: 100,
+            high: 101,
+            low: 99,
+            close: 100.5,
+            volume: 1000,
+          },
+        ],
         getChain: async (symbol: string, expiration: string) => {
           const observedAt = new Date();
           const settlementAt = optionSettlementAt(expiration, symbol, symbol);

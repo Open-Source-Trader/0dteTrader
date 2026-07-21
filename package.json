@@ -22,6 +22,7 @@
     "db:down": "docker compose down",
     "db:migrate": "prisma migrate deploy --schema apps/api/prisma/schema.prisma",
     "smoke:webull": "npm run smoke:webull --workspace apps/api",
+    "smoke:snaptrade": "npm run smoke:snaptrade --workspace apps/api",
     "format": "prettier --write .",
     "format:check": "prettier --check ."
   },

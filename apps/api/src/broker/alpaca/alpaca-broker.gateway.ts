@@ -1,4 +1,4 @@
-import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import {
   Candle,
   CandleInterval,
@@ -25,7 +25,7 @@ import {
   parseOccSymbol,
   resolveAutoOtm,
 } from '../contract-resolution';
-import { BrokerGateway } from '../broker-gateway.interface';
+import { BrokerGateway, MarketDataProvider } from '../broker-gateway.interface';
 import { OrderEventsService } from '../order-events.service';
 import { optionExpirations } from '../expiration-calendar';
 import {
@@ -65,7 +65,7 @@ const SDK_TIMEOUT_MS = 10_000;
  * under `/v1beta1/options/*`, not `/v2/options/*`).
  */
 @Injectable()
-export class AlpacaBrokerGateway implements BrokerGateway, OnModuleDestroy {
+export class AlpacaBrokerGateway implements BrokerGateway, MarketDataProvider {
   private readonly logger = new Logger(AlpacaBrokerGateway.name);
   private readonly clients = new Map<string, { fingerprint: string; client: AlpacaClientLike }>();
   private readonly pollTimers = new Map<string, ReturnType<typeof setTimeout>>();

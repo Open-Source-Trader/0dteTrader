@@ -20,8 +20,9 @@ describe('DispatchingBrokerGateway', () => {
   let prisma: { user: { findUnique: jest.Mock } };
   let webull: jest.Mocked<BrokerGateway>;
   let alpaca: jest.Mocked<BrokerGateway>;
+  let snaptrade: jest.Mocked<BrokerGateway>;
   let gw: DispatchingBrokerGateway;
-  let provider: 'webull' | 'alpaca';
+  let provider: 'webull' | 'alpaca' | 'snaptrade';
 
   beforeEach(() => {
     provider = 'webull';
@@ -32,25 +33,52 @@ describe('DispatchingBrokerGateway', () => {
     };
     webull = makeGateway();
     alpaca = makeGateway();
+    snaptrade = makeGateway();
     gw = new DispatchingBrokerGateway(
-      prisma as unknown as ConstructorParameters<typeof DispatchingBrokerGateway>[0],
-      webull,
-      alpaca,
+      prisma as any,
+      webull as any,
+      alpaca as any,
+      snaptrade as any,
     );
   });
 
-  it('routes to Webull when tradingProvider is webull', async () => {
+  it('routes market-data and trading calls to Webull when tradingProvider is webull', async () => {
     await gw.getQuote('u1', 'SPY');
+    await gw.getCandles('u1', 'SPY', { interval: '1m' });
+    await gw.getOptionsChain('u1', 'SPY');
+    await gw.previewOrder('u1', {} as never);
     expect(webull.getQuote).toHaveBeenCalledWith('u1', 'SPY');
+    expect(webull.getCandles).toHaveBeenCalledWith('u1', 'SPY', { interval: '1m' });
+    expect(webull.getOptionsChain).toHaveBeenCalledWith('u1', 'SPY', undefined);
+    expect(webull.previewOrder).toHaveBeenCalledWith('u1', {} as never);
     expect(alpaca.getQuote).not.toHaveBeenCalled();
-    expect(prisma.user.findUnique).toHaveBeenCalled();
   });
 
-  it('routes to Alpaca when tradingProvider is alpaca', async () => {
+  it('routes market-data and trading calls to Alpaca when tradingProvider is alpaca', async () => {
     provider = 'alpaca';
     await gw.getQuote('u1', 'SPY');
+    await gw.getCandles('u1', 'SPY', { interval: '1m' });
+    await gw.getOptionsChain('u1', 'SPY');
+    await gw.previewOrder('u1', {} as never);
     expect(alpaca.getQuote).toHaveBeenCalledWith('u1', 'SPY');
+    expect(alpaca.getCandles).toHaveBeenCalledWith('u1', 'SPY', { interval: '1m' });
+    expect(alpaca.getOptionsChain).toHaveBeenCalledWith('u1', 'SPY', undefined);
+    expect(alpaca.previewOrder).toHaveBeenCalledWith('u1', {} as never);
     expect(webull.getQuote).not.toHaveBeenCalled();
+  });
+
+  it('routes market-data and trading calls to SnapTrade when tradingProvider is snaptrade', async () => {
+    provider = 'snaptrade';
+    await gw.getQuote('u1', 'SPY');
+    await gw.getCandles('u1', 'SPY', { interval: '1m' });
+    await gw.getOptionsChain('u1', 'SPY');
+    await gw.placeOrder('u1', {} as never, 'key');
+    expect(snaptrade.getQuote).toHaveBeenCalledWith('u1', 'SPY');
+    expect(snaptrade.getCandles).toHaveBeenCalledWith('u1', 'SPY', { interval: '1m' });
+    expect(snaptrade.getOptionsChain).toHaveBeenCalledWith('u1', 'SPY', undefined);
+    expect(snaptrade.placeOrder).toHaveBeenCalledWith('u1', {} as never, 'key');
+    expect(webull.getQuote).not.toHaveBeenCalled();
+    expect(alpaca.getQuote).not.toHaveBeenCalled();
   });
 
   it('delegates placeOrder + idempotency to the right gateway', async () => {
@@ -76,7 +104,7 @@ describe('DispatchingBrokerGateway', () => {
     expect(alpaca.reauthenticate).toHaveBeenCalledWith('u1');
   });
 
-  it('routes every market-data + trading method by provider', async () => {
+  it('routes every method by provider for alpaca', async () => {
     provider = 'alpaca';
     await gw.getCandles('u1', 'SPY', { interval: '1m' });
     await gw.getOptionsChain('u1', 'SPY');
@@ -84,8 +112,8 @@ describe('DispatchingBrokerGateway', () => {
     await gw.getPositions('u1');
     await gw.getOpenOrders('u1');
     await gw.cancelOrder('u1', 'oid');
-    expect(alpaca.getCandles).toHaveBeenCalled();
-    expect(alpaca.getOptionsChain).toHaveBeenCalled();
+    expect(alpaca.getCandles).toHaveBeenCalledWith('u1', 'SPY', { interval: '1m' });
+    expect(alpaca.getOptionsChain).toHaveBeenCalledWith('u1', 'SPY', undefined);
     expect(alpaca.previewOrder).toHaveBeenCalled();
     expect(alpaca.getPositions).toHaveBeenCalled();
     expect(alpaca.getOpenOrders).toHaveBeenCalled();

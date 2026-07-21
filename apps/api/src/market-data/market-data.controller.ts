@@ -1,35 +1,39 @@
-import { Controller, Get, Inject, Query } from '@nestjs/common';
+import { Controller, Get, Query } from '@nestjs/common';
 import { Candle, OptionsChain, Quote } from '@0dtetrader/shared-types';
-import { BROKER_GATEWAY, BrokerGateway } from '../broker/broker-gateway.interface';
 import { AuthenticatedUser, CurrentUser } from '../common/current-user.decorator';
 import { CandlesQueryDto, OptionsChainQueryDto, QuoteQueryDto } from './dto/market-query.dto';
 import { CryptoDataService } from './crypto-data.service';
 import { IndexDataService } from './index-data.service';
 import { OptionsAnalyticsService } from '../options-analytics/options-analytics.service';
+import { TradierMarketDataService } from './tradier-market-data.service';
 
 @Controller('market')
 export class MarketDataController {
   constructor(
-    @Inject(BROKER_GATEWAY) private readonly broker: BrokerGateway,
+    private readonly tradierMarketData: TradierMarketDataService,
     private readonly analytics: OptionsAnalyticsService,
     private readonly crypto: CryptoDataService,
     private readonly index: IndexDataService,
   ) {}
 
   @Get('quote')
-  getQuote(@CurrentUser() user: AuthenticatedUser, @Query() query: QuoteQueryDto): Promise<Quote> {
+  getQuote(@CurrentUser() _user: AuthenticatedUser, @Query() query: QuoteQueryDto): Promise<Quote> {
     if (this.crypto.isCryptoSymbol(query.symbol)) {
       return this.crypto.getQuote(query.symbol);
     }
     if (this.index.isIndexSymbol(query.symbol)) {
       return this.index.getQuote(query.symbol);
     }
-    return this.broker.getQuote(user.userId, query.symbol);
+    // Market quotes are sourced from Tradier regardless of the user's
+    // trading broker. Tradier returns a fresh NBBO in a single HTTP call;
+    // Alpaca requires stockSnapshots and Webull requires optionSnapshot
+    // probes, both of which are more expensive for the same data.
+    return this.tradierMarketData.getQuote(query.symbol);
   }
 
   @Get('candles')
   getCandles(
-    @CurrentUser() user: AuthenticatedUser,
+    @CurrentUser() _user: AuthenticatedUser,
     @Query() query: CandlesQueryDto,
   ): Promise<Candle[]> {
     if (this.crypto.isCryptoSymbol(query.symbol)) {
@@ -38,7 +42,11 @@ export class MarketDataController {
     if (this.index.isIndexSymbol(query.symbol)) {
       return this.index.getCandles(query.symbol, query.interval, query.from, query.to);
     }
-    return this.broker.getCandles(user.userId, query.symbol, {
+    // Market candles are sourced from Tradier regardless of the user's
+    // trading broker. Tradier serves native bars for 1m/5m/15m (time-sales)
+    // and 1d/1w (history); 30m/1h/4h are aggregated from 1m in a single
+    // upstream call.
+    return this.tradierMarketData.getCandles(query.symbol, {
       interval: query.interval,
       from: query.from,
       to: query.to,

@@ -35,6 +35,7 @@ model User {
   webullApiTokens WebullApiToken[]
   brokerCredentials BrokerCredential[]
   brokerApiTokens   BrokerApiToken[]
+  brokerConnections BrokerConnection[]
   tradeOrders     TradeOrder[]
 
   @@map("users")
@@ -112,6 +113,28 @@ model BrokerApiToken {
 
   @@unique([userId, provider, environment])
   @@map("broker_api_tokens")
+}
+
+// OAuth connection metadata for provider-agnostic brokerage connections.
+// **Per-user:** one row per (userId, provider). Tracks the SnapTrade
+// connection id and the account ids surfaced by that connection so webhooks
+// can update them and the UI can present an account picker. The `userId`
+// FK has `onDelete: Cascade` so removing a user removes all their
+// connections. Additive — no existing rows are touched.
+model BrokerConnection {
+  id                String    @id @default(uuid()) @db.Uuid
+  userId            String    @db.Uuid
+  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider          String    @default("snaptrade")
+  connectionId      String
+  accountIds        String[]
+  selectedAccountId String?
+  status            String    @default("active")
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  @@unique([userId, provider])
+  @@map("broker_connections")
 }
 
 model RefreshToken {

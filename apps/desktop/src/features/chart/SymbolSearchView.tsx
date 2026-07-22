@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { memo, useEffect, useMemo, useState } from 'react';
 import { NavBar } from '../../design/components/NavBar';
 import { Sheet } from '../../design/components/Sheet';
 import { CheckmarkIcon, MagnifierIcon, TextCursorIcon } from '../../design/icons';
@@ -11,7 +11,11 @@ interface SymbolSearchViewProps {
 }
 
 /** Symbol switcher: curated watchlist plus arbitrary free-text symbols. */
-export function SymbolSearchView({ currentSymbol, onSelect, onDismiss }: SymbolSearchViewProps) {
+export const SymbolSearchView = memo(function SymbolSearchView({
+  currentSymbol,
+  onSelect,
+  onDismiss,
+}: SymbolSearchViewProps) {
   const [query, setQuery] = useState('');
   const [activeIndex, setActiveIndex] = useState(0);
   const normalizedQuery = query.toUpperCase().trim();
@@ -164,4 +168,4 @@ export function SymbolSearchView({ currentSymbol, onSelect, onDismiss }: SymbolS
       </div>
     </Sheet>
   );
-}
+});

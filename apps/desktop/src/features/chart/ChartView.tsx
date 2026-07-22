@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react';
+import { memo, useEffect, useMemo } from 'react';
 import type { ChartInterval, TradingMode } from '@0dtetrader/shared-types';
 import type { ApiClient } from '../../core/api/ApiClient';
 import { useStore } from '../../core/observable';
@@ -64,7 +64,7 @@ const SKELETON_BARS = [
 ];
 
 /** Chart surface: header, candle chart with overlays and drawing tools, sub-panes. */
-export function ChartView({
+export const ChartView = memo(function ChartView({
   store,
   drawingsStore,
   apiClient,
@@ -546,7 +546,7 @@ export function ChartView({
       ) : null}
     </div>
   );
-}
+});
 
 /** Live value readouts for a pane card: last non-null of each labeled series,
  *  in label order. Histogram series get their sign color (green/red). */

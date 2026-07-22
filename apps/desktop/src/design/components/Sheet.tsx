@@ -4,6 +4,7 @@ import type { ReactNode } from 'react';
 interface SheetProps {
   detent?: 'large' | 'medium';
   onDismiss: () => void;
+  onEntered?: () => void;
   children: ReactNode;
 }
 
@@ -16,8 +17,9 @@ const FOCUSABLE = 'button, input, select, textarea, a[href], [tabindex]:not([tab
  * dialog: focus moves into the panel on open, Tab is trapped inside, and
  * focus returns to the previously focused element on close.
  */
-export function Sheet({ detent = 'large', onDismiss, children }: SheetProps) {
+export function Sheet({ detent = 'large', onDismiss, onEntered, children }: SheetProps) {
   const panelRef = useRef<HTMLDivElement>(null);
+  const enteredRef = useRef(false);
   // Parents pass inline closures whose identity changes on every re-render
   // (e.g. TradeScreen re-renders on each quote tick). Track the latest
   // callback in a ref so the mount effect below runs exactly once — re-running
@@ -28,6 +30,7 @@ export function Sheet({ detent = 'large', onDismiss, children }: SheetProps) {
   useEffect(() => {
     const panel = panelRef.current;
     const previouslyFocused = document.activeElement as HTMLElement | null;
+    enteredRef.current = false;
     const first = panel?.querySelector<HTMLElement>(FOCUSABLE);
     (first ?? panel)?.focus();
 
@@ -54,12 +57,20 @@ export function Sheet({ detent = 'large', onDismiss, children }: SheetProps) {
         event.preventDefault();
       }
     };
+    const onAnimationEnd = (event: AnimationEvent) => {
+      if (event.target !== panel || event.animationName !== 'sheet-up' || enteredRef.current)
+        return;
+      enteredRef.current = true;
+      onEntered?.();
+    };
     window.addEventListener('keydown', onKey);
+    panel?.addEventListener('animationend', onAnimationEnd);
     return () => {
       window.removeEventListener('keydown', onKey);
+      panel?.removeEventListener('animationend', onAnimationEnd);
       previouslyFocused?.focus();
     };
-  }, []);
+  }, [onEntered]);
 
   return (
     <>

@@ -127,6 +127,7 @@ export class ProfileStore extends Store<ProfileStoreState> {
     try {
       const me = await this.apiClient.updateTradingProvider(provider);
       this.set({ me, tradingProvider: me.tradingProvider });
+      await this.load();
     } catch (error) {
       this.set({ errorMessage: errorMessage(error) });
     }

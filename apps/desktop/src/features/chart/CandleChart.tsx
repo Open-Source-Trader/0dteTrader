@@ -98,6 +98,7 @@ export function CandleChart({
   const lastLengthRef = useRef(0);
   const lastFirstTimeRef = useRef<number | null>(null);
   const lastBarRef = useRef<ChartCandle | null>(null);
+  const prevSymbolRef = useRef(symbol);
   const intervalRef = useRef(interval);
   intervalRef.current = interval;
   const [apis, setApis] = useState<{
@@ -222,6 +223,21 @@ export function CandleChart({
   // load, when the sliding window drops the oldest bar (head time changes), or
   // when a PAST bar's regime color actually changed.
   const lastCandleColorsRef = useRef<(string | null)[] | null>(null);
+  useEffect(() => {
+    if (prevSymbolRef.current === symbol) return;
+    prevSymbolRef.current = symbol;
+    const chart = chartRef.current;
+    if (!chart) return;
+    // A symbol swap should behave like a fresh chart session: clear the
+    // cached history so the next dataset recenters instead of reusing the
+    // previous symbol's viewport and price scale.
+    chart.priceScale('left').applyOptions({ autoScale: true });
+    lastLengthRef.current = 0;
+    lastFirstTimeRef.current = null;
+    lastCandleColorsRef.current = null;
+    prevOverlaysRef.current = null;
+  }, [symbol]);
+
   useEffect(() => {
     const chart = chartRef.current;
     const series = candleSeriesRef.current;

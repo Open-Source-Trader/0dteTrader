@@ -91,7 +91,9 @@ export interface AlpacaMarketData {
   collectOptionSnapshotsBySymbol(req: {
     symbols: string[];
   }): Promise<Record<string, SdkOptionSnapshot>>;
-  stockSnapshots(req: { symbols: string[] }): Promise<Record<string, SdkStockSnapshot>>;
+  stocks: {
+    stockSnapshots(req: { symbols: string[] }): Promise<Record<string, SdkStockSnapshot>>;
+  };
   getOptionBarsFor(symbol: string, req: SdkBarsRequest): Promise<SdkBar[]>;
   getStockBarsFor(symbol: string, req: SdkBarsRequest): Promise<SdkBar[]>;
   collectOptionChainBySymbol(req: {

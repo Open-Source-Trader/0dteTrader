@@ -143,7 +143,9 @@ export class AlpacaBrokerGateway implements BrokerGateway, OnModuleDestroy {
       if (!snap) throw brokerErrors.contractNotFound(`Unknown option: ${symbol}`);
       return toQuote(symbol, snap);
     }
-    const snaps = await this.guard(() => client.marketData.stockSnapshots({ symbols: [symbol] }));
+    const snaps = await this.guard(() =>
+      client.marketData.stocks.stockSnapshots({ symbols: [symbol] }),
+    );
     const snap = snaps[symbol];
     if (!snap) throw brokerErrors.contractNotFound(`Unknown symbol: ${symbol}`);
     return toQuote(symbol, snap);

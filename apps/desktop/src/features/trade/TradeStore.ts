@@ -316,7 +316,7 @@ export class TradeStore extends Store<TradeStoreState> {
 
     try {
       const side: OrderSide = position.quantity > 0 ? 'sell' : 'buy';
-      const contract = this.optionContractResolver?.(position.symbol);
+      const contract = this.optionContractResolver?.(position.symbol) ?? null;
       if (!contract) {
         this.showToast(`Open ${position.symbol}'s chart to flatten this option.`, 'error');
         return;

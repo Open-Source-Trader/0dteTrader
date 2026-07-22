@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { BrokerProvider, TradingMode } from '@0dtetrader/shared-types';
 import { useContainer } from '../../app/container';
 import { useStore } from '../../core/observable';
@@ -17,7 +17,7 @@ interface ProfileViewProps {
   onDismiss: () => void;
 }
 
-export function ProfileView({ onLogout, onDismiss }: ProfileViewProps) {
+export const ProfileView = memo(function ProfileView({ onLogout, onDismiss }: ProfileViewProps) {
   const container = useContainer();
   const store = useMemo(() => new ProfileStore(container.apiClient), [container]);
   const state = useStore(store);
@@ -27,10 +27,23 @@ export function ProfileView({ onLogout, onDismiss }: ProfileViewProps) {
   } | null>(null);
   const [showLogoutConfirmation, setShowLogoutConfirmation] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const [bodyReady, setBodyReady] = useState(false);
+  const readyTimer = useRef<number | null>(null);
+  const handleSheetEntered = useCallback(() => {
+    readyTimer.current = window.setTimeout(() => setBodyReady(true), 80);
+  }, []);
+
+  useEffect(
+    () => () => {
+      if (readyTimer.current !== null) window.clearTimeout(readyTimer.current);
+    },
+    [],
+  );
 
   useEffect(() => {
+    if (!bodyReady) return;
     void store.load();
-  }, [store]);
+  }, [bodyReady, store]);
 
   const renderCredentialsSection = (environment: TradingMode, configured: boolean) => {
     const env = state[environment];
@@ -190,7 +203,7 @@ export function ProfileView({ onLogout, onDismiss }: ProfileViewProps) {
   };
 
   return (
-    <Sheet detent="large" onDismiss={onDismiss}>
+    <Sheet detent="large" onDismiss={onDismiss} onEntered={handleSheetEntered}>
       <div className="profile-view">
         <NavBar
           title="Profile"
@@ -200,98 +213,107 @@ export function ProfileView({ onLogout, onDismiss }: ProfileViewProps) {
             </button>
           }
         />
-        <div className="sheet-body grouped-list hide-scrollbar">
-          {/* Account */}
-          <div className="grouped-section">
-            <div className="section-header">Account</div>
-            <div className="section-card">
-              {state.me ? (
-                <>
-                  <div className="grouped-row">
-                    <span>Email</span>
-                    <span className="row-value" title={state.me.email}>
-                      {state.me.email}
-                    </span>
-                  </div>
-                  {state.me.tradingDisabled ? (
-                    <div className="grouped-row footnote negative">
-                      <WarningFillIcon size={14} />
-                      <span>Trading is disabled (kill switch active)</span>
+        {bodyReady ? (
+          <div className="sheet-body grouped-list hide-scrollbar">
+            {/* Account */}
+            <div className="grouped-section">
+              <div className="section-header">Account</div>
+              <div className="section-card">
+                {state.me ? (
+                  <>
+                    <div className="grouped-row">
+                      <span>Email</span>
+                      <span className="row-value" title={state.me.email}>
+                        {state.me.email}
+                      </span>
                     </div>
-                  ) : null}
-                </>
-              ) : state.isLoading ? (
-                <div className="grouped-row" aria-busy="true">
-                  <span className="skeleton skeleton-label" />
-                  <span className="skeleton skeleton-value row-value" />
-                </div>
-              ) : (
-                <>
-                  <div className="grouped-row text-secondary">Account details unavailable</div>
-                  <button className="grouped-row button-row" onClick={() => void store.load()}>
-                    Retry
-                  </button>
-                </>
-              )}
-            </div>
-          </div>
-
-          {/* Trading provider selector (webull | alpaca). */}
-          <div className="grouped-section">
-            <div className="section-header">Trading Provider</div>
-            <div className="section-card">
-              <div className="segmented-control" role="group" aria-label="Trading provider">
-                {(['webull', 'alpaca'] as BrokerProvider[]).map((provider) => (
-                  <button
-                    key={provider}
-                    type="button"
-                    className={`segment${state.tradingProvider === provider ? ' active' : ''}`}
-                    aria-pressed={state.tradingProvider === provider}
-                    onClick={async () => {
-                      await store.setTradingProvider(provider);
-                      // Re-establish the market-data stream so live quotes use the
-                      // newly selected provider immediately (the subscription was
-                      // established under the previous provider).
-                      container.quoteSocket.reconnect();
-                    }}
-                  >
-                    {provider === 'webull' ? 'Webull' : 'Alpaca'}
-                  </button>
-                ))}
+                    {state.me.tradingDisabled ? (
+                      <div className="grouped-row footnote negative">
+                        <WarningFillIcon size={14} />
+                        <span>Trading is disabled (kill switch active)</span>
+                      </div>
+                    ) : null}
+                  </>
+                ) : state.isLoading ? (
+                  <div className="grouped-row" aria-busy="true">
+                    <span className="skeleton skeleton-label" />
+                    <span className="skeleton skeleton-value row-value" />
+                  </div>
+                ) : (
+                  <>
+                    <div className="grouped-row text-secondary">Account details unavailable</div>
+                    <button className="grouped-row button-row" onClick={() => void store.load()}>
+                      Retry
+                    </button>
+                  </>
+                )}
               </div>
             </div>
-            <div className="section-footer">
-              Switch providers any time. Credentials for the other provider stay saved.
+
+            {/* Trading provider selector (webull | alpaca). */}
+            <div className="grouped-section">
+              <div className="section-header">Trading Provider</div>
+              <div className="section-card">
+                <div className="segmented-control" role="group" aria-label="Trading provider">
+                  {(['webull', 'alpaca'] as BrokerProvider[]).map((provider) => (
+                    <button
+                      key={provider}
+                      type="button"
+                      className={`segment${state.tradingProvider === provider ? ' active' : ''}`}
+                      aria-pressed={state.tradingProvider === provider}
+                      onClick={async () => {
+                        await store.setTradingProvider(provider);
+                        // Re-establish the market-data stream so live quotes use the
+                        // newly selected provider immediately (the subscription was
+                        // established under the previous provider).
+                        container.quoteSocket.reconnect();
+                      }}
+                    >
+                      {provider === 'webull' ? 'Webull' : 'Alpaca'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="section-footer">
+                Switch providers any time. Credentials for the other provider stay saved.
+              </div>
             </div>
-          </div>
 
-          {state.tradingProvider === 'webull' ? (
-            <>
-              {renderCredentialsSection('live', state.me?.webullConfigured === true)}
-              {renderCredentialsSection('practice', state.me?.webullPracticeConfigured === true)}
-            </>
-          ) : (
-            <>
-              {renderAlpacaSection('live', state.me?.alpacaConfigured === true)}
-              {renderAlpacaSection('practice', state.me?.alpacaPracticeConfigured === true)}
-            </>
-          )}
+            {state.tradingProvider === 'webull' ? (
+              <>
+                {renderCredentialsSection('live', state.me?.webullConfigured === true)}
+                {renderCredentialsSection('practice', state.me?.webullPracticeConfigured === true)}
+              </>
+            ) : (
+              <>
+                {renderAlpacaSection('live', state.me?.alpacaConfigured === true)}
+                {renderAlpacaSection('practice', state.me?.alpacaPracticeConfigured === true)}
+              </>
+            )}
 
-          {/* Security section intentionally omitted: Face ID / AppLockManager is
+            {/* Security section intentionally omitted: Face ID / AppLockManager is
               iOS-only (ProfileView.swift securitySection). */}
-          {/* Session */}
-          <div className="grouped-section">
-            <div className="section-card">
-              <button
-                className="grouped-row destructive"
-                disabled={isLoggingOut}
-                onClick={() => setShowLogoutConfirmation(true)}
-              >
-                {isLoggingOut ? <Spinner size={14} /> : 'Log Out'}
-              </button>
+            {/* Session */}
+            <div className="grouped-section">
+              <div className="section-card">
+                <button
+                  className="grouped-row destructive"
+                  disabled={isLoggingOut}
+                  onClick={() => setShowLogoutConfirmation(true)}
+                >
+                  {isLoggingOut ? <Spinner size={14} /> : 'Log Out'}
+                </button>
+              </div>
             </div>
           </div>
-        </div>
+        ) : (
+          <div
+            className="sheet-body grouped-list hide-scrollbar"
+            style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+          >
+            <Spinner size={18} />
+          </div>
+        )}
 
         {deleteTarget ? (
           <AlertDialog
@@ -341,4 +363,4 @@ export function ProfileView({ onLogout, onDismiss }: ProfileViewProps) {
       </div>
     </Sheet>
   );
-}
+});

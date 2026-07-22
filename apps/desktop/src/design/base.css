@@ -180,10 +180,10 @@ input:focus-visible {
 
 @keyframes sheet-up {
   from {
-    transform: translateY(100%);
+    transform: translate3d(0, 100%, 0);
   }
   to {
-    transform: translateY(0);
+    transform: translate3d(0, 0, 0);
   }
 }
 

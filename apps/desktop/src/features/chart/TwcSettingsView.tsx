@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { memo, type ReactNode } from 'react';
 import { Menu } from '../../design/components/Menu';
 import { NavBar } from '../../design/components/NavBar';
 import { Sheet } from '../../design/components/Sheet';
@@ -32,7 +32,12 @@ interface TwcSettingsViewProps {
  * indicator: every phase-1 input from the Pine script, grouped like its input
  * groups. Changes apply and persist immediately.
  */
-export function TwcSettingsView({ settings, onChange, onBack, onDismiss }: TwcSettingsViewProps) {
+export const TwcSettingsView = memo(function TwcSettingsView({
+  settings,
+  onChange,
+  onBack,
+  onDismiss,
+}: TwcSettingsViewProps) {
   const patch = (partial: Partial<TwcHeatmapSettings>) => onChange({ ...settings, ...partial });
 
   const toggleRow = (label: string, key: keyof TwcHeatmapSettings): ReactNode => (
@@ -395,4 +400,4 @@ export function TwcSettingsView({ settings, onChange, onBack, onDismiss }: TwcSe
       </div>
     </Sheet>
   );
-}
+});

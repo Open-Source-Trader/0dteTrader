@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { Me, OrderSide, TradingMode } from '@0dtetrader/shared-types';
 import { useContainer } from '../../app/container';
 import { useStore } from '../../core/observable';
@@ -7,7 +7,10 @@ import { NavBar } from '../../design/components/NavBar';
 import { Format } from '../../design/format';
 import { ClockIcon, LayoutFullIcon, LayoutSplitIcon, PersonCircleIcon } from '../../design/icons';
 import type { TradeLayout } from '../../core/storage/SettingsStore';
+import type { IndicatorSettings } from '../chart/indicatorSettings';
 import { enabledSubPanes } from '../chart/indicatorSettings';
+import type { TwcHeatmapSettings } from '../chart/twc/twcSettings';
+import type { OptionsAnalyticsSettings } from '../chart/optionsAnalytics/optionsAnalyticsSettings';
 import { ChartView } from '../chart/ChartView';
 import { IndicatorSettingsView } from '../chart/IndicatorSettingsView';
 import { TwcSettingsView } from '../chart/TwcSettingsView';
@@ -93,12 +96,12 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
     };
   }, [apiClient]);
 
-  const confirmModeSwitch = async () => {
+  const confirmModeSwitch = useCallback(async () => {
     await apiClient.updateTradingMode(nextMode);
     // Deliberately simple: guarantees every store and the quote socket
     // re-init against the new environment.
     location.reload();
-  };
+  }, [apiClient, nextMode]);
 
   const contentRef = useRef<HTMLDivElement>(null);
   const [contentHeight, setContentHeight] = useState(0);
@@ -190,15 +193,69 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
     return () => observer.disconnect();
   }, []);
 
-  const toggleLayout = () => {
+  const refreshTradingContext = useCallback(async () => {
+    try {
+      const nextMe = await apiClient.me();
+      setMe(nextMe);
+      await tradeStore.refreshTradingData();
+    } catch {
+      // Ignore: the profile sheet surfaces failures directly.
+    }
+  }, [apiClient, tradeStore]);
+
+  const toggleLayout = useCallback(() => {
     const next: TradeLayout = layout === 'fullscreen' ? 'split' : 'fullscreen';
     setLayout(next);
     settingsStore.layoutMode = next;
-  };
+  }, [layout, settingsStore]);
 
-  const arm = (side: OrderSide) => {
-    tradeStore.arm(side, chartStore.getState().symbol, chainStore);
-  };
+  const arm = useCallback(
+    (side: OrderSide) => {
+      tradeStore.arm(side, chartStore.getState().symbol, chainStore);
+    },
+    [chainStore, chartStore, tradeStore],
+  );
+
+  const openProfile = useCallback(() => setShowProfile(true), []);
+  const openHistory = useCallback(() => setShowHistory(true), []);
+  const openSymbolSearch = useCallback(() => setShowSymbolSearch(true), []);
+  const openIndicatorSettings = useCallback(() => setShowIndicatorSettings(true), []);
+  const closeSymbolSearch = useCallback(() => setShowSymbolSearch(false), []);
+  const closeIndicatorSettings = useCallback(() => setShowIndicatorSettings(false), []);
+  const openModeConfirmation = useCallback(() => setShowModeConfirmation(true), []);
+  const openTwcSettings = useCallback(() => {
+    setShowIndicatorSettings(false);
+    setShowTwcSettings(true);
+  }, []);
+  const closeTwcSettings = useCallback(() => setShowTwcSettings(false), []);
+  const handleSymbolSelect = useCallback(
+    (symbol: string) => chartStore.selectSymbol(symbol),
+    [chartStore],
+  );
+  const handleIndicatorSettingsChange = useCallback(
+    (settings: IndicatorSettings) => chartStore.setIndicatorSettings(settings),
+    [chartStore],
+  );
+  const handleTwcToggle = useCallback(
+    (on: boolean) =>
+      chartStore.setTwcSettings({ ...chartStore.getState().twcSettings, enabled: on }),
+    [chartStore],
+  );
+  const handleTwcSettingsChange = useCallback(
+    (settings: TwcHeatmapSettings) => chartStore.setTwcSettings(settings),
+    [chartStore],
+  );
+  const handleOptionsAnalyticsChange = useCallback(
+    (settings: OptionsAnalyticsSettings) => chartStore.setOptionsAnalytics(settings),
+    [chartStore],
+  );
+  const closeModeConfirmation = useCallback(() => setShowModeConfirmation(false), []);
+  const handleProfileDismiss = useCallback(() => {
+    setShowProfile(false);
+    quoteSocket.reconnect();
+    void refreshTradingContext();
+  }, [quoteSocket, refreshTradingContext]);
+  const dismissHistory = useCallback(() => setShowHistory(false), []);
 
   // Same gate as the split-layout TradePanel's Buy/Sell buttons.
   const canTrade = chainStore.selectedContract !== null;
@@ -251,18 +308,10 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
         title="0dteTrader"
         leading={
           <>
-            <button
-              className="navbar-icon-button"
-              onClick={() => setShowProfile(true)}
-              aria-label="Profile"
-            >
+            <button className="navbar-icon-button" onClick={openProfile} aria-label="Profile">
               <PersonCircleIcon size={22} />
             </button>
-            <button
-              className="navbar-icon-button"
-              onClick={() => setShowHistory(true)}
-              aria-label="Trade history"
-            >
+            <button className="navbar-icon-button" onClick={openHistory} aria-label="Trade history">
               <ClockIcon size={22} />
             </button>
           </>
@@ -284,7 +333,7 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
       {needsProviderConfig ? (
         <button
           type="button"
-          onClick={() => setShowProfile(true)}
+          onClick={openProfile}
           style={{
             display: 'flex',
             alignItems: 'center',
@@ -310,10 +359,10 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
               store={chartStore}
               drawingsStore={drawingsStore}
               apiClient={apiClient}
-              onSymbolSearch={() => setShowSymbolSearch(true)}
-              onIndicatorSettings={() => setShowIndicatorSettings(true)}
+              onSymbolSearch={openSymbolSearch}
+              onIndicatorSettings={openIndicatorSettings}
               tradingMode={tradingMode}
-              onToggleMode={() => setShowModeConfirmation(true)}
+              onToggleMode={openModeConfirmation}
               optionsAnalyticsExpiration={optionsAnalyticsExpiration}
             />
             {/* Scrim so the dock never lets chart content bleed through the buttons */}
@@ -363,10 +412,10 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
                 store={chartStore}
                 drawingsStore={drawingsStore}
                 apiClient={apiClient}
-                onSymbolSearch={() => setShowSymbolSearch(true)}
-                onIndicatorSettings={() => setShowIndicatorSettings(true)}
+                onSymbolSearch={openSymbolSearch}
+                onIndicatorSettings={openIndicatorSettings}
                 tradingMode={tradingMode}
-                onToggleMode={() => setShowModeConfirmation(true)}
+                onToggleMode={openModeConfirmation}
                 optionsAnalyticsExpiration={optionsAnalyticsExpiration}
               />
             </div>
@@ -408,40 +457,35 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
       {showSymbolSearch ? (
         <SymbolSearchView
           currentSymbol={chart.symbol}
-          onSelect={(symbol) => chartStore.selectSymbol(symbol)}
-          onDismiss={() => setShowSymbolSearch(false)}
+          onSelect={handleSymbolSelect}
+          onDismiss={closeSymbolSearch}
         />
       ) : null}
       {showIndicatorSettings ? (
         <IndicatorSettingsView
           settings={chart.indicatorSettings}
-          onChange={(settings) => chartStore.setIndicatorSettings(settings)}
-          onDismiss={() => setShowIndicatorSettings(false)}
+          onChange={handleIndicatorSettingsChange}
+          onDismiss={closeIndicatorSettings}
           twcEnabled={chart.twcSettings.enabled}
-          onToggleTwc={(on) => chartStore.setTwcSettings({ ...chart.twcSettings, enabled: on })}
-          onOpenTwcSettings={() => {
-            setShowIndicatorSettings(false);
-            setShowTwcSettings(true);
-          }}
+          onToggleTwc={handleTwcToggle}
+          onOpenTwcSettings={openTwcSettings}
           optionsAnalytics={chart.optionsAnalytics}
-          onChangeOptionsAnalytics={(settings) => chartStore.setOptionsAnalytics(settings)}
+          onChangeOptionsAnalytics={handleOptionsAnalyticsChange}
         />
       ) : null}
       {showTwcSettings ? (
         <TwcSettingsView
           settings={chart.twcSettings}
-          onChange={(settings) => chartStore.setTwcSettings(settings)}
+          onChange={handleTwcSettingsChange}
           onBack={() => {
             setShowTwcSettings(false);
             setShowIndicatorSettings(true);
           }}
-          onDismiss={() => setShowTwcSettings(false)}
+          onDismiss={closeTwcSettings}
         />
       ) : null}
-      {showProfile ? (
-        <ProfileView onLogout={onLogout} onDismiss={() => setShowProfile(false)} />
-      ) : null}
-      {showHistory ? <HistoryView onDismiss={() => setShowHistory(false)} /> : null}
+      {showProfile ? <ProfileView onLogout={onLogout} onDismiss={handleProfileDismiss} /> : null}
+      {showHistory ? <HistoryView onDismiss={dismissHistory} /> : null}
       {showModeConfirmation ? (
         <AlertDialog
           title={nextMode === 'live' ? 'Switch to LIVE trading?' : 'Switch to PRACTICE mode?'}
@@ -458,7 +502,7 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
             },
             { label: 'Cancel', role: 'cancel' },
           ]}
-          onDismiss={() => setShowModeConfirmation(false)}
+          onDismiss={closeModeConfirmation}
         />
       ) : null}
     </div>

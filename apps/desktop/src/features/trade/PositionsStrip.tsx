@@ -22,6 +22,8 @@ interface PositionsStripProps {
   /** Expanded height cap — smaller when the trade panel is in a compact
    *  density so the strip can't push the SELL/BUY row out of view. */
   maxHeight?: number;
+  /** When true, flatten and cancel are disabled (trading lock active). */
+  locked?: boolean;
 }
 
 const chipStyle: React.CSSProperties = {
@@ -51,6 +53,7 @@ export function PositionsStrip({
   onCancelOrder,
   rowPadding = '0 20px',
   maxHeight = 140,
+  locked = false,
 }: PositionsStripProps) {
   const [positionPendingFlatten, setPositionPendingFlatten] = useState<Position | null>(null);
   const [orderPendingCancel, setOrderPendingCancel] = useState<OrderResult | null>(null);
@@ -86,11 +89,12 @@ export function PositionsStrip({
           {positions.map((position) => (
             <button
               key={position.symbol}
-              style={chipStyle}
+              style={{ ...chipStyle, opacity: locked ? 0.55 : 1 }}
+              disabled={locked}
               onClick={() => setPositionPendingFlatten(position)}
               aria-label={`Position ${position.symbol}${
                 workingSymbols.includes(position.symbol) ? ', order working' : ''
-              }, activate to flatten`}
+              }${locked ? ', trading locked' : ', activate to flatten'}`}
             >
               <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                 <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -157,7 +161,9 @@ export function PositionsStrip({
                   // hit target to ~33x33px.
                   margin: '-8px -8px -8px 0',
                   padding: 8,
+                  opacity: locked ? 0.55 : 1,
                 }}
+                disabled={locked}
                 onClick={() => setOrderPendingCancel(order)}
                 aria-label="Cancel order"
               >

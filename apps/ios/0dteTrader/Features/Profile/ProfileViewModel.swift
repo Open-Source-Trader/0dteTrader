@@ -30,6 +30,10 @@ final class ProfileViewModel: ObservableObject {
         didSet { settingsStore.appLockEnabled = appLockEnabled }
     }
 
+    @Published var bypassOrderConfirmation: Bool {
+        didSet { settingsStore.bypassOrderConfirmation = bypassOrderConfirmation }
+    }
+
     private let apiClient: APIClient
     private let settingsStore: SettingsStore
     private let quoteSocket: QuoteSocketClient
@@ -46,6 +50,7 @@ final class ProfileViewModel: ObservableObject {
         self.quoteSocket = quoteSocket
         self.onLogout = onLogout
         self.appLockEnabled = settingsStore.appLockEnabled
+        self.bypassOrderConfirmation = settingsStore.bypassOrderConfirmation
     }
 
     /// True when the last `load()` failed. Kept separate from `errorMessage`

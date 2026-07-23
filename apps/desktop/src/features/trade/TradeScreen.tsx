@@ -1,11 +1,18 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import type { Me, OrderSide, TradingMode } from '@0dtetrader/shared-types';
+import type { Me, OptionContract, OrderSide, TradingMode } from '@0dtetrader/shared-types';
 import { useContainer } from '../../app/container';
 import { useStore } from '../../core/observable';
 import { AlertDialog } from '../../design/components/AlertDialog';
 import { NavBar } from '../../design/components/NavBar';
 import { Format } from '../../design/format';
-import { ClockIcon, LayoutFullIcon, LayoutSplitIcon, PersonCircleIcon } from '../../design/icons';
+import {
+  ClockIcon,
+  LayoutFullIcon,
+  LayoutSplitIcon,
+  LockIcon,
+  LockOpenIcon,
+  PersonCircleIcon,
+} from '../../design/icons';
 import type { TradeLayout } from '../../core/storage/SettingsStore';
 import { enabledSubPanes } from '../chart/indicatorSettings';
 import { ChartView } from '../chart/ChartView';
@@ -47,6 +54,7 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
   const chain = useStore(chainStore); // Chain selection supplies the exact analytics expiration.
 
   const [layout, setLayout] = useState<TradeLayout>(() => settingsStore.layoutMode);
+  const [locked, setLocked] = useState(() => settingsStore.tradingLocked);
   const [showSymbolSearch, setShowSymbolSearch] = useState(false);
   const [showIndicatorSettings, setShowIndicatorSettings] = useState(false);
   const [showTwcSettings, setShowTwcSettings] = useState(false);
@@ -108,7 +116,9 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
     void chartStore.start();
     void tradeStore.refreshTradingData();
     tradeStore.optionContractResolver = (symbol) =>
-      chainStore.getState().chain?.contracts.find((contract) => contract.symbol === symbol);
+      chainStore
+        .getState()
+        .chain?.contracts.find((contract: OptionContract) => contract.symbol === symbol);
     return quoteSocket.onOrderUpdate((update) => tradeStore.handleOrderUpdate(update));
   }, [chartStore, tradeStore, chainStore, quoteSocket]);
 
@@ -196,19 +206,33 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
     settingsStore.layoutMode = next;
   };
 
-  const arm = (side: OrderSide) => {
-    tradeStore.arm(side, chartStore.getState().symbol, chainStore);
+  const toggleLock = () => {
+    const next = !locked;
+    setLocked(next);
+    settingsStore.tradingLocked = next;
   };
 
-  // Same gate as the split-layout TradePanel's Buy/Sell buttons.
-  const canTrade = chainStore.selectedContract !== null;
+  const arm = (side: OrderSide) => {
+    tradeStore.arm(
+      side,
+      chartStore.getState().symbol,
+      chainStore,
+      settingsStore.bypassOrderConfirmation,
+    );
+  };
+
+  // Same gate as the split-layout TradePanel's Buy/Sell buttons; the lock
+  // disables every order-placing control while leaving the chart untouched.
+  const canTrade = chainStore.selectedContract !== null && !locked;
 
   // Explains a disabled BUY/SELL; rendered above the floating buttons.
-  const disabledReason = chart.errorMessage
-    ? 'Market data unavailable — check credentials in Profile'
-    : !chainStore.selectedContract
-      ? 'Select an option contract to trade'
-      : null;
+  const disabledReason = locked
+    ? 'Trading locked'
+    : chart.errorMessage
+      ? 'Market data unavailable — check credentials in Profile'
+      : !chainStore.selectedContract
+        ? 'Select an option contract to trade'
+        : null;
 
   // Fixed split sized by sub-pane count (0/1/2): each pane takes chart
   // height, so the panel shrinks and its content compacts to match — the
@@ -234,6 +258,7 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
       workingSymbols={trade.workingSymbols}
       onFlatten={(position) => void tradeStore.flatten(position)}
       onCancelOrder={(order) => void tradeStore.cancel(order)}
+      locked={locked}
     />
   );
 
@@ -268,16 +293,30 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
           </>
         }
         trailing={
-          <button
-            className="navbar-icon-button"
-            onClick={toggleLayout}
-            aria-pressed={layout === 'split'}
-            aria-label={
-              layout === 'fullscreen' ? 'Switch to split layout' : 'Switch to fullscreen layout'
-            }
-          >
-            {layout === 'fullscreen' ? <LayoutSplitIcon size={22} /> : <LayoutFullIcon size={22} />}
-          </button>
+          <>
+            <button
+              className="navbar-icon-button"
+              onClick={toggleLock}
+              aria-pressed={locked}
+              aria-label={locked ? 'Unlock trading' : 'Lock trading'}
+            >
+              {locked ? <LockIcon size={22} /> : <LockOpenIcon size={22} />}
+            </button>
+            <button
+              className="navbar-icon-button"
+              onClick={toggleLayout}
+              aria-pressed={layout === 'split'}
+              aria-label={
+                layout === 'fullscreen' ? 'Switch to split layout' : 'Switch to fullscreen layout'
+              }
+            >
+              {layout === 'fullscreen' ? (
+                <LayoutSplitIcon size={22} />
+              ) : (
+                <LayoutFullIcon size={22} />
+              )}
+            </button>
+          </>
         }
       />
 
@@ -390,6 +429,7 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
                 chainStore={chainStore}
                 onArm={arm}
                 density={panelDensity}
+                locked={locked}
               />
             </div>
           </div>

@@ -15,6 +15,7 @@ struct TradeScreenView: View {
     @StateObject private var profileViewModel: ProfileViewModel
 
     @State private var layout: TradeLayout
+    @State private var tradingLocked: Bool
     @State private var showSymbolSearch = false
     @State private var showIndicatorSettings = false
     @State private var showProfile = false
@@ -37,6 +38,7 @@ struct TradeScreenView: View {
         _tradeViewModel = StateObject(wrappedValue: container.makeTradeViewModel())
         _profileViewModel = StateObject(wrappedValue: container.makeProfileViewModel(onLogout: onLogout))
         _layout = State(initialValue: container.settingsStore.layoutMode)
+        _tradingLocked = State(initialValue: container.settingsStore.tradingLocked)
         self.settingsStore = container.settingsStore
     }
 
@@ -84,6 +86,14 @@ struct TradeScreenView: View {
                     }
                     ToolbarItem(placement: .topBarTrailing) {
                         AIAnalysisButton { showAIAnalysis = true }
+                    }
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button {
+                            toggleLock()
+                        } label: {
+                            Image(systemName: tradingLocked ? "lock.fill" : "lock.open.fill")
+                        }
+                        .accessibilityLabel(tradingLocked ? "Unlock trading" : "Lock trading")
                     }
                     ToolbarItem(placement: .topBarTrailing) {
                         Button {
@@ -250,7 +260,12 @@ struct TradeScreenView: View {
                     VStack(spacing: AppSpacing.sm) {
                         positionsStrip
                         FloatingTradeButtons(isEnabled: canTrade) { side in
-                            tradeViewModel.arm(side: side, underlying: chartViewModel.symbol, chainViewModel: chainViewModel)
+                            tradeViewModel.arm(
+                                side: side,
+                                underlying: chartViewModel.symbol,
+                                chainViewModel: chainViewModel,
+                                bypass: settingsStore.bypassOrderConfirmation
+                            )
                         }
                     }
                     .padding(.bottom, AppSpacing.lg + insetBottom)
@@ -280,8 +295,14 @@ struct TradeScreenView: View {
                         underlying: chartViewModel.symbol,
                         positionsStrip: positionsStrip,
                         density: Self.panelDensities[min(paneCount, Self.panelDensities.count - 1)],
+                        tradingLocked: tradingLocked,
                         onArm: { side in
-                            tradeViewModel.arm(side: side, underlying: chartViewModel.symbol, chainViewModel: chainViewModel)
+                            tradeViewModel.arm(
+                                side: side,
+                                underlying: chartViewModel.symbol,
+                                chainViewModel: chainViewModel,
+                                bypass: settingsStore.bypassOrderConfirmation
+                            )
                         }
                     )
                     .frame(height: panelHeight)
@@ -327,6 +348,7 @@ struct TradeScreenView: View {
             positions: tradeViewModel.positions,
             openOrders: tradeViewModel.openOrders,
             workingSymbols: tradeViewModel.workingSymbols,
+            tradingLocked: tradingLocked,
             onFlatten: { position in
                 Task { await tradeViewModel.flatten(position) }
             },
@@ -349,9 +371,10 @@ struct TradeScreenView: View {
         return symbols.sorted()
     }
 
-    /// Same gate as the split-layout TradePanelView's Buy/Sell buttons.
+    /// Same gate as the split-layout TradePanelView's Buy/Sell buttons; the lock
+    /// disables every order-placing control while leaving the chart untouched.
     private var canTrade: Bool {
-        chainViewModel.selectedContract != nil
+        chainViewModel.selectedContract != nil && !tradingLocked
     }
 
     // MARK: - Provider-aware copy + empty state
@@ -396,6 +419,12 @@ struct TradeScreenView: View {
             layout = layout == .fullscreen ? .split : .fullscreen
         }
         settingsStore.layoutMode = layout
+    }
+
+    private func toggleLock() {
+        Haptics.selection()
+        tradingLocked.toggle()
+        settingsStore.tradingLocked = tradingLocked
     }
 }
 

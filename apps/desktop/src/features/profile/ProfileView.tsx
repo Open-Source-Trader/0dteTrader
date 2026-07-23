@@ -6,6 +6,7 @@ import { AlertDialog } from '../../design/components/AlertDialog';
 import { NavBar } from '../../design/components/NavBar';
 import { Sheet } from '../../design/components/Sheet';
 import { Spinner } from '../../design/components/Spinner';
+import { Toggle } from '../../design/components/Toggle';
 import { CheckCircleFillIcon, WarningFillIcon } from '../../design/icons';
 import { ProfileStore } from './ProfileStore';
 import { AlpacaCredentialsForm } from './AlpacaCredentialsForm';
@@ -27,6 +28,14 @@ export function ProfileView({ onLogout, onDismiss }: ProfileViewProps) {
   } | null>(null);
   const [showLogoutConfirmation, setShowLogoutConfirmation] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const [bypassConfirmation, setBypassConfirmation] = useState(
+    () => container.settingsStore.bypassOrderConfirmation,
+  );
+
+  const handleBypassChange = (on: boolean) => {
+    setBypassConfirmation(on);
+    container.settingsStore.bypassOrderConfirmation = on;
+  };
 
   useEffect(() => {
     void store.load();
@@ -276,6 +285,23 @@ export function ProfileView({ onLogout, onDismiss }: ProfileViewProps) {
               {renderAlpacaSection('practice', state.me?.alpacaPracticeConfigured === true)}
             </>
           )}
+
+          {/* Trading */}
+          <div className="grouped-section">
+            <div className="section-header">Trading</div>
+            <div className="section-card">
+              <div className="grouped-row">
+                <span>Skip order confirmation</span>
+                <span style={{ marginLeft: 'auto' }}>
+                  <Toggle on={bypassConfirmation} onChange={handleBypassChange} />
+                </span>
+              </div>
+            </div>
+            <div className="section-footer">
+              When on, tapping Buy or Sell places the order immediately without the confirmation
+              step. This device only.
+            </div>
+          </div>
 
           {/* Security section intentionally omitted: Face ID / AppLockManager is
               iOS-only (ProfileView.swift securitySection). */}

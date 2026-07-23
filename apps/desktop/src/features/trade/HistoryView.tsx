@@ -187,7 +187,7 @@ export function HistoryView({ onDismiss }: { onDismiss: () => void }) {
                   </span>
                 </div>
               ) : (
-                history.entries.map((entry, index) => (
+                history.entries.map((entry: TradeHistoryEntry, index: number) => (
                   <div
                     key={entry.orderId}
                     style={{

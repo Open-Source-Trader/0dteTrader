@@ -16,23 +16,25 @@ export function selectAutoOTM(
   const targetExpiration = expiration ?? nearestExpiration(chain.expirations);
 
   const candidates = chain.contracts.filter(
-    (contract) =>
+    (contract: OptionContract) =>
       contract.optionType === optionType &&
       (targetExpiration === null || contract.expiration === targetExpiration),
   );
 
   if (optionType === 'call') {
     return candidates
-      .filter((contract) => contract.strike > referencePrice)
+      .filter((contract: OptionContract) => contract.strike > referencePrice)
       .reduce<OptionContract | null>(
-        (best, contract) => (best === null || contract.strike < best.strike ? contract : best),
+        (best: OptionContract | null, contract: OptionContract) =>
+          best === null || contract.strike < best.strike ? contract : best,
         null,
       );
   }
   return candidates
-    .filter((contract) => contract.strike < referencePrice)
+    .filter((contract: OptionContract) => contract.strike < referencePrice)
     .reduce<OptionContract | null>(
-      (best, contract) => (best === null || contract.strike > best.strike ? contract : best),
+      (best: OptionContract | null, contract: OptionContract) =>
+        best === null || contract.strike > best.strike ? contract : best,
       null,
     );
 }

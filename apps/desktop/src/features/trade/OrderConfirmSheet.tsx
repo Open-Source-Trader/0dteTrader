@@ -141,7 +141,7 @@ export function OrderConfirmSheet({ tradeStore, ticket }: OrderConfirmSheetProps
                 label="Est. buying power"
                 value={Format.price(preview.resolved.estBuyingPower)}
               />
-              {preview.warnings.map((warning) => (
+              {preview.warnings.map((warning: string) => (
                 <div
                   key={warning}
                   style={{

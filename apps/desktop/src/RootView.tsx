@@ -67,53 +67,56 @@ export function RootView() {
     return () => document.removeEventListener('visibilitychange', onVisibilityChange);
   }, [container]);
 
+  let content: ReactNode;
+  if (state === 'checking') {
+    content = (
+      <div
+        role="status"
+        aria-live="polite"
+        style={{
+          flex: 1,
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: 'var(--space-3)',
+        }}
+      >
+        {/* The text label carries the meaning; hide the glyph from AT. */}
+        <span aria-hidden="true">
+          <Spinner size={24} />
+        </span>
+        <span className="text-secondary" style={{ fontSize: 'var(--fs-footnote)' }}>
+          Restoring session…
+        </span>
+        {slowRestore ? (
+          <>
+            <span className="text-secondary" style={{ fontSize: 'var(--fs-footnote)' }}>
+              Taking longer than expected — check your connection.
+            </span>
+            <button
+              style={{ fontSize: 'var(--fs-subheadline)', color: 'var(--app-accent)' }}
+              onClick={() => void container.authStore.start()}
+            >
+              Retry
+            </button>
+          </>
+        ) : null}
+      </div>
+    );
+  } else if (state === 'disclaimer') {
+    content = <RiskDisclaimerView store={container.authStore} />;
+  } else if (state === 'unauthenticated') {
+    content = <LoginView store={container.authStore} />;
+  } else {
+    content = <TradeScreen onLogout={() => container.authStore.logout()} />;
+  }
+
   return (
     <div className="phone-frame">
       <StatusBar />
       <div className="phone-content">
-        <StateFade key={state}>
-          {state === 'checking' ? (
-            <div
-              role="status"
-              aria-live="polite"
-              style={{
-                flex: 1,
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: 'var(--space-3)',
-              }}
-            >
-              {/* The text label carries the meaning; hide the glyph from AT. */}
-              <span aria-hidden="true">
-                <Spinner size={24} />
-              </span>
-              <span className="text-secondary" style={{ fontSize: 'var(--fs-footnote)' }}>
-                Restoring session…
-              </span>
-              {slowRestore ? (
-                <>
-                  <span className="text-secondary" style={{ fontSize: 'var(--fs-footnote)' }}>
-                    Taking longer than expected — check your connection.
-                  </span>
-                  <button
-                    style={{ fontSize: 'var(--fs-subheadline)', color: 'var(--app-accent)' }}
-                    onClick={() => void container.authStore.start()}
-                  >
-                    Retry
-                  </button>
-                </>
-              ) : null}
-            </div>
-          ) : state === 'disclaimer' ? (
-            <RiskDisclaimerView store={container.authStore} />
-          ) : state === 'unauthenticated' ? (
-            <LoginView store={container.authStore} />
-          ) : (
-            <TradeScreen onLogout={() => container.authStore.logout()} />
-          )}
-        </StateFade>
+        <StateFade key={state}>{content}</StateFade>
       </div>
       <div className="home-indicator" />
     </div>

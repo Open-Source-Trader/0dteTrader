@@ -467,12 +467,12 @@ export class WebullClient {
     raw: unknown,
   ): { token: string; expiresAt: number; status: string } | null {
     const d = (raw ?? {}) as Record<string, unknown>;
-    const token =
-      typeof d.token === 'string'
-        ? d.token
-        : typeof d.access_token === 'string'
-          ? d.access_token
-          : null;
+    let token: string | null = null;
+    if (typeof d.token === 'string') {
+      token = d.token;
+    } else if (typeof d.access_token === 'string') {
+      token = d.access_token;
+    }
     const status = typeof d.status === 'string' ? d.status : null;
     if (!token || status === null) return null;
     return { token, expiresAt: this.parseExpiry(d), status };

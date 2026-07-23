@@ -66,6 +66,12 @@ function record(value: unknown): Record<string, unknown> | null {
     : null;
 }
 
+/** Tradier collapses a single-item list to a bare object; normalize to an array. */
+function toArray(value: unknown): unknown[] {
+  if (!value) return [];
+  return Array.isArray(value) ? value : [value];
+}
+
 function finite(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
@@ -311,13 +317,16 @@ export class TradierClient {
         'Underlying spot uses the fresh last trade because a valid fresh NBBO midpoint was unavailable',
       );
     }
-    const feedMode: OptionsAnalyticsFeedMode = this.baseUrl.includes('sandbox')
-      ? 'sandbox'
-      : quote?.['delayed'] === true
-        ? 'delayed'
-        : quote?.['delayed'] === false
-          ? 'realtime'
-          : 'unknown';
+    let feedMode: OptionsAnalyticsFeedMode;
+    if (this.baseUrl.includes('sandbox')) {
+      feedMode = 'sandbox';
+    } else if (quote?.['delayed'] === true) {
+      feedMode = 'delayed';
+    } else if (quote?.['delayed'] === false) {
+      feedMode = 'realtime';
+    } else {
+      feedMode = 'unknown';
+    }
     return {
       symbol,
       spot,
@@ -368,8 +377,7 @@ export class TradierClient {
       ),
     );
     const history = record(body?.['history']);
-    const rawDays = history?.['day'];
-    const days = rawDays ? (Array.isArray(rawDays) ? rawDays : [rawDays]) : [];
+    const days = toArray(history?.['day']);
     const candles: Candle[] = [];
     for (const value of days) {
       const day = record(value);
@@ -405,8 +413,7 @@ export class TradierClient {
       `&start=${encodeURIComponent(easternMinute(start))}&end=${encodeURIComponent(easternMinute(end))}`;
     const body = record(await this.get(`/markets/timesales?${query}`));
     const series = record(body?.['series']);
-    const rawData = series?.['data'];
-    const rows = rawData ? (Array.isArray(rawData) ? rawData : [rawData]) : [];
+    const rows = toArray(series?.['data']);
     const candles: Candle[] = [];
     for (const value of rows) {
       const row = record(value);
@@ -441,8 +448,7 @@ export class TradierClient {
       ),
     );
     const options = record(body?.['options']);
-    const rawValue = options?.['option'];
-    const rawOptions = rawValue ? (Array.isArray(rawValue) ? rawValue : [rawValue]) : [];
+    const rawOptions = toArray(options?.['option']);
     const contractWarnings = new BoundedContractWarnings();
     const contracts: ValidatedAnalyticsContract[] = [];
     const contractsTotalByRoot: Record<string, number> = {};

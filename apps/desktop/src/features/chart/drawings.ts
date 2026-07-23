@@ -154,8 +154,14 @@ export class DrawingsStore extends Store<DrawingsState> {
   nudgeSelected(key: string, steps: number): void {
     const { selectedId, drawings, alerts } = this.getState();
     if (!selectedId) return;
-    const dPrice = (key === 'ArrowUp' ? 1 : key === 'ArrowDown' ? -1 : 0) * steps * 0.25; // tick
-    const dTime = (key === 'ArrowRight' ? 1 : key === 'ArrowLeft' ? -1 : 0) * steps * 60; // 1m bucket
+    let priceDir = 0;
+    if (key === 'ArrowUp') priceDir = 1;
+    else if (key === 'ArrowDown') priceDir = -1;
+    const dPrice = priceDir * steps * 0.25; // tick
+    let timeDir = 0;
+    if (key === 'ArrowRight') timeDir = 1;
+    else if (key === 'ArrowLeft') timeDir = -1;
+    const dTime = timeDir * steps * 60; // 1m bucket
     this.set({
       drawings: drawings.map((d) =>
         d.id === selectedId

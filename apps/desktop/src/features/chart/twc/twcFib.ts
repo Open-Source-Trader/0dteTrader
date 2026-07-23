@@ -41,6 +41,42 @@ export interface TwcFibResult {
 const round4 = (v: number): number => Math.round(v * 10000) / 10000;
 const approxEqual = (a: number, b: number): boolean => Math.abs(a - b) < FIB_EPSILON;
 
+/** Pine's instant-flip ratio lookup for the current swing direction. */
+function flipRatio(
+  flipLevel: TwcHeatmapSettings['flipLevel'],
+  isUp: boolean,
+  negExtLevel: number,
+): number {
+  if (flipLevel === '0.000') return 0;
+  if (flipLevel === '±0.618') return isUp ? negExtLevel : -negExtLevel;
+  return isUp ? -1.618 : 1.618;
+}
+
+/** Whether price has crossed the instant-flip threshold. */
+function crossedFlip(
+  flipTrigger: TwcHeatmapSettings['flipTrigger'],
+  isUp: boolean,
+  low: number,
+  high: number,
+  close: number,
+  flipPx: number,
+): boolean {
+  if (flipTrigger === 'Wick') return isUp ? low < flipPx : high > flipPx;
+  return isUp ? close < flipPx : close > flipPx;
+}
+
+/** New zigzag pivot value planted by an instant flip. */
+function flipPivotValue(
+  flipTrigger: TwcHeatmapSettings['flipTrigger'],
+  isUp: boolean,
+  low: number,
+  high: number,
+  close: number,
+): number {
+  if (flipTrigger !== 'Wick') return close;
+  return isUp ? low : high;
+}
+
 function seedRatios(useStandard: boolean): RatioEntry[] {
   return [
     { ratio: round4(useStandard ? FIB_NEG_0618 : -0.1618), color: TWC_COLORS.red50 },
@@ -88,14 +124,10 @@ export function fibDirectionSeries(candles: TwcCandle[], settings: TwcHeatmapSet
   const ph = simple ? pivotHigh(highs, prd, prd) : [];
   const pl = simple ? pivotLow(lows, prd, prd) : [];
 
-  const pivotPriceAt = (idx: number, isHigh: boolean): number =>
-    useWick
-      ? isHigh
-        ? highs[idx]
-        : lows[idx]
-      : isHigh
-        ? Math.max(opens[idx], closes[idx])
-        : Math.min(opens[idx], closes[idx]);
+  const pivotPriceAt = (idx: number, isHigh: boolean): number => {
+    if (useWick) return isHigh ? highs[idx] : lows[idx];
+    return isHigh ? Math.max(opens[idx], closes[idx]) : Math.min(opens[idx], closes[idx]);
+  };
 
   const zz: number[] = [];
   let dir = 0;
@@ -204,27 +236,11 @@ export function fibDirectionSeries(candles: TwcCandle[], settings: TwcHeatmapSet
     let isUp = diff >= 0;
 
     if (settings.flipEnable) {
-      const rFlip =
-        settings.flipLevel === '0.000'
-          ? 0
-          : settings.flipLevel === '±0.618'
-            ? isUp
-              ? negExtLevel
-              : -negExtLevel
-            : isUp
-              ? -1.618
-              : 1.618;
+      const rFlip = flipRatio(settings.flipLevel, isUp, negExtLevel);
       const flipPx = base + diff * rFlip;
-      const doFlip =
-        settings.flipTrigger === 'Wick'
-          ? isUp
-            ? lows[i] < flipPx
-            : highs[i] > flipPx
-          : isUp
-            ? closes[i] < flipPx
-            : closes[i] > flipPx;
+      const doFlip = crossedFlip(settings.flipTrigger, isUp, lows[i], highs[i], closes[i], flipPx);
       if (doFlip) {
-        const newVal = settings.flipTrigger === 'Wick' ? (isUp ? lows[i] : highs[i]) : closes[i];
+        const newVal = flipPivotValue(settings.flipTrigger, isUp, lows[i], highs[i], closes[i]);
         zzAdd(newVal, i);
         dir = isUp ? -1 : 1;
         base = zz[2];
@@ -256,14 +272,10 @@ export function computeFib(
   const useWick = settings.fibPivotSource === 'Wick';
   const negExtLevel = settings.useStandardRatios ? FIB_NEG_0618 : -0.1618;
 
-  const pivotPriceAt = (idx: number, isHigh: boolean): number =>
-    useWick
-      ? isHigh
-        ? highs[idx]
-        : lows[idx]
-      : isHigh
-        ? Math.max(opens[idx], closes[idx])
-        : Math.min(opens[idx], closes[idx]);
+  const pivotPriceAt = (idx: number, isHigh: boolean): number => {
+    if (useWick) return isHigh ? highs[idx] : lows[idx];
+    return isHigh ? Math.max(opens[idx], closes[idx]) : Math.min(opens[idx], closes[idx]);
+  };
 
   // Simple Pivots confirmations, precomputed (value at confirmation bar)
   const ph = settings.fibMethod === 'Simple Pivots' ? pivotHigh(highs, prd, prd) : [];
@@ -448,27 +460,11 @@ export function computeFib(
 
     // Instant flip on threshold break
     if (settings.flipEnable) {
-      const rFlip =
-        settings.flipLevel === '0.000'
-          ? 0
-          : settings.flipLevel === '±0.618'
-            ? up
-              ? negExtLevel
-              : -negExtLevel
-            : up
-              ? -1.618
-              : 1.618;
+      const rFlip = flipRatio(settings.flipLevel, up, negExtLevel);
       const flipPx = b + d * rFlip;
-      const doFlip =
-        settings.flipTrigger === 'Wick'
-          ? up
-            ? lows[i] < flipPx
-            : highs[i] > flipPx
-          : up
-            ? closes[i] < flipPx
-            : closes[i] > flipPx;
+      const doFlip = crossedFlip(settings.flipTrigger, up, lows[i], highs[i], closes[i], flipPx);
       if (doFlip) {
-        const newVal = settings.flipTrigger === 'Wick' ? (up ? lows[i] : highs[i]) : closes[i];
+        const newVal = flipPivotValue(settings.flipTrigger, up, lows[i], highs[i], closes[i]);
         zzAdd(newVal, i);
         dir = up ? -1 : 1;
         dirAtPrevBarEnd = dir;

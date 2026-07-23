@@ -430,13 +430,14 @@ export function ChartView({
               Options analytics unavailable: {optionsAnalyticsState.errorMessage}
             </div>
           ) : null}
-          {isLoading && candles.length === 0 ? (
+          {isLoading && candles.length === 0 && (
             <div className="chart-skeleton" aria-hidden="true">
               {SKELETON_BARS.map((height, index) => (
                 <div className="bar" key={index} style={{ height: `${height}%` }} />
               ))}
             </div>
-          ) : isLoading ? (
+          )}
+          {isLoading && candles.length > 0 && (
             <div
               style={{
                 position: 'absolute',
@@ -449,7 +450,7 @@ export function ChartView({
             >
               <Spinner />
             </div>
-          ) : null}
+          )}
           {errorMessage && candles.length === 0 ? (
             <div
               role="alert"

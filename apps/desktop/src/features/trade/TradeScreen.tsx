@@ -64,15 +64,20 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
   // the "configure provider" empty state.
   const tradingProvider = me?.tradingProvider ?? 'webull';
   const providerName = tradingProvider === 'alpaca' ? 'Alpaca' : 'Webull';
-  const activeProviderConfigured = me
-    ? tradingProvider === 'alpaca'
-      ? tradingMode === 'practice'
-        ? Boolean(me.alpacaPracticeConfigured)
-        : Boolean(me.alpacaConfigured)
-      : tradingMode === 'practice'
-        ? Boolean(me.webullPracticeConfigured)
-        : Boolean(me.webullConfigured)
-    : true;
+  let activeProviderConfigured = true;
+  if (me) {
+    if (tradingProvider === 'alpaca') {
+      activeProviderConfigured =
+        tradingMode === 'practice'
+          ? Boolean(me.alpacaPracticeConfigured)
+          : Boolean(me.alpacaConfigured);
+    } else {
+      activeProviderConfigured =
+        tradingMode === 'practice'
+          ? Boolean(me.webullPracticeConfigured)
+          : Boolean(me.webullConfigured);
+    }
+  }
   const needsProviderConfig = me != null && !activeProviderConfigured;
 
   useEffect(() => {
@@ -204,11 +209,12 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
   const canTrade = chainStore.selectedContract !== null;
 
   // Explains a disabled BUY/SELL; rendered above the floating buttons.
-  const disabledReason = chart.errorMessage
-    ? 'Market data unavailable — check credentials in Profile'
-    : !chainStore.selectedContract
-      ? 'Select an option contract to trade'
-      : null;
+  let disabledReason: string | null = null;
+  if (chart.errorMessage) {
+    disabledReason = 'Market data unavailable — check credentials in Profile';
+  } else if (!chainStore.selectedContract) {
+    disabledReason = 'Select an option contract to trade';
+  }
 
   // Fixed split sized by sub-pane count (0/1/2): each pane takes chart
   // height, so the panel shrinks and its content compacts to match — the

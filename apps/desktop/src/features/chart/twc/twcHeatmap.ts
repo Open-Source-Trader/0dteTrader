@@ -26,6 +26,13 @@ import {
   type TwcCandle,
 } from './twcMath';
 
+/** -1 / 0 / 1 sign of a value, with an explicit zero band. */
+function signOf(v: number): number {
+  if (v > 0) return 1;
+  if (v < 0) return -1;
+  return 0;
+}
+
 // HMM emission archetypes (mean, sigma) per state for (return, volatility)
 const MU_RET = { bull: 0.7, chop: 0.0, bear: -0.7 };
 const SD_RET = { bull: 0.9, chop: 0.6, bear: 0.9 };
@@ -106,7 +113,9 @@ export function computeHeatmap(
       pChop = priChop;
       pBear = priBear;
     }
-    hmmDominant[i] = pBull >= Math.max(pChop, pBear) ? 1 : pBear >= Math.max(pBull, pChop) ? -1 : 0;
+    if (pBull >= Math.max(pChop, pBear)) hmmDominant[i] = 1;
+    else if (pBear >= Math.max(pBull, pChop)) hmmDominant[i] = -1;
+    else hmmDominant[i] = 0;
     sHmm[i] = pBull;
   }
 
@@ -122,8 +131,7 @@ export function computeHeatmap(
     const a = lrNow[i];
     const b = lrPrev[i];
     if (a === null || b === null) return 0;
-    const slope = a - b;
-    return slope > 0 ? 1 : slope < 0 ? -1 : 0;
+    return signOf(a - b);
   });
 
   // ── MODEL 4: Holt-Winters velocity ──
@@ -134,14 +142,14 @@ export function computeHeatmap(
     const prevLevel: number = hwLevel === null ? src[i] : hwLevel;
     hwLevel = settings.hwAlpha * src[i] + (1 - settings.hwAlpha) * (prevLevel + hwTrend);
     hwTrend = settings.hwBeta * (hwLevel - prevLevel) + (1 - settings.hwBeta) * hwTrend;
-    hwSign[i] = hwTrend > 0 ? 1 : hwTrend < 0 ? -1 : 0;
+    hwSign[i] = signOf(hwTrend);
   }
 
   // ── MODEL 5: Center of Gravity turn sign ──
   const cog = cogSeries(src, settings.lenCoG);
   const cogSign: number[] = cog.map((v, i) => {
     const prev = i > 0 ? cog[i - 1] : 0;
-    return v > prev ? 1 : v < prev ? -1 : 0;
+    return signOf(v - prev);
   });
 
   // ── Forecast index + MSI composite ──
@@ -151,10 +159,10 @@ export function computeHeatmap(
   const msi: (number | null)[] = new Array(n).fill(null);
   for (let i = 0; i < n; i++) {
     const voteSum = lrSign[i] + hwSign[i] + cogSign[i];
-    const forecastIdx = voteSum > 0 ? 1 : voteSum < 0 ? -1 : 0;
+    const forecastIdx = signOf(voteSum);
     const e20 = ema20[i];
     const e50 = ema50[i];
-    const emaVel = e20 !== null && e50 !== null ? (e20 > e50 ? 1 : e20 < e50 ? -1 : 0) : 0;
+    const emaVel = e20 !== null && e50 !== null ? signOf(e20 - e50) : 0;
     const prevLr = i > 0 ? lrSign[i - 1] : 0;
     trendRun = lrSign[i] === prevLr && lrSign[i] !== 0 ? trendRun + 1 : 0;
     const runScore = Math.min(trendRun, 20) / 20;
@@ -164,7 +172,9 @@ export function computeHeatmap(
     const sFcst = (forecastIdx + 1) / 2;
     const sVwap = Math.max(0, Math.min(1, 0.5 + vz / 4));
     const sEmav = (emaVel + 1) / 2;
-    const sRun = lrSign[i] > 0 ? 0.5 + 0.5 * runScore : lrSign[i] < 0 ? 0.5 - 0.5 * runScore : 0.5;
+    let sRun = 0.5;
+    if (lrSign[i] > 0) sRun = 0.5 + 0.5 * runScore;
+    else if (lrSign[i] < 0) sRun = 0.5 - 0.5 * runScore;
     msi[i] = 100 * (0.3 * sHmm[i] + 0.3 * sFcst + 0.15 * sVwap + 0.15 * sEmav + 0.1 * sRun);
   }
 
@@ -212,7 +222,8 @@ export function computeHeatmap(
       lastStackBull = stackAgreeBull;
       lastStackBear = stackAgreeBear;
     }
-    ctfDirOut[i] = ctfBullish ? 1 : ctfBearish ? -1 : 0;
+    if (ctfBullish) ctfDirOut[i] = 1;
+    else if (ctfBearish) ctfDirOut[i] = -1;
 
     // All-ENABLED HTF stack agreement (display toggles included, unlike the
     // signal gate above) — the confluence engine's `stackDir` component.
@@ -226,12 +237,8 @@ export function computeHeatmap(
       (included3 && h3 !== null && h3 < 0 ? 1 : 0) + (included4 && h4 !== null && h4 < 0 ? 1 : 0);
     const bearCount =
       (included3 && h3 !== null && h3 > 0 ? 1 : 0) + (included4 && h4 !== null && h4 > 0 ? 1 : 0);
-    stackDirOut[i] =
-      enabledCount > 0 && bullCount === enabledCount
-        ? 1
-        : enabledCount > 0 && bearCount === enabledCount
-          ? -1
-          : 0;
+    if (enabledCount > 0 && bullCount === enabledCount) stackDirOut[i] = 1;
+    else if (enabledCount > 0 && bearCount === enabledCount) stackDirOut[i] = -1;
 
     // ST-gated heatmap triggers (independent of showMarkers; feed CL/CS too)
     const rawUp = crossesOver(msi, i, settings.msiBullThr) && hmmDominant[i] === 1;
@@ -246,12 +253,9 @@ export function computeHeatmap(
       if (m !== null && !hidden) {
         const conv = Math.max(0, Math.min(1, Math.abs(m - 50) / 50));
         const transparency = Math.round(80 - conv * 70);
-        const base =
-          hmmDominant[i] === 1
-            ? TWC_COLORS.bull
-            : hmmDominant[i] === -1
-              ? TWC_COLORS.bear
-              : TWC_COLORS.chop;
+        let base: string = TWC_COLORS.chop;
+        if (hmmDominant[i] === 1) base = TWC_COLORS.bull;
+        else if (hmmDominant[i] === -1) base = TWC_COLORS.bear;
         candleColors[i] = withOpacity(base, (100 - transparency) / 100);
       }
     }
@@ -427,7 +431,8 @@ export function computeHeatmap(
     values.map((v, i) => {
       const d = dirs[i];
       if (v === null || d === null) return null;
-      return wantBull ? (d < 0 ? v : null) : d > 0 ? v : null;
+      if (wantBull) return d < 0 ? v : null;
+      return d > 0 ? v : null;
     });
 
   if (settings.showCTFLine) {
@@ -509,22 +514,24 @@ export function computeHeatmap(
   }
 
   // ── Bias banner (last bar stack agreement) ──
-  const banner: TwcBanner | null = settings.showBiasBanner
-    ? {
-        text: lastStackBull
-          ? settings.biasLongText
-          : lastStackBear
-            ? settings.biasShortText
-            : settings.biasChopText,
-        color: lastStackBull
-          ? TWC_COLORS.bannerLong
-          : lastStackBear
-            ? TWC_COLORS.bannerShort
-            : TWC_COLORS.bannerChop,
-        position: settings.biasBannerPosition,
-        size: settings.biasBannerSize,
-      }
-    : null;
+  let banner: TwcBanner | null = null;
+  if (settings.showBiasBanner) {
+    let text = settings.biasChopText;
+    let color: string = TWC_COLORS.bannerChop;
+    if (lastStackBull) {
+      text = settings.biasLongText;
+      color = TWC_COLORS.bannerLong;
+    } else if (lastStackBear) {
+      text = settings.biasShortText;
+      color = TWC_COLORS.bannerShort;
+    }
+    banner = {
+      text,
+      color,
+      position: settings.biasBannerPosition,
+      size: settings.biasBannerSize,
+    };
+  }
 
   return {
     candleColors,

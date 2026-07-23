@@ -251,8 +251,10 @@ export function OptionsAnalyticsOverlay({
           if (presentation.showLiquidity && strike.liquidity) {
             context.font = '7px "JetBrains Mono", ui-monospace, monospace';
             context.fillStyle = 'rgba(255, 214, 10, 0.92)';
-            const liquidityY =
-              y + (presentation.showGammaProfile ? 11 : presentation.showMarkedOi ? 6 : 2);
+            let liquidityOffset = 2;
+            if (presentation.showGammaProfile) liquidityOffset = 11;
+            else if (presentation.showMarkedOi) liquidityOffset = 6;
+            const liquidityY = y + liquidityOffset;
             context.textAlign = 'left';
             context.fillText(
               `P ${optionalPercent(strike.liquidity.putRelativeSpread)}`,

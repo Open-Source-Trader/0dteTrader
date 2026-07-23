@@ -20,6 +20,17 @@ function statusColor(status: TradeHistoryEntry['status']): string {
   }
 }
 
+function pnlColor(pnl: number): string {
+  if (pnl === 0) return 'var(--label-primary)';
+  return pnl > 0 ? 'var(--pnl-positive)' : 'var(--pnl-negative)';
+}
+
+function fillOrLimitLabel(entry: TradeHistoryEntry): string {
+  if (entry.filledPrice !== undefined) return ` · filled @ ${Format.price(entry.filledPrice)}`;
+  if (entry.limitPrice !== undefined) return ` · limit ${Format.price(entry.limitPrice)}`;
+  return '';
+}
+
 function timeLabel(timestamp: string): string {
   const parsed = new Date(timestamp);
   if (Number.isNaN(parsed.getTime())) return timestamp;
@@ -149,12 +160,7 @@ export function HistoryView({ onDismiss }: { onDismiss: () => void }) {
                     fontFamily: 'var(--font-mono)',
                     fontSize: 'var(--fs-title3)',
                     fontWeight: 600,
-                    color:
-                      history.totalRealizedPnl === 0
-                        ? 'var(--label-primary)'
-                        : history.totalRealizedPnl > 0
-                          ? 'var(--pnl-positive)'
-                          : 'var(--pnl-negative)',
+                    color: pnlColor(history.totalRealizedPnl),
                   }}
                 >
                   {Format.signedPrice(history.totalRealizedPnl)}
@@ -243,11 +249,7 @@ export function HistoryView({ onDismiss }: { onDismiss: () => void }) {
                     >
                       <span>
                         {orderTypeDisplayName(entry.orderType)}
-                        {entry.filledPrice !== undefined
-                          ? ` · filled @ ${Format.price(entry.filledPrice)}`
-                          : entry.limitPrice !== undefined
-                            ? ` · limit ${Format.price(entry.limitPrice)}`
-                            : ''}
+                        {fillOrLimitLabel(entry)}
                         {' · '}
                         {timeLabel(entry.timestamp)}
                       </span>

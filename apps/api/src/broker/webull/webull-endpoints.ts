@@ -274,11 +274,14 @@ export function parsePlaceResult(raw: unknown): {
   orderId?: string;
 } {
   const d = (raw ?? {}) as Record<string, unknown>;
-  const inner = Array.isArray(d.orders)
-    ? (d.orders[0] as Record<string, unknown>)
-    : Array.isArray(raw)
-      ? (raw[0] as Record<string, unknown>)
-      : d;
+  let inner: Record<string, unknown>;
+  if (Array.isArray(d.orders)) {
+    inner = d.orders[0] as Record<string, unknown>;
+  } else if (Array.isArray(raw)) {
+    inner = raw[0] as Record<string, unknown>;
+  } else {
+    inner = d;
+  }
   return {
     clientOrderId: inner?.client_order_id !== undefined ? String(inner.client_order_id) : undefined,
     orderId: inner?.order_id !== undefined ? String(inner.order_id) : undefined,

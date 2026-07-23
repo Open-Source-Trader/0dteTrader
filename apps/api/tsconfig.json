@@ -1,10 +1,9 @@
 {
   "compilerOptions": {
-    "module": "commonjs",
+    "module": "nodenext",
     "target": "ES2021",
     "lib": ["ES2021"],
-    "moduleResolution": "node10",
-    "ignoreDeprecations": "6.0",
+    "moduleResolution": "nodenext",
     "declaration": false,
     "emitDecoratorMetadata": true,
     "experimentalDecorators": true,
@@ -13,7 +12,6 @@
     "resolveJsonModule": true,
     "sourceMap": true,
     "outDir": "./dist",
-    "baseUrl": "./",
     "skipLibCheck": true,
     "strict": true,
     "strictPropertyInitialization": false,

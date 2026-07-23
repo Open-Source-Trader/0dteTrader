@@ -456,6 +456,15 @@ export function IndicatorSettingsView({
                       />
                     </span>
                   </div>
+                  <div className="grouped-row">
+                    <span>Diagnostics &amp; Quality Warnings</span>
+                    <span className="row-value">
+                      <Toggle
+                        on={optionsAnalytics.showDiagnostics}
+                        onChange={(on) => patchOptionsAnalytics({ showDiagnostics: on })}
+                      />
+                    </span>
+                  </div>
                 </>
               ) : null}
             </div>

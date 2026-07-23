@@ -1,5 +1,8 @@
 import type {
   AuthTokens,
+  BrokerCredentialsInput,
+  BrokerCredentialsSaved,
+  BrokerProvider,
   Candle,
   CandleInterval,
   Me,
@@ -161,6 +164,35 @@ export class ApiClient {
 
   updateTradingMode(mode: TradingMode): Promise<Me> {
     return this.request({ method: 'PATCH', path: 'v1/me', body: { tradingMode: mode } });
+  }
+
+  /** Select the active trading provider (webull | alpaca). */
+  updateTradingProvider(provider: BrokerProvider): Promise<Me> {
+    return this.request({ method: 'PATCH', path: 'v1/me', body: { tradingProvider: provider } });
+  }
+
+  /** Generic, provider-aware credential save (Alpaca uses this; Webull keeps
+   *  the legacy /webull-credentials endpoint until the mobile migration). */
+  putBrokerCredentials(
+    input: BrokerCredentialsInput,
+    environment: TradingMode = 'live',
+  ): Promise<BrokerCredentialsSaved> {
+    return this.request({
+      method: 'PUT',
+      path: 'v1/me/broker-credentials',
+      body: { ...input, environment },
+    });
+  }
+
+  deleteBrokerCredentials(
+    provider: BrokerProvider,
+    environment: TradingMode = 'live',
+  ): Promise<void> {
+    return this.requestVoid({
+      method: 'DELETE',
+      path: 'v1/me/broker-credentials',
+      query: { provider, environment },
+    });
   }
 
   quote(symbol: string): Promise<Quote> {

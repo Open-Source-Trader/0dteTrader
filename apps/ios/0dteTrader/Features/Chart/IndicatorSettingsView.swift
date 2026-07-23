@@ -144,6 +144,7 @@ struct IndicatorSettingsView: View {
                                 .font(.caption)
                                 .foregroundStyle(Color.appWarning)
                         }
+                        Toggle("Diagnostics & Quality Warnings", isOn: $optionsAnalyticsSettings.showDiagnostics)
                         Stepper("Profile Strikes: \(optionsAnalyticsSettings.profileStrikeCount)",
                                 value: $optionsAnalyticsSettings.profileStrikeCount,
                                 in: OptionsAnalyticsSettings.profileStrikeRange)

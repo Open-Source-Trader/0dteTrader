@@ -6,7 +6,8 @@ import { randomUUID } from 'node:crypto';
  * app uses (documented on PrismaService) and emulates:
  *   - @default(uuid()) / @default(now()) / @updatedAt
  *   - unique constraints on user.email, refreshToken.tokenHash,
- *     webullCredential.(userId, environment) and
+ *     webullCredential.(userId, environment),
+ *     brokerCredential.(userId, provider, environment) and
  *     orderAudit.(userId, idempotencyKey)
  *     (violations throw a P2002-coded error like the real client)
  *   - nullable unique column semantics for orderAudit.idempotencyKey
@@ -48,6 +49,8 @@ export class InMemoryPrismaService {
   readonly tradeOrders: any[] = [];
   readonly optionsAnalyticsSnapshots: any[] = [];
   readonly scheduledJobLeases: any[] = [];
+  readonly brokerCredentials: any[] = [];
+  readonly brokerApiTokens: any[] = [];
 
   readonly user = {
     findUnique: async ({ where }: any) => {
@@ -63,6 +66,7 @@ export class InMemoryPrismaService {
         id: randomUUID(),
         tradingDisabled: false,
         tradingMode: 'live',
+        tradingProvider: 'webull',
         createdAt: now,
         updatedAt: now,
         ...data,
@@ -291,6 +295,114 @@ export class InMemoryPrismaService {
     },
   };
 
+  readonly brokerCredential = {
+    findUnique: async ({ where }: any) => {
+      const key = where.userId_provider_environment ?? {
+        userId: where.userId,
+        provider: where.provider ?? 'webull',
+        environment: 'live',
+      };
+      return (
+        this.brokerCredentials.find(
+          (c) =>
+            c.userId === key.userId &&
+            c.provider === key.provider &&
+            c.environment === key.environment,
+        ) ?? null
+      );
+    },
+    findMany: async ({ where }: any = {}) =>
+      this.brokerCredentials.filter((c) => matches(c, where)),
+    upsert: async ({ where, create, update }: any) => {
+      const key = where.userId_provider_environment ?? {
+        userId: where.userId,
+        provider: where.provider ?? 'webull',
+        environment: 'live',
+      };
+      const existing = this.brokerCredentials.find(
+        (c) =>
+          c.userId === key.userId &&
+          c.provider === key.provider &&
+          c.environment === key.environment,
+      );
+      if (existing) {
+        Object.assign(existing, update, { updatedAt: new Date() });
+        return existing;
+      }
+      const now = new Date();
+      const row = { id: randomUUID(), createdAt: now, updatedAt: now, ...create };
+      this.brokerCredentials.push(row);
+      return row;
+    },
+    delete: async ({ where }: any) => {
+      const key = where.userId_provider_environment ?? {
+        userId: where.userId,
+        provider: where.provider ?? 'webull',
+        environment: 'live',
+      };
+      const idx = this.brokerCredentials.findIndex(
+        (c) =>
+          c.userId === key.userId &&
+          c.provider === key.provider &&
+          c.environment === key.environment,
+      );
+      if (idx === -1) {
+        throw Object.assign(new Error('Record not found'), { code: 'P2025' });
+      }
+      const [row] = this.brokerCredentials.splice(idx, 1);
+      return row;
+    },
+  };
+
+  readonly brokerApiToken = {
+    findUnique: async ({ where }: any) => {
+      const key = where.userId_provider_environment ?? {
+        userId: where.userId,
+        provider: where.provider ?? 'webull',
+        environment: 'live',
+      };
+      return (
+        this.brokerApiTokens.find(
+          (t) =>
+            t.userId === key.userId &&
+            t.provider === key.provider &&
+            t.environment === key.environment,
+        ) ?? null
+      );
+    },
+    upsert: async ({ where, create, update }: any) => {
+      const key = where.userId_provider_environment ?? {
+        userId: where.userId,
+        provider: where.provider ?? 'webull',
+        environment: 'live',
+      };
+      const existing = this.brokerApiTokens.find(
+        (t) =>
+          t.userId === key.userId &&
+          t.provider === key.provider &&
+          t.environment === key.environment,
+      );
+      if (existing) {
+        Object.assign(existing, update, { updatedAt: new Date() });
+        return existing;
+      }
+      const now = new Date();
+      const row = { id: randomUUID(), createdAt: now, updatedAt: now, ...create };
+      this.brokerApiTokens.push(row);
+      return row;
+    },
+    deleteMany: async ({ where }: any) => {
+      let count = 0;
+      for (let i = this.brokerApiTokens.length - 1; i >= 0; i--) {
+        if (matches(this.brokerApiTokens[i], where)) {
+          this.brokerApiTokens.splice(i, 1);
+          count += 1;
+        }
+      }
+      return { count };
+    },
+  };
+
   // Prisma lifecycle no-ops.
   async $connect(): Promise<void> {}
   async $disconnect(): Promise<void> {}
@@ -306,6 +418,8 @@ export class InMemoryPrismaService {
     this.tradeOrders.length = 0;
     this.optionsAnalyticsSnapshots.length = 0;
     this.scheduledJobLeases.length = 0;
+    this.brokerCredentials.length = 0;
+    this.brokerApiTokens.length = 0;
   }
 
   /** Test helper: flip the kill switch for a user. */

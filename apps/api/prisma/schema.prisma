@@ -25,12 +25,16 @@ model User {
   passwordHash    String
   tradingDisabled Boolean            @default(false)
   tradingMode     String             @default("live")
+  /// Broker the user trades through ('webull' | 'alpaca'); default webull.
+  tradingProvider String             @default("webull")
   createdAt       DateTime           @default(now())
   updatedAt       DateTime           @updatedAt
   credentials     WebullCredential[]
   refreshTokens   RefreshToken[]
   orderAudits     OrderAudit[]
   webullApiTokens WebullApiToken[]
+  brokerCredentials BrokerCredential[]
+  brokerApiTokens   BrokerApiToken[]
   tradeOrders     TradeOrder[]
 
   @@map("users")
@@ -73,6 +77,41 @@ model WebullApiToken {
 
   @@unique([userId, environment])
   @@map("webull_api_tokens")
+}
+
+// Provider-agnostic credential store. `encSecrets` is one AES-256-GCM blob of
+// the provider-specific secret JSON ({appKey,appSecret,accountId} for Webull;
+// {apiKey,apiSecret} for Alpaca). One row per (user, provider, environment).
+model BrokerCredential {
+  id          String   @id @default(uuid()) @db.Uuid
+  userId      String   @db.Uuid
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider    String   @default("webull")
+  environment String   @default("live")
+  encSecrets  Bytes
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([userId, provider, environment])
+  @@map("broker_credentials")
+}
+
+// Encrypted-at-rest broker access tokens (Webull only today; Alpaca keys are
+// long-lived and need none). Mirrors webull_api_tokens but provider-scoped.
+model BrokerApiToken {
+  id          String   @id @default(uuid()) @db.Uuid
+  userId      String   @db.Uuid
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider    String   @default("webull")
+  environment String   @default("live")
+  encToken    Bytes
+  expiresAt   DateTime
+  status      String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([userId, provider, environment])
+  @@map("broker_api_tokens")
 }
 
 model RefreshToken {

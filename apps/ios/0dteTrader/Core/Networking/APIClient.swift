@@ -131,14 +131,41 @@ struct APIClient: @unchecked Sendable {
         return try await request(endpoint, body: encode(credentials))
     }
 
-    func deleteWebullCredentials() async throws {
-        try await requestVoid(Endpoint(method: .delete, path: "v1/me/webull-credentials"))
+    func deleteWebullCredentials(environment: TradingMode = .live) async throws {
+        var query: [URLQueryItem] = []
+        if environment == .practice {
+            query.append(URLQueryItem(name: "environment", value: "practice"))
+        }
+        try await requestVoid(Endpoint(method: .delete, path: "v1/me/webull-credentials", query: query))
     }
 
     /// Mint a fresh Webull access token from the stored credentials (the
     /// server side of the Reconnect button).
     func refreshWebullSession() async throws {
         try await requestVoid(Endpoint(method: .post, path: "v1/me/webull-session/refresh"))
+    }
+
+    /// Select the active trading provider (webull | alpaca).
+    @discardableResult
+    func updateTradingProvider(_ provider: BrokerProvider) async throws -> MeDTO {
+        let endpoint = Endpoint(method: .patch, path: "v1/me")
+        return try await request(endpoint, body: encode(["tradingProvider": provider.rawValue]))
+    }
+
+    /// Save Alpaca API key/secret via the generic broker-credentials endpoint.
+    @discardableResult
+    func putAlpacaCredentials(_ credentials: AlpacaCredentialsInputDTO) async throws -> BrokerCredentialsSavedDTO {
+        let endpoint = Endpoint(method: .put, path: "v1/me/broker-credentials")
+        return try await request(endpoint, body: encode(credentials))
+    }
+
+    /// Delete stored broker credentials by provider (defaults to live env).
+    func deleteBrokerCredentials(provider: BrokerProvider, environment: TradingMode = .live) async throws {
+        var query = [URLQueryItem(name: "provider", value: provider.rawValue)]
+        if environment == .practice {
+            query.append(URLQueryItem(name: "environment", value: "practice"))
+        }
+        try await requestVoid(Endpoint(method: .delete, path: "v1/me/broker-credentials", query: query))
     }
 
     func quote(symbol: String) async throws -> QuoteDTO {

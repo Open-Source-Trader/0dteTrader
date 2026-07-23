@@ -1,55 +1,55 @@
 import SwiftUI
 
-/// Write-only Webull credential entry for one environment (live / practice).
+/// Write-only Alpaca credential entry for one environment (live / practice).
 /// Fields are local `@State` (write-only: never re-displayed after saving — FR-4).
-struct WebullCredentialsForm: View {
+struct AlpacaCredentialsForm: View {
     @ObservedObject var viewModel: ProfileViewModel
     let environment: TradingMode
 
-    @State private var appKey = ""
-    @State private var appSecret = ""
+    @State private var apiKey = ""
+    @State private var apiSecret = ""
 
-    private enum Field: Hashable { case appKey, appSecret }
+    private enum Field: Hashable { case apiKey, apiSecret }
     @FocusState private var focused: Field?
 
     private var canSave: Bool {
-        !appKey.trimmingCharacters(in: .whitespaces).isEmpty && !appSecret.isEmpty
+        !apiKey.trimmingCharacters(in: .whitespaces).isEmpty && !apiSecret.isEmpty
     }
     private var isSaving: Bool {
-        viewModel.savingWebull.contains(environment)
+        viewModel.savingAlpaca.contains(environment)
     }
 
     var body: some View {
         VStack(spacing: AppSpacing.md) {
-            TextField("App Key", text: $appKey)
+            TextField("API Key", text: $apiKey)
                 .textContentType(.none)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
                 .keyboardType(.asciiCapable)
-                .focused($focused, equals: .appKey)
+                .focused($focused, equals: .apiKey)
                 .submitLabel(.next)
-                .onSubmit { focused = .appSecret }
-                .authField(isFocused: focused == .appKey)
+                .onSubmit { focused = .apiSecret }
+                .authField(isFocused: focused == .apiKey)
 
-            TextField("App Secret", text: $appSecret)
+            SecureField("API Secret", text: $apiSecret)
                 .textContentType(.none)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
                 .keyboardType(.asciiCapable)
-                .focused($focused, equals: .appSecret)
+                .focused($focused, equals: .apiSecret)
                 .submitLabel(.go)
                 .onSubmit {
                     guard canSave else { return }
-                    Task { await viewModel.saveWebull(environment: environment, appKey: appKey, appSecret: appSecret) }
+                    Task { await viewModel.saveAlpaca(environment: environment, apiKey: apiKey, apiSecret: apiSecret) }
                 }
-                .authField(isFocused: focused == .appSecret)
+                .authField(isFocused: focused == .apiSecret)
 
-            Text("Your account is detected automatically after you approve the connection in the Webull app.")
+            Text("Use the key/secret for the matching environment. The server connects to Alpaca's live or paper API accordingly.")
                 .font(.chipLabel)
                 .foregroundStyle(.secondary)
 
             Button {
-                Task { await viewModel.saveWebull(environment: environment, appKey: appKey, appSecret: appSecret) }
+                Task { await viewModel.saveAlpaca(environment: environment, apiKey: apiKey, apiSecret: apiSecret) }
             } label: {
                 HStack(spacing: AppSpacing.sm) {
                     if isSaving { ProgressView().controlSize(.small).tint(Color.appAccent) }

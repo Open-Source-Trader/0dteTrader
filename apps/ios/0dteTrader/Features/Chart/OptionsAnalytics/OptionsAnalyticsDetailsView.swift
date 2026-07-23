@@ -34,9 +34,11 @@ struct OptionsAnalyticsDetailsView: View {
                         "\(snapshot.quality.status.rawValue) · \(snapshot.quality.cacheStatus.rawValue)"
                     )
                     row("Version", snapshot.quality.calculationVersion)
-                    ForEach(snapshot.quality.warnings, id: \.self) { warning in
-                        Label(warning, systemImage: "exclamationmark.triangle")
-                            .foregroundStyle(Color.appWarning)
+                    if settings.showDiagnostics {
+                        ForEach(snapshot.quality.warnings, id: \.self) { warning in
+                            Label(warning, systemImage: "exclamationmark.triangle")
+                                .foregroundStyle(Color.appWarning)
+                        }
                     }
                 }
                 Section("Observed structure") {

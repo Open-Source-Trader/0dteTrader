@@ -32,9 +32,23 @@ struct AuthTokensDTO: Decodable, Equatable, Sendable {
 // MARK: - Profile & credentials
 
 /// Practice/live trading environment (server-persisted; `PATCH /v1/me`).
-enum TradingMode: String, Codable, Equatable, Sendable {
+enum TradingMode: String, Codable, Equatable, Sendable, Hashable {
     case practice
     case live
+
+    /// User-facing label for UI ("Live" / "Practice").
+    var label: String {
+        switch self {
+        case .practice: return "Practice"
+        case .live: return "Live"
+        }
+    }
+}
+
+/// Trading provider selected by the user (Webull or Alpaca).
+enum BrokerProvider: String, Codable, Equatable, Sendable {
+    case webull
+    case alpaca
 }
 
 struct MeDTO: Decodable, Equatable, Sendable {
@@ -47,6 +61,17 @@ struct MeDTO: Decodable, Equatable, Sendable {
     let webullAccountId: String?
     /// nil on older servers that predate mode switching.
     let tradingMode: TradingMode?
+    /// Active trading provider chosen by the user; nil on older servers.
+    let tradingProvider: BrokerProvider?
+    /// Practice (paper) Webull credentials are stored.
+    let webullPracticeConfigured: Bool?
+    let webullPracticeAccountId: String?
+    /// Live Alpaca credentials are stored.
+    let alpacaConfigured: Bool?
+    let alpacaPracticeConfigured: Bool?
+    /// Alpaca v2 is key-scoped: no account id is stored.
+    let alpacaAccountId: String?
+    let alpacaPracticeAccountId: String?
 }
 
 struct UpdateTradingModeDTO: Encodable, Sendable {
@@ -56,10 +81,24 @@ struct UpdateTradingModeDTO: Encodable, Sendable {
 struct WebullCredentialsInputDTO: Encodable, Sendable {
     let appKey: String
     let appSecret: String
+    let environment: TradingMode
 }
 
 struct WebullConfiguredResponseDTO: Decodable, Equatable, Sendable {
     let webullConfigured: Bool
+}
+
+struct AlpacaCredentialsInputDTO: Encodable, Sendable {
+    let provider = "alpaca"
+    let apiKey: String
+    let apiSecret: String
+    let environment: TradingMode
+}
+
+struct BrokerCredentialsSavedDTO: Decodable, Equatable, Sendable {
+    let provider: BrokerProvider
+    let configured: Bool
+    let environment: TradingMode
 }
 
 // MARK: - Market data

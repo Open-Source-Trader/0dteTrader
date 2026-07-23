@@ -9,6 +9,7 @@ struct OptionsAnalyticsSettings: Codable, Equatable, Sendable {
     var showDealerProxy: Bool
     var refreshSeconds: Int
     var profileStrikeCount: Int
+    var showDiagnostics: Bool
 
     static let refreshRange = 15...120
     static let profileStrikeRange = 3...20
@@ -21,7 +22,8 @@ struct OptionsAnalyticsSettings: Codable, Equatable, Sendable {
         showLiquidity: false,
         showDealerProxy: false,
         refreshSeconds: 45,
-        profileStrikeCount: 12
+        profileStrikeCount: 12,
+        showDiagnostics: true
     )
 
     init(
@@ -32,7 +34,8 @@ struct OptionsAnalyticsSettings: Codable, Equatable, Sendable {
         showLiquidity: Bool,
         showDealerProxy: Bool,
         refreshSeconds: Int,
-        profileStrikeCount: Int
+        profileStrikeCount: Int,
+        showDiagnostics: Bool
     ) {
         self.enabled = enabled
         self.showImpliedRange = showImpliedRange
@@ -42,6 +45,7 @@ struct OptionsAnalyticsSettings: Codable, Equatable, Sendable {
         self.showDealerProxy = showDealerProxy
         self.refreshSeconds = Self.refreshRange.clamped(refreshSeconds)
         self.profileStrikeCount = Self.profileStrikeRange.clamped(profileStrikeCount)
+        self.showDiagnostics = showDiagnostics
     }
 
     init(from decoder: Decoder) throws {
@@ -62,13 +66,15 @@ struct OptionsAnalyticsSettings: Codable, Equatable, Sendable {
             refreshSeconds: try container.decodeIfPresent(Int.self, forKey: .refreshSeconds)
                 ?? defaults.refreshSeconds,
             profileStrikeCount: try container.decodeIfPresent(Int.self, forKey: .profileStrikeCount)
-                ?? defaults.profileStrikeCount
+                ?? defaults.profileStrikeCount,
+            showDiagnostics: try container.decodeIfPresent(Bool.self, forKey: .showDiagnostics)
+                ?? defaults.showDiagnostics
         )
     }
 }
 
 private extension ClosedRange where Bound == Int {
     func clamped(_ value: Int) -> Int {
-        min(upperBound, max(lowerBound, value))
+        Swift.min(upperBound, Swift.max(lowerBound, value))
     }
 }

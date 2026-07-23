@@ -419,8 +419,8 @@ export function ChartView({
             <div
               style={{
                 position: 'absolute',
-                bottom: 8,
-                left: 56,
+                top: 8,
+                left: 65,
                 fontSize: 'var(--fs-caption2)',
                 color: 'var(--warning-orange)',
                 pointerEvents: 'none',

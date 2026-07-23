@@ -94,3 +94,35 @@
 .profile-view .skeleton.skeleton-value {
   width: 180px;
 }
+
+/* Trading-provider segmented control (Webull | Alpaca). */
+.profile-view .segmented-control {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 10px;
+  background: rgba(160, 190, 235, 0.08);
+  border: 1px solid var(--hud-stroke-dim);
+}
+.profile-view .segmented-control .segment {
+  flex: 1;
+  padding: 8px 0;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-secondary);
+  font: 600 12px/1 system-ui;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  transition:
+    background 120ms ease,
+    color 120ms ease;
+}
+.profile-view .segmented-control .segment.active {
+  background: var(--app-accent);
+  color: #05121f;
+}
+.profile-view .segmented-control .segment:focus-visible {
+  outline: 2px solid var(--app-accent);
+  outline-offset: 2px;
+}

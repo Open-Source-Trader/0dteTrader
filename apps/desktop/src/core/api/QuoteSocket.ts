@@ -72,6 +72,20 @@ export class QuoteSocket extends Store<QuoteSocketState> {
     this.openConnection();
   }
 
+  /**
+   * Force a fresh connection, re-subscribing the current symbols. Used after
+   * the trading provider changes so live quotes immediately use the new
+   * provider (the dispatcher resolves the provider per call, but an already
+   * established subscription keeps serving the old one until re-connected).
+   */
+  reconnect(): void {
+    this.teardownConnection();
+    this.set({ connectionState: 'disconnected' });
+    this.reconnectAttempt = 0;
+    this.clearReconnectTimer();
+    this.openConnection();
+  }
+
   // MARK: - Subscriptions
 
   subscribeSymbols(symbols: string[]): void {
@@ -122,7 +136,17 @@ export class QuoteSocket extends Store<QuoteSocketState> {
         this.set({ connectionState: 'disconnected' });
         return;
       }
-      const url = new URL(this.streamUrl);
+      let url: URL;
+      try {
+        url = new URL(this.streamUrl);
+      } catch (error) {
+        this.set({
+          connectionState: 'disconnected',
+          lastErrorMessage: error instanceof Error ? error.message : String(error),
+        });
+        this.scheduleReconnect();
+        return;
+      }
       url.searchParams.set('token', token);
       const ws = new WebSocket(url.toString());
       this.ws = ws;

@@ -21,6 +21,7 @@ import type { ChartCandle } from './ChartStore';
 import { intervalSeconds } from './ChartStore';
 import { DrawingLayer } from './DrawingLayer';
 import type { DrawingsStore } from './drawings';
+import { sameColorsExceptLast } from './candleRepaint';
 import { OptionsAnalyticsOverlay } from './optionsAnalytics/OptionsAnalyticsOverlay';
 import type { OptionsAnalyticsSettings } from './optionsAnalytics/optionsAnalyticsSettings';
 import { TwcOverlay } from './TwcOverlay';
@@ -89,9 +90,15 @@ export function CandleChart({
   const candleSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
   const volumeSeriesRef = useRef<ISeriesApi<'Histogram'> | null>(null);
   const overlaySeriesRef = useRef<Map<string, ISeriesApi<'Line'>>>(new Map());
+  const prevOverlaysRef = useRef<{
+    ids: string[];
+    lengths: number[];
+    firstTime: number | null;
+  } | null>(null);
   const lastLengthRef = useRef(0);
   const lastFirstTimeRef = useRef<number | null>(null);
   const lastBarRef = useRef<ChartCandle | null>(null);
+  const prevSymbolRef = useRef(symbol);
   const intervalRef = useRef(interval);
   intervalRef.current = interval;
   const [apis, setApis] = useState<{
@@ -171,6 +178,7 @@ export function CandleChart({
       candleSeriesRef.current = null;
       volumeSeriesRef.current = null;
       overlaySeriesRef.current = new Map();
+      prevOverlaysRef.current = null;
       lastLengthRef.current = 0;
       lastFirstTimeRef.current = null;
       lastBarRef.current = null;
@@ -207,38 +215,76 @@ export function CandleChart({
     chart.applyOptions({ handleScroll: interactive, handleScale: interactive });
   }, [tool]);
 
-  // Candle data: full set + snap on structural change, cheap update on ticks.
-  // Regime-candle repaints (candleColors) always reset the full data set —
-  // per-bar colors can change across the whole array on any recompute.
-  const hadCandleColorsRef = useRef(false);
+  // Candle data: cheap update on ticks and on each new bar, full set only on a
+  // genuine structural replacement. A NEW CANDLE starting (length grows, head
+  // time unchanged) is NOT structural: we `series.update()` the last bar and
+  // let `shiftVisibleRangeOnNewBar` scroll it into view while the user's
+  // pan/zoom is left untouched. The whole set is only repainted on the first
+  // load, when the sliding window drops the oldest bar (head time changes), or
+  // when a PAST bar's regime color actually changed.
+  const lastCandleColorsRef = useRef<(string | null)[] | null>(null);
+  useEffect(() => {
+    if (prevSymbolRef.current === symbol) return;
+    prevSymbolRef.current = symbol;
+    const chart = chartRef.current;
+    if (!chart) return;
+    // A symbol swap should behave like a fresh chart session: clear the
+    // cached history so the next dataset recenters instead of reusing the
+    // previous symbol's viewport and price scale.
+    chart.priceScale('left').applyOptions({ autoScale: true });
+    lastLengthRef.current = 0;
+    lastFirstTimeRef.current = null;
+    lastCandleColorsRef.current = null;
+    prevOverlaysRef.current = null;
+  }, [symbol]);
+
   useEffect(() => {
     const chart = chartRef.current;
     const series = candleSeriesRef.current;
     if (!chart || !series) return;
 
     const firstTime = candles.length > 0 ? candles[0].time : null;
-    const structuralChange =
-      candles.length !== lastLengthRef.current || firstTime !== lastFirstTimeRef.current;
-    const repaintAll = candleColors !== null || hadCandleColorsRef.current;
-    hadCandleColorsRef.current = candleColors !== null;
+    const hadData = lastLengthRef.current > 0;
+    const isFirstLoad = !hadData && candles.length > 0;
+    const headChanged = firstTime !== lastFirstTimeRef.current;
+    const truncated = headChanged && hadData;
+    // A regime-color toggle (off→on, on→off) must repaint everything.
+    const colorsToggled = (candleColors !== null) !== (lastCandleColorsRef.current !== null);
+    // Past-bar colors only: the forming (last) bar's color is applied via
+    // update(), so a change there alone must not force a full repaint.
+    const priorColorsChanged =
+      candleColors !== null &&
+      lastCandleColorsRef.current !== null &&
+      !sameColorsExceptLast(candleColors, lastCandleColorsRef.current);
+    const needFullSet = isFirstLoad || truncated || colorsToggled || priorColorsChanged;
 
-    if (structuralChange || repaintAll) {
+    if (needFullSet) {
+      // Preserve the current time window unless this is the very first paint
+      // (then snap to the live edge so the user lands on the right).
+      const prevRange = isFirstLoad ? null : chart.timeScale().getVisibleRange();
       series.setData(
         candles.map((candle, index) => toCandleData(candle, candleColors?.[index] ?? null)),
       );
       volumeSeriesRef.current?.setData(candles.map(toVolumeData));
-      if (structuralChange && candles.length > 0) {
+      if (isFirstLoad && candles.length > 0) {
         chart.timeScale().setVisibleLogicalRange({
           from: Math.max(0, candles.length - VISIBLE_CANDLES),
           to: candles.length + 12,
         });
+      } else if (prevRange && candles.length > 0) {
+        chart.timeScale().setVisibleRange(prevRange);
       }
     } else if (candles.length > 0) {
-      series.update(toCandleData(candles[candles.length - 1], null));
+      // In-place tick update OR a freshly started candle: update the last bar
+      // (regime color included). No view reset — the user keeps their zoom.
+      series.update(
+        toCandleData(candles[candles.length - 1], candleColors?.[candles.length - 1] ?? null),
+      );
       volumeSeriesRef.current?.update(toVolumeData(candles[candles.length - 1]));
     }
     lastLengthRef.current = candles.length;
     lastFirstTimeRef.current = firstTime;
+    lastCandleColorsRef.current = candleColors;
     lastBarRef.current = candles.length > 0 ? candles[candles.length - 1] : null;
   }, [candles, candleColors]);
 
@@ -303,6 +349,8 @@ export function CandleChart({
         existing.delete(id);
       }
     }
+    const firstTime = candles.length > 0 ? candles[0].time : null;
+    const prev = prevOverlaysRef.current;
     for (const entry of expanded) {
       let series = existing.get(entry.id);
       if (!series) {
@@ -318,8 +366,28 @@ export function CandleChart({
       } else {
         series.applyOptions({ color: entry.color, lineWidth: entry.lineWidth });
       }
-      series.setData(entry.data);
+      const idx = expanded.indexOf(entry);
+      // A structural change (series added/removed, run lengths changed, or the
+      // data head moved on truncation) requires a full setData. Otherwise the
+      // overlay's forming (last) point is the only thing that changed on this
+      // tick, so update() it instead of rebuilding the whole series every quote.
+      const structural =
+        !prev ||
+        entry.id !== prev.ids[idx] ||
+        prev.firstTime !== firstTime ||
+        entry.data.length !== prev.lengths[idx];
+      if (structural) {
+        series.setData(entry.data);
+      } else {
+        const lastPoint = entry.data[entry.data.length - 1];
+        if (lastPoint) series.update(lastPoint);
+      }
     }
+    prevOverlaysRef.current = {
+      ids: expanded.map((entry) => entry.id),
+      lengths: expanded.map((entry) => entry.data.length),
+      firstTime,
+    };
   }, [candles, overlays]);
 
   const resetView = () => {

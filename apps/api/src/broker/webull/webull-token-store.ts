@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { TradingMode } from '@0dtetrader/shared-types';
+import { BrokerProvider, TradingMode } from '@0dtetrader/shared-types';
 import { CryptoService } from '../../credentials/crypto.service';
 import { PrismaService } from '../../prisma/prisma.service';
 
@@ -37,12 +37,12 @@ export class WebullTokenStore {
     private readonly crypto: CryptoService,
   ) {}
 
-  scopedTo(userId: string, environment: TradingMode): ScopedTokenStore {
+  scopedTo(userId: string, provider: BrokerProvider, environment: TradingMode): ScopedTokenStore {
     return {
       load: async () => {
         try {
-          const row = await this.prisma.webullApiToken.findUnique({
-            where: { userId_environment: { userId, environment } },
+          const row = await this.prisma.brokerApiToken.findUnique({
+            where: { userId_provider_environment: { userId, provider, environment } },
           });
           if (!row) return null;
           return {
@@ -51,7 +51,9 @@ export class WebullTokenStore {
             status: row.status,
           };
         } catch (err) {
-          this.logger.warn(`Webull token load failed (${environment}): ${(err as Error).message}`);
+          this.logger.warn(
+            `Token load failed (${provider}/${environment}): ${(err as Error).message}`,
+          );
           return null;
         }
       },
@@ -63,22 +65,26 @@ export class WebullTokenStore {
             expiresAt: new Date(token.expiresAt),
             status: token.status,
           };
-          await this.prisma.webullApiToken.upsert({
-            where: { userId_environment: { userId, environment } },
-            create: { userId, environment, ...data },
+          await this.prisma.brokerApiToken.upsert({
+            where: { userId_provider_environment: { userId, provider, environment } },
+            create: { userId, provider, environment, ...data },
             update: data,
           });
         } catch (err) {
-          this.logger.warn(`Webull token save failed (${environment}): ${(err as Error).message}`);
+          this.logger.warn(
+            `Token save failed (${provider}/${environment}): ${(err as Error).message}`,
+          );
         }
       },
       clear: async () => {
         try {
-          await this.prisma.webullApiToken.deleteMany({
-            where: { userId, environment },
+          await this.prisma.brokerApiToken.deleteMany({
+            where: { userId: userId, provider, environment },
           });
         } catch (err) {
-          this.logger.warn(`Webull token clear failed (${environment}): ${(err as Error).message}`);
+          this.logger.warn(
+            `Token clear failed (${provider}/${environment}): ${(err as Error).message}`,
+          );
         }
       },
     };

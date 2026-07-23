@@ -38,6 +38,7 @@ interface ExpectedOptionsAnalyticsSettings {
   showDealerProxy: boolean;
   refreshSeconds: number;
   profileStrikeCount: number;
+  showDiagnostics: boolean;
 }
 
 function optionsAnalyticsSettings(store: SettingsStore): ExpectedOptionsAnalyticsSettings {
@@ -63,6 +64,7 @@ describe('SettingsStore options analytics settings', () => {
       showDealerProxy: false,
       refreshSeconds: 45,
       profileStrikeCount: 12,
+      showDiagnostics: true,
     });
   });
 
@@ -88,6 +90,7 @@ describe('SettingsStore options analytics settings', () => {
         showDealerProxy: true,
         refreshSeconds: 4,
         profileStrikeCount: 99,
+        showDiagnostics: true,
       }),
     );
 
@@ -100,6 +103,7 @@ describe('SettingsStore options analytics settings', () => {
       showDealerProxy: true,
       refreshSeconds: 15,
       profileStrikeCount: 20,
+      showDiagnostics: true,
     });
   });
 

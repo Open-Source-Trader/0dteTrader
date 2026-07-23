@@ -6,17 +6,19 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "build:watch": "tsc -p tsconfig.build.json --watch",
-    "dev": "npm run build && node --watch dist/main.js",
+    "dev": "npm run build && npm run db:generate && node --watch dist/main.js",
     "start": "node dist/main.js",
+    "prestart": "set -a; [ -f ../../.env ] && . ../../.env; set +a; prisma generate && prisma migrate deploy",
     "lint": "eslint \"{src,test}/**/*.ts\"",
     "test": "jest --runInBand",
     "smoke:webull": "npm run build && node dist/scripts/webull-smoke.js",
     "db:generate": "prisma generate",
-    "db:migrate": "prisma migrate deploy",
+    "db:migrate": "set -a; [ -f ../../.env ] && . ../../.env; set +a; prisma migrate deploy",
     "postinstall": "prisma generate"
   },
   "dependencies": {
     "@0dtetrader/shared-types": "*",
+    "@alpacahq/alpaca-trade-api": "^4.0.1",
     "@nestjs/common": "^11.1.28",
     "@nestjs/config": "^4.0.4",
     "@nestjs/core": "^11.1.28",
@@ -51,6 +53,6 @@
     "prisma": "^7.8.0",
     "supertest": "^7.0.0",
     "ts-jest": "^29.2.5",
-    "typescript": "~7.0.2"
+    "typescript": "~6.0.3"
   }
 }

@@ -16,6 +16,7 @@ const settings = {
   showDealerProxy: false,
   refreshSeconds: 45,
   profileStrikeCount: 12,
+  showDiagnostics: false,
 };
 
 async function runClientEffect(expiration: string | null, enabled: boolean) {

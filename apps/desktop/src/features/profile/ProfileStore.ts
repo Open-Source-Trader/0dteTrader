@@ -1,9 +1,10 @@
-import type { Me, TradingMode } from '@0dtetrader/shared-types';
+import type { BrokerProvider, Me, TradingMode } from '@0dtetrader/shared-types';
 import type { ApiClient } from '../../core/api/ApiClient';
 import { errorMessage } from '../../core/api/ApiError';
 import { Store } from '../../core/observable';
 
 type CredentialField = 'appKey' | 'appSecret';
+type AlpacaField = 'apiKey' | 'apiSecret';
 
 interface CredentialEnvironmentState {
   appKey: string;
@@ -14,6 +15,14 @@ interface CredentialEnvironmentState {
   isReconnecting: boolean;
 }
 
+interface AlpacaEnvironmentState {
+  apiKey: string;
+  apiSecret: string;
+  isEditing: boolean;
+  isSaving: boolean;
+  isDeleting: boolean;
+}
+
 interface ProfileStoreState {
   me: Me | null;
   isLoading: boolean;
@@ -21,8 +30,11 @@ interface ProfileStoreState {
   successMessage: string | null;
   /** Which section the current success/error message belongs to. */
   messageEnv: TradingMode | null;
+  /** Active trading provider chosen by the user (webull | alpaca). */
+  tradingProvider: BrokerProvider;
   live: CredentialEnvironmentState;
   practice: CredentialEnvironmentState;
+  alpaca: Record<TradingMode, AlpacaEnvironmentState>;
 }
 
 const emptyEnvironment = (): CredentialEnvironmentState => ({
@@ -34,10 +46,20 @@ const emptyEnvironment = (): CredentialEnvironmentState => ({
   isReconnecting: false,
 });
 
+const emptyAlpacaEnvironment = (): AlpacaEnvironmentState => ({
+  apiKey: '',
+  apiSecret: '',
+  isEditing: false,
+  isSaving: false,
+  isDeleting: false,
+});
+
 /**
- * Profile sheet state (ProfileViewModel.swift analog): account info and the
- * write-only Webull credential lifecycle, one credential set per environment
- * (live / practice). Secrets are never re-displayed.
+ * Profile sheet state (ProfileViewModel.swift analog): account info, the active
+ * trading provider, and the write-only credential lifecycle for both Webull
+ * (legacy webull-credentials endpoint) and Alpaca (generic broker-credentials
+ * endpoint) — one credential set per environment (live / practice). Secrets are
+ * never re-displayed.
  */
 export class ProfileStore extends Store<ProfileStoreState> {
   constructor(private readonly apiClient: ApiClient) {
@@ -47,8 +69,10 @@ export class ProfileStore extends Store<ProfileStoreState> {
       errorMessage: null,
       successMessage: null,
       messageEnv: null,
+      tradingProvider: 'webull',
       live: emptyEnvironment(),
       practice: emptyEnvironment(),
+      alpaca: { live: emptyAlpacaEnvironment(), practice: emptyAlpacaEnvironment() },
     });
   }
 
@@ -65,14 +89,47 @@ export class ProfileStore extends Store<ProfileStoreState> {
     this.set({ [environment]: { ...this.getState()[environment], isEditing } });
   }
 
+  canSaveAlpaca(environment: TradingMode): boolean {
+    const { apiKey, apiSecret } = this.getState().alpaca[environment];
+    return apiKey.trim() !== '' && apiSecret !== '';
+  }
+
+  setAlpacaField(environment: TradingMode, field: AlpacaField, value: string): void {
+    const next = {
+      ...this.getState().alpaca,
+      [environment]: { ...this.getState().alpaca[environment], [field]: value },
+    };
+    this.set({ alpaca: next });
+  }
+
+  setAlpacaEditing(environment: TradingMode, isEditing: boolean): void {
+    const next = {
+      ...this.getState().alpaca,
+      [environment]: { ...this.getState().alpaca[environment], isEditing },
+    };
+    this.set({ alpaca: next });
+  }
+
   async load(): Promise<void> {
     this.set({ isLoading: true, errorMessage: null });
     try {
-      this.set({ me: await this.apiClient.me() });
+      const me = await this.apiClient.me();
+      this.set({ me, tradingProvider: me.tradingProvider });
     } catch (error) {
       this.set({ errorMessage: errorMessage(error) });
     } finally {
       this.set({ isLoading: false });
+    }
+  }
+
+  async setTradingProvider(provider: BrokerProvider): Promise<void> {
+    this.set({ errorMessage: null, successMessage: null });
+    try {
+      const me = await this.apiClient.updateTradingProvider(provider);
+      this.set({ me, tradingProvider: me.tradingProvider });
+      await this.load();
+    } catch (error) {
+      this.set({ errorMessage: errorMessage(error) });
     }
   }
 
@@ -153,6 +210,61 @@ export class ProfileStore extends Store<ProfileStoreState> {
     } finally {
       this.set({
         [environment]: { ...this.getState()[environment], isReconnecting: false },
+      });
+    }
+  }
+
+  async saveAlpacaCredentials(environment: TradingMode): Promise<void> {
+    const env = this.getState().alpaca[environment];
+    if (!this.canSaveAlpaca(environment) || env.isSaving) return;
+    const next = { ...this.getState().alpaca, [environment]: { ...env, isSaving: true } };
+    this.set({
+      alpaca: next,
+      errorMessage: null,
+      successMessage: null,
+      messageEnv: environment,
+    });
+    try {
+      await this.apiClient.putBrokerCredentials(
+        { provider: 'alpaca', apiKey: env.apiKey.trim(), apiSecret: env.apiSecret },
+        environment,
+      );
+      // Write-only: wipe the fields, never render them back.
+      this.set({
+        alpaca: { ...this.getState().alpaca, [environment]: { ...emptyAlpacaEnvironment() } },
+        successMessage: 'Alpaca credentials saved.',
+      });
+      await this.load();
+    } catch (error) {
+      this.set({ errorMessage: errorMessage(error) });
+    } finally {
+      const done = this.getState().alpaca[environment];
+      this.set({
+        alpaca: { ...this.getState().alpaca, [environment]: { ...done, isSaving: false } },
+      });
+    }
+  }
+
+  async deleteAlpacaCredentials(environment: TradingMode): Promise<void> {
+    const env = this.getState().alpaca[environment];
+    if (env.isDeleting) return;
+    const next = { ...this.getState().alpaca, [environment]: { ...env, isDeleting: true } };
+    this.set({
+      alpaca: next,
+      errorMessage: null,
+      successMessage: null,
+      messageEnv: environment,
+    });
+    try {
+      await this.apiClient.deleteBrokerCredentials('alpaca', environment);
+      this.set({ successMessage: 'Alpaca credentials removed.' });
+      await this.load();
+    } catch (error) {
+      this.set({ errorMessage: errorMessage(error) });
+    } finally {
+      const done = this.getState().alpaca[environment];
+      this.set({
+        alpaca: { ...this.getState().alpaca, [environment]: { ...done, isDeleting: false } },
       });
     }
   }

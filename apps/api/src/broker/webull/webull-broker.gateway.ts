@@ -159,13 +159,17 @@ export class WebullBrokerGateway implements BrokerGateway, OnModuleDestroy {
     userId: string,
     mode: TradingMode,
   ): Promise<WebullCredentials | null> {
-    const stored = await this.credentials.getDecrypted(userId, mode);
-    if (stored) return stored;
+    const stored = await this.credentials.getDecrypted(userId, 'webull', mode);
+    if (stored) return stored as unknown as WebullCredentials;
     if (mode !== 'practice') return null;
     const appKey = this.config.get<string>('webull.practiceAppKey') ?? '';
     const appSecret = this.config.get<string>('webull.practiceAppSecret') ?? '';
     const accountId = this.config.get<string>('webull.practiceAccountId') ?? '';
     if (!appKey || !appSecret) return null;
+    // Materialize the built-in practice fallback as a stored credential so the
+    // discovered account id survives a token-cache miss / restart (bug 3) and
+    // so /me reports webullPracticeConfigured once practice is used (bug 2).
+    await this.credentials.ensureWebullPracticeStored(userId, { appKey, appSecret, accountId });
     return { appKey, appSecret, accountId };
   }
 
@@ -193,7 +197,7 @@ export class WebullBrokerGateway implements BrokerGateway, OnModuleDestroy {
     const client = new WebullClient(creds, {
       hosts: this.hosts(mode),
       fetchImpl: this.fetchImpl,
-      tokenStore: this.tokenStore?.scopedTo(userId, mode),
+      tokenStore: this.tokenStore?.scopedTo(userId, 'webull', mode),
     });
     this.clients.set(cacheKey, { fingerprint, client });
     return client;
@@ -218,7 +222,7 @@ export class WebullBrokerGateway implements BrokerGateway, OnModuleDestroy {
     }
     client.setAccountId(accountId);
     const mode = await this.tradingModeFor(userId);
-    await this.credentials.saveDiscoveredAccountId(userId, mode, accountId);
+    await this.credentials.saveDiscoveredAccountId(userId, 'webull', mode, accountId);
     this.logger.log(`Discovered Webull ${mode} account (…${accountId.slice(-4)}) via account/list`);
     return accountId;
   }

@@ -83,12 +83,17 @@ struct ChartView: View {
                             if viewModel.optionsAnalyticsDisplayState == .retained {
                                 Text("RETAINED")
                             }
-                            if !snapshot.quality.warnings.isEmpty {
+                            if viewModel.optionsAnalyticsSettings.showDiagnostics && !snapshot.quality.warnings.isEmpty {
                                 Image(systemName: "exclamationmark.triangle.fill")
                             }
                         }
                         .font(.system(size: 8, weight: .bold, design: .monospaced))
-                        .foregroundStyle(snapshot.quality.warnings.isEmpty ? Color.appAccent : Color.appWarning)
+                        .foregroundStyle(
+                            snapshot.quality.warnings.isEmpty
+                                || !viewModel.optionsAnalyticsSettings.showDiagnostics
+                                ? Color.appAccent
+                                : Color.appWarning
+                        )
                         .padding(.horizontal, 6)
                         .frame(minHeight: 28)
                         .background(Color.black.opacity(0.72))

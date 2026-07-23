@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import type { OptionContract, OrderSide, TradingMode } from '@0dtetrader/shared-types';
+import type { Me, OptionContract, OrderSide, TradingMode } from '@0dtetrader/shared-types';
 import { useContainer } from '../../app/container';
 import { useStore } from '../../core/observable';
 import { AlertDialog } from '../../design/components/AlertDialog';
@@ -64,14 +64,34 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
   // 'practice' is only the pre-fetch placeholder; the server value wins.
   const [tradingMode, setTradingMode] = useState<TradingMode>('practice');
   const [showModeConfirmation, setShowModeConfirmation] = useState(false);
+  const [me, setMe] = useState<Me | null>(null);
   const nextMode: TradingMode = tradingMode === 'live' ? 'practice' : 'live';
+
+  // Active trading provider (from /v1/me) and whether it has credentials
+  // stored for the current trading mode — drives the provider-aware copy and
+  // the "configure provider" empty state.
+  const tradingProvider = me?.tradingProvider ?? 'webull';
+  const providerName = tradingProvider === 'alpaca' ? 'Alpaca' : 'Webull';
+  const activeProviderConfigured = me
+    ? tradingProvider === 'alpaca'
+      ? tradingMode === 'practice'
+        ? Boolean(me.alpacaPracticeConfigured)
+        : Boolean(me.alpacaConfigured)
+      : tradingMode === 'practice'
+        ? Boolean(me.webullPracticeConfigured)
+        : Boolean(me.webullConfigured)
+    : true;
+  const needsProviderConfig = me != null && !activeProviderConfigured;
 
   useEffect(() => {
     let cancelled = false;
     void apiClient
       .me()
-      .then((me) => {
-        if (!cancelled) setTradingMode(me.tradingMode);
+      .then((m) => {
+        if (!cancelled) {
+          setTradingMode(m.tradingMode);
+          setMe(m);
+        }
       })
       .catch(() => {
         // Keep the placeholder; profile/quote errors surface elsewhere.
@@ -300,6 +320,28 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
         }
       />
 
+      {needsProviderConfig ? (
+        <button
+          type="button"
+          onClick={() => setShowProfile(true)}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 8,
+            padding: '8px 12px',
+            width: '100%',
+            border: 'none',
+            cursor: 'pointer',
+            background: 'var(--hud-stroke-dim)',
+            color: 'var(--text-primary)',
+            fontSize: 13,
+          }}
+        >
+          No {providerName} credentials configured — open Profile to connect.
+        </button>
+      ) : null}
+
       <div ref={contentRef} style={{ flex: 1, minHeight: 0, position: 'relative' }}>
         {layout === 'fullscreen' ? (
           <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column' }}>
@@ -446,7 +488,7 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
           message={
             nextMode === 'live'
               ? 'Real money will be used for orders and quotes.'
-              : 'Orders will go to the Webull paper environment.'
+              : `Orders will go to the ${providerName} paper environment.`
           }
           actions={[
             {

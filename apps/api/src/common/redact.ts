@@ -21,6 +21,15 @@ const REDACTED = '[REDACTED]';
 export function redact<T>(input: T, depth = 0): T {
   if (depth > 8 || input === null || input === undefined) return input;
   if (Buffer.isBuffer(input)) return REDACTED as unknown as T;
+  // Preserve message/stack/enumerable extra fields instead of dropping them
+  //   to allow hosted crashes to print a readable error.
+  //   EG: railway crash on boot
+  if (input instanceof Error) {
+    return Object.assign(Object.create(Object.getPrototypeOf(input)), input, {
+      message: input.message,
+      stack: input.stack,
+    }) as unknown as T;
+  }
   if (Array.isArray(input)) {
     return input.map((item) => redact(item, depth + 1)) as unknown as T;
   }

@@ -25,10 +25,14 @@ export class HealthController {
     }
     let outboundIp = 'unknown';
     try {
-      const resp = await fetch('https://api.ipify.org');
+      const resp = await fetch('https://api.ipify.org', {
+        signal: AbortSignal.timeout(2000),
+      });
       outboundIp = await resp.text();
     } catch {
-      // Best-effort: leave outboundIp as 'unknown' if the lookup fails.
+      // Best-effort: leave outboundIp as 'unknown' if the lookup fails or times out.
+      // The timeout matters: this endpoint is Railway's healthcheck target, so an
+      // unbounded third-party call here would stall deploys.
     }
     return { status, db: dbStatus, uptime: process.uptime(), outboundIp };
   }

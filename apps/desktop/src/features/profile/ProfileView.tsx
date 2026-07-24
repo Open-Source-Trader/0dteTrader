@@ -53,6 +53,34 @@ export function ProfileView({ onLogout, onDismiss }: ProfileViewProps) {
                   {accountId ?? 'detected after first connection'}
                 </span>
               </div>
+              <div className="grouped-row account-selector-row">
+                <span>Connected Webull account</span>
+                {state.webullAccounts[environment].length > 0 ? (
+                  <select
+                    aria-label={`${title} connected account`}
+                    value={accountId ?? ''}
+                    disabled={state.selectingAccount[environment]}
+                    onChange={(event) =>
+                      void store.selectWebullAccount(environment, event.target.value)
+                    }
+                  >
+                    {state.webullAccounts[environment].map((account) => (
+                      <option key={account.accountId} value={account.accountId}>
+                        {account.accountName ?? account.accountType ?? 'Webull account'} —{' '}
+                        {account.accountId}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <button
+                    className="inline-button"
+                    disabled={state.loadingAccounts[environment]}
+                    onClick={() => void store.loadWebullAccounts(environment)}
+                  >
+                    {state.loadingAccounts[environment] ? <Spinner size={14} /> : 'Choose account'}
+                  </button>
+                )}
+              </div>
               <div className="grouped-row footnote text-secondary">
                 Credentials are stored encrypted on the server and are never displayed here.
               </div>

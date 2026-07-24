@@ -71,6 +71,26 @@
 .profile-view .grouped-row.negative {
   color: var(--pnl-negative-text); /* AA-passing on the elevated card */
 }
+.profile-view .account-selector-row {
+  gap: var(--space-3);
+}
+.profile-view .account-selector-row select {
+  min-width: 0;
+  max-width: 65%;
+  color: var(--text-secondary);
+  background: transparent;
+  border: 1px solid var(--hud-stroke-dim);
+  border-radius: 6px;
+  padding: 4px 6px;
+}
+.profile-view .inline-button {
+  color: var(--app-accent);
+  cursor: pointer;
+}
+.profile-view .inline-button:disabled {
+  opacity: var(--disabled-opacity);
+  cursor: default;
+}
 
 .profile-view .grouped-row:is(button) {
   cursor: pointer;

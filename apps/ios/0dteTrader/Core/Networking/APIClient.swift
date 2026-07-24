@@ -145,6 +145,22 @@ struct APIClient: @unchecked Sendable {
         try await requestVoid(Endpoint(method: .post, path: "v1/me/webull-session/refresh"))
     }
 
+    func webullAccounts(environment: TradingMode) async throws -> [WebullAccountDTO] {
+        var query = [URLQueryItem]()
+        if environment == .practice {
+            query.append(URLQueryItem(name: "environment", value: "practice"))
+        }
+        return try await request(Endpoint(method: .get, path: "v1/me/webull-accounts", query: query))
+    }
+
+    func selectWebullAccount(accountId: String, environment: TradingMode) async throws {
+        let body = try JSONEncoder().encode([
+            "accountId": accountId,
+            "environment": environment.rawValue
+        ])
+        try await requestVoid(Endpoint(method: .patch, path: "v1/me/webull-accounts"), body: body)
+    }
+
     /// Select the active trading provider (webull | alpaca).
     @discardableResult
     func updateTradingProvider(_ provider: BrokerProvider) async throws -> MeDTO {

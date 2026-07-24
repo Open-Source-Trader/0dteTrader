@@ -9,6 +9,7 @@ import {
   Position,
   Quote,
   TradingMode,
+  WebullAccount,
 } from '@0dtetrader/shared-types';
 import { PrismaService } from '../prisma/prisma.service';
 import { BrokerGateway } from './broker-gateway.interface';
@@ -82,5 +83,13 @@ export class DispatchingBrokerGateway implements BrokerGateway {
 
   async reauthenticate(userId: string): Promise<TradingMode> {
     return (await this.gatewayFor(userId)).reauthenticate(userId);
+  }
+
+  async listAccounts(userId: string, environment: TradingMode): Promise<WebullAccount[]> {
+    return (await this.gatewayFor(userId)).listAccounts(userId, environment);
+  }
+
+  async selectAccount(userId: string, environment: TradingMode, accountId: string): Promise<void> {
+    return (await this.gatewayFor(userId)).selectAccount(userId, environment, accountId);
   }
 }

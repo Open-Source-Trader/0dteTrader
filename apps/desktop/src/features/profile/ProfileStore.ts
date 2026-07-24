@@ -1,4 +1,4 @@
-import type { BrokerProvider, Me, TradingMode } from '@0dtetrader/shared-types';
+import type { BrokerProvider, Me, TradingMode, WebullAccount } from '@0dtetrader/shared-types';
 import type { ApiClient } from '../../core/api/ApiClient';
 import { errorMessage } from '../../core/api/ApiError';
 import { Store } from '../../core/observable';
@@ -35,6 +35,9 @@ interface ProfileStoreState {
   live: CredentialEnvironmentState;
   practice: CredentialEnvironmentState;
   alpaca: Record<TradingMode, AlpacaEnvironmentState>;
+  webullAccounts: Record<TradingMode, WebullAccount[]>;
+  loadingAccounts: Record<TradingMode, boolean>;
+  selectingAccount: Record<TradingMode, boolean>;
 }
 
 const emptyEnvironment = (): CredentialEnvironmentState => ({
@@ -73,6 +76,9 @@ export class ProfileStore extends Store<ProfileStoreState> {
       live: emptyEnvironment(),
       practice: emptyEnvironment(),
       alpaca: { live: emptyAlpacaEnvironment(), practice: emptyAlpacaEnvironment() },
+      webullAccounts: { live: [], practice: [] },
+      loadingAccounts: { live: false, practice: false },
+      selectingAccount: { live: false, practice: false },
     });
   }
 
@@ -211,6 +217,46 @@ export class ProfileStore extends Store<ProfileStoreState> {
       this.set({
         [environment]: { ...this.getState()[environment], isReconnecting: false },
       });
+    }
+
+    async loadWebullAccounts(environment: TradingMode): Promise<void> {
+      if (this.getState().loadingAccounts[environment]) return;
+      this.set({
+        loadingAccounts: { ...this.getState().loadingAccounts, [environment]: true },
+        errorMessage: null,
+        messageEnv: environment,
+      });
+      try {
+        const accounts = await this.apiClient.webullAccounts(environment);
+        this.set({ webullAccounts: { ...this.getState().webullAccounts, [environment]: accounts } });
+      } catch (error) {
+        this.set({ errorMessage: errorMessage(error) });
+      } finally {
+        this.set({
+          loadingAccounts: { ...this.getState().loadingAccounts, [environment]: false },
+        });
+      }
+    }
+
+    async selectWebullAccount(environment: TradingMode, accountId: string): Promise<void> {
+      if (this.getState().selectingAccount[environment]) return;
+      this.set({
+        selectingAccount: { ...this.getState().selectingAccount, [environment]: true },
+        errorMessage: null,
+        successMessage: null,
+        messageEnv: environment,
+      });
+      try {
+        await this.apiClient.selectWebullAccount(accountId, environment);
+        this.set({ successMessage: 'Webull account selected.' });
+        await this.load();
+      } catch (error) {
+        this.set({ errorMessage: errorMessage(error) });
+      } finally {
+        this.set({
+          selectingAccount: { ...this.getState().selectingAccount, [environment]: false },
+        });
+      }
     }
   }
 

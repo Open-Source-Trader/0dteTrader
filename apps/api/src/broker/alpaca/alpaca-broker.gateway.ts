@@ -12,6 +12,7 @@ import {
   Position,
   Quote,
   TradingMode,
+  WebullAccount,
 } from '@0dtetrader/shared-types';
 import { Alpaca, TimeFrame, TimeFrameUnit, timeFrame } from '@alpacahq/alpaca-trade-api';
 import { createHash } from 'crypto';
@@ -304,6 +305,14 @@ export class AlpacaBrokerGateway implements BrokerGateway, OnModuleDestroy {
   async reauthenticate(userId: string): Promise<TradingMode> {
     // Alpaca credentials are static API keys; no OAuth refresh needed.
     return this.tradingModeFor(userId);
+  }
+
+  async listAccounts(): Promise<WebullAccount[]> {
+    return [];
+  }
+
+  async selectAccount(): Promise<void> {
+    throw new Error('Account selection is not supported for Alpaca');
   }
 
   // -- helpers --------------------------------------------------------------

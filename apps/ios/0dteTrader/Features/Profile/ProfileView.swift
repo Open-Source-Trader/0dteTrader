@@ -237,6 +237,37 @@ struct ProfileView: View {
                 .background(Color.appSurface, in: HudPanelShape(chamfer: 6))
                 .overlay(HudPanelShape(chamfer: 6).strokeBorder(Color.hudStrokeDim.opacity(0.5), lineWidth: 1))
 
+                HStack {
+                    Text("Connected Webull account")
+                        .font(.panelLabel)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    if let accounts = viewModel.webullAccounts[environment], !accounts.isEmpty {
+                        Picker("Connected Webull account", selection: Binding(
+                            get: { accountId ?? accounts[0].accountId },
+                            set: { selected in
+                                Task { await viewModel.selectWebullAccount(environment: environment, accountId: selected) }
+                            }
+                        )) {
+                            ForEach(accounts) { account in
+                                Text("\(account.accountName ?? account.accountType ?? "Webull account") — \(account.accountId)")
+                                    .tag(account.accountId)
+                            }
+                        }
+                        .labelsHidden()
+                        .disabled(viewModel.selectingWebullAccount.contains(environment))
+                    } else {
+                        Button(viewModel.loadingWebullAccounts.contains(environment) ? "Loading…" : "Choose account") {
+                            Task { await viewModel.loadWebullAccounts(environment: environment) }
+                        }
+                        .foregroundStyle(Color.appAccent)
+                        .disabled(viewModel.loadingWebullAccounts.contains(environment))
+                    }
+                }
+                .padding(AppSpacing.md)
+                .background(Color.appSurface, in: HudPanelShape(chamfer: 6))
+                .overlay(HudPanelShape(chamfer: 6).strokeBorder(Color.hudStrokeDim.opacity(0.5), lineWidth: 1))
+
                 Text("Credentials are stored encrypted on the server and are never displayed here.")
                     .font(.chipLabel)
                     .foregroundStyle(.secondary)

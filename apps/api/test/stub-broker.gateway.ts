@@ -10,6 +10,7 @@ import {
   Position,
   Quote,
   TradingMode,
+  WebullAccount,
 } from '@0dtetrader/shared-types';
 import { BrokerGateway } from '../src/broker/broker-gateway.interface';
 import {
@@ -67,6 +68,12 @@ export class StubBrokerGateway implements BrokerGateway {
   async reauthenticate(): Promise<TradingMode> {
     return 'live';
   }
+
+  async listAccounts(): Promise<WebullAccount[]> {
+    return [];
+  }
+
+  async selectAccount(): Promise<void> {}
 
   async getCandles(_userId: string, symbol: string, req: CandleRequest): Promise<Candle[]> {
     void symbol;

@@ -13,7 +13,9 @@ import {
   Position,
   Quote,
   TradingMode,
+  WebullAccount,
 } from '@0dtetrader/shared-types';
+import { errors } from '../../common/api-exception';
 import { brokerErrors } from '../../common/broker-error';
 import { AGGREGATION_PLANS, aggregateCandles } from '../../market-data/candle-aggregation';
 import { CredentialsService } from '../../credentials/credentials.service';
@@ -141,6 +143,22 @@ export class WebullBrokerGateway implements BrokerGateway, OnModuleDestroy {
     return mode;
   }
 
+  async listAccounts(userId: string, environment: TradingMode): Promise<WebullAccount[]> {
+    const client = await this.clientFor(userId, environment);
+    return this.accountsFromPayload(await client.request('accountList'));
+  }
+
+  async selectAccount(userId: string, environment: TradingMode, accountId: string): Promise<void> {
+    const normalizedId = accountId.trim();
+    const client = await this.clientFor(userId, environment);
+    const accounts = this.accountsFromPayload(await client.request('accountList'));
+    if (!accounts.some((account) => account.accountId === normalizedId)) {
+      throw errors.badRequest('INVALID_WEBULL_ACCOUNT', 'That Webull account is not available.');
+    }
+    client.setAccountId(normalizedId);
+    await this.credentials.saveDiscoveredAccountId(userId, 'webull', environment, normalizedId);
+  }
+
   // -------------------------------------------------------------------------
   // Client factory (per-user, per-environment, credentials-aware)
   // -------------------------------------------------------------------------
@@ -173,8 +191,8 @@ export class WebullBrokerGateway implements BrokerGateway, OnModuleDestroy {
     return { appKey, appSecret, accountId };
   }
 
-  private async clientFor(userId: string): Promise<WebullClient> {
-    const mode = await this.tradingModeFor(userId);
+  private async clientFor(userId: string, requestedMode?: TradingMode): Promise<WebullClient> {
+    const mode = requestedMode ?? (await this.tradingModeFor(userId));
     const creds = await this.credentialsFor(userId, mode);
     if (!creds) {
       throw brokerErrors.authFailed(
@@ -201,6 +219,24 @@ export class WebullBrokerGateway implements BrokerGateway, OnModuleDestroy {
     });
     this.clients.set(cacheKey, { fingerprint, client });
     return client;
+  }
+
+  private accountsFromPayload(payload: unknown): WebullAccount[] {
+    const rows = Array.isArray(payload) ? payload : asArray(asObject(payload)?.accounts);
+    return rows.flatMap((row) => {
+      const value = asObject(row);
+      const accountId = value?.account_id;
+      if (typeof accountId !== 'string' || accountId.length === 0) return [];
+      return [
+        {
+          accountId,
+          accountType:
+            typeof value.account_type === 'string' ? value.account_type : undefined,
+          accountName:
+            typeof value.account_name === 'string' ? value.account_name : undefined,
+        },
+      ];
+    });
   }
 
   /**

@@ -55,7 +55,7 @@ export function ProfileView({ onLogout, onDismiss }: ProfileViewProps) {
               </div>
               <div className="grouped-row account-selector-row">
                 <span>Connected Webull account</span>
-                {state.webullAccounts[environment].length > 0 ? (
+                {state.webullAccounts[environment]?.length > 0 ? (
                   <select
                     aria-label={`${title} connected account`}
                     value={accountId ?? ''}
@@ -64,7 +64,7 @@ export function ProfileView({ onLogout, onDismiss }: ProfileViewProps) {
                       void store.selectWebullAccount(environment, event.target.value)
                     }
                   >
-                    {state.webullAccounts[environment].map((account) => (
+                    {state.webullAccounts[environment]?.map((account) => (
                       <option key={account.accountId} value={account.accountId}>
                         {account.accountName ?? account.accountType ?? 'Webull account'} —{' '}
                         {account.accountId}

@@ -222,6 +222,8 @@ export class WebullBrokerGateway implements BrokerGateway, OnModuleDestroy {
   }
 
   private accountsFromPayload(payload: unknown): WebullAccount[] {
+    // Webull returns either a top-level account array or an object containing
+    // that array under `accounts`, depending on the account/list response.
     const rows = Array.isArray(payload) ? payload : asArray(asObject(payload)?.accounts);
     return rows.flatMap((row) => {
       const value = asObject(row);

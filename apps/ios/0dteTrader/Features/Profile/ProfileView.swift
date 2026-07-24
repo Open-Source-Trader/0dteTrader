@@ -243,15 +243,17 @@ struct ProfileView: View {
                         .foregroundStyle(.secondary)
                     Spacer()
                     if let accounts = viewModel.webullAccounts[environment], !accounts.isEmpty {
-                        Picker("Connected Webull account", selection: Binding(
-                            get: { accountId ?? accounts[0].accountId },
+                        Picker("Connected Webull account", selection: Binding<String?>(
+                            get: { accountId },
                             set: { selected in
+                                guard let selected else { return }
                                 Task { await viewModel.selectWebullAccount(environment: environment, accountId: selected) }
                             }
                         )) {
+                            Text("Select account").tag(String?.none)
                             ForEach(accounts) { account in
                                 Text("\(account.accountName ?? account.accountType ?? "Webull account") — \(account.accountId)")
-                                    .tag(account.accountId)
+                                    .tag(String?.some(account.accountId))
                             }
                         }
                         .labelsHidden()

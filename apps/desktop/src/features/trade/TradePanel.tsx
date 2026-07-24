@@ -52,6 +52,61 @@ export function TradePanel({ tradeStore, chainStore, onArm, density = 'roomy' }:
 
   const d = DENSITY[density];
 
+  let autoModeContent;
+  if (chain.errorMessage) {
+    autoModeContent = (
+      <button
+        className="text-secondary"
+        style={{
+          fontSize: 'var(--fs-caption)',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
+        }}
+        onClick={() => void chainStore.load(chain.underlying)}
+        aria-label={`Chain failed to load: ${chain.errorMessage}. Activate to retry`}
+      >
+        <span style={{ color: 'var(--pnl-negative)' }}>
+          Chain unavailable — <u>Retry</u>
+        </span>
+      </button>
+    );
+  } else if (chain.isLoading) {
+    autoModeContent = <Spinner size={14} />;
+  } else if (autoContract) {
+    autoModeContent = (
+      <>
+        <span
+          style={{
+            fontFamily: 'var(--font-mono)',
+            fontSize: 'var(--fs-body)',
+            fontWeight: 500,
+          }}
+        >
+          {Format.strike(autoContract.strike)}
+          {autoContract.optionType === 'call' ? 'C' : 'P'}
+        </span>
+        <span className="text-secondary numeric" style={{ fontSize: 'var(--fs-caption)' }}>
+          ≈ {autoMid !== null ? Format.price(autoMid) : '—'}
+        </span>
+      </>
+    );
+  } else {
+    autoModeContent = (
+      <span className="text-secondary" style={{ fontSize: 'var(--fs-caption)' }}>
+        No contract
+      </span>
+    );
+  }
+
+  let orderTypeQuoteLabel = '';
+  if (selectedQuote) {
+    orderTypeQuoteLabel =
+      trade.orderType === 'mid'
+        ? `≈ ${indicativeMid !== null ? Format.price(indicativeMid) : '—'}`
+        : `${Format.price(selectedQuote.bid)} × ${Format.price(selectedQuote.ask)}`;
+  }
+
   return (
     <div
       className={`trade-panel ${density}`}
@@ -139,48 +194,7 @@ export function TradePanel({ tradeStore, chainStore, onArm, density = 'roomy' }:
                 borderRadius: 'var(--radius-chip)',
               }}
             >
-              {chain.errorMessage ? (
-                <button
-                  className="text-secondary"
-                  style={{
-                    fontSize: 'var(--fs-caption)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 6,
-                  }}
-                  onClick={() => void chainStore.load(chain.underlying)}
-                  aria-label={`Chain failed to load: ${chain.errorMessage}. Activate to retry`}
-                >
-                  <span style={{ color: 'var(--pnl-negative)' }}>
-                    Chain unavailable — <u>Retry</u>
-                  </span>
-                </button>
-              ) : chain.isLoading ? (
-                <Spinner size={14} />
-              ) : autoContract ? (
-                <>
-                  <span
-                    style={{
-                      fontFamily: 'var(--font-mono)',
-                      fontSize: 'var(--fs-body)',
-                      fontWeight: 500,
-                    }}
-                  >
-                    {Format.strike(autoContract.strike)}
-                    {autoContract.optionType === 'call' ? 'C' : 'P'}
-                  </span>
-                  <span
-                    className="text-secondary numeric"
-                    style={{ fontSize: 'var(--fs-caption)' }}
-                  >
-                    ≈ {autoMid !== null ? Format.price(autoMid) : '—'}
-                  </span>
-                </>
-              ) : (
-                <span className="text-secondary" style={{ fontSize: 'var(--fs-caption)' }}>
-                  No contract
-                </span>
-              )}
+              {autoModeContent}
             </div>
           ) : (
             <Menu
@@ -252,11 +266,7 @@ export function TradePanel({ tradeStore, chainStore, onArm, density = 'roomy' }:
             visibility: selectedQuote ? 'visible' : 'hidden',
           }}
         >
-          {selectedQuote
-            ? trade.orderType === 'mid'
-              ? `≈ ${indicativeMid !== null ? Format.price(indicativeMid) : '—'}`
-              : `${Format.price(selectedQuote.bid)} × ${Format.price(selectedQuote.ask)}`
-            : ''}
+          {orderTypeQuoteLabel}
         </span>
       </div>
 

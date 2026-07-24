@@ -32,6 +32,56 @@ export function ProfileView({ onLogout, onDismiss }: ProfileViewProps) {
     void store.load();
   }, [store]);
 
+  const deleteCredentialsMessage = (target: {
+    provider: BrokerProvider;
+    environment: TradingMode;
+  }) => {
+    if (target.provider !== 'webull') {
+      return 'Trading with this provider will stop working until new credentials are saved.';
+    }
+    if (target.environment === 'live') {
+      return 'Trading will stop working until new credentials are saved.';
+    }
+    return "Practice trading will use the server's built-in practice app credentials.";
+  };
+
+  const renderAccountSection = () => {
+    if (state.me) {
+      return (
+        <>
+          <div className="grouped-row">
+            <span>Email</span>
+            <span className="row-value" title={state.me.email}>
+              {state.me.email}
+            </span>
+          </div>
+          {state.me.tradingDisabled ? (
+            <div className="grouped-row footnote negative">
+              <WarningFillIcon size={14} />
+              <span>Trading is disabled (kill switch active)</span>
+            </div>
+          ) : null}
+        </>
+      );
+    }
+    if (state.isLoading) {
+      return (
+        <div className="grouped-row" aria-busy="true">
+          <span className="skeleton skeleton-label" />
+          <span className="skeleton skeleton-value row-value" />
+        </div>
+      );
+    }
+    return (
+      <>
+        <div className="grouped-row text-secondary">Account details unavailable</div>
+        <button className="grouped-row button-row" onClick={() => void store.load()}>
+          Retry
+        </button>
+      </>
+    );
+  };
+
   const renderCredentialsSection = (environment: TradingMode, configured: boolean) => {
     const env = state[environment];
     const title = environment === 'live' ? 'Webull API — Live' : 'Webull API — Practice';
@@ -204,36 +254,7 @@ export function ProfileView({ onLogout, onDismiss }: ProfileViewProps) {
           {/* Account */}
           <div className="grouped-section">
             <div className="section-header">Account</div>
-            <div className="section-card">
-              {state.me ? (
-                <>
-                  <div className="grouped-row">
-                    <span>Email</span>
-                    <span className="row-value" title={state.me.email}>
-                      {state.me.email}
-                    </span>
-                  </div>
-                  {state.me.tradingDisabled ? (
-                    <div className="grouped-row footnote negative">
-                      <WarningFillIcon size={14} />
-                      <span>Trading is disabled (kill switch active)</span>
-                    </div>
-                  ) : null}
-                </>
-              ) : state.isLoading ? (
-                <div className="grouped-row" aria-busy="true">
-                  <span className="skeleton skeleton-label" />
-                  <span className="skeleton skeleton-value row-value" />
-                </div>
-              ) : (
-                <>
-                  <div className="grouped-row text-secondary">Account details unavailable</div>
-                  <button className="grouped-row button-row" onClick={() => void store.load()}>
-                    Retry
-                  </button>
-                </>
-              )}
-            </div>
+            <div className="section-card">{renderAccountSection()}</div>
           </div>
 
           {/* Trading provider selector (webull | alpaca). */}
@@ -298,13 +319,7 @@ export function ProfileView({ onLogout, onDismiss }: ProfileViewProps) {
             title={`Remove ${deleteTarget.environment === 'live' ? 'Live' : 'Practice'} ${
               deleteTarget.provider === 'webull' ? 'Webull' : 'Alpaca'
             } credentials?`}
-            message={
-              deleteTarget.provider === 'webull'
-                ? deleteTarget.environment === 'live'
-                  ? 'Trading will stop working until new credentials are saved.'
-                  : "Practice trading will use the server's built-in practice app credentials."
-                : 'Trading with this provider will stop working until new credentials are saved.'
-            }
+            message={deleteCredentialsMessage(deleteTarget)}
             actions={[
               {
                 label: 'Delete Credentials',

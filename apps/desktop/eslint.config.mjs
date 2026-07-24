@@ -18,6 +18,7 @@ export default tseslint.config(
       'react-refresh': reactRefresh,
     },
     rules: {
+      'no-nested-ternary': 'error',
       '@typescript-eslint/no-explicit-any': 'off',
       '@typescript-eslint/no-unused-vars': [
         'error',

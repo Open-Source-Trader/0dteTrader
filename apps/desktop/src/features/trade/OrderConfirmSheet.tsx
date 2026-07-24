@@ -39,6 +39,69 @@ export function OrderConfirmSheet({ tradeStore, ticket }: OrderConfirmSheetProps
     return () => window.removeEventListener('keydown', onKey);
   }, [confirmEnabled, tradeStore]);
 
+  let previewSection;
+  if (isPreviewLoading) {
+    // Skeleton rows mirror the resolved layout: no jump when the
+    // preview lands.
+    previewSection = (
+      <>
+        {[0, 1, 2].map((i) => (
+          <div key={i} style={{ display: 'flex', justifyContent: 'space-between' }}>
+            <span
+              style={{
+                width: 88 + i * 12,
+                height: 14,
+                borderRadius: 4,
+                background: 'var(--app-surface-elevated)',
+                animation: 'spinner-pulse 1200ms ease-in-out infinite',
+              }}
+            />
+            <span
+              style={{
+                width: 64,
+                height: 14,
+                borderRadius: 4,
+                background: 'var(--app-surface-elevated)',
+                animation: 'spinner-pulse 1200ms ease-in-out infinite',
+              }}
+            />
+          </div>
+        ))}
+      </>
+    );
+  } else if (preview) {
+    previewSection = (
+      <>
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+          <span>Contract</span>
+          <span className="text-secondary numeric">{preview.resolved.contractSymbol}</span>
+        </div>
+        <DetailRow label="Est. price" value={Format.price(preview.resolved.price)} />
+        <DetailRow
+          label="Est. buying power"
+          value={Format.price(preview.resolved.estBuyingPower)}
+        />
+        {preview.warnings.map((warning) => (
+          <div
+            key={warning}
+            style={{
+              display: 'flex',
+              alignItems: 'flex-start',
+              gap: 6,
+              fontSize: 'var(--fs-footnote)',
+              color: 'var(--warning-orange)',
+            }}
+          >
+            <WarningIcon size={13} style={{ marginTop: 2 }} />
+            <span>{warning}</span>
+          </div>
+        ))}
+      </>
+    );
+  } else {
+    previewSection = null;
+  }
+
   return (
     <Sheet
       detent="medium"
@@ -103,61 +166,7 @@ export function OrderConfirmSheet({ tradeStore, ticket }: OrderConfirmSheetProps
             value={ticket.request.orderType === 'mid' ? 'Limit at mid' : 'Market'}
           />
 
-          {isPreviewLoading ? (
-            // Skeleton rows mirror the resolved layout: no jump when the
-            // preview lands.
-            <>
-              {[0, 1, 2].map((i) => (
-                <div key={i} style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span
-                    style={{
-                      width: 88 + i * 12,
-                      height: 14,
-                      borderRadius: 4,
-                      background: 'var(--app-surface-elevated)',
-                      animation: 'spinner-pulse 1200ms ease-in-out infinite',
-                    }}
-                  />
-                  <span
-                    style={{
-                      width: 64,
-                      height: 14,
-                      borderRadius: 4,
-                      background: 'var(--app-surface-elevated)',
-                      animation: 'spinner-pulse 1200ms ease-in-out infinite',
-                    }}
-                  />
-                </div>
-              ))}
-            </>
-          ) : preview ? (
-            <>
-              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
-                <span>Contract</span>
-                <span className="text-secondary numeric">{preview.resolved.contractSymbol}</span>
-              </div>
-              <DetailRow label="Est. price" value={Format.price(preview.resolved.price)} />
-              <DetailRow
-                label="Est. buying power"
-                value={Format.price(preview.resolved.estBuyingPower)}
-              />
-              {preview.warnings.map((warning) => (
-                <div
-                  key={warning}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'flex-start',
-                    gap: 6,
-                    fontSize: 'var(--fs-footnote)',
-                    color: 'var(--warning-orange)',
-                  }}
-                >
-                  <WarningIcon size={13} style={{ marginTop: 2 }} />
-                  <span>{warning}</span>
-                </div>
-              ))}
-            </>
-          ) : null}
+          {previewSection}
 
           {previewError ? (
             <>

@@ -12,6 +12,7 @@ export default tseslint.config(
       globals: globals.node,
     },
     rules: {
+      'no-nested-ternary': 'error',
       '@typescript-eslint/no-explicit-any': 'off',
     },
   },

@@ -1,19 +1,9 @@
 import { Body, Controller, Get, Patch, Query } from '@nestjs/common';
-import { IsIn, IsOptional, IsString, MinLength } from 'class-validator';
 import { WebullAccount } from '@0dtetrader/shared-types';
 import { AuthenticatedUser, CurrentUser } from '../common/current-user.decorator';
 import { EnvironmentQueryDto } from '../credentials/dto/environment-query.dto';
+import { SelectWebullAccountDto } from './dto/select-webull-account.dto';
 import { WebullBrokerGateway } from './webull/webull-broker.gateway';
-
-class SelectWebullAccountDto {
-  @IsString()
-  @MinLength(1)
-  accountId!: string;
-
-  @IsOptional()
-  @IsIn(['live', 'practice'])
-  environment?: 'live' | 'practice';
-}
 
 @Controller('me/webull-accounts')
 export class WebullAccountController {

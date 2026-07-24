@@ -670,6 +670,19 @@ describe('WebullBrokerGateway', () => {
       expect(callsTo('/openapi/assets/positions')[0].url).toContain('account_id=ACC-NESTED');
     });
 
+    it('selects the margin account when multiple accounts are returned', async () => {
+      handlers['GET /openapi/account/list'] = () => ({
+        status: 200,
+        body: [
+          { account_id: 'ACC-CASH', account_type: 'CASH' },
+          { account_id: 'ACC-MARGIN', account_type: 'MARGIN' },
+        ],
+      });
+      await gateway.getPositions('u1');
+      expect(callsTo('/openapi/assets/positions')[0].url).toContain('account_id=ACC-MARGIN');
+      expect(savedAccountIds).toHaveBeenCalledWith('u1', 'webull', 'live', 'ACC-MARGIN');
+    });
+
     it('fails with an auth error when no accounts come back', async () => {
       handlers['GET /openapi/account/list'] = () => ({ status: 200, body: [] });
       await expect(gateway.getPositions('u1')).rejects.toMatchObject({

@@ -10,6 +10,7 @@ import { TradierClient } from '../src/options-analytics/tradier.client';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { InMemoryPrismaService } from './in-memory-prisma.service';
 import { StubBrokerGateway } from './stub-broker.gateway';
+import { WebullBrokerGateway } from '../src/broker/webull/webull-broker.gateway';
 
 const E2E_OPTION_EXPIRATION = optionExpirations('SPY', new Date(Date.now() + 86_400_000))[0];
 
@@ -101,6 +102,14 @@ describe('0dteTrader API (e2e)', () => {
             }),
           };
         },
+      })
+      .overrideProvider(WebullBrokerGateway)
+      .useValue({
+        listAccounts: async () => [
+          { accountId: 'stub-acct-1', accountType: 'margin', accountName: 'Stub Margin Account' },
+          { accountId: 'stub-acct-2', accountType: 'cash', accountName: 'Stub Cash Account' },
+        ],
+        selectAccount: async () => undefined,
       })
       .compile();
     app = moduleRef.createNestApplication();
@@ -372,6 +381,75 @@ describe('0dteTrader API (e2e)', () => {
     me = await request(server).get('/v1/me').set(auth).expect(200);
     expect(me.body.webullConfigured).toBe(true);
     expect(me.body.webullPracticeConfigured).toBe(false);
+  });
+
+  it('GET /v1/me/webull-accounts lists accounts for live (default)', async () => {
+    const auth = { Authorization: `Bearer ${accessToken}` };
+    const res = await request(server).get('/v1/me/webull-accounts').set(auth).expect(200);
+    expect(Array.isArray(res.body)).toBe(true);
+    expect(res.body).toHaveLength(2);
+    expect(res.body[0]).toMatchObject({ accountId: 'stub-acct-1', accountType: 'margin' });
+  });
+
+  it('GET /v1/me/webull-accounts?environment=practice lists practice accounts', async () => {
+    const auth = { Authorization: `Bearer ${accessToken}` };
+    const res = await request(server)
+      .get('/v1/me/webull-accounts?environment=practice')
+      .set(auth)
+      .expect(200);
+    expect(Array.isArray(res.body)).toBe(true);
+  });
+
+  it('GET /v1/me/webull-accounts rejects invalid environment with 400', async () => {
+    const auth = { Authorization: `Bearer ${accessToken}` };
+    const res = await request(server)
+      .get('/v1/me/webull-accounts?environment=demo')
+      .set(auth)
+      .expect(400);
+    expect(res.body.error.code).toBe('VALIDATION_ERROR');
+  });
+
+  it('GET /v1/me/webull-accounts requires authentication (401)', async () => {
+    await request(server).get('/v1/me/webull-accounts').expect(401);
+  });
+
+  it('PATCH /v1/me/webull-accounts selects an account', async () => {
+    const auth = { Authorization: `Bearer ${accessToken}` };
+    await request(server)
+      .patch('/v1/me/webull-accounts')
+      .set(auth)
+      .send({ accountId: 'stub-acct-1', environment: 'live' })
+      .expect(200);
+  });
+
+  it('PATCH /v1/me/webull-accounts rejects missing accountId with 400', async () => {
+    const auth = { Authorization: `Bearer ${accessToken}` };
+    const res = await request(server)
+      .patch('/v1/me/webull-accounts')
+      .set(auth)
+      .send({ environment: 'live' })
+      .expect(400);
+    expect(res.body.error.code).toBe('VALIDATION_ERROR');
+  });
+
+  it('PATCH /v1/me/webull-accounts rejects empty accountId with 400', async () => {
+    const auth = { Authorization: `Bearer ${accessToken}` };
+    const res = await request(server)
+      .patch('/v1/me/webull-accounts')
+      .set(auth)
+      .send({ accountId: '', environment: 'live' })
+      .expect(400);
+    expect(res.body.error.code).toBe('VALIDATION_ERROR');
+  });
+
+  it('PATCH /v1/me/webull-accounts rejects invalid environment with 400', async () => {
+    const auth = { Authorization: `Bearer ${accessToken}` };
+    const res = await request(server)
+      .patch('/v1/me/webull-accounts')
+      .set(auth)
+      .send({ accountId: 'stub-acct-1', environment: 'demo' })
+      .expect(400);
+    expect(res.body.error.code).toBe('VALIDATION_ERROR');
   });
 
   it('serves market data (quote, candles, chain)', async () => {

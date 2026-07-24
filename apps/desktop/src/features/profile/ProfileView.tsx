@@ -60,10 +60,14 @@ export function ProfileView({ onLogout, onDismiss }: ProfileViewProps) {
                     aria-label={`${title} connected account`}
                     value={accountId ?? ''}
                     disabled={state.selectingAccount[environment]}
-                    onChange={(event) =>
-                      void store.selectWebullAccount(environment, event.target.value)
-                    }
+                    onChange={(event) => {
+                      if (event.target.value === '') return;
+                      void store.selectWebullAccount(environment, event.target.value);
+                    }}
                   >
+                    <option value="" disabled>
+                      Select an account
+                    </option>
                     {state.webullAccounts[environment]?.map((account) => (
                       <option key={account.accountId} value={account.accountId}>
                         {account.accountName ?? account.accountType ?? 'Webull account'} —{' '}

@@ -70,7 +70,10 @@ export class StubBrokerGateway implements BrokerGateway {
   }
 
   async listAccounts(): Promise<WebullAccount[]> {
-    return [];
+    return [
+      { accountId: 'stub-acct-1', accountType: 'margin', accountName: 'Stub Margin Account' },
+      { accountId: 'stub-acct-2', accountType: 'cash', accountName: 'Stub Cash Account' },
+    ];
   }
 
   async selectAccount(): Promise<void> {}

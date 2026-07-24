@@ -44,6 +44,11 @@ interface PositionAgg {
  * chain from the real expiration calendar, market fills at last, mid fills at
  * mid after 200 ms, positions aggregate on fills. Never leaves the process.
  */
+export const STUB_WEBULL_ACCOUNTS = [
+  { accountId: 'stub-acct-1', accountType: 'margin', accountName: 'Stub Margin Account' },
+  { accountId: 'stub-acct-2', accountType: 'cash', accountName: 'Stub Cash Account' },
+] as const;
+
 export class StubBrokerGateway implements BrokerGateway {
   static readonly PRICE = 100;
 
@@ -70,10 +75,7 @@ export class StubBrokerGateway implements BrokerGateway {
   }
 
   async listAccounts(): Promise<WebullAccount[]> {
-    return [
-      { accountId: 'stub-acct-1', accountType: 'margin', accountName: 'Stub Margin Account' },
-      { accountId: 'stub-acct-2', accountType: 'cash', accountName: 'Stub Cash Account' },
-    ];
+    return [...STUB_WEBULL_ACCOUNTS];
   }
 
   async selectAccount(): Promise<void> {}

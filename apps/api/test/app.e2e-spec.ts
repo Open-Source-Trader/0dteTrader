@@ -9,7 +9,7 @@ import { blackForwardKernel } from '../src/options-analytics/options-analytics.e
 import { TradierClient } from '../src/options-analytics/tradier.client';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { InMemoryPrismaService } from './in-memory-prisma.service';
-import { StubBrokerGateway } from './stub-broker.gateway';
+import { StubBrokerGateway, STUB_WEBULL_ACCOUNTS } from './stub-broker.gateway';
 import { WebullBrokerGateway } from '../src/broker/webull/webull-broker.gateway';
 
 const E2E_OPTION_EXPIRATION = optionExpirations('SPY', new Date(Date.now() + 86_400_000))[0];
@@ -105,10 +105,7 @@ describe('0dteTrader API (e2e)', () => {
       })
       .overrideProvider(WebullBrokerGateway)
       .useValue({
-        listAccounts: async () => [
-          { accountId: 'stub-acct-1', accountType: 'margin', accountName: 'Stub Margin Account' },
-          { accountId: 'stub-acct-2', accountType: 'cash', accountName: 'Stub Cash Account' },
-        ],
+        listAccounts: async () => [...STUB_WEBULL_ACCOUNTS],
         selectAccount: async () => undefined,
       })
       .compile();
@@ -387,8 +384,11 @@ describe('0dteTrader API (e2e)', () => {
     const auth = { Authorization: `Bearer ${accessToken}` };
     const res = await request(server).get('/v1/me/webull-accounts').set(auth).expect(200);
     expect(Array.isArray(res.body)).toBe(true);
-    expect(res.body).toHaveLength(2);
-    expect(res.body[0]).toMatchObject({ accountId: 'stub-acct-1', accountType: 'margin' });
+    expect(res.body).toHaveLength(STUB_WEBULL_ACCOUNTS.length);
+    expect(res.body[0]).toMatchObject({
+      accountId: STUB_WEBULL_ACCOUNTS[0].accountId,
+      accountType: STUB_WEBULL_ACCOUNTS[0].accountType,
+    });
   });
 
   it('GET /v1/me/webull-accounts?environment=practice lists practice accounts', async () => {
@@ -440,6 +440,10 @@ describe('0dteTrader API (e2e)', () => {
       .send({ accountId: '', environment: 'live' })
       .expect(400);
     expect(res.body.error.code).toBe('VALIDATION_ERROR');
+  });
+
+  it('PATCH /v1/me/webull-accounts requires authentication (401)', async () => {
+    await request(server).patch('/v1/me/webull-accounts').expect(401);
   });
 
   it('PATCH /v1/me/webull-accounts rejects invalid environment with 400', async () => {

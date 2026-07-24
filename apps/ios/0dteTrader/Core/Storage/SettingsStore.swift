@@ -28,6 +28,8 @@ final class SettingsStore: @unchecked Sendable {
         static let riskDisclaimerAccepted = "settings.riskDisclaimerAccepted"
         static let lastSymbol = "settings.lastSymbol"
         static let appLockEnabled = "settings.appLockEnabled"
+        static let tradingLocked = "settings.tradingLocked"
+        static let bypassOrderConfirmation = "settings.bypassOrderConfirmation"
     }
 
     /// Layout choice persists across launches (FR-12). Defaults to split view.
@@ -111,5 +113,19 @@ final class SettingsStore: @unchecked Sendable {
     var appLockEnabled: Bool {
         get { defaults.bool(forKey: Keys.appLockEnabled) }
         set { defaults.set(newValue, forKey: Keys.appLockEnabled) }
+    }
+
+    /// Trading lock: when true, every order-placing control is disabled. Persists
+    /// across launches (the lock is remembered, like the layout choice). Distinct
+    /// from `appLockEnabled`, which is the Face-ID app-open gate.
+    var tradingLocked: Bool {
+        get { defaults.bool(forKey: Keys.tradingLocked) }
+        set { defaults.set(newValue, forKey: Keys.tradingLocked) }
+    }
+
+    /// Skip the buy/sell confirmation sheet and submit immediately. Per-device.
+    var bypassOrderConfirmation: Bool {
+        get { defaults.bool(forKey: Keys.bypassOrderConfirmation) }
+        set { defaults.set(newValue, forKey: Keys.bypassOrderConfirmation) }
     }
 }

@@ -175,10 +175,16 @@ export class ChainStore extends Store<ChainStoreState> {
       if (gen !== this.loadGeneration) return;
       const current = this.getState().chain;
       if (!current) return;
-      const updated = new Map(dto.contracts.map((contract) => [contract.symbol, contract]));
-      const known = new Set(current.contracts.map((contract) => contract.symbol));
-      const merged = current.contracts.map((contract) => updated.get(contract.symbol) ?? contract);
-      const additions = dto.contracts.filter((contract) => !known.has(contract.symbol));
+      const updated = new Map(
+        dto.contracts.map((contract: OptionContract) => [contract.symbol, contract]),
+      );
+      const known = new Set(current.contracts.map((contract: OptionContract) => contract.symbol));
+      const merged = current.contracts.map(
+        (contract: OptionContract) => updated.get(contract.symbol) ?? contract,
+      );
+      const additions = dto.contracts.filter(
+        (contract: OptionContract) => !known.has(contract.symbol),
+      );
       this.set({
         chain: {
           ...current,
@@ -226,7 +232,7 @@ export class ChainStore extends Store<ChainStoreState> {
     expiration: string,
   ): Promise<OptionContract[] | null> {
     const dto = await this.apiClient.optionsChain(underlying, expiration);
-    return dto.contracts.filter((contract) => contract.expiration === expiration);
+    return dto.contracts.filter((contract: OptionContract) => contract.expiration === expiration);
   }
 
   /** Manual-mode strike setter. */

@@ -107,6 +107,9 @@ struct TradePanelView: View {
     let underlying: String
     let positionsStrip: PositionsStripView
     var density: TradePanelDensity = .roomy
+    /// Trading lock: disables Buy/Sell and the order-config controls. The
+    /// positions strip handles its own lock (passed in pre-built).
+    var tradingLocked: Bool = false
     let onArm: (OrderSide) -> Void
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -117,9 +120,13 @@ struct TradePanelView: View {
             VStack(spacing: density.spacing) {
                 positionsStrip
                     .frame(maxHeight: density.stripMaxHeight)
-                optionsSection
-                quantityRow
-                orderTypeRow
+                Group {
+                    optionsSection
+                    quantityRow
+                    orderTypeRow
+                }
+                .disabled(tradingLocked)
+                .opacity(tradingLocked ? 0.55 : 1)
             }
             .frame(maxHeight: .infinity, alignment: .top)
             .clipped()
@@ -365,7 +372,7 @@ struct TradePanelView: View {
     }
 
     private var canTrade: Bool {
-        chainViewModel.selectedContract != nil
+        chainViewModel.selectedContract != nil && !tradingLocked
     }
 
     // MARK: - Shared chrome

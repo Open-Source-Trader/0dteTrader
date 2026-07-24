@@ -45,6 +45,14 @@ targets:
       Staging: Configurations/Staging.xcconfig
       Release: Configurations/Release.xcconfig
     prebuildScripts:
+      - name: Generate Environment
+        basedOnDependencyAnalysis: false
+        script: |-
+          if [ -f "${SRCROOT}/scripts/generate-env.sh" ]; then
+            bash "${SRCROOT}/scripts/generate-env.sh"
+          else
+            echo "warning: generate-env.sh not found; skipping environment generation"
+          fi
       - name: SwiftLint
         basedOnDependencyAnalysis: false
         script: |

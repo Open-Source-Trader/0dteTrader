@@ -3,12 +3,13 @@ import Foundation
 /// Typed, compile-time environment selection.
 ///
 /// The active environment is chosen by build configuration:
-/// - **Debug** → `.development` (localhost)
-/// - **Staging** → `.staging` (Railway staging)
-/// - **Release** → `.production` (Railway production)
+/// - **Debug** → `.development`
+/// - **Staging** → `.staging`
+/// - **Release** → `.production`
 ///
-/// Override at runtime by setting the `API_BASE_URL` environment
-/// variable in the scheme's Run arguments (useful for QA).
+/// The `apiBaseURL` is loaded from the top-level `.env` file at
+/// build time via `scripts/generate-env.sh` (see `project.yml`).
+/// Override `API_BASE_URL` in `.env` to point at any backend.
 enum AppEnvironment {
     case development, staging, production
 
@@ -27,14 +28,7 @@ enum AppEnvironment {
     // MARK: - Endpoints
 
     var apiBaseURL: URL {
-        switch self {
-        case .development:
-            return URL(string: "http://localhost:3000")!
-        case .staging:
-            return URL(string: "https://caring-prosperity-staging.up.railway.app")!
-        case .production:
-            return URL(string: "https://caring-prosperity-production.up.railway.app")!
-        }
+        URL(string: GeneratedEnvironment.apiBaseURL)!
     }
 
     var streamURL: URL {

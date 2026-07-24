@@ -60,9 +60,9 @@ Environment configuration is split across two files:
 | **Staging**   | `STAGING`  | `https://caring-prosperity-staging.up.railway.app`    | Disabled             |
 | **Release**   | _(none)_   | `https://caring-prosperity-production.up.railway.app` | Disabled             |
 
-### Runtime override
+### API base URL source
 
-Set the `API_BASE_URL` environment variable in the scheme's Run arguments to override the default for any configuration. This is useful for QA or when pointing a release build at a non-production backend.
+`API_BASE_URL` is generated at build time by `scripts/generate-env.sh`. The script reads the top-level `.env` first, then falls back to the build environment, then defaults to `http://localhost:3000`. Change the URI in `.env` to point the app at a different backend.
 
 ### Certificate pinning
 

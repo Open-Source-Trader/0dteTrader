@@ -215,15 +215,19 @@ export class WebullBrokerGateway implements BrokerGateway, OnModuleDestroy {
     const accounts = rows.map((row) => asObject(row));
     // Sandbox and production responses have used both snake_case and camelCase
     // account-type fields, so accept the known aliases when identifying margin.
-    const hasAccountId = (account: Record<string, unknown> | null): account is Record<string, unknown> =>
+    const hasValidAccountId = (
+      account: Record<string, unknown> | null,
+    ): account is Record<string, unknown> =>
       typeof account?.account_id === 'string' && account.account_id.length > 0;
     const marginAccount = accounts.find((account) => {
-      if (!hasAccountId(account)) return false;
+      if (!hasValidAccountId(account)) return false;
       const type =
         account.account_type ?? account.accountType ?? account.account_type_name ?? account.type;
-      return typeof type === 'string' && type.toLowerCase().includes('margin');
+      if (typeof type !== 'string') return false;
+      const normalizedType = type.toLowerCase().replace(/[\s_-]+/g, '');
+      return normalizedType === 'margin' || normalizedType === 'marginaccount';
     });
-    const firstAccount = accounts.find(hasAccountId);
+    const firstAccount = accounts.find(hasValidAccountId);
     const accountId = (marginAccount ?? firstAccount)?.account_id;
     if (!accountId) {
       throw brokerErrors.authFailed(

@@ -8,6 +8,7 @@ import {
   Position,
   Quote,
   TradingMode,
+  WebullAccount,
 } from '@0dtetrader/shared-types';
 
 /** Injection token for the BrokerGateway (Webull OpenAPI). */
@@ -32,4 +33,6 @@ export interface BrokerGateway {
    * and mint a fresh access token. Returns the mode it applied to.
    */
   reauthenticate(userId: string): Promise<TradingMode>;
+  listAccounts(userId: string, environment: TradingMode): Promise<WebullAccount[]>;
+  selectAccount(userId: string, environment: TradingMode, accountId: string): Promise<void>;
 }

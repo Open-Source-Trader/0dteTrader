@@ -10,6 +10,7 @@ import {
   Position,
   Quote,
   TradingMode,
+  WebullAccount,
 } from '@0dtetrader/shared-types';
 import { BrokerGateway } from '../src/broker/broker-gateway.interface';
 import {
@@ -43,6 +44,11 @@ interface PositionAgg {
  * chain from the real expiration calendar, market fills at last, mid fills at
  * mid after 200 ms, positions aggregate on fills. Never leaves the process.
  */
+export const STUB_WEBULL_ACCOUNTS = [
+  { accountId: 'stub-acct-1', accountType: 'margin', accountName: 'Stub Margin Account' },
+  { accountId: 'stub-acct-2', accountType: 'cash', accountName: 'Stub Cash Account' },
+] as const;
+
 export class StubBrokerGateway implements BrokerGateway {
   static readonly PRICE = 100;
 
@@ -67,6 +73,12 @@ export class StubBrokerGateway implements BrokerGateway {
   async reauthenticate(): Promise<TradingMode> {
     return 'live';
   }
+
+  async listAccounts(): Promise<WebullAccount[]> {
+    return [...STUB_WEBULL_ACCOUNTS];
+  }
+
+  async selectAccount(): Promise<void> {}
 
   async getCandles(_userId: string, symbol: string, req: CandleRequest): Promise<Candle[]> {
     void symbol;

@@ -188,6 +188,12 @@ export interface Me {
   alpacaPracticeAccountId?: string | null;
 }
 
+export interface WebullAccount {
+  accountId: string;
+  accountType?: string;
+  accountName?: string;
+}
+
 export interface WebullCredentialsInput {
   /** Present only on the discriminated union; omitted by the legacy DTO. */
   provider?: 'webull';

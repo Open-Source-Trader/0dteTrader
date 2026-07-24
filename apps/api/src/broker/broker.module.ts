@@ -14,6 +14,7 @@ import {
   BrokerCredentialsController,
 } from '../credentials/credentials.controller';
 import { BrokerSessionController, WebullSessionController } from './webull-session.controller';
+import { WebullAccountController } from './webull-account.controller';
 
 /**
  * Provides the BrokerGateway under the BROKER_GATEWAY token
@@ -30,6 +31,7 @@ import { BrokerSessionController, WebullSessionController } from './webull-sessi
     BrokerSessionController,
     CredentialsController,
     BrokerCredentialsController,
+    WebullAccountController,
   ],
   providers: [
     OrderEventsService,

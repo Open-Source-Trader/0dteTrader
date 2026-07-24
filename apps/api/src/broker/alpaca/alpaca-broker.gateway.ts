@@ -12,10 +12,12 @@ import {
   Position,
   Quote,
   TradingMode,
+  WebullAccount,
 } from '@0dtetrader/shared-types';
 import { Alpaca, TimeFrame, TimeFrameUnit, timeFrame } from '@alpacahq/alpaca-trade-api';
 import { createHash } from 'crypto';
 import { BrokerError, brokerErrors } from '../../common/broker-error';
+import { errors } from '../../common/api-exception';
 import { aggregateCandles } from '../../market-data/candle-aggregation';
 import { CredentialsService } from '../../credentials/credentials.service';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -304,6 +306,17 @@ export class AlpacaBrokerGateway implements BrokerGateway, OnModuleDestroy {
   async reauthenticate(userId: string): Promise<TradingMode> {
     // Alpaca credentials are static API keys; no OAuth refresh needed.
     return this.tradingModeFor(userId);
+  }
+
+  async listAccounts(): Promise<WebullAccount[]> {
+    return [];
+  }
+
+  async selectAccount(): Promise<void> {
+    throw errors.badRequest(
+      'UNSUPPORTED_ACCOUNT_SELECTION',
+      'Account selection is not supported for Alpaca',
+    );
   }
 
   // -- helpers --------------------------------------------------------------

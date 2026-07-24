@@ -84,6 +84,19 @@ struct WebullCredentialsInputDTO: Encodable, Sendable {
     let environment: TradingMode
 }
 
+struct WebullAccountDTO: Decodable, Equatable, Sendable, Identifiable {
+    let accountId: String
+    let accountType: String?
+    let accountName: String?
+
+    var id: String { accountId }
+}
+
+struct SelectWebullAccountRequest: Encodable, Sendable {
+    let accountId: String
+    let environment: TradingMode
+}
+
 struct WebullConfiguredResponseDTO: Decodable, Equatable, Sendable {
     let webullConfigured: Bool
 }

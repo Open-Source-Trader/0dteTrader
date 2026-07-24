@@ -17,6 +17,7 @@ import type {
   TradingMode,
   WebullCredentialsInput,
   WebullCredentialsSaved,
+  WebullAccount,
   WebullSessionRefreshed,
 } from '@0dtetrader/shared-types';
 import { ApiError, parseErrorEnvelope } from './ApiError';
@@ -160,6 +161,18 @@ export class ApiClient {
   /** Mint a fresh Webull access token for the current trading mode ("Reconnect"). */
   refreshWebullSession(): Promise<WebullSessionRefreshed> {
     return this.request({ method: 'POST', path: 'v1/me/webull-session/refresh' });
+  }
+
+  webullAccounts(environment: TradingMode = 'live'): Promise<WebullAccount[]> {
+    return this.request({ method: 'GET', path: 'v1/me/webull-accounts', query: { environment } });
+  }
+
+  selectWebullAccount(accountId: string, environment: TradingMode = 'live'): Promise<void> {
+    return this.requestVoid({
+      method: 'PATCH',
+      path: 'v1/me/webull-accounts',
+      body: { accountId, environment },
+    });
   }
 
   updateTradingMode(mode: TradingMode): Promise<Me> {

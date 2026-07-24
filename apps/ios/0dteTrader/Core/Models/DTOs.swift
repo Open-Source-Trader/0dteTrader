@@ -92,6 +92,11 @@ struct WebullAccountDTO: Decodable, Equatable, Sendable, Identifiable {
     var id: String { accountId }
 }
 
+struct SelectWebullAccountRequest: Encodable, Sendable {
+    let accountId: String
+    let environment: TradingMode
+}
+
 struct WebullConfiguredResponseDTO: Decodable, Equatable, Sendable {
     let webullConfigured: Bool
 }

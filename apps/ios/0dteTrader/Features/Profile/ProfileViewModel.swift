@@ -152,32 +152,32 @@ final class ProfileViewModel: ObservableObject {
         } catch {
             setError(error)
         }
+    }
 
-        func loadWebullAccounts(environment: TradingMode) async {
-            guard !loadingWebullAccounts.contains(environment) else { return }
-            loadingWebullAccounts.insert(environment)
-            defer { loadingWebullAccounts.remove(environment) }
-            do {
-                webullAccounts[environment] = try await apiClient.webullAccounts(environment: environment)
-            } catch {
-                messageEnv = environment
-                setError(error)
-            }
+    func loadWebullAccounts(environment: TradingMode) async {
+        guard !loadingWebullAccounts.contains(environment) else { return }
+        loadingWebullAccounts.insert(environment)
+        defer { loadingWebullAccounts.remove(environment) }
+        do {
+            webullAccounts[environment] = try await apiClient.webullAccounts(environment: environment)
+        } catch {
+            messageEnv = environment
+            setError(error)
         }
+    }
 
-        func selectWebullAccount(environment: TradingMode, accountId: String) async {
-            guard !selectingWebullAccount.contains(environment) else { return }
-            selectingWebullAccount.insert(environment)
-            defer { selectingWebullAccount.remove(environment) }
-            do {
-                try await apiClient.selectWebullAccount(accountId: accountId, environment: environment)
-                successMessage = "Webull account selected."
-                messageEnv = environment
-                await load()
-            } catch {
-                messageEnv = environment
-                setError(error)
-            }
+    func selectWebullAccount(environment: TradingMode, accountId: String) async {
+        guard !selectingWebullAccount.contains(environment) else { return }
+        selectingWebullAccount.insert(environment)
+        defer { selectingWebullAccount.remove(environment) }
+        do {
+            try await apiClient.selectWebullAccount(accountId: accountId, environment: environment)
+            successMessage = "Webull account selected."
+            messageEnv = environment
+            await load()
+        } catch {
+            messageEnv = environment
+            setError(error)
         }
     }
 

@@ -226,10 +226,10 @@ export class WebullBrokerGateway implements BrokerGateway, OnModuleDestroy {
     return rows.flatMap((row) => {
       const value = asObject(row);
       const accountId = value?.account_id;
-      if (typeof accountId !== 'string' || accountId.length === 0) return [];
+      if (typeof accountId !== 'string' || accountId.trim().length === 0) return [];
       return [
         {
-          accountId,
+          accountId: accountId.trim(),
           accountType: typeof value.account_type === 'string' ? value.account_type : undefined,
           accountName: typeof value.account_name === 'string' ? value.account_name : undefined,
         },

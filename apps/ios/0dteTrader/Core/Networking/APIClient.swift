@@ -154,10 +154,10 @@ struct APIClient: @unchecked Sendable {
     }
 
     func selectWebullAccount(accountId: String, environment: TradingMode) async throws {
-        let body = try JSONEncoder().encode([
-            "accountId": accountId,
-            "environment": environment.rawValue
-        ])
+        let body = try JSONEncoder().encode(SelectWebullAccountRequest(
+            accountId: accountId,
+            environment: environment
+        ))
         try await requestVoid(Endpoint(method: .patch, path: "v1/me/webull-accounts"), body: body)
     }
 

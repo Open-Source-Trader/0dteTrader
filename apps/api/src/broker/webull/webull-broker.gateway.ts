@@ -212,13 +212,19 @@ export class WebullBrokerGateway implements BrokerGateway, OnModuleDestroy {
     if (client.hasAccountId()) return client.accountId;
     const payload = await client.request('accountList');
     const rows = Array.isArray(payload) ? payload : asArray(asObject(payload)?.accounts);
-    const accounts = rows.map((row) => asObject(row)).filter(Boolean);
+    const accounts = rows.map((row) => asObject(row));
+    // Sandbox and production responses have used both snake_case and camelCase
+    // account-type fields, so accept the known aliases when identifying margin.
+    const hasAccountId = (account: Record<string, unknown> | null): account is Record<string, unknown> =>
+      typeof account?.account_id === 'string' && account.account_id.length > 0;
     const marginAccount = accounts.find((account) => {
+      if (!hasAccountId(account)) return false;
       const type =
         account.account_type ?? account.accountType ?? account.account_type_name ?? account.type;
       return typeof type === 'string' && type.toLowerCase().includes('margin');
     });
-    const accountId = (marginAccount ?? accounts[0])?.account_id;
+    const firstAccount = accounts.find(hasAccountId);
+    const accountId = (marginAccount ?? firstAccount)?.account_id;
     if (!accountId) {
       throw brokerErrors.authFailed(
         'Webull returned no accounts for these credentials — check the app key/secret',

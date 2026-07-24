@@ -7,6 +7,12 @@ const TINTS = {
   info: 'var(--app-accent)',
 };
 
+const ICONS = {
+  success: CheckCircleFillIcon,
+  error: WarningFillIcon,
+  info: InfoCircleFillIcon,
+};
+
 interface ToastViewProps {
   toast: Toast;
   /** Tap-to-dismiss (the toast itself is pointer-events: none by default). */
@@ -16,12 +22,7 @@ interface ToastViewProps {
 /** Result banner for order submissions and stream events. */
 export function ToastView({ toast, onDismiss }: ToastViewProps) {
   const tint = TINTS[toast.style];
-  const Icon =
-    toast.style === 'success'
-      ? CheckCircleFillIcon
-      : toast.style === 'error'
-        ? WarningFillIcon
-        : InfoCircleFillIcon;
+  const Icon = ICONS[toast.style];
   return (
     <div
       className="toast"

@@ -40,9 +40,10 @@ export function TwcOverlay({ chart, series, model, candles }: TwcOverlayProps) {
     const applyStyle = (ctx: CanvasRenderingContext2D, segment: TwcSegment): void => {
       ctx.strokeStyle = segment.color;
       ctx.lineWidth = segment.width;
-      ctx.setLineDash(
-        segment.style === 'dashed' ? [5, 4] : segment.style === 'dotted' ? [2, 3] : [],
-      );
+      let dash: number[] = [];
+      if (segment.style === 'dashed') dash = [5, 4];
+      else if (segment.style === 'dotted') dash = [2, 3];
+      ctx.setLineDash(dash);
     };
 
     const draw = () => {
@@ -147,12 +148,9 @@ export function TwcOverlay({ chart, series, model, candles }: TwcOverlayProps) {
         const y = yAt(label.price);
         if (x === null || y === null) continue;
         const textWidth = ctx.measureText(label.text).width;
-        const drawX =
-          label.align === 'center'
-            ? x - textWidth / 2
-            : label.align === 'right'
-              ? x - textWidth
-              : x;
+        let drawX = x;
+        if (label.align === 'center') drawX = x - textWidth / 2;
+        else if (label.align === 'right') drawX = x - textWidth;
         if (label.bgColor) {
           ctx.fillStyle = label.bgColor;
           const padX = 6;

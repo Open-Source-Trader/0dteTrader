@@ -14,13 +14,14 @@ export function RegisterView({ store, onDismiss }: { store: AuthStore; onDismiss
   const [touched, setTouched] = useState(false);
 
   // Same rules as RegisterView.swift; shown as a hint once any field loses focus.
-  const validationMessage = !email.includes('@')
-    ? 'Enter a valid email address.'
-    : password.length < 8
-      ? 'Password must be at least 8 characters.'
-      : password !== confirmPassword
-        ? 'Passwords do not match.'
-        : null;
+  let validationMessage: string | null = null;
+  if (!email.includes('@')) {
+    validationMessage = 'Enter a valid email address.';
+  } else if (password.length < 8) {
+    validationMessage = 'Password must be at least 8 characters.';
+  } else if (password !== confirmPassword) {
+    validationMessage = 'Passwords do not match.';
+  }
 
   const submit = () => {
     if (validationMessage !== null || isLoading) return;

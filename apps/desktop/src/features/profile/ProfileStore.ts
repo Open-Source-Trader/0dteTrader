@@ -218,45 +218,45 @@ export class ProfileStore extends Store<ProfileStoreState> {
         [environment]: { ...this.getState()[environment], isReconnecting: false },
       });
     }
+  }
 
-    async loadWebullAccounts(environment: TradingMode): Promise<void> {
-      if (this.getState().loadingAccounts[environment]) return;
+  async loadWebullAccounts(environment: TradingMode): Promise<void> {
+    if (this.getState().loadingAccounts[environment]) return;
+    this.set({
+      loadingAccounts: { ...this.getState().loadingAccounts, [environment]: true },
+      errorMessage: null,
+      messageEnv: environment,
+    });
+    try {
+      const accounts = await this.apiClient.webullAccounts(environment);
+      this.set({ webullAccounts: { ...this.getState().webullAccounts, [environment]: accounts } });
+    } catch (error) {
+      this.set({ errorMessage: errorMessage(error) });
+    } finally {
       this.set({
-        loadingAccounts: { ...this.getState().loadingAccounts, [environment]: true },
-        errorMessage: null,
-        messageEnv: environment,
+        loadingAccounts: { ...this.getState().loadingAccounts, [environment]: false },
       });
-      try {
-        const accounts = await this.apiClient.webullAccounts(environment);
-        this.set({ webullAccounts: { ...this.getState().webullAccounts, [environment]: accounts } });
-      } catch (error) {
-        this.set({ errorMessage: errorMessage(error) });
-      } finally {
-        this.set({
-          loadingAccounts: { ...this.getState().loadingAccounts, [environment]: false },
-        });
-      }
     }
+  }
 
-    async selectWebullAccount(environment: TradingMode, accountId: string): Promise<void> {
-      if (this.getState().selectingAccount[environment]) return;
+  async selectWebullAccount(environment: TradingMode, accountId: string): Promise<void> {
+    if (this.getState().selectingAccount[environment]) return;
+    this.set({
+      selectingAccount: { ...this.getState().selectingAccount, [environment]: true },
+      errorMessage: null,
+      successMessage: null,
+      messageEnv: environment,
+    });
+    try {
+      await this.apiClient.selectWebullAccount(accountId, environment);
+      this.set({ successMessage: 'Webull account selected.' });
+      await this.load();
+    } catch (error) {
+      this.set({ errorMessage: errorMessage(error) });
+    } finally {
       this.set({
-        selectingAccount: { ...this.getState().selectingAccount, [environment]: true },
-        errorMessage: null,
-        successMessage: null,
-        messageEnv: environment,
+        selectingAccount: { ...this.getState().selectingAccount, [environment]: false },
       });
-      try {
-        await this.apiClient.selectWebullAccount(accountId, environment);
-        this.set({ successMessage: 'Webull account selected.' });
-        await this.load();
-      } catch (error) {
-        this.set({ errorMessage: errorMessage(error) });
-      } finally {
-        this.set({
-          selectingAccount: { ...this.getState().selectingAccount, [environment]: false },
-        });
-      }
     }
   }
 

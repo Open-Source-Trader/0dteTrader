@@ -230,10 +230,8 @@ export class WebullBrokerGateway implements BrokerGateway, OnModuleDestroy {
       return [
         {
           accountId,
-          accountType:
-            typeof value.account_type === 'string' ? value.account_type : undefined,
-          accountName:
-            typeof value.account_name === 'string' ? value.account_name : undefined,
+          accountType: typeof value.account_type === 'string' ? value.account_type : undefined,
+          accountName: typeof value.account_name === 'string' ? value.account_name : undefined,
         },
       ];
     });

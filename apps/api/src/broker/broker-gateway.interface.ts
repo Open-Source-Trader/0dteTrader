@@ -8,6 +8,7 @@ import {
   Position,
   Quote,
   TradingMode,
+  WebullAccount,
 } from '@0dtetrader/shared-types';
 
 /** Injection token for the BrokerGateway (Webull OpenAPI). */

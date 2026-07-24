@@ -221,9 +221,13 @@ export class WebullBrokerGateway implements BrokerGateway, OnModuleDestroy {
       typeof account?.account_id === 'string' && account.account_id.length > 0;
     const marginAccount = accounts.find((account) => {
       if (!hasValidAccountId(account)) return false;
+      // These aliases cover the snake_case and camelCase account-list payloads
+      // observed across Webull's sandbox and production environments.
       const type =
         account.account_type ?? account.accountType ?? account.account_type_name ?? account.type;
       if (typeof type !== 'string') return false;
+      // Normalize labels such as "MARGIN_ACCOUNT", "margin-account", and
+      // "Margin Account" before matching only known margin account types.
       const normalizedType = type.toLowerCase().replace(/[\s_-]+/g, '');
       return normalizedType === 'margin' || normalizedType === 'marginaccount';
     });

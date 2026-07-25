@@ -87,7 +87,7 @@ export function SymbolSpotlight({ currentSymbol, onSelect, onDismiss }: SymbolSp
     >
       <div className="spotlight-card">
         <div className="spotlight-input-row">
-          <MagnifierIcon size={16} style={{ color: 'var(--app-accent)' }} />
+          <MagnifierIcon size={20} style={{ color: 'var(--label-secondary)' }} />
           <input
             ref={inputRef}
             placeholder="Jump to symbol…"

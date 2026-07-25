@@ -850,33 +850,38 @@
 }
 
 /* --- Symbol spotlight (desktop Cmd+K command palette) ---
-   Real elevation (deep backdrop blur-equivalent, glow, layered surfaces)
-   instead of a flat bordered box — a command palette is a focal moment,
-   it should look considered, not like a plain modal with a blue outline. */
+   Rebuilt from scratch: no chamfer/HUD-card border (that decorative
+   language reads fine on chunky panels, but shrank to a single hairline
+   rectangle on this narrower, taller surface it just looked like a plain
+   box). Instead: a soft backdrop blur, a single glowing 1px edge, and a
+   generously-sized query row that's the visual anchor of the whole thing —
+   Spotlight/Raycast's actual proportions, not a shrunk-down settings dialog. */
 .spotlight-backdrop {
   position: absolute;
   inset: 0;
-  background: rgba(2, 6, 14, 0.7);
+  background: rgba(2, 6, 14, 0.55);
+  backdrop-filter: blur(3px);
   display: flex;
   align-items: flex-start;
   justify-content: center;
-  padding-top: 11vh;
+  padding-top: 14vh;
   animation: backdrop-in 120ms ease-out;
   z-index: var(--z-alert);
 }
 
 .spotlight-card {
-  width: min(560px, 92%);
-  max-height: 62vh;
+  width: min(600px, 92%);
+  max-height: 56vh;
   display: flex;
   flex-direction: column;
-  background: var(--hud-panel-fill);
-  border: 8px solid transparent;
-  border-image: var(--hud-src-accent) 28 fill / 24px / 6px stretch;
+  background: var(--app-surface-elevated);
+  border-radius: 12px;
   box-shadow:
-    var(--shadow-overlay),
-    0 0 0 1px rgba(46, 143, 255, 0.15),
-    0 0 48px rgba(46, 143, 255, 0.12);
+    0 0 0 1px var(--hud-stroke-dim),
+    0 0 0 1px rgba(46, 143, 255, 0.2) inset,
+    0 24px 64px rgba(0, 0, 0, 0.55),
+    0 0 60px rgba(46, 143, 255, 0.1);
+  overflow: hidden;
 }
 
 .spotlight-input-row {
@@ -884,66 +889,61 @@
   align-items: center;
   gap: var(--space-3);
   flex: none;
-  padding: var(--space-4);
-  border-bottom: var(--border-hairline) solid var(--hud-stroke-dim);
+  padding: var(--space-4) var(--space-5);
 }
 
 .spotlight-input {
   flex: 1;
-  font-family: var(--font-mono);
-  font-size: var(--fs-headline);
-  letter-spacing: 0.02em;
+  height: 32px;
+  font-family: var(--font-sans);
+  font-size: 22px;
+  font-weight: 500;
 }
 
 /* Override the app-wide input:focus-visible box-shadow ring (base.css) —
    the input is auto-focused for the palette's entire open duration, so that
-   ring was permanently visible, nested inside the card's own accent border
-   ("a box within a box"). No ring needed here: the whole card already reads
-   as the focused surface. */
+   ring would be permanently visible. The card's own edge glow already reads
+   as the focused surface; no second ring nested inside it. */
 .spotlight-input:focus-visible {
   outline: none;
   box-shadow: none;
-}
-
-.spotlight-input::placeholder {
-  font-family: var(--font-sans);
-  letter-spacing: normal;
 }
 
 .spotlight-results {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: var(--space-2) 0;
+  padding: 0 var(--space-2) var(--space-2);
+  border-top: var(--border-hairline) solid var(--hud-stroke-dim);
 }
 
 .spotlight-section-header {
-  padding: var(--space-3) var(--space-4) 6px;
+  padding: var(--space-3) var(--space-3) 6px;
   font-size: var(--fs-caption2-desktop);
-  color: var(--app-accent-text);
-  font-weight: 700;
+  color: var(--label-secondary);
+  font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.08em;
 }
 
 .spotlight-row {
-  position: relative;
   display: flex;
   align-items: center;
   gap: var(--space-3);
-  width: 100%;
-  padding: 9px var(--space-4);
+  padding: 10px var(--space-3);
+  margin: 0 var(--space-1);
+  width: calc(100% - 2 * var(--space-1));
+  border-radius: 8px;
   font-size: var(--fs-subheadline-desktop);
-  border-left: 2px solid transparent;
 }
 
 .spotlight-row:hover {
-  background: rgba(46, 143, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
 }
 
 .spotlight-row.active {
-  background: rgba(46, 143, 255, 0.14);
-  border-left-color: var(--hud-stroke);
+  background: var(--app-accent-fill);
+  color: #fff;
 }
 
 .spotlight-row-icon {
@@ -954,6 +954,10 @@
   color: var(--app-accent);
 }
 
+.spotlight-row.active .spotlight-row-icon {
+  color: #fff;
+}
+
 .spotlight-row-label {
   flex: 1;
   min-width: 0;
@@ -962,17 +966,17 @@
 .spotlight-footer {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: var(--space-4);
   flex: none;
   padding: var(--space-2) var(--space-4);
   border-top: var(--border-hairline) solid var(--hud-stroke-dim);
-  background: var(--app-surface);
 }
 
 .spotlight-footer-hint {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 5px;
   font-size: var(--fs-caption2-desktop);
   color: var(--label-secondary);
 }
@@ -981,15 +985,14 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 18px;
-  height: 18px;
-  padding: 0 4px;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
   font-family: var(--font-mono);
   font-size: var(--fs-caption2-desktop);
   color: var(--label-primary);
-  background: var(--app-surface-elevated);
-  border: var(--border-hairline) solid var(--hud-stroke-dim);
-  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 5px;
 }
 
 /* --- Desktop settings/indicators/history panel (desktop grid only) ---

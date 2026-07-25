@@ -5,15 +5,17 @@ import { Spinner } from '../../design/components/Spinner';
 import { XCircleFillIcon } from '../../design/icons';
 import { useProfileStore } from './useProfileStore';
 
-type Field = 'apiKey' | 'apiSecret';
+type Field = 'clientId' | 'consumerKey';
 
-/** Write-only Alpaca credential entry for one environment; stored values are never shown.
- *  Alpaca v2 is key-scoped, so there is no account id to discover. */
-export function AlpacaCredentialsForm({ environment }: { environment: TradingMode }) {
+/** Write-only SnapTrade Personal client ID / consumer key entry for one
+ *  environment; stored values are never shown. This is the user's own
+ *  SnapTrade identity (docs.snaptrade.com/docs/personal-vs-commercial) —
+ *  0dteTrader never mints or holds a SnapTrade identity on their behalf. */
+export function SnapTradeCredentialsForm({ environment }: { environment: TradingMode }) {
   const store = useProfileStore();
   const state = useStore(store);
-  const { apiKey, apiSecret, isSaving } = state.alpaca[environment];
-  const canSave = store.canSaveAlpaca(environment) && !isSaving;
+  const { clientId, consumerKey, isSaving } = state.snaptradeKey[environment];
+  const canSave = store.canSaveSnapTradeKey(environment) && !isSaving;
   const [reveal, setReveal] = useState(false);
   const inputType = reveal ? 'text' : 'password';
   const inputClassName = `secret-input${reveal ? ' revealed' : ''}`;
@@ -27,7 +29,7 @@ export function AlpacaCredentialsForm({ environment }: { environment: TradingMod
       <div className="credential-field">
         <input
           id={id}
-          name={`${environment}-alpaca-${field}`}
+          name={`${environment}-snaptrade-${field}`}
           className={inputClassName}
           type={inputType}
           placeholder="Required"
@@ -35,14 +37,14 @@ export function AlpacaCredentialsForm({ environment }: { environment: TradingMod
           spellCheck={false}
           required
           value={value}
-          onChange={(event) => store.setAlpacaField(environment, field, event.target.value)}
+          onChange={(event) => store.setSnapTradeKeyField(environment, field, event.target.value)}
         />
         {value !== '' ? (
           <button
             type="button"
             className="clear-field"
             aria-label={`Clear ${envTitle} ${label}`}
-            onClick={() => store.setAlpacaField(environment, field, '')}
+            onClick={() => store.setSnapTradeKeyField(environment, field, '')}
           >
             <XCircleFillIcon size={16} />
           </button>
@@ -56,13 +58,14 @@ export function AlpacaCredentialsForm({ environment }: { environment: TradingMod
       className="credentials-form"
       onSubmit={(event) => {
         event.preventDefault();
-        if (canSave) void store.saveAlpacaCredentials(environment);
+        if (canSave) void store.saveSnapTradeKey(environment);
       }}
     >
-      {renderField('apiKey', `ap-${environment}-api-key`, 'API Key', apiKey)}
-      {renderField('apiSecret', `ap-${environment}-api-secret`, 'API Secret', apiSecret)}
+      {renderField('clientId', `st-${environment}-client-id`, 'Client ID', clientId)}
+      {renderField('consumerKey', `st-${environment}-consumer-key`, 'Consumer Key', consumerKey)}
       <div className="grouped-row footnote" style={{ color: 'var(--text-secondary)' }}>
-        Alpaca is key-scoped: the key/secret identify your account, so no account id is needed.
+        Create a free Personal client ID and consumer key in your own SnapTrade Dashboard —
+        0dteTrader never sees or stores your brokerage login.
       </div>
       <button
         type="button"

@@ -12,6 +12,7 @@ import type { DesktopSnapTradeConnectionRecord } from '../../core/types/snaptrad
 
 type CredentialField = 'appKey' | 'appSecret';
 type AlpacaField = 'apiKey' | 'apiSecret';
+type SnapTradeKeyField = 'clientId' | 'consumerKey';
 
 interface CredentialEnvironmentState {
   appKey: string;
@@ -46,6 +47,17 @@ interface SnapTradeEnvironmentState {
   isReconnecting: boolean;
 }
 
+/** SnapTrade Personal client ID + consumer key — the user's own SnapTrade
+ *  identity (docs.snaptrade.com/docs/personal-vs-commercial). Entered and
+ *  stored the same way as an Alpaca API key; never server-minted. */
+interface SnapTradeKeyEnvironmentState {
+  clientId: string;
+  consumerKey: string;
+  isEditing: boolean;
+  isSaving: boolean;
+  isDeleting: boolean;
+}
+
 interface ProfileStoreState {
   me: Me | null;
   isLoading: boolean;
@@ -67,6 +79,7 @@ interface ProfileStoreState {
   loadingAccounts: Record<TradingMode, boolean>;
   selectingAccount: Record<TradingMode, boolean>;
   snaptrade: Record<TradingMode, SnapTradeEnvironmentState>;
+  snaptradeKey: Record<TradingMode, SnapTradeKeyEnvironmentState>;
 }
 
 const emptyEnvironment = (): CredentialEnvironmentState => ({
@@ -102,6 +115,14 @@ const emptySnapTradeEnvironment = (): SnapTradeEnvironmentState => ({
   isReconnecting: false,
 });
 
+const emptySnapTradeKeyEnvironment = (): SnapTradeKeyEnvironmentState => ({
+  clientId: '',
+  consumerKey: '',
+  isEditing: false,
+  isSaving: false,
+  isDeleting: false,
+});
+
 /**
  * Profile sheet state (ProfileViewModel.swift analog): account info, the active
  * trading provider, and the write-only credential lifecycle for Webull
@@ -127,6 +148,10 @@ export class ProfileStore extends Store<ProfileStoreState> {
       loadingAccounts: { live: false, practice: false },
       selectingAccount: { live: false, practice: false },
       snaptrade: { live: emptySnapTradeEnvironment(), practice: emptySnapTradeEnvironment() },
+      snaptradeKey: {
+        live: emptySnapTradeKeyEnvironment(),
+        practice: emptySnapTradeKeyEnvironment(),
+      },
     });
   }
 
@@ -162,6 +187,97 @@ export class ProfileStore extends Store<ProfileStoreState> {
       [environment]: { ...this.getState().alpaca[environment], isEditing },
     };
     this.set({ alpaca: next });
+  }
+
+  // MARK: - SnapTrade Personal client ID / consumer key (user-entered, write-only)
+
+  canSaveSnapTradeKey(environment: TradingMode): boolean {
+    const { clientId, consumerKey } = this.getState().snaptradeKey[environment];
+    return clientId.trim() !== '' && consumerKey !== '';
+  }
+
+  setSnapTradeKeyField(environment: TradingMode, field: SnapTradeKeyField, value: string): void {
+    const next = {
+      ...this.getState().snaptradeKey,
+      [environment]: { ...this.getState().snaptradeKey[environment], [field]: value },
+    };
+    this.set({ snaptradeKey: next });
+  }
+
+  setSnapTradeKeyEditing(environment: TradingMode, isEditing: boolean): void {
+    const next = {
+      ...this.getState().snaptradeKey,
+      [environment]: { ...this.getState().snaptradeKey[environment], isEditing },
+    };
+    this.set({ snaptradeKey: next });
+  }
+
+  async saveSnapTradeKey(environment: TradingMode): Promise<void> {
+    const env = this.getState().snaptradeKey[environment];
+    if (!this.canSaveSnapTradeKey(environment) || env.isSaving) return;
+    const next = { ...this.getState().snaptradeKey, [environment]: { ...env, isSaving: true } };
+    this.set({
+      snaptradeKey: next,
+      errorMessage: null,
+      successMessage: null,
+      messageEnv: environment,
+    });
+    try {
+      await this.apiClient.putBrokerCredentials(
+        {
+          provider: 'snaptrade',
+          clientId: env.clientId.trim(),
+          consumerKey: env.consumerKey,
+        },
+        environment,
+      );
+      // Write-only: wipe the fields, never render them back.
+      this.set({
+        snaptradeKey: {
+          ...this.getState().snaptradeKey,
+          [environment]: { ...emptySnapTradeKeyEnvironment() },
+        },
+        successMessage: 'SnapTrade credentials saved.',
+      });
+      await this.load();
+    } catch (error) {
+      this.set({ errorMessage: errorMessage(error) });
+    } finally {
+      const done = this.getState().snaptradeKey[environment];
+      this.set({
+        snaptradeKey: {
+          ...this.getState().snaptradeKey,
+          [environment]: { ...done, isSaving: false },
+        },
+      });
+    }
+  }
+
+  async deleteSnapTradeKey(environment: TradingMode): Promise<void> {
+    const env = this.getState().snaptradeKey[environment];
+    if (env.isDeleting) return;
+    const next = { ...this.getState().snaptradeKey, [environment]: { ...env, isDeleting: true } };
+    this.set({
+      snaptradeKey: next,
+      errorMessage: null,
+      successMessage: null,
+      messageEnv: environment,
+    });
+    try {
+      await this.apiClient.deleteBrokerCredentials('snaptrade', environment);
+      this.set({ successMessage: 'SnapTrade credentials removed.' });
+      await this.load();
+    } catch (error) {
+      this.set({ errorMessage: errorMessage(error) });
+    } finally {
+      const done = this.getState().snaptradeKey[environment];
+      this.set({
+        snaptradeKey: {
+          ...this.getState().snaptradeKey,
+          [environment]: { ...done, isDeleting: false },
+        },
+      });
+    }
   }
 
   // MARK: - SnapTrade connection lifecycle

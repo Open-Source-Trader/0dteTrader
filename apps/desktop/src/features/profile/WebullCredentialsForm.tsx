@@ -3,18 +3,13 @@ import type { TradingMode } from '@0dtetrader/shared-types';
 import { useStore } from '../../core/observable';
 import { Spinner } from '../../design/components/Spinner';
 import { XCircleFillIcon } from '../../design/icons';
-import type { ProfileStore } from './ProfileStore';
+import { useProfileStore } from './useProfileStore';
 
 type Field = 'appKey' | 'appSecret';
 
 /** Write-only Webull credential entry for one environment; stored values are never shown. */
-export function WebullCredentialsForm({
-  store,
-  environment,
-}: {
-  store: ProfileStore;
-  environment: TradingMode;
-}) {
+export function WebullCredentialsForm({ environment }: { environment: TradingMode }) {
+  const store = useProfileStore();
   const state = useStore(store);
   const { appKey, appSecret, isSaving } = state[environment];
   const canSave = store.canSaveCredentials(environment) && !isSaving;

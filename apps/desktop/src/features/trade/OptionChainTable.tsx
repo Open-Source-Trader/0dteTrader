@@ -48,11 +48,6 @@ function LegCell({
     >
       <span className="numeric chain-cell-bid">{Format.price(contract.bid)}</span>
       <span className="numeric chain-cell-ask">{Format.price(contract.ask)}</span>
-      {autoSelected && selected ? (
-        <span className="chain-cell-auto-badge" aria-hidden="true">
-          AUTO
-        </span>
-      ) : null}
     </button>
   );
 }
@@ -129,7 +124,17 @@ export function OptionChainTable({
                   chainStore.selectStrike(strike);
                 }}
               />
-              <span className="chain-row-strike numeric" role="cell">
+              <span
+                className={
+                  autoSelected && isSelected
+                    ? 'chain-row-strike chain-row-strike--auto numeric'
+                    : 'chain-row-strike numeric'
+                }
+                role="cell"
+              >
+                {autoSelected && isSelected ? (
+                  <span className="chain-row-auto-dot" aria-hidden="true" />
+                ) : null}
                 {Format.strike(strike)}
               </span>
               <LegCell

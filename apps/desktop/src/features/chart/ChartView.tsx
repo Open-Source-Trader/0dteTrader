@@ -267,114 +267,219 @@ export function ChartView({
 
   return (
     <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-      {/* Header: one dense row (TradingView legend convention) — symbol,
-          last/bid/ask inline, controls right-aligned. The old two-line
-          stacked price block cost real chart height for no added
-          information; a scalper reads this in one glance either way. */}
-      <div
-        className={dense ? 'chart-header chart-header--dense' : 'chart-header'}
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: dense ? 10 : 8,
-          margin: dense ? '2px 6px 0' : '3px 8px 0',
-          padding: dense ? '2px 6px' : '4px 6px',
-          flex: 'none',
-        }}
-      >
-        <button
-          className="chart-header-symbol"
-          onClick={onSymbolSearch}
-          aria-label={`Symbol ${symbol}. Change symbol`}
-        >
-          <span className="chart-header-symbol-text">{symbol}</span>
-          <span aria-hidden="true" style={{ display: 'flex', color: 'var(--app-accent)' }}>
-            <ChevronDownIcon size={12} />
-          </span>
-        </button>
+      {dense ? (
+        // Desktop grid: one dense strip, solid fill (Bloomberg/TV terminal
+        // convention — never text floating over the canvas, always a real
+        // background), symbol + price/bid-ask + controls all in one row.
+        <div className="chart-strip">
+          <button
+            className="chart-strip-symbol"
+            onClick={onSymbolSearch}
+            aria-label={`Symbol ${symbol}. Change symbol`}
+          >
+            <span>{symbol}</span>
+            <ChevronDownIcon size={11} />
+          </button>
 
-        {quote ? (
-          <span className="numeric chart-header-quote">
-            <span
-              style={{
-                fontSize: dense ? 15 : 18,
-                fontWeight: 600,
-                textShadow: '0 0 8px var(--hud-glow)',
-              }}
-            >
-              {Format.price(quote.last)}
-            </span>
-            <span style={{ color: 'var(--buy-green)' }}>{Format.price(quote.bid)}</span>
-            <span style={{ color: 'var(--label-secondary)' }}>×</span>
-            <span style={{ color: 'var(--sell-red)' }}>{Format.price(quote.ask)}</span>
-            {isStale ? (
-              <span style={{ color: 'var(--warning-orange)', fontWeight: 600 }}>● STALE</span>
-            ) : null}
-          </span>
-        ) : null}
-
-        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
-          {tickProgress ? (
-            <span
-              className="quick-chip"
-              style={{ fontSize: 'var(--fs-caption)', color: 'var(--label-secondary)' }}
-              aria-label={`Building candle: ${tickProgress.count} of ${tickProgress.size} ticks`}
-            >
-              {tickProgress.count}/{tickProgress.size} ticks
+          {quote ? (
+            <span className="numeric chart-strip-quote">
+              <span className="chart-strip-last">{Format.price(quote.last)}</span>
+              <span style={{ color: 'var(--buy-green)' }}>{Format.price(quote.bid)}</span>
+              <span style={{ color: 'var(--label-secondary)' }}>/</span>
+              <span style={{ color: 'var(--sell-red)' }}>{Format.price(quote.ask)}</span>
+              {isStale ? (
+                <span style={{ color: 'var(--warning-orange)', fontWeight: 600 }}>STALE</span>
+              ) : null}
             </span>
           ) : null}
-          <button
-            className={tradingMode === 'live' ? 'hud-badge hud-badge--live' : 'hud-badge'}
-            onClick={onToggleMode}
-            aria-label={`Trading mode ${tradingMode === 'live' ? 'LIVE' : 'PRACTICE'}. Switch mode`}
-          >
-            {tradingMode === 'live' ? 'LIVE' : 'PRACTICE'}
-          </button>
-          <Menu
-            trigger={
-              <button
-                className="quick-chip"
-                style={{ minHeight: dense ? 26 : 32, padding: dense ? '4px 8px' : '6px 10px' }}
-                aria-label={`Chart interval ${interval}`}
-                aria-haspopup="menu"
-              >
-                {interval}
-              </button>
-            }
-            items={CHART_INTERVALS.map((option) => ({
-              key: option,
-              label: (
-                <>
-                  {option.toUpperCase()}
-                  {INTERVAL_HINTS[option] ? (
-                    <span
-                      style={{
-                        marginLeft: 12,
-                        fontSize: 'var(--fs-caption)',
-                        color: 'var(--label-secondary)',
-                      }}
-                    >
-                      {INTERVAL_HINTS[option]}
-                    </span>
-                  ) : null}
-                </>
-              ),
-              checked: option === interval,
-              onSelect: () => store.selectInterval(option),
-            }))}
-          />
-          {/* Desktop grid renders the persistent DrawToolsRail alongside the
-              chart instead — the header dropdown is compact-layout only. */}
-          {dense ? null : <DrawToolsMenu store={drawingsStore} />}
-          <button
-            className="chart-icon-button"
-            onClick={onIndicatorSettings}
-            aria-label="Indicator settings"
-          >
-            <SlidersIcon size={16} />
-          </button>
+
+          {tickProgress ? (
+            <span className="numeric chart-strip-ticks">
+              {tickProgress.count}/{tickProgress.size}
+            </span>
+          ) : null}
+
+          <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
+            <button
+              className={tradingMode === 'live' ? 'hud-badge hud-badge--live' : 'hud-badge'}
+              onClick={onToggleMode}
+              aria-label={`Trading mode ${tradingMode === 'live' ? 'LIVE' : 'PRACTICE'}. Switch mode`}
+            >
+              {tradingMode === 'live' ? 'LIVE' : 'PRACTICE'}
+            </button>
+            <Menu
+              trigger={
+                <button
+                  className="quick-chip"
+                  style={{ minHeight: 24, padding: '3px 7px' }}
+                  aria-label={`Chart interval ${interval}`}
+                  aria-haspopup="menu"
+                >
+                  {interval}
+                </button>
+              }
+              items={CHART_INTERVALS.map((option) => ({
+                key: option,
+                label: (
+                  <>
+                    {option.toUpperCase()}
+                    {INTERVAL_HINTS[option] ? (
+                      <span
+                        style={{
+                          marginLeft: 12,
+                          fontSize: 'var(--fs-caption)',
+                          color: 'var(--label-secondary)',
+                        }}
+                      >
+                        {INTERVAL_HINTS[option]}
+                      </span>
+                    ) : null}
+                  </>
+                ),
+                checked: option === interval,
+                onSelect: () => store.selectInterval(option),
+              }))}
+            />
+            <button
+              className="chart-icon-button chart-icon-button--sm"
+              onClick={onIndicatorSettings}
+              aria-label="Indicator settings"
+            >
+              <SlidersIcon size={14} />
+            </button>
+          </span>
         </div>
-      </div>
+      ) : (
+        <div
+          className="chart-header"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            margin: '3px 8px 0',
+            padding: '4px 6px',
+            flex: 'none',
+          }}
+        >
+          <button
+            className="chart-header-symbol"
+            onClick={onSymbolSearch}
+            aria-label={`Symbol ${symbol}. Change symbol`}
+          >
+            <span className="chart-header-symbol-text">{symbol}</span>
+            <span aria-hidden="true" style={{ display: 'flex', color: 'var(--app-accent)' }}>
+              <ChevronDownIcon size={12} />
+            </span>
+          </button>
+
+          {quote ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+              <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span
+                  style={{
+                    fontFamily: 'var(--font-mono)',
+                    fontSize: 18,
+                    fontWeight: 600,
+                    fontVariantNumeric: 'tabular-nums',
+                    textShadow: '0 0 8px var(--hud-glow)',
+                  }}
+                >
+                  {Format.price(quote.last)}
+                </span>
+                {isStale ? (
+                  <span
+                    style={{
+                      fontSize: 'var(--fs-caption2)',
+                      color: 'var(--warning-orange)',
+                      fontWeight: 600,
+                    }}
+                  >
+                    ● STALE
+                  </span>
+                ) : null}
+              </span>
+              <span
+                style={{
+                  fontFamily: 'var(--font-mono)',
+                  fontSize: 'var(--fs-caption2)',
+                  fontVariantNumeric: 'tabular-nums',
+                  display: 'flex',
+                  gap: 10,
+                }}
+              >
+                <span>
+                  <span style={{ color: 'var(--buy-green)', fontWeight: 600 }}>BID </span>
+                  <span style={{ color: 'var(--buy-green)' }}>{Format.price(quote.bid)}</span>
+                </span>
+                <span>
+                  <span style={{ color: 'var(--sell-red)', fontWeight: 600 }}>ASK </span>
+                  <span style={{ color: 'var(--sell-red)' }}>{Format.price(quote.ask)}</span>
+                </span>
+              </span>
+            </div>
+          ) : null}
+
+          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
+            {tickProgress ? (
+              <span
+                className="quick-chip"
+                style={{ fontSize: 'var(--fs-caption)', color: 'var(--label-secondary)' }}
+                aria-label={`Building candle: ${tickProgress.count} of ${tickProgress.size} ticks`}
+              >
+                {tickProgress.count}/{tickProgress.size} ticks
+              </span>
+            ) : null}
+            <button
+              className={tradingMode === 'live' ? 'hud-badge hud-badge--live' : 'hud-badge'}
+              onClick={onToggleMode}
+              aria-label={`Trading mode ${tradingMode === 'live' ? 'LIVE' : 'PRACTICE'}. Switch mode`}
+            >
+              {tradingMode === 'live' ? 'LIVE' : 'PRACTICE'}
+            </button>
+            <Menu
+              trigger={
+                <button
+                  className="quick-chip"
+                  style={{ minHeight: 32, padding: '6px 10px' }}
+                  aria-label={`Chart interval ${interval}`}
+                  aria-haspopup="menu"
+                >
+                  {interval}
+                </button>
+              }
+              items={CHART_INTERVALS.map((option) => ({
+                key: option,
+                label: (
+                  <>
+                    {option.toUpperCase()}
+                    {INTERVAL_HINTS[option] ? (
+                      <span
+                        style={{
+                          marginLeft: 12,
+                          fontSize: 'var(--fs-caption)',
+                          color: 'var(--label-secondary)',
+                        }}
+                      >
+                        {INTERVAL_HINTS[option]}
+                      </span>
+                    ) : null}
+                  </>
+                ),
+                checked: option === interval,
+                onSelect: () => store.selectInterval(option),
+              }))}
+            />
+            <DrawToolsMenu store={drawingsStore} />
+            <button
+              className="chart-icon-button"
+              onClick={onIndicatorSettings}
+              aria-label="Indicator settings"
+            >
+              <SlidersIcon size={16} />
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Chart area row: the persistent drawing-tool rail (desktop grid
           only) sits flush with the chart canvas card, not the header above

@@ -100,7 +100,11 @@ model BrokerCredential {
   snaptradeClientId String?
 
   @@unique([userId, provider, environment])
-  @@index([provider, snaptradeClientId])
+  /// Postgres treats each NULL as distinct under a unique index, so this only
+  /// constrains rows that actually have a snaptradeClientId (i.e. SnapTrade
+  /// rows) — one clientId can't be saved under two different app users or two
+  /// environments, which the webhook receiver's findFirst lookup depends on.
+  @@unique([provider, snaptradeClientId])
   @@map("broker_credentials")
 }
 

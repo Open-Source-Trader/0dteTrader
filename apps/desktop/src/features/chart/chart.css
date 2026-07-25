@@ -99,8 +99,8 @@
 }
 
 .chart-icon-button--sm {
-  width: 27px;
-  height: 27px;
+  width: 30px;
+  height: 30px;
 }
 
 /* Persistent left-edge drawing-tool rail (desktop grid only) — TradingView's
@@ -116,8 +116,8 @@
 }
 
 .draw-rail-button {
-  width: 30px;
-  height: 30px;
+  width: 34px;
+  height: 34px;
 }
 
 .draw-rail-clear {

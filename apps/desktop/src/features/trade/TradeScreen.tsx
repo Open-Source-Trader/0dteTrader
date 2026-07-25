@@ -621,7 +621,7 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
             {
               key: 'account',
               label: 'Account',
-              icon: <PersonCircleIcon size={16} />,
+              icon: <PersonCircleIcon size={18} />,
               content: (
                 <ProfileView onLogout={onLogout} onDismiss={() => setShowProfile(false)} bodyOnly />
               ),
@@ -629,7 +629,7 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
             {
               key: 'indicators',
               label: 'Indicators',
-              icon: <SlidersIcon size={16} />,
+              icon: <SlidersIcon size={18} />,
               content: (
                 <IndicatorSettingsBody
                   settings={chart.indicatorSettings}

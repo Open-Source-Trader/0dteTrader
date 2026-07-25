@@ -57,7 +57,7 @@ export function DesktopTopBar({
         aria-label={`Symbol ${symbol}. Change symbol`}
       >
         <span>{symbol}</span>
-        <ChevronDownIcon size={12} />
+        <ChevronDownIcon size={14} />
       </button>
 
       {quote ? (
@@ -124,7 +124,7 @@ export function DesktopTopBar({
           onClick={onIndicatorSettings}
           aria-label="Indicator settings"
         >
-          <SlidersIcon size={15} />
+          <SlidersIcon size={20} />
         </button>
       </span>
 
@@ -139,21 +139,21 @@ export function DesktopTopBar({
           aria-pressed={locked}
           aria-label={locked ? 'Unlock trading' : 'Lock trading'}
         >
-          {locked ? <LockIcon size={16} /> : <LockOpenIcon size={16} />}
+          {locked ? <LockIcon size={20} /> : <LockOpenIcon size={20} />}
         </button>
         <button
           className="chart-icon-button chart-icon-button--sm"
           onClick={onShowHistory}
           aria-label="Trade history"
         >
-          <ClockIcon size={15} />
+          <ClockIcon size={20} />
         </button>
         <button
           className="chart-icon-button chart-icon-button--sm"
           onClick={onShowProfile}
           aria-label="Profile"
         >
-          <PersonCircleIcon size={16} />
+          <PersonCircleIcon size={20} />
         </button>
       </span>
     </div>

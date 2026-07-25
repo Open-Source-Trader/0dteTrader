@@ -113,7 +113,7 @@ export function DrawToolsRail({ store }: { store: DrawingsStore }) {
           aria-pressed={tool === t}
           title={`${label} (${shortcut})`}
         >
-          <Icon size={16} />
+          <Icon size={19} />
         </button>
       ))}
       {hasAnnotations ? (
@@ -131,7 +131,7 @@ export function DrawToolsRail({ store }: { store: DrawingsStore }) {
           aria-label={selectedId ? 'Delete selection' : 'Clear all drawings'}
           title={selectedId ? 'Delete selection' : 'Clear all drawings'}
         >
-          <TrashIcon size={15} />
+          <TrashIcon size={18} />
         </button>
       ) : null}
     </div>

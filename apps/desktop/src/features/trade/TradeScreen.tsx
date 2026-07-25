@@ -247,14 +247,17 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
   // disables every order-placing control while leaving the chart untouched.
   const canTrade = chainStore.selectedContract !== null && !locked;
 
-  // Desktop-grid-only hotkeys: B/S arm an order, Cmd/Ctrl+K jumps to symbol
-  // search, L toggles the lock. The compact layout already has floating
-  // touch buttons and no keyboard-first workflow, so hotkeys stay off there.
-  // Also gated by the user's "Keyboard shortcuts" preference (Profile ›
-  // Desktop) — read live off the store, same as bypassOrderConfirmation,
-  // so toggling it while Profile is open takes effect immediately.
+  // Desktop-grid-only keyboard layer: Cmd/Ctrl+K always opens the symbol
+  // command palette; B/S arm an order and L toggles the lock, gated by the
+  // user's "Trading shortcuts" preference (Profile › Desktop) — that
+  // preference guards trading actions only, not navigation, so disabling it
+  // must not also disable Cmd+K. Read live off the store, same as
+  // bypassOrderConfirmation, so toggling it while Profile is open takes
+  // effect immediately. The compact layout has no command palette or
+  // hotkeys at all (floating touch buttons instead).
   useTradeShortcuts({
-    enabled: isDesktopGrid && settingsStore.keyboardShortcutsEnabled,
+    enabled: isDesktopGrid,
+    tradingShortcutsEnabled: settingsStore.keyboardShortcutsEnabled,
     canTrade,
     onArm: arm,
     onToggleLock: toggleLock,

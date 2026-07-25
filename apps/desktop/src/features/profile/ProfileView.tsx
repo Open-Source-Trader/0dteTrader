@@ -369,15 +369,15 @@ export function ProfileView({ onLogout, onDismiss }: ProfileViewProps) {
             <div className="section-header">Desktop</div>
             <div className="section-card">
               <div className="grouped-row">
-                <span>Keyboard shortcuts</span>
+                <span>Trading shortcuts</span>
                 <span style={{ marginLeft: 'auto' }}>
                   <Toggle on={shortcutsEnabled} onChange={handleShortcutsChange} />
                 </span>
               </div>
             </div>
             <div className="section-footer">
-              B/S arm Buy/Sell, L toggles the trading lock, ⌘K jumps to a symbol. Applies only to
-              the desktop grid layout; disabled while typing in any field.
+              B arms Buy, S arms Sell, L toggles the trading lock. Disabled while typing in any
+              field. Desktop grid layout only — ⌘K symbol search is unaffected by this setting.
             </div>
           </div>
 

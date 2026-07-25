@@ -2,9 +2,13 @@ import { useEffect } from 'react';
 import type { OrderSide } from '@0dtetrader/shared-types';
 
 interface UseTradeShortcutsOptions {
-  /** Whether the hotkey layer is active at all (desktop grid only — the
-   *  compact/phone-derived layout has its own touch controls). */
+  /** Whether this keyboard layer exists at all (desktop grid only — the
+   *  compact/phone-derived layout has no command palette or hotkeys). */
   enabled: boolean;
+  /** Whether the trading hotkeys (B/S/L) are active. Gated separately from
+   *  Cmd+K: the command palette is navigation, not an order-placing action,
+   *  so the "disable trading shortcuts" preference must not also disable it. */
+  tradingShortcutsEnabled: boolean;
   /** Whether an order can currently be armed (contract selected, not locked). */
   canTrade: boolean;
   onArm: (side: OrderSide) => void;
@@ -32,12 +36,14 @@ export function isTypingTarget(target: EventTarget | null): boolean {
 }
 
 /** Pure decision logic for a single keydown: which action (if any) fires,
- *  and whether the browser default should be prevented. Trading-desk
- *  hotkeys: B/S arm an order, Cmd/Ctrl+K jumps to symbol search, L toggles
- *  the trading lock. No-ops while a text input has focus. */
+ *  and whether the browser default should be prevented. Cmd/Ctrl+K (open the
+ *  symbol command palette) is always available; B/S (arm an order) and L
+ *  (toggle the trading lock) are gated by `tradingShortcutsEnabled` since
+ *  those place/guard real orders. No-ops while a text input has focus. */
 export function resolveTradeShortcut(
   info: TradeShortcutKeyInfo,
   canTrade: boolean,
+  tradingShortcutsEnabled: boolean,
 ): {
   action: 'arm-buy' | 'arm-sell' | 'toggle-lock' | 'open-symbol-search';
   preventDefault: boolean;
@@ -51,6 +57,7 @@ export function resolveTradeShortcut(
     return null;
   }
   if (info.altKey || info.shiftKey) return null;
+  if (!tradingShortcutsEnabled) return null;
 
   switch (info.key.toLowerCase()) {
     case 'b':
@@ -64,11 +71,13 @@ export function resolveTradeShortcut(
   }
 }
 
-/** Trading-desk hotkeys for the desktop grid: B/S arm an order, Cmd/Ctrl+K
- *  jumps to symbol search, L toggles the trading lock. Disabled while any
- *  text input has focus so normal typing is never hijacked. */
+/** Desktop-grid keyboard layer: Cmd/Ctrl+K always opens the symbol command
+ *  palette; B/S arm an order and L toggles the trading lock, gated by
+ *  `tradingShortcutsEnabled`. Disabled while any text input has focus so
+ *  normal typing is never hijacked. */
 export function useTradeShortcuts({
   enabled,
+  tradingShortcutsEnabled,
   canTrade,
   onArm,
   onToggleLock,
@@ -87,6 +96,7 @@ export function useTradeShortcuts({
           isTypingTarget: isTypingTarget(event.target),
         },
         canTrade,
+        tradingShortcutsEnabled,
       );
       if (!resolved) return;
       if (resolved.preventDefault) event.preventDefault();
@@ -111,5 +121,5 @@ export function useTradeShortcuts({
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [enabled, canTrade, onArm, onToggleLock, onOpenSymbolSearch]);
+  }, [enabled, tradingShortcutsEnabled, canTrade, onArm, onToggleLock, onOpenSymbolSearch]);
 }

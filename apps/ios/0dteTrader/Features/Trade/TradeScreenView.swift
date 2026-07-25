@@ -290,6 +290,14 @@ struct TradeScreenView: View {
             }
             // Per-message delivery: an OCO fire pushes two updates back-to-back
             // and both must land — see QuoteSocketClient.onChartOrder.
+            // Pushes that landed while the socket was down are gone; re-read on
+            // the way back rather than drawing a bracket that already fired.
+            container.quoteSocket.onReconnected = { [weak chartOrdersModel, weak tradeViewModel] in
+                Task {
+                    await chartOrdersModel?.load()
+                    await tradeViewModel?.refreshTradingData()
+                }
+            }
             container.quoteSocket.onChartOrder = { [weak chartOrdersModel, weak tradeViewModel] order in
                 chartOrdersModel?.applyServerUpdate(order)
                 // A fired line means a real order went out — refresh positions
@@ -337,6 +345,14 @@ struct TradeScreenView: View {
                     Task { await chartOrdersModel.trigger(id: order.id) }
                 }
             }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            // Coming back from background: iOS can tear the socket down without
+            // a close ever arriving, so anything the watcher pushed meanwhile is
+            // lost. These lines arm real orders — re-read them.
+            guard phase == .active else { return }
+            container.quoteSocket.reconnectIfNeeded()
+            Task { await chartOrdersModel.load() }
         }
         .onChange(of: chartOrdersModel.errorMessage) { _, message in
             if let message {

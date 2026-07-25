@@ -40,6 +40,11 @@ export function isVisible(order: ChartOrder): boolean {
 export class ChartOrdersStore extends Store<ChartOrdersState> {
   /** Lines with a trigger request in flight, so a burst of ticks fires once. */
   private readonly firing = new Set<string>();
+  /** Bumped per load so a superseded snapshot cannot land after a newer one. */
+  private loadSeq = 0;
+  /** Ids the socket updated while a load was in flight. The push is strictly
+   *  newer than the read that produced the snapshot, so it must win. */
+  private readonly pushedDuringLoad = new Set<string>();
   /** Last price seen per underlying, the left end of the crossing segment. */
   private readonly lastPrices = new Map<string, number>();
 
@@ -66,11 +71,33 @@ export class ChartOrdersStore extends Store<ChartOrdersState> {
     this.set({ selectedId: id });
   }
 
+  /**
+   * Re-reads the account's lines. Called on mount and on every socket
+   * reconnect, because pushes that landed while the stream was down are gone
+   * for good.
+   *
+   * Merges rather than replaces. A snapshot is a read from some instant before
+   * it arrived, so a push that overtook it in flight is newer — replacing
+   * wholesale would resurrect a line the watcher just fired or cancelled.
+   */
   async load(): Promise<void> {
+    const seq = ++this.loadSeq;
+    this.pushedDuringLoad.clear();
     try {
-      const orders = await this.apiClient.chartOrders();
+      const snapshot = await this.apiClient.chartOrders();
+      if (seq !== this.loadSeq) return; // a newer load superseded this one
+      const current = this.getState().orders;
+      const orders = snapshot.filter((order) => !this.pushedDuringLoad.has(order.id));
+      // Re-apply what the socket told us mid-flight. A pushed line that is no
+      // longer in local state was retired — it must stay gone, not come back.
+      for (const id of this.pushedDuringLoad) {
+        const pushed = current.find((order) => order.id === id);
+        if (pushed) orders.push(pushed);
+      }
+      this.pushedDuringLoad.clear();
       this.set({ orders, error: null });
     } catch (error) {
+      if (seq !== this.loadSeq) return;
       this.set({ error: messageOf(error) });
     }
   }
@@ -80,6 +107,8 @@ export class ChartOrdersStore extends Store<ChartOrdersState> {
   reset(): void {
     this.firing.clear();
     this.lastPrices.clear();
+    this.pushedDuringLoad.clear();
+    this.loadSeq += 1; // discard any snapshot still in flight for the old account
     this.set({ orders: [], selectedId: null, error: null });
   }
 
@@ -147,6 +176,7 @@ export class ChartOrdersStore extends Store<ChartOrdersState> {
   /** Server-side watcher pushed a state change over the socket. */
   applyServerUpdate(order: ChartOrder): void {
     this.firing.delete(order.id);
+    this.pushedDuringLoad.add(order.id);
     if (isVisible(order)) this.upsert(order);
     else this.remove(order.id);
   }

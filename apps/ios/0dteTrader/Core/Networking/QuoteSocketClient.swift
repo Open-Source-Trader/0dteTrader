@@ -27,6 +27,15 @@ final class QuoteSocketClient: ObservableObject {
     /// rendering as a working line. A direct call also delivers with no view
     /// re-render, so watcher pushes land even when the quote stream is idle.
     var onChartOrder: ((ChartOrder) -> Void)?
+
+    /// Called when the socket comes back after having been connected before.
+    /// Anything pushed while it was down was missed outright, so listeners must
+    /// re-read whatever state the stream keeps current.
+    var onReconnected: (() -> Void)?
+
+    /// Whether a connection was ever established, so the next `.connected`
+    /// transition is a RE-connection with a gap to make up.
+    private var hasConnected = false
     @Published private(set) var lastErrorMessage: String?
 
     private let streamURL: URL
@@ -131,6 +140,9 @@ final class QuoteSocketClient: ObservableObject {
                 task.resume()
                 self.connectionState = .connected
                 self.reconnectAttempt = 0
+                let reconnected = self.hasConnected
+                self.hasConnected = true
+                if reconnected { self.onReconnected?() }
                 if !self.subscribedSymbols.isEmpty {
                     self.send(SocketSubscribeMessage(type: "subscribe", symbols: Array(self.subscribedSymbols)))
                 }

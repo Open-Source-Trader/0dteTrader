@@ -167,6 +167,11 @@ final class ChartOrdersModel: ObservableObject {
     private let apiClient: APIClient
     /// Lines with a trigger request in flight, so a burst of ticks fires once.
     private var firing: Set<String> = []
+    /// Bumped per load so a superseded snapshot cannot land after a newer one.
+    private var loadSeq = 0
+    /// Ids the socket updated while a load was in flight. The push is strictly
+    /// newer than the read that produced the snapshot, so it must win.
+    private var pushedDuringLoad: Set<String> = []
     /// Last price seen per underlying — the left end of the crossing segment.
     private var lastPrices: [String: Double] = [:]
 
@@ -189,13 +194,35 @@ final class ChartOrdersModel: ObservableObject {
         selectedId = nil
     }
 
+    /// Re-reads the account's lines. Called on appear, on every socket
+    /// reconnect, and on foreground — pushes that landed while the stream was
+    /// down are gone for good.
+    ///
+    /// Merges rather than replaces. A snapshot is a read from some instant
+    /// before it arrived, so a push that overtook it in flight is newer;
+    /// replacing wholesale would resurrect a line the watcher just fired.
     func load() async {
+        loadSeq += 1
+        let seq = loadSeq
+        pushedDuringLoad.removeAll()
         do {
-            orders = try await apiClient.chartOrders().compactMap(ChartOrder.init(dto:))
+            let snapshot = try await apiClient.chartOrders().compactMap(ChartOrder.init(dto:))
+            guard seq == loadSeq else { return } // a newer load superseded this one
+            let current = orders
+            var merged = snapshot.filter { !pushedDuringLoad.contains($0.id) }
+            // Re-apply what the socket told us mid-flight. A pushed line that is
+            // no longer in local state was retired — it stays gone.
+            for id in pushedDuringLoad {
+                if let pushed = current.first(where: { $0.id == id }) { merged.append(pushed) }
+            }
+            pushedDuringLoad.removeAll()
+            orders = merged
             errorMessage = nil
         } catch let error as APIError {
+            guard seq == loadSeq else { return }
             errorMessage = error.userMessage
         } catch {
+            guard seq == loadSeq else { return }
             errorMessage = error.localizedDescription
         }
     }
@@ -205,6 +232,8 @@ final class ChartOrdersModel: ObservableObject {
     func reset() {
         firing.removeAll()
         lastPrices.removeAll()
+        pushedDuringLoad.removeAll()
+        loadSeq += 1 // discard any snapshot still in flight for the old account
         orders = []
         selectedId = nil
         errorMessage = nil
@@ -292,6 +321,7 @@ final class ChartOrdersModel: ObservableObject {
     /// Server-side watcher pushed a state change over the socket.
     func applyServerUpdate(_ order: ChartOrder) {
         firing.remove(order.id)
+        pushedDuringLoad.insert(order.id)
         if order.isVisible {
             upsert(order)
         } else {

@@ -30,6 +30,10 @@ export class QuoteSocket extends Store<QuoteSocketState> {
   private orderUpdateListeners = new Set<(update: OrderResult) => void>();
   private quoteListeners = new Set<(quote: Quote) => void>();
   private chartOrderListeners = new Set<(order: ChartOrder) => void>();
+  private reconnectListeners = new Set<() => void>();
+  /** Whether a connection has already been established once, so the next
+   *  `connected` transition is a RE-connection with a gap to make up. */
+  private hasConnected = false;
 
   constructor(
     private readonly streamUrl: string,
@@ -46,6 +50,18 @@ export class QuoteSocket extends Store<QuoteSocketState> {
   onQuote(listener: (quote: Quote) => void): () => void {
     this.quoteListeners.add(listener);
     return () => this.quoteListeners.delete(listener);
+  }
+
+  /**
+   * Fired when the socket comes back after having been connected before.
+   * Anything pushed while it was down was missed outright, so listeners must
+   * re-read whatever state the stream is responsible for keeping current.
+   */
+  onReconnect(listener: () => void): () => void {
+    this.reconnectListeners.add(listener);
+    return () => {
+      this.reconnectListeners.delete(listener);
+    };
   }
 
   /** Server-side chart-order watcher fired, failed, or retired a line. */
@@ -164,6 +180,9 @@ export class QuoteSocket extends Store<QuoteSocketState> {
         if (this.ws !== ws) return;
         this.set({ connectionState: 'connected' });
         this.reconnectAttempt = 0;
+        const reconnected = this.hasConnected;
+        this.hasConnected = true;
+        if (reconnected) this.reconnectListeners.forEach((listener) => listener());
         if (this.subscribedSymbols.size > 0) {
           this.send({ type: 'subscribe', symbols: [...this.subscribedSymbols] });
         }

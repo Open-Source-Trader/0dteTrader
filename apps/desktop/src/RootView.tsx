@@ -61,6 +61,10 @@ export function RootView() {
     const onVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
         container.quoteSocket.reconnectIfNeeded();
+        // A backgrounded tab can have its socket killed without a close event
+        // ever arriving, so reconnectIfNeeded may see nothing to do. Re-read
+        // the order lines regardless — they arm real orders.
+        void container.chartOrdersStore.load();
       }
     };
     document.addEventListener('visibilitychange', onVisibilityChange);

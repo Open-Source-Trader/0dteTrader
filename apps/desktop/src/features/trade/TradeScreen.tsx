@@ -159,9 +159,16 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
       // entry line appears without waiting for the next poll.
       void tradeStore.refreshTradingData();
     });
+    // Pushes that landed while the socket was down are gone; re-read on the
+    // way back rather than drawing a bracket that already fired.
+    const offReconnect = quoteSocket.onReconnect(() => {
+      void chartOrdersStore.load();
+      void tradeStore.refreshTradingData();
+    });
     return () => {
       offOrders();
       offChartOrders();
+      offReconnect();
     };
   }, [chartStore, tradeStore, chainStore, chartOrdersStore, quoteSocket]);
 

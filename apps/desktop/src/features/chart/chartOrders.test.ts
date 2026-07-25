@@ -261,6 +261,76 @@ describe('ChartOrdersStore', () => {
     });
   });
 
+  describe('resync (load merges rather than replaces)', () => {
+    /** Deferred response so a push can be injected mid-flight. */
+    function deferredLoad(orders: ChartOrder[]) {
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      api.chartOrders.mockImplementationOnce(async () => {
+        await gate;
+        return orders;
+      });
+      return release;
+    }
+
+    /**
+     * The snapshot is a read from before it arrived, so a push that overtook it
+     * is newer. Replacing wholesale would put a fired line back on the chart as
+     * live and draggable.
+     */
+    it('does not let a stale snapshot resurrect a line the watcher just fired', async () => {
+      await seed(order({ status: 'working' }));
+      const release = deferredLoad([order({ status: 'working' })]);
+
+      const loading = store.load();
+      store.applyServerUpdate(order({ status: 'triggered', brokerOrderId: 'B-1' }));
+      release();
+      await loading;
+
+      expect(store.byId('co-1')?.status).toBe('triggered');
+      expect(store.byId('co-1')?.brokerOrderId).toBe('B-1');
+    });
+
+    it('keeps a line the watcher retired mid-load gone', async () => {
+      await seed(order({ status: 'working' }));
+      const release = deferredLoad([order({ status: 'working' })]);
+
+      const loading = store.load();
+      store.applyServerUpdate(order({ status: 'cancelled' }));
+      release();
+      await loading;
+
+      expect(store.byId('co-1')).toBeUndefined();
+    });
+
+    it('still adopts snapshot rows the socket said nothing about', async () => {
+      await seed(order({ id: 'a', status: 'working' }));
+      const release = deferredLoad([order({ id: 'a' }), order({ id: 'b', triggerPrice: 97 })]);
+
+      const loading = store.load();
+      store.applyServerUpdate(order({ id: 'a', status: 'triggered' }));
+      release();
+      await loading;
+
+      expect(store.byId('a')?.status).toBe('triggered');
+      expect(store.byId('b')).toBeDefined();
+    });
+
+    it('discards a superseded snapshot when two loads overlap', async () => {
+      const releaseFirst = deferredLoad([order({ id: 'stale' })]);
+      const first = store.load();
+      api.chartOrders.mockResolvedValueOnce([order({ id: 'fresh' })]);
+      await store.load();
+      releaseFirst();
+      await first;
+
+      expect(store.byId('fresh')).toBeDefined();
+      expect(store.byId('stale')).toBeUndefined();
+    });
+  });
+
   describe('reset', () => {
     it('clears everything when the trading mode changes', async () => {
       await seed(order());

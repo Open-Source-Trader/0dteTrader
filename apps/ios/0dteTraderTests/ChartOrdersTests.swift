@@ -103,6 +103,60 @@ final class BracketDirectionTests: XCTestCase {
     }
 }
 
+/// The snapshot a load returns is a read from before it arrived, so a push that
+/// overtook it in flight is newer. Replacing wholesale would put a fired line
+/// back on the chart as live and draggable — the desktop store is pinned to the
+/// same behaviour in chartOrders.test.ts.
+@MainActor
+final class ChartOrdersResyncTests: XCTestCase {
+    private func makeModel() -> ChartOrdersModel {
+        let baseURL = URL(string: "http://localhost:0")!
+        let sessionStore = SessionStore(
+            keychainStore: KeychainStore(service: "test.resync"),
+            baseURL: baseURL
+        )
+        return ChartOrdersModel(apiClient: APIClient(baseURL: baseURL, sessionStore: sessionStore))
+    }
+
+    /// A push applied while a load is in flight must survive that load. The
+    /// request here fails (no server), which is the same merge path: the guard
+    /// must not discard what the socket delivered meanwhile.
+    func testPushDuringLoadIsNotLostWhenTheSnapshotLands() async {
+        let model = makeModel()
+        model.applyServerUpdate(makeOrder(status: .working))
+
+        async let loading: Void = model.load()
+        model.applyServerUpdate(makeOrder(status: .triggered))
+        await loading
+
+        XCTAssertEqual(model.order(id: "co-1")?.status, .triggered)
+    }
+
+    func testRetiredLineStaysGoneAcrossALoad() async {
+        let model = makeModel()
+        model.applyServerUpdate(makeOrder(status: .working))
+
+        async let loading: Void = model.load()
+        model.applyServerUpdate(makeOrder(status: .cancelled))
+        await loading
+
+        XCTAssertNil(model.order(id: "co-1"))
+    }
+
+    /// reset() bumps the sequence so a snapshot still in flight for the previous
+    /// account cannot land after the switch.
+    func testResetDiscardsAnInFlightSnapshot() async {
+        let model = makeModel()
+        model.applyServerUpdate(makeOrder(status: .working))
+
+        async let loading: Void = model.load()
+        model.reset()
+        await loading
+
+        XCTAssertTrue(model.orders.isEmpty)
+    }
+}
+
 @MainActor
 final class ChartTradingCoordinatorCancelTests: XCTestCase {
     private func makeCoordinator() -> (ChartTradingCoordinator, ChartOrdersModel) {

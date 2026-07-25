@@ -35,6 +35,28 @@
   box-shadow: 0 0 8px var(--hud-glow);
 }
 
+/* Persistent left-edge drawing-tool rail (desktop grid only) — TradingView's
+   always-visible toolbar convention instead of a dropdown menu. */
+.draw-rail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  flex: none;
+  width: 44px;
+  padding: var(--space-2) 0;
+}
+
+.draw-rail-button {
+  width: 30px;
+  height: 30px;
+}
+
+.draw-rail-clear {
+  margin-top: auto;
+  color: var(--pnl-negative-text);
+}
+
 /* Empty-chart loading skeleton: chart-shaped bars instead of a bare spinner,
    so the layout pre-commits before data arrives. */
 .chart-skeleton {

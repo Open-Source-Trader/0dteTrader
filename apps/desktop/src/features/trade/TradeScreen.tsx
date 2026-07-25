@@ -19,6 +19,7 @@ import {
 import type { TradeLayout } from '../../core/storage/SettingsStore';
 import { enabledSubPanes } from '../chart/indicatorSettings';
 import { ChartView } from '../chart/ChartView';
+import { DrawToolsRail } from '../chart/DrawingToolbar';
 import { IndicatorSettingsView } from '../chart/IndicatorSettingsView';
 import { TwcSettingsView } from '../chart/TwcSettingsView';
 import { SymbolSearchView } from '../chart/SymbolSearchView';
@@ -316,8 +317,9 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
             id="chart"
             defaultSize={breakpoint === 'wide' ? '78' : '70'}
             minSize="40"
-            style={{ minWidth: 0, display: 'flex', flexDirection: 'column' }}
+            style={{ minWidth: 0, display: 'flex', flexDirection: 'row' }}
           >
+            <DrawToolsRail store={drawingsStore} />
             <ChartView
               store={chartStore}
               drawingsStore={drawingsStore}
@@ -327,6 +329,7 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
               tradingMode={tradingMode}
               onToggleMode={() => setShowModeConfirmation(true)}
               optionsAnalyticsExpiration={optionsAnalyticsExpiration}
+              dense
             />
           </Panel>
 

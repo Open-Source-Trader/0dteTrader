@@ -92,3 +92,48 @@ export function DrawToolsMenu({ store }: { store: DrawingsStore }) {
     />
   );
 }
+
+/** Persistent vertical drawing-tool rail (desktop grid only) — TradingView's
+ *  left-edge toolbar convention: every tool is always one click away instead
+ *  of two (open menu, then pick). The "clear" action stays a small trailing
+ *  button rather than living inside a dropdown, so it's not one hover away
+ *  from every other tool. */
+export function DrawToolsRail({ store }: { store: DrawingsStore }) {
+  const { tool, selectedId, drawings, alerts } = useStore(store);
+  const hasAnnotations = drawings.length > 0 || alerts.length > 0;
+
+  return (
+    <div className="draw-rail">
+      {TOOLS.map(({ tool: t, label, shortcut, Icon }) => (
+        <button
+          key={t}
+          className={`chart-icon-button draw-rail-button${tool === t ? ' active' : ''}`}
+          onClick={() => store.setTool(t)}
+          aria-label={label}
+          aria-pressed={tool === t}
+          title={`${label} (${shortcut})`}
+        >
+          <Icon size={16} />
+        </button>
+      ))}
+      {hasAnnotations ? (
+        <button
+          className="chart-icon-button draw-rail-button draw-rail-clear"
+          onClick={() => {
+            if (selectedId) {
+              store.removeSelectedOrClear();
+            } else if (
+              window.confirm('Clear all drawings and alerts for this symbol? (Cmd+Z to undo)')
+            ) {
+              store.removeSelectedOrClear();
+            }
+          }}
+          aria-label={selectedId ? 'Delete selection' : 'Clear all drawings'}
+          title={selectedId ? 'Delete selection' : 'Clear all drawings'}
+        >
+          <TrashIcon size={15} />
+        </button>
+      ) : null}
+    </div>
+  );
+}

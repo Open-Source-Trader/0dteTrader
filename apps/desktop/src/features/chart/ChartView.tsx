@@ -32,6 +32,10 @@ interface ChartViewProps {
   onToggleMode: () => void;
   /** Trade-ticket expiration for the exact options snapshot; null pauses shadow capture. */
   optionsAnalyticsExpiration: string | null;
+  /** Desktop-grid terminal chrome: persistent left drawing-tool rail instead
+   *  of a header dropdown, decluttered header. Compact/phone layout omits
+   *  this and keeps its existing single-row header untouched. */
+  dense?: boolean;
 }
 
 // Interval hotkeys. 'H'/'D' are uppercase (shift held) so they don't collide
@@ -73,6 +77,7 @@ export function ChartView({
   tradingMode,
   onToggleMode,
   optionsAnalyticsExpiration,
+  dense = false,
 }: ChartViewProps) {
   const {
     symbol,
@@ -383,7 +388,9 @@ export function ChartView({
               onSelect: () => store.selectInterval(option),
             }))}
           />
-          <DrawToolsMenu store={drawingsStore} />
+          {/* Desktop grid renders the persistent DrawToolsRail alongside the
+              chart instead — the header dropdown is compact-layout only. */}
+          {dense ? null : <DrawToolsMenu store={drawingsStore} />}
           <button
             className="chart-icon-button"
             onClick={onIndicatorSettings}

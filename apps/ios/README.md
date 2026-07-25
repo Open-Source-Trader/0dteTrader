@@ -46,18 +46,31 @@ Configuration is in `.swiftlint.yml`. The rules are intentionally pragmatic for 
 
 ## Configuration
 
-All environment config lives in `0dteTrader/App/AppConfig.swift`:
+Environment configuration is split across two files:
 
-- `apiBaseURL` — points at the Railway production deployment by default. For
-  local dev, swap to `http://localhost:3000` or your Mac's LAN IP.
-- `streamURL` — derived automatically (`ws`/`wss` + `/v1/stream`).
-- `pinnedPublicKeyHashes` — SPKI SHA-256 hashes (base64) for TLS public-key
-  pinning (`Core/Networking/CertificatePinning.swift`). Empty disables pinning,
-  which is the right setting for local HTTP development; populate it when the
-  backend is deployed behind TLS (docs/SECURITY.md §5).
+- **`Configurations/*.xcconfig`** — per-build-configuration settings (Debug / Staging / Release). Each xcconfig sets the Swift compilation flags (`DEBUG`, `STAGING`) and ATS local-networking permission.
+- **`0dteTrader/App/AppEnvironment.swift`** — typed `AppEnvironment` enum that maps each build configuration to its endpoints, stream URL, and pinning hashes.
+- **`0dteTrader/App/AppConfig.swift`** — thin wrapper that exposes `AppEnvironment.current` values as `static let` constants. The public API is unchanged.
 
-Debug builds allow local HTTP via `NSAppTransportSecurity.NSAllowsLocalNetworking`
-in the generated Info.plist — ATS otherwise stays on (no arbitrary loads).
+### Build configurations
+
+| Configuration | Swift flag | Default base URL                                      | ATS local networking |
+| ------------- | ---------- | ----------------------------------------------------- | -------------------- |
+| **Debug**     | `DEBUG`    | `http://localhost:3000`                               | Allowed              |
+| **Staging**   | `STAGING`  | `https://caring-prosperity-staging.up.railway.app`    | Disabled             |
+| **Release**   | _(none)_   | `https://caring-prosperity-production.up.railway.app` | Disabled             |
+
+### API base URL source
+
+`API_BASE_URL` is generated at build time by `scripts/generate-env.sh`. The script reads the top-level `.env` first, then falls back to the build environment, then defaults to `http://localhost:3000`. Change the URI in `.env` to point the app at a different backend.
+
+### Certificate pinning
+
+`pinnedPublicKeyHashes` — SPKI SHA-256 hashes (base64) for TLS public-key
+pinning (`Core/Networking/CertificatePinning.swift`). Empty disables pinning,
+which is the right setting for local HTTP development; populate the staging
+and production entries in `AppEnvironment.swift` when the backend is deployed
+behind TLS (docs/SECURITY.md §5).
 
 ## Layout
 
@@ -65,7 +78,8 @@ Follows docs/ARCHITECTURE.md §4:
 
 ```
 0dteTrader/
-  App/                  ZeroDTETraderApp (@main), AppConfig, AppContainer (DI), RootView (coordinator)
+  Configurations/       Debug, Staging, Release xcconfig files (base, per-env settings)
+  App/                  ZeroDTETraderApp (@main), AppEnvironment, AppConfig, AppContainer (DI), RootView (coordinator)
   Core/
     Networking/         APIClient (typed REST, JWT attach, refresh-and-retry once on 401),
                         QuoteSocketClient (WS, subscribe/unsubscribe, exponential-backoff reconnect),

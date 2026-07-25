@@ -1,5 +1,8 @@
 import type {
   AuthTokens,
+  BrokerCredentialsInput,
+  BrokerCredentialsSaved,
+  BrokerProvider,
   Candle,
   CandleInterval,
   ChartOrder,
@@ -17,6 +20,7 @@ import type {
   TradingMode,
   WebullCredentialsInput,
   WebullCredentialsSaved,
+  WebullAccount,
   WebullSessionRefreshed,
 } from '@0dtetrader/shared-types';
 import { ApiError, parseErrorEnvelope } from './ApiError';
@@ -162,8 +166,49 @@ export class ApiClient {
     return this.request({ method: 'POST', path: 'v1/me/webull-session/refresh' });
   }
 
+  webullAccounts(environment: TradingMode = 'live'): Promise<WebullAccount[]> {
+    return this.request({ method: 'GET', path: 'v1/me/webull-accounts', query: { environment } });
+  }
+
+  selectWebullAccount(accountId: string, environment: TradingMode = 'live'): Promise<void> {
+    return this.requestVoid({
+      method: 'PATCH',
+      path: 'v1/me/webull-accounts',
+      body: { accountId, environment },
+    });
+  }
+
   updateTradingMode(mode: TradingMode): Promise<Me> {
     return this.request({ method: 'PATCH', path: 'v1/me', body: { tradingMode: mode } });
+  }
+
+  /** Select the active trading provider (webull | alpaca). */
+  updateTradingProvider(provider: BrokerProvider): Promise<Me> {
+    return this.request({ method: 'PATCH', path: 'v1/me', body: { tradingProvider: provider } });
+  }
+
+  /** Generic, provider-aware credential save (Alpaca uses this; Webull keeps
+   *  the legacy /webull-credentials endpoint until the mobile migration). */
+  putBrokerCredentials(
+    input: BrokerCredentialsInput,
+    environment: TradingMode = 'live',
+  ): Promise<BrokerCredentialsSaved> {
+    return this.request({
+      method: 'PUT',
+      path: 'v1/me/broker-credentials',
+      body: { ...input, environment },
+    });
+  }
+
+  deleteBrokerCredentials(
+    provider: BrokerProvider,
+    environment: TradingMode = 'live',
+  ): Promise<void> {
+    return this.requestVoid({
+      method: 'DELETE',
+      path: 'v1/me/broker-credentials',
+      query: { provider, environment },
+    });
   }
 
   quote(symbol: string): Promise<Quote> {

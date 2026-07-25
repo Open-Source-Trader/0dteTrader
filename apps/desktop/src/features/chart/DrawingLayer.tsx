@@ -431,11 +431,11 @@ export function DrawingLayer({ chart, series, store, candles, intervalSec }: Dra
         hoverIdRef.current = hoverId;
         scheduleRef.current();
       }
-      containerEl.style.cursor = hit
-        ? hit.mode === 'whole' || hit.mode === 'alert'
-          ? 'move'
-          : 'grab'
-        : '';
+      let cursor = '';
+      if (hit) {
+        cursor = hit.mode === 'whole' || hit.mode === 'alert' ? 'move' : 'grab';
+      }
+      containerEl.style.cursor = cursor;
     };
 
     containerEl.addEventListener('pointerdown', onPointerDown, true);

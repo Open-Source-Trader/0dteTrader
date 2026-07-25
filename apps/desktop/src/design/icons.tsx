@@ -58,6 +58,26 @@ export function LayoutFullIcon({ size = 20, style }: IconProps) {
   );
 }
 
+export function LockIcon({ size = 22, style }: IconProps) {
+  // lock.fill
+  return (
+    <svg {...svgProps(size, style)}>
+      <rect x="3" y="11" width="18" height="11" rx="2" />
+      <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+    </svg>
+  );
+}
+
+export function LockOpenIcon({ size = 22, style }: IconProps) {
+  // lock.open.fill
+  return (
+    <svg {...svgProps(size, style)}>
+      <rect x="3" y="11" width="18" height="11" rx="2" />
+      <path d="M7 11V7a5 5 0 0 1 9.9-1" />
+    </svg>
+  );
+}
+
 export function ChevronDownIcon({ size = 12, style }: IconProps) {
   return (
     <svg {...svgProps(size, style)} strokeWidth={3}>

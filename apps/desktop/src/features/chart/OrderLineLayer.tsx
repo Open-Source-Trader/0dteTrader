@@ -248,14 +248,7 @@ export function OrderLineLayer({
       for (const order of store.visibleOrders) {
         const y = series.priceToCoordinate(order.triggerPrice);
         if (y === null) continue;
-        const color =
-          order.status === 'failed'
-            ? colors.pnlNegative
-            : order.kind === 'target'
-              ? colors.pnlPositive
-              : order.kind === 'stop'
-                ? colors.pnlNegative
-                : colors.orderLimit;
+        const color = orderLineColor(order, colors);
         const working = order.status === 'working';
         const labels: Array<{ key: PillKey; label: string }> = [
           { key: 'quantity', label: String(order.quantity) },
@@ -457,7 +450,8 @@ export function OrderLineLayer({
         hoverRef.current = next;
         scheduleRef.current();
       }
-      containerEl.style.cursor = hit ? (hit.pill ? 'pointer' : 'ns-resize') : '';
+      if (!hit) containerEl.style.cursor = '';
+      else containerEl.style.cursor = hit.pill ? 'pointer' : 'ns-resize';
 
       // TradingView's price-axis `+`: hovering an empty row offers to place a
       // line right there. Suppressed over an existing row so it never covers
@@ -595,6 +589,16 @@ export function OrderLineLayer({
       ) : null}
     </>
   );
+}
+
+/** Line colour: failed and stop read as danger, target as profit, limit as accent. */
+function orderLineColor(
+  order: ChartOrder,
+  colors: { pnlPositive: string; pnlNegative: string; orderLimit: string },
+): string {
+  if (order.status === 'failed' || order.kind === 'stop') return colors.pnlNegative;
+  if (order.kind === 'target') return colors.pnlPositive;
+  return colors.orderLimit;
 }
 
 /** What the kind pill says: a fired line reports where it got to instead. */

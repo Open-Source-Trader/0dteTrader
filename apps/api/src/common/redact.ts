@@ -21,6 +21,18 @@ const REDACTED = '[REDACTED]';
 export function redact<T>(input: T, depth = 0): T {
   if (depth > 8 || input === null || input === undefined) return input;
   if (Buffer.isBuffer(input)) return REDACTED as unknown as T;
+  // Preserve message/stack (non-enumerable, so the object branch drops them)
+  //   to allow hosted crashes to print a readable error. EG: railway crash on boot.
+  //   Enumerable extras (e.g. HTTP client config/headers) still go through redaction.
+  if (input instanceof Error) {
+    const out = Object.create(Object.getPrototypeOf(input)) as Record<string, unknown>;
+    for (const [key, value] of Object.entries(input)) {
+      out[key] = SENSITIVE_KEYS.has(key.toLowerCase()) ? REDACTED : redact(value, depth + 1);
+    }
+    out.message = input.message;
+    out.stack = input.stack;
+    return out as unknown as T;
+  }
   if (Array.isArray(input)) {
     return input.map((item) => redact(item, depth + 1)) as unknown as T;
   }

@@ -5,11 +5,13 @@ import { AuthenticatedUser, CurrentUser } from '../common/current-user.decorator
 import { CandlesQueryDto, OptionsChainQueryDto, QuoteQueryDto } from './dto/market-query.dto';
 import { CryptoDataService } from './crypto-data.service';
 import { IndexDataService } from './index-data.service';
+import { OptionsAnalyticsService } from '../options-analytics/options-analytics.service';
 
 @Controller('market')
 export class MarketDataController {
   constructor(
     @Inject(BROKER_GATEWAY) private readonly broker: BrokerGateway,
+    private readonly analytics: OptionsAnalyticsService,
     private readonly crypto: CryptoDataService,
     private readonly index: IndexDataService,
   ) {}
@@ -44,10 +46,9 @@ export class MarketDataController {
   }
 
   @Get('options-chain')
-  getOptionsChain(
-    @CurrentUser() user: AuthenticatedUser,
-    @Query() query: OptionsChainQueryDto,
-  ): Promise<OptionsChain> {
-    return this.broker.getOptionsChain(user.userId, query.symbol, query.expiration);
+  getOptionsChain(@Query() query: OptionsChainQueryDto): Promise<OptionsChain> {
+    // Options chain + Greeks are sourced from Tradier (the designated options
+    // market-data provider), independent of the user's trading broker.
+    return this.analytics.getOptionsChain(query.symbol, query.expiration);
   }
 }

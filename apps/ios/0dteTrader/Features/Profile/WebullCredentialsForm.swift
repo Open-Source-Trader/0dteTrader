@@ -1,17 +1,27 @@
 import SwiftUI
 
+/// Write-only Webull credential entry for one environment (live / practice).
+/// Fields are local `@State` (write-only: never re-displayed after saving — FR-4).
 struct WebullCredentialsForm: View {
     @ObservedObject var viewModel: ProfileViewModel
+    let environment: TradingMode
 
-    private enum Field: Hashable {
-        case appKey, appSecret
-    }
+    @State private var appKey = ""
+    @State private var appSecret = ""
 
+    private enum Field: Hashable { case appKey, appSecret }
     @FocusState private var focused: Field?
+
+    private var canSave: Bool {
+        !appKey.trimmingCharacters(in: .whitespaces).isEmpty && !appSecret.isEmpty
+    }
+    private var isSaving: Bool {
+        viewModel.savingWebull.contains(environment)
+    }
 
     var body: some View {
         VStack(spacing: AppSpacing.md) {
-            TextField("App Key", text: $viewModel.appKey)
+            TextField("App Key", text: $appKey)
                 .textContentType(.none)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
@@ -21,7 +31,7 @@ struct WebullCredentialsForm: View {
                 .onSubmit { focused = .appSecret }
                 .authField(isFocused: focused == .appKey)
 
-            TextField("App Secret", text: $viewModel.appSecret)
+            TextField("App Secret", text: $appSecret)
                 .textContentType(.none)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
@@ -29,8 +39,8 @@ struct WebullCredentialsForm: View {
                 .focused($focused, equals: .appSecret)
                 .submitLabel(.go)
                 .onSubmit {
-                    guard viewModel.canSaveCredentials else { return }
-                    Task { await viewModel.saveCredentials() }
+                    guard canSave else { return }
+                    Task { await viewModel.saveWebull(environment: environment, appKey: appKey, appSecret: appSecret) }
                 }
                 .authField(isFocused: focused == .appSecret)
 
@@ -39,28 +49,22 @@ struct WebullCredentialsForm: View {
                 .foregroundStyle(.secondary)
 
             Button {
-                Task { await viewModel.saveCredentials() }
+                Task { await viewModel.saveWebull(environment: environment, appKey: appKey, appSecret: appSecret) }
             } label: {
                 HStack(spacing: AppSpacing.sm) {
-                    if viewModel.isSavingCredentials {
-                        ProgressView().controlSize(.small).tint(Color.appAccent)
-                    }
+                    if isSaving { ProgressView().controlSize(.small).tint(Color.appAccent) }
                     Text("Save Credentials")
                         .font(.hudButton)
                         .kerning(0.5)
                 }
-                .foregroundStyle(Color.appAccent.opacity(
-                    viewModel.canSaveCredentials && !viewModel.isSavingCredentials ? 1 : AppOpacity.disabled
-                ))
+                .foregroundStyle(Color.appAccent.opacity(canSave && !isSaving ? 1 : AppOpacity.disabled))
                 .frame(maxWidth: .infinity, minHeight: 44)
             }
             .buttonStyle(HudActionButtonStyle(
-                accent: Color.appAccent.opacity(
-                    viewModel.canSaveCredentials && !viewModel.isSavingCredentials ? 1 : AppOpacity.disabled
-                ),
+                accent: Color.appAccent.opacity(canSave && !isSaving ? 1 : AppOpacity.disabled),
                 chamfer: 6
             ))
-            .disabled(!viewModel.canSaveCredentials || viewModel.isSavingCredentials)
+            .disabled(!canSave || isSaving)
         }
     }
 }

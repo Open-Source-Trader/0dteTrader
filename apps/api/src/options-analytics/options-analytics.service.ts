@@ -7,8 +7,10 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type {
+  OptionContract,
   OptionsAnalyticsCacheStatus,
   OptionsAnalyticsSnapshot,
+  OptionsChain,
 } from '@0dtetrader/shared-types';
 import {
   isEarlyCloseTradingDay,
@@ -202,6 +204,50 @@ export class OptionsAnalyticsService {
 
   async getSnapshot(symbol: string, expiration?: string): Promise<OptionsAnalyticsSnapshot> {
     return (await this.getSnapshotResult(symbol, expiration)).snapshot;
+  }
+
+  /**
+   * Lightweight options chain for the trade ticket (distinct from the full
+   * analytics snapshot). Sourced from Tradier — the designated options market
+   * data provider — so it works regardless of the user's trading broker
+   * (Webull/Alpaca). Reuses the same Tradier calls as the analytics path.
+   */
+  async getOptionsChain(symbol: string, expiration?: string): Promise<OptionsChain> {
+    const normalizedSymbol = symbol.trim().toUpperCase();
+    if (!/^[A-Z0-9.-]{1,12}$/.test(normalizedSymbol)) {
+      throw new BadRequestException({
+        code: 'VALIDATION_ERROR',
+        message: 'A valid symbol is required (for example, SPY)',
+      });
+    }
+    const expirations = await this.getExpirations(normalizedSymbol);
+    const selected = expiration && expirations.includes(expiration) ? expiration : expirations[0];
+    if (!selected) {
+      throw new NotFoundException({
+        code: 'EXPIRATION_NOT_FOUND',
+        message: `No option expirations are available for ${normalizedSymbol}`,
+      });
+    }
+    const [quote, chain] = await Promise.all([
+      this.tradier.getQuote(normalizedSymbol),
+      this.tradier.getChain(normalizedSymbol, selected),
+    ]);
+    const contracts: OptionContract[] = chain.contracts.map((c) => ({
+      symbol: c.symbol,
+      underlying: normalizedSymbol,
+      expiration: selected,
+      strike: c.strike,
+      optionType: c.optionType,
+      bid: c.bid,
+      ask: c.ask,
+      last: c.last ?? 0,
+    }));
+    return {
+      underlying: normalizedSymbol,
+      underlyingPrice: quote.spot,
+      expirations,
+      contracts,
+    };
   }
 
   private async calculateExact(

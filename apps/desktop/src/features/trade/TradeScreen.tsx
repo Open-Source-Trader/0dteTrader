@@ -1,11 +1,24 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import type { OrderSide, Position, TradingMode } from '@0dtetrader/shared-types';
+import type {
+  Me,
+  OptionContract,
+  OrderSide,
+  Position,
+  TradingMode,
+} from '@0dtetrader/shared-types';
 import { useContainer } from '../../app/container';
 import { useStore } from '../../core/observable';
 import { AlertDialog } from '../../design/components/AlertDialog';
 import { NavBar } from '../../design/components/NavBar';
 import { Format } from '../../design/format';
-import { ClockIcon, LayoutFullIcon, LayoutSplitIcon, PersonCircleIcon } from '../../design/icons';
+import {
+  ClockIcon,
+  LayoutFullIcon,
+  LayoutSplitIcon,
+  LockIcon,
+  LockOpenIcon,
+  PersonCircleIcon,
+} from '../../design/icons';
 import type { TradeLayout } from '../../core/storage/SettingsStore';
 import { enabledSubPanes } from '../chart/indicatorSettings';
 import type { ChartTradingProps } from '../chart/CandleChart';
@@ -49,6 +62,7 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
   const chain = useStore(chainStore); // Chain selection supplies the exact analytics expiration.
 
   const [layout, setLayout] = useState<TradeLayout>(() => settingsStore.layoutMode);
+  const [locked, setLocked] = useState(() => settingsStore.tradingLocked);
   const [showSymbolSearch, setShowSymbolSearch] = useState(false);
   const [showIndicatorSettings, setShowIndicatorSettings] = useState(false);
   const [showTwcSettings, setShowTwcSettings] = useState(false);
@@ -66,15 +80,38 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
   const [positionPendingChartFlatten, setPositionPendingChartFlatten] = useState<Position | null>(
     null,
   );
+  const [me, setMe] = useState<Me | null>(null);
   const nextMode: TradingMode = tradingMode === 'live' ? 'practice' : 'live';
+
+  // Active trading provider (from /v1/me) and whether it has credentials
+  // stored for the current trading mode — drives the provider-aware copy and
+  // the "configure provider" empty state.
+  const tradingProvider = me?.tradingProvider ?? 'webull';
+  const providerName = tradingProvider === 'alpaca' ? 'Alpaca' : 'Webull';
+  let activeProviderConfigured = true;
+  if (me) {
+    if (tradingProvider === 'alpaca') {
+      activeProviderConfigured =
+        tradingMode === 'practice'
+          ? Boolean(me.alpacaPracticeConfigured)
+          : Boolean(me.alpacaConfigured);
+    } else {
+      activeProviderConfigured =
+        tradingMode === 'practice'
+          ? Boolean(me.webullPracticeConfigured)
+          : Boolean(me.webullConfigured);
+    }
+  }
+  const needsProviderConfig = me != null && !activeProviderConfigured;
 
   useEffect(() => {
     let cancelled = false;
     void apiClient
       .me()
-      .then((me) => {
+      .then((m) => {
         if (cancelled) return;
-        setTradingMode(me.tradingMode);
+        setTradingMode(m.tradingMode);
+        setMe(m);
         // Session proven valid: if the initial candle load raced login and
         // left the chart empty, reload the current symbol rather than making
         // the user switch tickers to force it.
@@ -104,7 +141,9 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
     void chartStore.start();
     void tradeStore.refreshTradingData();
     tradeStore.optionContractResolver = (symbol) =>
-      chainStore.getState().chain?.contracts.find((contract) => contract.symbol === symbol);
+      chainStore
+        .getState()
+        .chain?.contracts.find((contract: OptionContract) => contract.symbol === symbol);
     void chartOrdersStore.load();
     const offOrders = quoteSocket.onOrderUpdate((update) => tradeStore.handleOrderUpdate(update));
     // The server-side watcher fires lines with the app closed or backgrounded;
@@ -210,19 +249,34 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
     settingsStore.layoutMode = next;
   };
 
-  const arm = (side: OrderSide) => {
-    tradeStore.arm(side, chartStore.getState().symbol, chainStore);
+  const toggleLock = () => {
+    const next = !locked;
+    setLocked(next);
+    settingsStore.tradingLocked = next;
   };
 
-  // Same gate as the split-layout TradePanel's Buy/Sell buttons.
-  const canTrade = chainStore.selectedContract !== null;
+  const arm = (side: OrderSide) => {
+    tradeStore.arm(
+      side,
+      chartStore.getState().symbol,
+      chainStore,
+      settingsStore.bypassOrderConfirmation,
+    );
+  };
+
+  // Same gate as the split-layout TradePanel's Buy/Sell buttons; the lock
+  // disables every order-placing control while leaving the chart untouched.
+  const canTrade = chainStore.selectedContract !== null && !locked;
 
   // Explains a disabled BUY/SELL; rendered above the floating buttons.
-  const disabledReason = chart.errorMessage
-    ? 'Market data unavailable — check credentials in Profile'
-    : !chainStore.selectedContract
-      ? 'Select an option contract to trade'
-      : null;
+  let disabledReason: string | null = null;
+  if (locked) {
+    disabledReason = 'Trading locked';
+  } else if (chart.errorMessage) {
+    disabledReason = 'Market data unavailable — check credentials in Profile';
+  } else if (!chainStore.selectedContract) {
+    disabledReason = 'Select an option contract to trade';
+  }
 
   // Fixed split sized by sub-pane count (0/1/2): each pane takes chart
   // height, so the panel shrinks and its content compacts to match — the
@@ -262,6 +316,7 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
       workingSymbols={trade.workingSymbols}
       onFlatten={(position) => void tradeStore.flatten(position)}
       onCancelOrder={(order) => void tradeStore.cancel(order)}
+      locked={locked}
     />
   );
 
@@ -296,18 +351,54 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
           </>
         }
         trailing={
-          <button
-            className="navbar-icon-button"
-            onClick={toggleLayout}
-            aria-pressed={layout === 'split'}
-            aria-label={
-              layout === 'fullscreen' ? 'Switch to split layout' : 'Switch to fullscreen layout'
-            }
-          >
-            {layout === 'fullscreen' ? <LayoutSplitIcon size={22} /> : <LayoutFullIcon size={22} />}
-          </button>
+          <>
+            <button
+              className="navbar-icon-button"
+              onClick={toggleLock}
+              aria-pressed={locked}
+              aria-label={locked ? 'Unlock trading' : 'Lock trading'}
+            >
+              {locked ? <LockIcon size={22} /> : <LockOpenIcon size={22} />}
+            </button>
+            <button
+              className="navbar-icon-button"
+              onClick={toggleLayout}
+              aria-pressed={layout === 'split'}
+              aria-label={
+                layout === 'fullscreen' ? 'Switch to split layout' : 'Switch to fullscreen layout'
+              }
+            >
+              {layout === 'fullscreen' ? (
+                <LayoutSplitIcon size={22} />
+              ) : (
+                <LayoutFullIcon size={22} />
+              )}
+            </button>
+          </>
         }
       />
+
+      {needsProviderConfig ? (
+        <button
+          type="button"
+          onClick={() => setShowProfile(true)}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 8,
+            padding: '8px 12px',
+            width: '100%',
+            border: 'none',
+            cursor: 'pointer',
+            background: 'var(--hud-stroke-dim)',
+            color: 'var(--text-primary)',
+            fontSize: 13,
+          }}
+        >
+          No {providerName} credentials configured — open Profile to connect.
+        </button>
+      ) : null}
 
       <div ref={contentRef} style={{ flex: 1, minHeight: 0, position: 'relative' }}>
         {layout === 'fullscreen' ? (
@@ -398,6 +489,7 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
                 chainStore={chainStore}
                 onArm={arm}
                 density={panelDensity}
+                locked={locked}
               />
             </div>
           </div>
@@ -461,7 +553,7 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
           message={
             nextMode === 'live'
               ? 'Real money will be used for orders and quotes.'
-              : 'Orders will go to the Webull paper environment.'
+              : `Orders will go to the ${providerName} paper environment.`
           }
           actions={[
             {

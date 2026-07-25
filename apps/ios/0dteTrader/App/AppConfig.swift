@@ -1,37 +1,18 @@
 import Foundation
 
-/// Environment configuration. The backend base URL points at the Railway
-/// production deployment. For local dev, swap to http://localhost:3000 or
-/// your machine's LAN IP.
+/// Environment configuration.
 ///
-/// To enable certificate pinning, populate `pinnedPublicKeyHashes` with
-/// the backend's SPKI SHA-256 hashes (base64).
+/// Values are driven by the build configuration (Debug / Staging / Release)
+/// via `AppEnvironment.current`. Override the base URL at runtime by setting
+/// the `API_BASE_URL` environment variable in the scheme's Run arguments.
 enum AppConfig {
-    static let apiBaseURL: URL = makeURL("https://caring-prosperity-production.up.railway.app")
+    static let apiBaseURL: URL = AppEnvironment.current.apiBaseURL
 
-    /// WebSocket stream URL derived from `apiBaseURL` (http→ws, https→wss).
-    static let streamURL: URL = makeStreamURL()
+    /// WebSocket stream URL derived from `apiBaseURL` (`http→ws`, `https→wss`).
+    static let streamURL: URL = AppEnvironment.current.streamURL
 
     /// Base64 SHA-256 hashes of the backend's Subject Public Key Info.
     /// Empty disables pinning (default for local dev over plain HTTP).
-    static let pinnedPublicKeyHashes: [String] = []
-
-    private static func makeURL(_ string: String) -> URL {
-        guard let url = URL(string: string) else {
-            preconditionFailure("AppConfig: invalid URL constant \(string)")
-        }
-        return url
-    }
-
-    private static func makeStreamURL() -> URL {
-        guard var components = URLComponents(url: apiBaseURL, resolvingAgainstBaseURL: false) else {
-            preconditionFailure("AppConfig: invalid apiBaseURL")
-        }
-        components.scheme = apiBaseURL.scheme == "https" ? "wss" : "ws"
-        components.path = "/v1/stream"
-        guard let url = components.url else {
-            preconditionFailure("AppConfig: invalid stream URL")
-        }
-        return url
-    }
+    /// Populate for staging and production to enable TLS pinning.
+    static let pinnedPublicKeyHashes: [String] = AppEnvironment.current.pinnedPublicKeyHashes
 }

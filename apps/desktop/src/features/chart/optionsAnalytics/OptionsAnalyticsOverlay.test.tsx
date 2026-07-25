@@ -28,6 +28,7 @@ describe('OptionsAnalyticsOverlay accessibility', () => {
           showDealerProxy: false,
           refreshSeconds: 45,
           profileStrikeCount: 12,
+          showDiagnostics: true,
         },
         candles: [],
         retained: true,
@@ -68,6 +69,7 @@ describe('OptionsAnalyticsOverlay accessibility', () => {
           showDealerProxy: false,
           refreshSeconds: 45,
           profileStrikeCount: 12,
+          showDiagnostics: true,
         },
         candles: [],
         retained: false,
@@ -96,6 +98,7 @@ describe('OptionsAnalyticsOverlay accessibility', () => {
       showDealerProxy: true,
       refreshSeconds: 45,
       profileStrikeCount: 12,
+      showDiagnostics: true,
     });
 
     const lines = optionsAnalyticsHoverLines(model.strikes[0]!);
@@ -125,6 +128,7 @@ describe('OptionsAnalyticsOverlay accessibility', () => {
           showDealerProxy: false,
           refreshSeconds: 45,
           profileStrikeCount: 12,
+          showDiagnostics: true,
         },
         candles: [],
         retained: false,

@@ -85,9 +85,9 @@ paths:
           application/json:
             schema:
               type: object
-              required: [tradingMode]
               properties:
                 tradingMode: { type: string, enum: [live, practice] }
+                tradingProvider: { type: string, enum: [webull, alpaca] }
       responses:
         '200':
           {
@@ -109,6 +109,33 @@ paths:
       tags: [user]
       security: [{ bearerAuth: [] }]
       parameters:
+        - {
+            name: environment,
+            in: query,
+            schema: { type: string, enum: [live, practice], default: live },
+          }
+      responses:
+        '204': { description: Deleted }
+  /me/broker-credentials:
+    put:
+      tags: [user]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BrokerCredentialsInput' }
+      responses:
+        '200': { description: Saved }
+    delete:
+      tags: [user]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - {
+            name: provider,
+            in: query,
+            schema: { type: string, enum: [webull, alpaca], default: webull },
+          }
         - {
             name: environment,
             in: query,
@@ -336,6 +363,19 @@ components:
             nullable: true,
             description: Practice account id auto-discovered via Webull account/list,
           }
+        tradingProvider:
+          { type: string, enum: [webull, alpaca], description: Active trading provider }
+        alpacaConfigured:
+          { type: boolean, nullable: true, description: Live Alpaca credentials stored }
+        alpacaPracticeConfigured:
+          { type: boolean, nullable: true, description: Practice Alpaca credentials stored }
+        alpacaAccountId:
+          {
+            type: string,
+            nullable: true,
+            description: 'Alpaca v2 is key-scoped: no account id is stored',
+          }
+        alpacaPracticeAccountId: { type: string, nullable: true }
     WebullCredentialsInput:
       type: object
       required: [appKey, appSecret]
@@ -347,6 +387,24 @@ components:
             type: string,
             description: 'Optional manual override; normally auto-discovered via account/list',
           }
+        environment: { type: string, enum: [live, practice], default: live }
+    BrokerCredentialsInput:
+      type: object
+      required: [provider]
+      properties:
+        provider: { type: string, enum: [webull, alpaca] }
+        appKey: { type: string, description: Webull app key (provider=webull) }
+        appSecret: { type: string, description: Webull app secret (provider=webull) }
+        apiKey: { type: string, description: Alpaca API key (provider=alpaca) }
+        apiSecret: { type: string, description: Alpaca API secret (provider=alpaca) }
+        environment: { type: string, enum: [live, practice], default: live }
+    AlpacaCredentialsInput:
+      type: object
+      required: [provider, apiKey, apiSecret]
+      properties:
+        provider: { type: string, enum: [alpaca] }
+        apiKey: { type: string }
+        apiSecret: { type: string }
         environment: { type: string, enum: [live, practice], default: live }
     Quote:
       type: object

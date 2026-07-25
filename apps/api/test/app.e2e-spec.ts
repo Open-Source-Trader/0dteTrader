@@ -9,7 +9,8 @@ import { blackForwardKernel } from '../src/options-analytics/options-analytics.e
 import { TradierClient } from '../src/options-analytics/tradier.client';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { InMemoryPrismaService } from './in-memory-prisma.service';
-import { StubBrokerGateway } from './stub-broker.gateway';
+import { StubBrokerGateway, STUB_WEBULL_ACCOUNTS } from './stub-broker.gateway';
+import { WebullBrokerGateway } from '../src/broker/webull/webull-broker.gateway';
 
 const E2E_OPTION_EXPIRATION = optionExpirations('SPY', new Date(Date.now() + 86_400_000))[0];
 
@@ -40,7 +41,15 @@ describe('0dteTrader API (e2e)', () => {
       .overrideProvider(TradierClient)
       .useValue({
         availableRequests: 100,
-        getExpirations: async () => [E2E_OPTION_EXPIRATION],
+        getExpirations: async () => {
+          const base = new Date(`${E2E_OPTION_EXPIRATION}T00:00:00Z`);
+          const iso = (dt: Date): string => dt.toISOString().slice(0, 10);
+          return [
+            iso(base),
+            iso(new Date(base.getTime() + 86_400_000)),
+            iso(new Date(base.getTime() + 2 * 86_400_000)),
+          ];
+        },
         getQuote: async (symbol: string) => ({
           symbol,
           spot: 100,
@@ -93,6 +102,11 @@ describe('0dteTrader API (e2e)', () => {
             }),
           };
         },
+      })
+      .overrideProvider(WebullBrokerGateway)
+      .useValue({
+        listAccounts: async () => [...STUB_WEBULL_ACCOUNTS],
+        selectAccount: async () => undefined,
       })
       .compile();
     app = moduleRef.createNestApplication();
@@ -233,10 +247,15 @@ describe('0dteTrader API (e2e)', () => {
       email: user.email,
       tradingDisabled: false,
       tradingMode: 'live',
+      tradingProvider: 'webull',
       webullConfigured: false,
       webullPracticeConfigured: false,
       webullAccountId: null,
       webullPracticeAccountId: null,
+      alpacaConfigured: false,
+      alpacaPracticeConfigured: false,
+      alpacaAccountId: null,
+      alpacaPracticeAccountId: null,
     });
   });
 
@@ -283,20 +302,26 @@ describe('0dteTrader API (e2e)', () => {
       .expect(200);
     expect(me.body.webullConfigured).toBe(true);
 
-    // Stored encrypted: each blob has the GCM envelope and is not the plaintext value.
-    expect(prisma.credentials).toHaveLength(1);
-    const row = prisma.credentials[0];
-    const plaintextByField = {
-      encAppKey: 'ak',
-      encAppSecret: 'sk',
-      encAccountId: 'acct-1',
-    } as const;
-    for (const [field, plaintext] of Object.entries(plaintextByField)) {
-      // Prisma 7 surfaces Bytes columns as Uint8Array rather than Buffer.
-      const blob = Buffer.from(row[field]);
-      expect(blob.equals(Buffer.from(plaintext))).toBe(false);
-      expect(blob).toHaveLength(12 + 16 + Buffer.byteLength(plaintext));
-    }
+    // Stored encrypted as a single GCM blob (iv || tag || ciphertext); the
+    // plaintext secret is never persisted.
+    expect(prisma.brokerCredentials).toHaveLength(1);
+    const row = prisma.brokerCredentials[0];
+    expect(row.provider).toBe('webull');
+    expect(row.environment).toBe('live');
+    const blob = Buffer.from(row.encSecrets);
+    expect(blob.toString('utf8')).not.toContain('sk');
+    expect(blob).toHaveLength(
+      12 +
+        16 +
+        Buffer.byteLength(
+          JSON.stringify({
+            provider: 'webull',
+            appKey: 'ak',
+            appSecret: 'sk',
+            accountId: 'acct-1',
+          }),
+        ),
+    );
   });
 
   it('deletes Webull credentials (204, idempotent)', async () => {
@@ -336,7 +361,7 @@ describe('0dteTrader API (e2e)', () => {
     let me = await request(server).get('/v1/me').set(auth).expect(200);
     expect(me.body.webullConfigured).toBe(true);
     expect(me.body.webullPracticeConfigured).toBe(true);
-    expect(prisma.credentials).toHaveLength(2);
+    expect(prisma.brokerCredentials).toHaveLength(2);
 
     // An invalid environment is rejected.
     await request(server)
@@ -353,6 +378,82 @@ describe('0dteTrader API (e2e)', () => {
     me = await request(server).get('/v1/me').set(auth).expect(200);
     expect(me.body.webullConfigured).toBe(true);
     expect(me.body.webullPracticeConfigured).toBe(false);
+  });
+
+  it('GET /v1/me/webull-accounts lists accounts for live (default)', async () => {
+    const auth = { Authorization: `Bearer ${accessToken}` };
+    const res = await request(server).get('/v1/me/webull-accounts').set(auth).expect(200);
+    expect(Array.isArray(res.body)).toBe(true);
+    expect(res.body).toHaveLength(STUB_WEBULL_ACCOUNTS.length);
+    expect(res.body[0]).toMatchObject({
+      accountId: STUB_WEBULL_ACCOUNTS[0].accountId,
+      accountType: STUB_WEBULL_ACCOUNTS[0].accountType,
+    });
+  });
+
+  it('GET /v1/me/webull-accounts?environment=practice lists practice accounts', async () => {
+    const auth = { Authorization: `Bearer ${accessToken}` };
+    const res = await request(server)
+      .get('/v1/me/webull-accounts?environment=practice')
+      .set(auth)
+      .expect(200);
+    expect(Array.isArray(res.body)).toBe(true);
+  });
+
+  it('GET /v1/me/webull-accounts rejects invalid environment with 400', async () => {
+    const auth = { Authorization: `Bearer ${accessToken}` };
+    const res = await request(server)
+      .get('/v1/me/webull-accounts?environment=demo')
+      .set(auth)
+      .expect(400);
+    expect(res.body.error.code).toBe('VALIDATION_ERROR');
+  });
+
+  it('GET /v1/me/webull-accounts requires authentication (401)', async () => {
+    await request(server).get('/v1/me/webull-accounts').expect(401);
+  });
+
+  it('PATCH /v1/me/webull-accounts selects an account', async () => {
+    const auth = { Authorization: `Bearer ${accessToken}` };
+    await request(server)
+      .patch('/v1/me/webull-accounts')
+      .set(auth)
+      .send({ accountId: 'stub-acct-1', environment: 'live' })
+      .expect(200);
+  });
+
+  it('PATCH /v1/me/webull-accounts rejects missing accountId with 400', async () => {
+    const auth = { Authorization: `Bearer ${accessToken}` };
+    const res = await request(server)
+      .patch('/v1/me/webull-accounts')
+      .set(auth)
+      .send({ environment: 'live' })
+      .expect(400);
+    expect(res.body.error.code).toBe('VALIDATION_ERROR');
+  });
+
+  it('PATCH /v1/me/webull-accounts rejects empty accountId with 400', async () => {
+    const auth = { Authorization: `Bearer ${accessToken}` };
+    const res = await request(server)
+      .patch('/v1/me/webull-accounts')
+      .set(auth)
+      .send({ accountId: '', environment: 'live' })
+      .expect(400);
+    expect(res.body.error.code).toBe('VALIDATION_ERROR');
+  });
+
+  it('PATCH /v1/me/webull-accounts requires authentication (401)', async () => {
+    await request(server).patch('/v1/me/webull-accounts').expect(401);
+  });
+
+  it('PATCH /v1/me/webull-accounts rejects invalid environment with 400', async () => {
+    const auth = { Authorization: `Bearer ${accessToken}` };
+    const res = await request(server)
+      .patch('/v1/me/webull-accounts')
+      .set(auth)
+      .send({ accountId: 'stub-acct-1', environment: 'demo' })
+      .expect(400);
+    expect(res.body.error.code).toBe('VALIDATION_ERROR');
   });
 
   it('serves market data (quote, candles, chain)', async () => {

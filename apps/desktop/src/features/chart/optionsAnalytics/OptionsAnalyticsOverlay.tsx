@@ -251,8 +251,10 @@ export function OptionsAnalyticsOverlay({
           if (presentation.showLiquidity && strike.liquidity) {
             context.font = '7px "JetBrains Mono", ui-monospace, monospace';
             context.fillStyle = 'rgba(255, 214, 10, 0.92)';
-            const liquidityY =
-              y + (presentation.showGammaProfile ? 11 : presentation.showMarkedOi ? 6 : 2);
+            let liquidityOffset = 2;
+            if (presentation.showGammaProfile) liquidityOffset = 11;
+            else if (presentation.showMarkedOi) liquidityOffset = 6;
+            const liquidityY = y + liquidityOffset;
             context.textAlign = 'left';
             context.fillText(
               `P ${optionalPercent(strike.liquidity.putRelativeSpread)}`,
@@ -384,38 +386,40 @@ export function OptionsAnalyticsOverlay({
         aria-hidden="true"
         style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}
       />
-      <div
-        style={{
-          position: 'absolute',
-          top: 6,
-          right: 6,
-          maxWidth: '72%',
-          padding: '4px 6px',
-          border: '1px solid color-mix(in srgb, var(--hud-stroke) 70%, transparent)',
-          background: 'rgba(8, 16, 32, 0.84)',
-          color: 'var(--label-secondary)',
-          fontFamily: 'var(--font-mono)',
-          fontSize: 8,
-          lineHeight: 1.25,
-        }}
-      >
-        <div style={{ color: 'var(--label-primary)', fontWeight: 600 }}>
-          Options structure{retained ? ' · retained last snapshot' : ''}
+      {settings.showDiagnostics ? (
+        <div
+          style={{
+            position: 'absolute',
+            top: 6,
+            right: 6,
+            maxWidth: '72%',
+            padding: '4px 6px',
+            border: '1px solid color-mix(in srgb, var(--hud-stroke) 70%, transparent)',
+            background: 'rgba(8, 16, 32, 0.84)',
+            color: 'var(--label-secondary)',
+            fontFamily: 'var(--font-mono)',
+            fontSize: 8,
+            lineHeight: 1.25,
+          }}
+        >
+          <div style={{ color: 'var(--label-primary)', fontWeight: 600 }}>
+            Options structure{retained ? ' · retained last snapshot' : ''}
+          </div>
+          {model.visibleQualityLines.map((line) => (
+            <div key={line}>{line}</div>
+          ))}
+          <div>{model.structureLine}</div>
+          {model.dealerProxy ? (
+            <>
+              <div>Assumption: {model.dealerProxy.assumption}</div>
+              <div>
+                Proxy gamma {formatCompactDollars(model.dealerProxy.gammaExposure)} · delta{' '}
+                {formatCompactDollars(model.dealerProxy.deltaNotional)}
+              </div>
+            </>
+          ) : null}
         </div>
-        {model.visibleQualityLines.map((line) => (
-          <div key={line}>{line}</div>
-        ))}
-        <div>{model.structureLine}</div>
-        {model.dealerProxy ? (
-          <>
-            <div>Assumption: {model.dealerProxy.assumption}</div>
-            <div>
-              Proxy gamma {formatCompactDollars(model.dealerProxy.gammaExposure)} · delta{' '}
-              {formatCompactDollars(model.dealerProxy.deltaNotional)}
-            </div>
-          </>
-        ) : null}
-      </div>
+      ) : null}
       {model.showGammaProfile || model.showMarkedOi || model.showLiquidity ? (
         <div
           style={{

@@ -17,6 +17,7 @@ struct TradeScreenView: View {
     @StateObject private var chartTrading: ChartTradingCoordinator
 
     @State private var layout: TradeLayout
+    @State private var tradingLocked: Bool
     @State private var showSymbolSearch = false
     @State private var showIndicatorSettings = false
     @State private var showProfile = false
@@ -25,6 +26,7 @@ struct TradeScreenView: View {
     @State private var capturedScreenshot: CapturedScreenshot?
     // 'nil' until /v1/me answers; the server value wins (desktop parity).
     @State private var tradingMode: TradingMode?
+    @State private var me: MeDTO?
     @State private var showModeConfirmation = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
@@ -44,6 +46,7 @@ struct TradeScreenView: View {
             wrappedValue: container.makeChartTradingCoordinator(chartOrders: chartOrders)
         )
         _layout = State(initialValue: container.settingsStore.layoutMode)
+        _tradingLocked = State(initialValue: container.settingsStore.tradingLocked)
         self.settingsStore = container.settingsStore
     }
 
@@ -52,12 +55,17 @@ struct TradeScreenView: View {
             layoutContent
                 .background(Color.appBackground)
                 .overlay(alignment: .top) {
-                    if let toast = tradeViewModel.toast {
-                        ToastView(toast: toast, onDismiss: { tradeViewModel.dismissCurrentToast() })
-                            .padding(.top, AppSpacing.sm)
-                            .transition(reduceMotion ? .opacity : .move(edge: .top).combined(with: .opacity))
-                            .zIndex(1)
+                    VStack(spacing: 8) {
+                        if needsProviderConfig {
+                            providerConfigBanner
+                        }
+                        if let toast = tradeViewModel.toast {
+                            ToastView(toast: toast, onDismiss: { tradeViewModel.dismissCurrentToast() })
+                                                .transition(reduceMotion ? .opacity : .move(edge: .top).combined(with: .opacity))
+                                                .zIndex(1)
+                        }
                     }
+                    .padding(.top, AppSpacing.sm)
                 }
                 .animation(AppMotion.standard, value: tradeViewModel.toast)
                 .navigationBarTitleDisplayMode(.inline)
@@ -99,6 +107,14 @@ struct TradeScreenView: View {
                             Image(systemName: "camera")
                         }
                         .accessibilityLabel("Take screenshot")
+                    }
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button {
+                            toggleLock()
+                        } label: {
+                            Image(systemName: tradingLocked ? "lock.fill" : "lock.open.fill")
+                        }
+                        .accessibilityLabel(tradingLocked ? "Unlock trading" : "Lock trading")
                     }
                     ToolbarItem(placement: .topBarTrailing) {
                         Button {
@@ -210,8 +226,9 @@ struct TradeScreenView: View {
             await chartViewModel.start()
         }
         .task {
-            if let me = try? await container.apiClient.me() {
-                tradingMode = me.tradingMode ?? .practice
+            if let fetched = try? await container.apiClient.me() {
+                tradingMode = fetched.tradingMode ?? .practice
+                me = fetched
                 // The session is proven valid at this point. If the initial
                 // candle load raced login (or failed before auth settled), the
                 // chart would sit empty until the user jiggles tickers — reload
@@ -234,7 +251,7 @@ struct TradeScreenView: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Orders will route to the \(tradingMode == .live ? "practice" : "LIVE") Webull environment.")
+            Text("Orders will route to the \(tradingMode == .live ? "practice" : "LIVE") \(providerName) environment.")
         }
         .task {
             await tradeViewModel.refreshTradingData()
@@ -366,7 +383,12 @@ struct TradeScreenView: View {
                     VStack(spacing: AppSpacing.sm) {
                         positionsStrip
                         FloatingTradeButtons(isEnabled: canTrade) { side in
-                            tradeViewModel.arm(side: side, underlying: chartViewModel.symbol, chainViewModel: chainViewModel)
+                            tradeViewModel.arm(
+                                side: side,
+                                underlying: chartViewModel.symbol,
+                                chainViewModel: chainViewModel,
+                                bypass: settingsStore.bypassOrderConfirmation
+                            )
                         }
                     }
                     .padding(.bottom, AppSpacing.lg + insetBottom)
@@ -396,8 +418,14 @@ struct TradeScreenView: View {
                         underlying: chartViewModel.symbol,
                         positionsStrip: positionsStrip,
                         density: Self.panelDensities[min(paneCount, Self.panelDensities.count - 1)],
+                        tradingLocked: tradingLocked,
                         onArm: { side in
-                            tradeViewModel.arm(side: side, underlying: chartViewModel.symbol, chainViewModel: chainViewModel)
+                            tradeViewModel.arm(
+                                side: side,
+                                underlying: chartViewModel.symbol,
+                                chainViewModel: chainViewModel,
+                                bypass: settingsStore.bypassOrderConfirmation
+                            )
                         }
                     )
                     .frame(height: panelHeight)
@@ -455,6 +483,7 @@ struct TradeScreenView: View {
             positions: tradeViewModel.positions,
             openOrders: tradeViewModel.openOrders,
             workingSymbols: tradeViewModel.workingSymbols,
+            tradingLocked: tradingLocked,
             onFlatten: { position in
                 Task { await tradeViewModel.flatten(position) }
             },
@@ -477,9 +506,46 @@ struct TradeScreenView: View {
         return symbols.sorted()
     }
 
-    /// Same gate as the split-layout TradePanelView's Buy/Sell buttons.
+    /// Same gate as the split-layout TradePanelView's Buy/Sell buttons; the lock
+    /// disables every order-placing control while leaving the chart untouched.
     private var canTrade: Bool {
-        chainViewModel.selectedContract != nil
+        chainViewModel.selectedContract != nil && !tradingLocked
+    }
+
+    // MARK: - Provider-aware copy + empty state
+
+    private var tradingProvider: BrokerProvider { me?.tradingProvider ?? .webull }
+    private var providerName: String { tradingProvider == .alpaca ? "Alpaca" : "Webull" }
+    private var activeProviderConfigured: Bool {
+        guard let me else { return true }
+        if tradingProvider == .alpaca {
+            return tradingMode == .practice
+                ? (me.alpacaPracticeConfigured ?? false)
+                : (me.alpacaConfigured ?? false)
+        }
+        return tradingMode == .practice
+            ? (me.webullPracticeConfigured ?? false)
+            : (me.webullConfigured)
+    }
+    private var needsProviderConfig: Bool { me != nil && !activeProviderConfigured }
+
+    /// Shown at the top of the screen when the active provider has no saved
+    /// credentials for the current trading mode — a clear path to connect
+    /// instead of being stuck on the raw broker error at launch.
+    private var providerConfigBanner: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(Color.orange)
+            Text("No \(providerName) credentials configured.")
+                .font(.footnote)
+                .foregroundStyle(Color.secondary)
+            Button("Configure") { showProfile = true }
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(Color.appAccent)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Color.hudStrokeDim, in: RoundedRectangle(cornerRadius: 8))
     }
 
     private func toggleLayout() {
@@ -488,6 +554,12 @@ struct TradeScreenView: View {
             layout = layout == .fullscreen ? .split : .fullscreen
         }
         settingsStore.layoutMode = layout
+    }
+
+    private func toggleLock() {
+        Haptics.selection()
+        tradingLocked.toggle()
+        settingsStore.tradingLocked = tradingLocked
     }
 }
 

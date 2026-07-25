@@ -117,6 +117,7 @@ describe('WebullBrokerGateway', () => {
   let storedCreds: Partial<Record<'live' | 'practice', WebullCredentials>>;
   let configValues: Record<string, unknown>;
   let savedAccountIds: jest.Mock;
+  let savedPracticeStored: jest.Mock;
   /** Saved override so the Prisma-client dotenv autoload can't leak into hosts(). */
   let savedDataBaseUrl: string | undefined;
 
@@ -160,12 +161,17 @@ describe('WebullBrokerGateway', () => {
     };
     const credentials = {
       getDecrypted: jest.fn(
-        async (_userId: string, environment: 'live' | 'practice' = 'live') =>
-          storedCreds[environment] ?? null,
+        async (
+          _userId: string,
+          _provider?: 'webull' | 'alpaca',
+          environment: 'live' | 'practice' = 'live',
+        ) => storedCreds[environment] ?? null,
       ),
       saveDiscoveredAccountId: jest.fn(async () => undefined),
+      ensureWebullPracticeStored: jest.fn(async () => undefined),
     } as unknown as CredentialsService;
     savedAccountIds = credentials.saveDiscoveredAccountId as jest.Mock;
+    savedPracticeStored = credentials.ensureWebullPracticeStored as jest.Mock;
     const config = new ConfigService(configValues);
     const prisma = {
       user: {
@@ -294,6 +300,16 @@ describe('WebullBrokerGateway', () => {
       await gateway.getQuote('u1', 'SPY');
       expect(calls[0].url).toContain('https://api.sandbox.webull.com');
       expect(calls[0].headers['x-app-key']).toBe('PAK');
+
+      // Bug 2 + 3: the built-in fallback is materialized as a stored
+      // credential (so /me reports webullPracticeConfigured once practice is
+      // used, and the practice account id — supplied by config — persists
+      // instead of being re-discovered on every token-cache miss / restart).
+      expect(savedPracticeStored).toHaveBeenCalledWith('u1', {
+        appKey: 'PAK',
+        appSecret: 'PSK',
+        accountId: 'PACC',
+      });
     });
 
     it('practice mode fails with an auth error when no credentials exist at all', async () => {
@@ -635,7 +651,7 @@ describe('WebullBrokerGateway', () => {
       expect(callsTo('/openapi/account/list')).toHaveLength(1);
       const positions = callsTo('/openapi/assets/positions');
       expect(positions[0].url).toContain('account_id=ACC-DISCOVERED');
-      expect(savedAccountIds).toHaveBeenCalledWith('u1', 'live', 'ACC-DISCOVERED');
+      expect(savedAccountIds).toHaveBeenCalledWith('u1', 'webull', 'live', 'ACC-DISCOVERED');
     });
 
     it('discovers only once — later calls reuse the resolved id', async () => {

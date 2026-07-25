@@ -141,6 +141,26 @@ final class TradeViewModelArmTests: XCTestCase {
         XCTAssertEqual(tradeViewModel.armedTicket?.request.quantity, 1)
     }
 
+    func testArm_bypass_submitsDirectlyWithoutArmingTicket() {
+        let (tradeViewModel, chainViewModel) = makeViewModels()
+        chainViewModel.isAutoMode = true
+
+        tradeViewModel.arm(side: .buy, underlying: "SPY", chainViewModel: chainViewModel, bypass: true)
+
+        // Bypass submits directly instead of opening the confirm sheet, so no
+        // ticket is armed (the background submit fails harmlessly in tests).
+        XCTAssertNil(tradeViewModel.armedTicket)
+    }
+
+    func testArm_withoutBypass_armsTicket() {
+        let (tradeViewModel, chainViewModel) = makeViewModels()
+        chainViewModel.isAutoMode = true
+
+        tradeViewModel.arm(side: .buy, underlying: "SPY", chainViewModel: chainViewModel)
+
+        XCTAssertNotNil(tradeViewModel.armedTicket)
+    }
+
     func testSetQuantity_clampsToValidRange() {
         let (tradeViewModel, _) = makeViewModels()
         tradeViewModel.setQuantity(0)

@@ -9,6 +9,7 @@ import {
   Position,
   Quote,
   TradingMode,
+  WebullAccount,
 } from '@0dtetrader/shared-types';
 import {
   computeMid,
@@ -54,6 +55,12 @@ class StubBrokerGateway implements BrokerGateway {
   async getCandles(): Promise<Candle[]> {
     return [];
   }
+
+  async listAccounts(): Promise<WebullAccount[]> {
+    return [];
+  }
+
+  async selectAccount(): Promise<void> {}
 
   async reauthenticate(): Promise<TradingMode> {
     return 'live';

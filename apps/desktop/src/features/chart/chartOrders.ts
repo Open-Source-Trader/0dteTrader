@@ -224,7 +224,9 @@ function messageOf(error: unknown): string {
 
 /** Short label for the kind pill: the line's colour already carries most of this. */
 export function kindLabel(kind: ChartOrderKind): string {
-  return kind === 'target' ? 'TP' : kind === 'stop' ? 'STP' : 'LMT';
+  if (kind === 'target') return 'TP';
+  if (kind === 'stop') return 'STP';
+  return 'LMT';
 }
 
 /** The tappable execution pill. `MKT` is deliberately abbreviated so the pill

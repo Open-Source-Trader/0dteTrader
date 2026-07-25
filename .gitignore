@@ -13,6 +13,7 @@ coverage/
 apps/ios/build/
 apps/ios/DerivedData/
 apps/ios/0dteTrader.xcodeproj/
+apps/ios/0dteTrader/App/GeneratedEnvironment.swift
 xcuserdata/
 *.ipa
 *.dSYM.zip

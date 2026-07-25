@@ -1,0 +1,4 @@
+// Shared settings across all configurations.
+CODE_SIGN_STYLE = Automatic
+DEVELOPMENT_TEAM = X3Q9GMD432
+PRODUCT_BUNDLE_IDENTIFIER = com.0dtetrader.app

@@ -38,6 +38,7 @@ interface ExpectedOptionsAnalyticsSettings {
   showDealerProxy: boolean;
   refreshSeconds: number;
   profileStrikeCount: number;
+  showDiagnostics: boolean;
 }
 
 function optionsAnalyticsSettings(store: SettingsStore): ExpectedOptionsAnalyticsSettings {
@@ -63,6 +64,7 @@ describe('SettingsStore options analytics settings', () => {
       showDealerProxy: false,
       refreshSeconds: 45,
       profileStrikeCount: 12,
+      showDiagnostics: true,
     });
   });
 
@@ -88,6 +90,7 @@ describe('SettingsStore options analytics settings', () => {
         showDealerProxy: true,
         refreshSeconds: 4,
         profileStrikeCount: 99,
+        showDiagnostics: true,
       }),
     );
 
@@ -100,6 +103,7 @@ describe('SettingsStore options analytics settings', () => {
       showDealerProxy: true,
       refreshSeconds: 15,
       profileStrikeCount: 20,
+      showDiagnostics: true,
     });
   });
 
@@ -115,5 +119,33 @@ describe('SettingsStore options analytics settings', () => {
     expect(localStorage.getItem('settings.optionsAnalytics.v1')).not.toBeNull();
     const obsoleteKey = `settings.${['g', 'e', 'x', 'Settings'].join('')}`;
     expect(localStorage.getItem(obsoleteKey)).toBeNull();
+  });
+});
+
+describe('SettingsStore boolean device preferences', () => {
+  beforeEach(() => {
+    Object.defineProperty(globalThis, 'localStorage', {
+      configurable: true,
+      value: new MemoryStorage(),
+    });
+  });
+
+  it('defaults tradingLocked and bypassOrderConfirmation to false', () => {
+    const store = new SettingsStore();
+    expect(store.tradingLocked).toBe(false);
+    expect(store.bypassOrderConfirmation).toBe(false);
+  });
+
+  it('persists tradingLocked across instances (the lock is remembered)', () => {
+    new SettingsStore().tradingLocked = true;
+    expect(localStorage.getItem('settings.tradingLocked')).toBe('true');
+    expect(new SettingsStore().tradingLocked).toBe(true);
+  });
+
+  it('round-trips bypassOrderConfirmation through localStorage', () => {
+    new SettingsStore().bypassOrderConfirmation = true;
+    expect(new SettingsStore().bypassOrderConfirmation).toBe(true);
+    new SettingsStore().bypassOrderConfirmation = false;
+    expect(new SettingsStore().bypassOrderConfirmation).toBe(false);
   });
 });

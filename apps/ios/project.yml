@@ -3,8 +3,13 @@ name: 0dteTrader
 options:
   bundleIdPrefix: com.0dtetrader
   deploymentTarget:
-    iOS: "17.0"
+    iOS: '17.0'
   createIntermediateGroups: true
+
+configs:
+  Debug: debug
+  Staging: release
+  Release: release
 
 packages:
   Charts:
@@ -17,7 +22,7 @@ targets:
   0dteTrader:
     type: application
     platform: iOS
-    deploymentTarget: "17.0"
+    deploymentTarget: '17.0'
     sources:
       - path: 0dteTrader
     dependencies:
@@ -30,12 +35,24 @@ targets:
         # the "0dteTrader" name while the module is ZeroDTETrader (tests do
         # `@testable import ZeroDTETrader`).
         PRODUCT_MODULE_NAME: ZeroDTETrader
-        MARKETING_VERSION: "0.1.0"
-        CURRENT_PROJECT_VERSION: "1"
-        TARGETED_DEVICE_FAMILY: "1"
+        MARKETING_VERSION: '0.1.0'
+        CURRENT_PROJECT_VERSION: '1'
+        TARGETED_DEVICE_FAMILY: '1'
         CODE_SIGN_STYLE: Automatic
         DEVELOPMENT_TEAM: X3Q9GMD432
+    configFiles:
+      Debug: Configurations/Debug.xcconfig
+      Staging: Configurations/Staging.xcconfig
+      Release: Configurations/Release.xcconfig
     prebuildScripts:
+      - name: Generate Environment
+        basedOnDependencyAnalysis: false
+        script: |-
+          if [ -f "${SRCROOT}/scripts/generate-env.sh" ]; then
+            bash "${SRCROOT}/scripts/generate-env.sh"
+          else
+            echo "warning: generate-env.sh not found; skipping environment generation"
+          fi
       - name: SwiftLint
         basedOnDependencyAnalysis: false
         script: |
@@ -47,7 +64,7 @@ targets:
     info:
       path: 0dteTrader/Info.plist
       properties:
-        CFBundleDisplayName: 0dteTrader
+        CFBundleDisplayName: $(PRODUCT_NAME)
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         UILaunchScreen: {}
@@ -71,7 +88,7 @@ targets:
   0dteTraderTests:
     type: bundle.unit-test
     platform: iOS
-    deploymentTarget: "17.0"
+    deploymentTarget: '17.0'
     sources:
       - path: 0dteTraderTests
     dependencies:
@@ -88,7 +105,7 @@ targets:
   0dteTraderUITests:
     type: bundle.ui-testing
     platform: iOS
-    deploymentTarget: "17.0"
+    deploymentTarget: '17.0'
     sources:
       - path: 0dteTraderUITests
     dependencies:
@@ -109,6 +126,32 @@ schemes:
       config: Debug
     test:
       config: Debug
+      targets:
+        - 0dteTraderTests
+
+  0dteTraderStaging:
+    build:
+      targets:
+        0dteTrader: all
+        0dteTraderTests:
+          - test
+    run:
+      config: Staging
+    test:
+      config: Staging
+      targets:
+        - 0dteTraderTests
+
+  0dteTraderRelease:
+    build:
+      targets:
+        0dteTrader: all
+        0dteTraderTests:
+          - test
+    run:
+      config: Release
+    test:
+      config: Release
       targets:
         - 0dteTraderTests
 

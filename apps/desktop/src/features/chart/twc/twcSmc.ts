@@ -284,24 +284,24 @@ export function computeSmc(candles: TwcCandle[], settings: TwcHeatmapSettings): 
   const pushOrderBlocks = (blocks: OrderBlock[], count: number, internal: boolean): void => {
     for (const block of blocks.slice(0, Math.min(count, blocks.length))) {
       const bullish = block.bias === 1;
+      let fillColor: string;
+      if (internal) {
+        fillColor = bullish ? TWC_COLORS.internalBullishOB : TWC_COLORS.internalBearishOB;
+      } else {
+        fillColor = bullish ? TWC_COLORS.swingBullishOB : TWC_COLORS.swingBearishOB;
+      }
+      // Pine: swing blocks are outlined, internal blocks are fill-only
+      let borderColor: string | undefined;
+      if (!internal) {
+        borderColor = bullish ? TWC_COLORS.swingBullishOBBorder : TWC_COLORS.swingBearishOBBorder;
+      }
       bands.push({
         x1: block.barIndex,
         x2: lastBar + OB_EXTEND_BARS,
         yTop: block.barHigh,
         yBottom: block.barLow,
-        fillColor: internal
-          ? bullish
-            ? TWC_COLORS.internalBullishOB
-            : TWC_COLORS.internalBearishOB
-          : bullish
-            ? TWC_COLORS.swingBullishOB
-            : TWC_COLORS.swingBearishOB,
-        // Pine: swing blocks are outlined, internal blocks are fill-only
-        borderColor: internal
-          ? undefined
-          : bullish
-            ? TWC_COLORS.swingBullishOBBorder
-            : TWC_COLORS.swingBearishOBBorder,
+        fillColor,
+        borderColor,
       });
     }
   };

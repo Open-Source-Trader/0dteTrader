@@ -6,6 +6,8 @@ struct PositionsStripView: View {
     let positions: [Position]
     let openOrders: [OrderResult]
     let workingSymbols: Set<String>
+    /// When true, flatten and cancel are disabled (trading lock active).
+    var tradingLocked: Bool = false
     let onFlatten: (Position) -> Void
     let onCancelOrder: (OrderResult) -> Void
 
@@ -110,10 +112,10 @@ struct PositionsStripView: View {
                 RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
                     .stroke(Color.appBorder, lineWidth: 1)
             )
-            .opacity(isWorking ? 0.6 : 1)
+            .opacity(isWorking || tradingLocked ? 0.6 : 1)
         }
         .buttonStyle(AppPressStyle())
-        .disabled(isWorking)
+        .disabled(isWorking || tradingLocked)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("""
             Position \(position.symbol), quantity \(position.quantity), average price \
@@ -142,8 +144,10 @@ struct PositionsStripView: View {
                     .foregroundStyle(.secondary)
                     .frame(width: 44, height: 44)
                     .contentShape(Rectangle())
+                    .opacity(tradingLocked ? 0.55 : 1)
             }
             .buttonStyle(AppPressStyle())
+            .disabled(tradingLocked)
             .accessibilityLabel("Cancel \(order.side.displayName) order, \(order.quantity) \(order.contractSymbol)")
         }
         .padding(.leading, AppSpacing.md)

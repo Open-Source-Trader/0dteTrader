@@ -24,6 +24,7 @@ describe('IndicatorSettingsView options structure controls', () => {
           showDealerProxy: false,
           refreshSeconds: 45,
           profileStrikeCount: 12,
+          showDiagnostics: false,
         },
         chartTrading: DEFAULT_CHART_TRADING_SETTINGS,
         onChangeChartTrading: vi.fn(),

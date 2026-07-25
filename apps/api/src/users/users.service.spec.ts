@@ -13,13 +13,28 @@ describe('UsersService', () => {
   };
 
   const addCredential = (userId: string, environment: 'live' | 'practice') => {
-    prisma.credentials.push({
+    prisma.brokerCredentials.push({
       id: `cred-${environment}`,
       userId,
+      provider: 'webull',
       environment,
-      encAppKey: Buffer.from('x'),
-      encAppSecret: Buffer.from('y'),
-      encAccountId: Buffer.from('z'),
+      encSecrets: Buffer.from(
+        JSON.stringify({ provider: 'webull', appKey: 'k', appSecret: 's', accountId: 'z' }),
+      ),
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+  };
+
+  const addAlpacaCredential = (userId: string, environment: 'live' | 'practice') => {
+    prisma.brokerCredentials.push({
+      id: `alpaca-${environment}`,
+      userId,
+      provider: 'alpaca',
+      environment,
+      encSecrets: Buffer.from(
+        JSON.stringify({ provider: 'alpaca', apiKey: 'ak', apiSecret: 'as' }),
+      ),
       createdAt: new Date(),
       updatedAt: new Date(),
     });
@@ -43,10 +58,15 @@ describe('UsersService', () => {
       email: 'u@example.com',
       tradingDisabled: false,
       tradingMode: 'live',
+      tradingProvider: 'webull',
       webullConfigured: false,
       webullPracticeConfigured: false,
       webullAccountId: null,
       webullPracticeAccountId: null,
+      alpacaConfigured: false,
+      alpacaPracticeConfigured: false,
+      alpacaAccountId: null,
+      alpacaPracticeAccountId: null,
     });
 
     addCredential(userId, 'practice');
@@ -72,9 +92,26 @@ describe('UsersService', () => {
     expect((await users.setTradingMode(userId, 'live')).tradingMode).toBe('live');
   });
 
+  it('setTradingProvider persists the provider and returns the updated Me', async () => {
+    const userId = await seedUser();
+    const me = await users.setTradingProvider(userId, 'alpaca');
+    expect(me.tradingProvider).toBe('alpaca');
+    expect((await users.getMe(userId)).tradingProvider).toBe('alpaca');
+    expect((await users.setTradingProvider(userId, 'webull')).tradingProvider).toBe('webull');
+  });
+
   it('rejects with USER_NOT_FOUND for unknown users', async () => {
     await expect(users.getMe('missing')).rejects.toMatchObject({
       code: 'USER_NOT_FOUND',
     });
+  });
+
+  it('reports Alpaca credential flags from broker_credentials', async () => {
+    const userId = await seedUser();
+    addAlpacaCredential(userId, 'live');
+    const me = await users.getMe(userId);
+    expect(me.alpacaConfigured).toBe(true);
+    expect(me.alpacaPracticeConfigured).toBe(false);
+    expect(me.alpacaAccountId).toBeNull();
   });
 });

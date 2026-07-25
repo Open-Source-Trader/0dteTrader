@@ -811,23 +811,13 @@
 /* AUTO mode: the chain stays fully readable — not the trading-locked
    "faded/inert" look — since the point is to keep spread/liquidity info
    visible while AUTO owns the pick. Only the cursor communicates
-   non-interactivity; the highlighted (auto-picked) cell gets its own
-   badge instead of relying on opacity to convey "this one is active." */
+   non-interactivity; the auto-picked cell reuses the same elevated-surface
+   + hairline-outline treatment as a manual selection (not the solid accent
+   fill) — that fill is already the ATM/current-price row's look, so reusing
+   it here made the auto-pick and the current price read as the same thing. */
 .chain-table--auto .chain-cell:disabled {
   cursor: default;
   opacity: 1;
-}
-
-.chain-table--auto .chain-cell.selected {
-  background: var(--app-accent-fill);
-  box-shadow: none;
-}
-
-.chain-table--auto .chain-cell--call.selected .chain-cell-bid,
-.chain-table--auto .chain-cell--call.selected .chain-cell-ask,
-.chain-table--auto .chain-cell--put.selected .chain-cell-bid,
-.chain-table--auto .chain-cell--put.selected .chain-cell-ask {
-  color: #fff;
 }
 
 /* AUTO's picked row: a small dot on the strike cell (the only column with
@@ -838,7 +828,6 @@
   align-items: center;
   justify-content: center;
   gap: 3px;
-  color: #fff;
   font-weight: 700;
 }
 
@@ -846,7 +835,7 @@
   width: 5px;
   height: 5px;
   border-radius: 50%;
-  background: #fff;
+  background: var(--app-accent);
 }
 
 /* --- Symbol spotlight (desktop Cmd+K command palette) ---

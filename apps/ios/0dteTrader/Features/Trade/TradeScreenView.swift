@@ -75,6 +75,12 @@ struct TradeScreenView: View {
                             .font(.hudTitle)
                             .foregroundStyle(Color.appAccent)
                             .shadow(color: .hudGlow, radius: 8)
+                            // Six toolbar buttons squeeze the principal slot;
+                            // scale the wordmark down instead of truncating it
+                            // to "0dteTr…".
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.45)
+                            .allowsTightening(true)
                     }
                     ToolbarItem(placement: .topBarLeading) {
                         Button {

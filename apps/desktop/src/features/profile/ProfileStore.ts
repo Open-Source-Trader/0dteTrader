@@ -300,7 +300,7 @@ export class ProfileStore extends Store<ProfileStoreState> {
       errorMessage: null,
     });
     try {
-      const data = await this.apiClient.getSnapTradeConnections();
+      const data = await this.apiClient.getSnapTradeConnections(environment);
       const connections = data.connections ?? [];
       const accounts = data.accounts ?? {};
       const status = data.status ?? { configured: false, selectedAccountId: null };
@@ -328,7 +328,7 @@ export class ProfileStore extends Store<ProfileStoreState> {
       messageEnv: envKey,
     });
     try {
-      const result = await this.apiClient.authorizeSnapTrade({
+      const result = await this.apiClient.authorizeSnapTrade(environment, {
         connectionType: 'trade',
       });
       await this.openExternal(result.redirectUrl);
@@ -360,7 +360,7 @@ export class ProfileStore extends Store<ProfileStoreState> {
       messageEnv: envKey,
     });
     try {
-      const result = await this.apiClient.reconnectSnapTrade(connectionId);
+      const result = await this.apiClient.reconnectSnapTrade(environment, connectionId);
       await this.openExternal(result.redirectUrl);
       await this.loadSnapTradeConnections(envKey);
       this.set({ successMessage: 'SnapTrade connection refreshed.' });
@@ -383,7 +383,7 @@ export class ProfileStore extends Store<ProfileStoreState> {
   ): Promise<void> {
     const envKey = environment;
     try {
-      await this.apiClient.selectSnapTradeAccount(connectionId, accountId);
+      await this.apiClient.selectSnapTradeAccount(environment, connectionId, accountId);
       await this.loadSnapTradeConnections(envKey);
       this.set({ successMessage: 'SnapTrade trading account selected.' });
     } catch (error) {
@@ -404,7 +404,7 @@ export class ProfileStore extends Store<ProfileStoreState> {
       messageEnv: envKey,
     });
     try {
-      await this.apiClient.deleteSnapTradeConnection(connectionId);
+      await this.apiClient.deleteSnapTradeConnection(environment, connectionId);
       await this.loadSnapTradeConnections(envKey);
       this.set({ successMessage: 'SnapTrade connection removed.' });
     } catch (error) {

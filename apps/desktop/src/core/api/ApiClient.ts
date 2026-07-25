@@ -304,16 +304,23 @@ export class ApiClient {
 
   // MARK: - SnapTrade connection lifecycle
 
-  getSnapTradeConnections(): Promise<DesktopSnapTradeConnectionsResponse> {
-    return this.request({ method: 'GET', path: 'v1/me/broker-connections/snaptrade' });
+  getSnapTradeConnections(environment: TradingMode): Promise<DesktopSnapTradeConnectionsResponse> {
+    return this.request({
+      method: 'GET',
+      path: 'v1/me/broker-connections/snaptrade',
+      query: { environment },
+    });
   }
 
-  authorizeSnapTrade(params?: {
-    brokerage?: string;
-    reconnect?: string;
-    connectionType?: 'read' | 'trade' | 'trade-if-available';
-  }): Promise<DesktopSnapTradeAuthorizeResponse> {
-    const query: Record<string, string> = {};
+  authorizeSnapTrade(
+    environment: TradingMode,
+    params?: {
+      brokerage?: string;
+      reconnect?: string;
+      connectionType?: 'read' | 'trade' | 'trade-if-available';
+    },
+  ): Promise<DesktopSnapTradeAuthorizeResponse> {
+    const query: Record<string, string> = { environment };
     if (params?.brokerage) query.brokerage = params.brokerage;
     if (params?.reconnect) query.reconnect = params.reconnect;
     if (params?.connectionType) query.connectionType = params.connectionType;
@@ -324,27 +331,32 @@ export class ApiClient {
     });
   }
 
-  reconnectSnapTrade(connectionId: string): Promise<DesktopSnapTradeAuthorizeResponse> {
+  reconnectSnapTrade(
+    environment: TradingMode,
+    connectionId: string,
+  ): Promise<DesktopSnapTradeAuthorizeResponse> {
     return this.request({
       method: 'POST',
       path: 'v1/me/broker-connections/snaptrade/reconnect',
-      query: { connectionId },
+      query: { connectionId, environment },
     });
   }
 
   selectSnapTradeAccount(
+    environment: TradingMode,
     connectionId: string,
     accountId: string,
   ): Promise<DesktopSnapTradeSelectResponse> {
     return this.request({
       method: 'POST',
       path: 'v1/me/broker-connections/snaptrade/select',
-      query: { connectionId, accountId },
+      query: { connectionId, accountId, environment },
     });
   }
 
-  deleteSnapTradeConnection(connectionId?: string): Promise<void> {
-    const query: Record<string, string> = connectionId ? { connectionId } : {};
+  deleteSnapTradeConnection(environment: TradingMode, connectionId?: string): Promise<void> {
+    const query: Record<string, string> = { environment };
+    if (connectionId) query.connectionId = connectionId;
     return this.requestVoid({
       method: 'DELETE',
       path: 'v1/me/broker-connections/snaptrade',

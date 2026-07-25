@@ -5,9 +5,11 @@ import {
   createChart,
   HistogramSeries,
   LineSeries,
+  LineStyle,
   type CandlestickData,
   type HistogramData,
   type IChartApi,
+  type IPriceLine,
   type ISeriesApi,
   type LineData,
   type LineWidth,
@@ -58,6 +60,10 @@ interface CandleChartProps {
   positionsForSymbol?: Position[];
   onFlattenPosition?: (position: Position) => void;
   positionsLocked?: boolean;
+  /** Live underlying bid/ask (TradingView convention: bid/ask lines pinned
+   *  to the price axis). Desktop grid only; null hides both lines. */
+  bid?: number | null;
+  ask?: number | null;
 }
 
 const VISIBLE_CANDLES = 120;
@@ -93,11 +99,15 @@ export function CandleChart({
   positionsForSymbol = [],
   onFlattenPosition,
   positionsLocked = false,
+  bid = null,
+  ask = null,
 }: CandleChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const candleSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
   const volumeSeriesRef = useRef<ISeriesApi<'Histogram'> | null>(null);
+  const bidLineRef = useRef<IPriceLine | null>(null);
+  const askLineRef = useRef<IPriceLine | null>(null);
   const overlaySeriesRef = useRef<Map<string, ISeriesApi<'Line'>>>(new Map());
   const prevOverlaysRef = useRef<{
     ids: string[];
@@ -186,6 +196,8 @@ export function CandleChart({
       chartRef.current = null;
       candleSeriesRef.current = null;
       volumeSeriesRef.current = null;
+      bidLineRef.current = null;
+      askLineRef.current = null;
       overlaySeriesRef.current = new Map();
       prevOverlaysRef.current = null;
       lastLengthRef.current = 0;
@@ -215,6 +227,51 @@ export function CandleChart({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showVolume]);
+
+  // Live underlying bid/ask price lines pinned to the axis (TradingView
+  // convention) — desktop grid only; null bid/ask (compact layout, no
+  // quote yet) removes the lines rather than leaving stale ones behind.
+  useEffect(() => {
+    const series = candleSeriesRef.current;
+    if (!series) return;
+    const colors = chartPalette();
+
+    if (bid !== null) {
+      if (!bidLineRef.current) {
+        bidLineRef.current = series.createPriceLine({
+          price: bid,
+          color: colors.candleUp,
+          lineWidth: 1,
+          lineStyle: LineStyle.Dotted,
+          axisLabelVisible: true,
+          title: 'BID',
+        });
+      } else {
+        bidLineRef.current.applyOptions({ price: bid });
+      }
+    } else if (bidLineRef.current) {
+      series.removePriceLine(bidLineRef.current);
+      bidLineRef.current = null;
+    }
+
+    if (ask !== null) {
+      if (!askLineRef.current) {
+        askLineRef.current = series.createPriceLine({
+          price: ask,
+          color: colors.candleDown,
+          lineWidth: 1,
+          lineStyle: LineStyle.Dotted,
+          axisLabelVisible: true,
+          title: 'ASK',
+        });
+      } else {
+        askLineRef.current.applyOptions({ price: ask });
+      }
+    } else if (askLineRef.current) {
+      series.removePriceLine(askLineRef.current);
+      askLineRef.current = null;
+    }
+  }, [bid, ask]);
 
   // Drawing tools take over the pointer: freeze pan/zoom while one is active.
   useEffect(() => {

@@ -432,6 +432,8 @@ export function ChartView({
             positionsForSymbol={positionsForSymbol}
             onFlattenPosition={onFlattenPosition}
             positionsLocked={positionsLocked}
+            bid={dense ? (quote?.bid ?? null) : null}
+            ask={dense ? (quote?.ask ?? null) : null}
           />
           {twcModel?.banner ? <TwcBiasBanner banner={twcModel.banner} /> : null}
           {optionsAnalytics.enabled && optionsAnalyticsState.errorMessage ? (

@@ -27,8 +27,8 @@ extension ProfileView {
         .padding(AppSpacing.lg)
         .hudCard(glow: false)
         .animation(AppMotion.standard, value: viewModel.isLoading)
-        .animation(AppMotion.standard, value: viewModel.me?.snaptradeConfigured)
-        .animation(AppMotion.standard, value: viewModel.me?.snaptradePracticeConfigured)
+        .animation(AppMotion.standard, value: viewModel.me?.snaptradeKeyConfigured)
+        .animation(AppMotion.standard, value: viewModel.me?.snaptradeKeyPracticeConfigured)
         .animation(AppMotion.standard, value: viewModel.editingSnapTradeKey)
         .sensoryFeedback(.success, trigger: viewModel.successMessage)
         .sensoryFeedback(.error, trigger: viewModel.errorMessage)
@@ -46,8 +46,8 @@ extension ProfileView {
     func snaptradeKeySection(_ environment: TradingMode) -> some View {
         let me = viewModel.me
         let configured = environment == .live
-            ? (me?.snaptradeConfigured ?? false)
-            : (me?.snaptradePracticeConfigured ?? false)
+            ? (me?.snaptradeKeyConfigured ?? false)
+            : (me?.snaptradeKeyPracticeConfigured ?? false)
         let title = environment == .live ? "SnapTrade API — Live" : "SnapTrade API — Practice"
         let editing = viewModel.editingSnapTradeKey.contains(environment)
         let isDeleting = viewModel.deletingSnapTradeKey.contains(environment)

@@ -79,6 +79,10 @@ struct MeDTO: Decodable, Equatable, Sendable {
     /// Tradier market-data API key is stored (used alongside Webull).
     let tradierConfigured: Bool?
     let tradierPracticeConfigured: Bool?
+    /// Live SnapTrade Personal clientId/consumerKey are stored.
+    let snaptradeKeyConfigured: Bool?
+    /// Practice SnapTrade Personal clientId/consumerKey are stored.
+    let snaptradeKeyPracticeConfigured: Bool?
     /// Live SnapTrade brokerage connection is active.
     let snaptradeConfigured: Bool?
     /// Practice SnapTrade brokerage connection is active.

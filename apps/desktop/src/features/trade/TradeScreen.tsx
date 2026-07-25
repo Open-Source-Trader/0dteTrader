@@ -22,7 +22,6 @@ import { enabledSubPanes } from '../chart/indicatorSettings';
 import { ChartView } from '../chart/ChartView';
 import { positionsForUnderlying } from '../chart/positionsForUnderlying';
 import { IndicatorSettingsBody, IndicatorSettingsView } from '../chart/IndicatorSettingsView';
-import { TwcSettingsView } from '../chart/TwcSettingsView';
 import { SymbolSearchView } from '../chart/SymbolSearchView';
 import { SymbolSpotlight } from '../chart/SymbolSpotlight';
 import { ProfileView } from '../profile/ProfileView';
@@ -67,7 +66,6 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
   const [locked, setLocked] = useState(() => settingsStore.tradingLocked);
   const [showSymbolSearch, setShowSymbolSearch] = useState(false);
   const [showIndicatorSettings, setShowIndicatorSettings] = useState(false);
-  const [showTwcSettings, setShowTwcSettings] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
 
@@ -640,11 +638,8 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
                   onToggleTwc={(on) =>
                     chartStore.setTwcSettings({ ...chart.twcSettings, enabled: on })
                   }
-                  onOpenTwcSettings={() => {
-                    setShowIndicatorSettings(false);
-                    setShowProfile(false);
-                    setShowTwcSettings(true);
-                  }}
+                  twcSettings={chart.twcSettings}
+                  onChangeTwcSettings={(settings) => chartStore.setTwcSettings(settings)}
                   optionsAnalytics={chart.optionsAnalytics}
                   onChangeOptionsAnalytics={(settings) => chartStore.setOptionsAnalytics(settings)}
                 />
@@ -660,24 +655,10 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
           onDismiss={() => setShowIndicatorSettings(false)}
           twcEnabled={chart.twcSettings.enabled}
           onToggleTwc={(on) => chartStore.setTwcSettings({ ...chart.twcSettings, enabled: on })}
-          onOpenTwcSettings={() => {
-            setShowIndicatorSettings(false);
-            setShowTwcSettings(true);
-          }}
+          twcSettings={chart.twcSettings}
+          onChangeTwcSettings={(settings) => chartStore.setTwcSettings(settings)}
           optionsAnalytics={chart.optionsAnalytics}
           onChangeOptionsAnalytics={(settings) => chartStore.setOptionsAnalytics(settings)}
-        />
-      ) : null}
-      {showTwcSettings ? (
-        <TwcSettingsView
-          settings={chart.twcSettings}
-          onChange={(settings) => chartStore.setTwcSettings(settings)}
-          onBack={() => {
-            setShowTwcSettings(false);
-            setShowIndicatorSettings(true);
-          }}
-          onDismiss={() => setShowTwcSettings(false)}
-          dense={isDesktopGrid}
         />
       ) : null}
       {!isDesktopGrid && showProfile ? (

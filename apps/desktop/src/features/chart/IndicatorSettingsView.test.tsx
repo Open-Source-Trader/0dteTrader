@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import { IndicatorSettingsView } from './IndicatorSettingsView';
 import { DEFAULT_INDICATOR_SETTINGS } from './indicatorSettings';
+import { DEFAULT_TWC_SETTINGS } from './twc/twcSettings';
 
 describe('IndicatorSettingsView options structure controls', () => {
   it('shows the approved layers and contains no obsolete analytics labels', () => {
@@ -13,7 +14,8 @@ describe('IndicatorSettingsView options structure controls', () => {
         onDismiss: vi.fn(),
         twcEnabled: false,
         onToggleTwc: vi.fn(),
-        onOpenTwcSettings: vi.fn(),
+        twcSettings: DEFAULT_TWC_SETTINGS,
+        onChangeTwcSettings: vi.fn(),
         optionsAnalytics: {
           enabled: true,
           showImpliedRange: true,

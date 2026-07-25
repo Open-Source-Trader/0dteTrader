@@ -1,13 +1,16 @@
+import { useState } from 'react';
 import { DesktopSheet } from '../../design/components/DesktopSheet';
 import { NavBar } from '../../design/components/NavBar';
 import { Sheet } from '../../design/components/Sheet';
 import { Stepper } from '../../design/components/Stepper';
 import { Toggle } from '../../design/components/Toggle';
 import { Format } from '../../design/format';
-import { SlidersIcon } from '../../design/icons';
+import { ChevronDownIcon } from '../../design/icons';
 import type { IndicatorSettings } from './indicatorSettings';
 import { DEFAULT_INDICATOR_SETTINGS, enabledSubPanes, MAX_SUB_PANES } from './indicatorSettings';
 import type { OptionsAnalyticsSettings } from './optionsAnalytics/optionsAnalyticsSettings';
+import { TwcSettingsBody } from './TwcSettingsView';
+import type { TwcHeatmapSettings } from './twc/twcSettings';
 
 interface IndicatorSettingsViewProps {
   settings: IndicatorSettings;
@@ -15,7 +18,8 @@ interface IndicatorSettingsViewProps {
   onDismiss: () => void;
   twcEnabled: boolean;
   onToggleTwc: (on: boolean) => void;
-  onOpenTwcSettings: () => void;
+  twcSettings: TwcHeatmapSettings;
+  onChangeTwcSettings: (settings: TwcHeatmapSettings) => void;
   optionsAnalytics: OptionsAnalyticsSettings;
   onChangeOptionsAnalytics: (settings: OptionsAnalyticsSettings) => void;
   /** Desktop grid: centered floating panel instead of an iOS bottom sheet. */
@@ -44,7 +48,8 @@ interface IndicatorSettingsBodyProps {
   onChange: (settings: IndicatorSettings) => void;
   twcEnabled: boolean;
   onToggleTwc: (on: boolean) => void;
-  onOpenTwcSettings: () => void;
+  twcSettings: TwcHeatmapSettings;
+  onChangeTwcSettings: (settings: TwcHeatmapSettings) => void;
   optionsAnalytics: OptionsAnalyticsSettings;
   onChangeOptionsAnalytics: (settings: OptionsAnalyticsSettings) => void;
 }
@@ -56,10 +61,12 @@ export function IndicatorSettingsBody({
   onChange,
   twcEnabled,
   onToggleTwc,
-  onOpenTwcSettings,
+  twcSettings,
+  onChangeTwcSettings,
   optionsAnalytics,
   onChangeOptionsAnalytics,
 }: IndicatorSettingsBodyProps) {
+  const [twcExpanded, setTwcExpanded] = useState(false);
   const patch = (partial: Partial<IndicatorSettings>) => onChange({ ...settings, ...partial });
   const patchOptionsAnalytics = (partial: Partial<OptionsAnalyticsSettings>) =>
     onChangeOptionsAnalytics({ ...optionsAnalytics, ...partial });
@@ -352,17 +359,30 @@ export function IndicatorSettingsBody({
               TWC Heatmap V5
               <button
                 className="icon-button"
-                aria-label="TWC Heatmap V5 settings"
-                onClick={onOpenTwcSettings}
-                style={{ display: 'inline-flex', alignItems: 'center', padding: 4 }}
+                aria-label={
+                  twcExpanded ? 'Hide TWC Heatmap V5 settings' : 'TWC Heatmap V5 settings'
+                }
+                aria-expanded={twcExpanded}
+                onClick={() => setTwcExpanded((expanded) => !expanded)}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  padding: 4,
+                  transform: twcExpanded ? 'rotate(180deg)' : undefined,
+                }}
               >
-                <SlidersIcon size={14} />
+                <ChevronDownIcon size={14} />
               </button>
             </span>
             <span className="row-value">
               <Toggle on={twcEnabled} onChange={onToggleTwc} />
             </span>
           </div>
+          {twcExpanded ? (
+            <div className="indicator-nested-settings">
+              <TwcSettingsBody settings={twcSettings} onChange={onChangeTwcSettings} />
+            </div>
+          ) : null}
 
           <div className="grouped-row">
             <span>
@@ -483,7 +503,8 @@ export function IndicatorSettingsView({
   onDismiss,
   twcEnabled,
   onToggleTwc,
-  onOpenTwcSettings,
+  twcSettings,
+  onChangeTwcSettings,
   optionsAnalytics,
   onChangeOptionsAnalytics,
   dense = false,
@@ -512,7 +533,8 @@ export function IndicatorSettingsView({
           onChange={onChange}
           twcEnabled={twcEnabled}
           onToggleTwc={onToggleTwc}
-          onOpenTwcSettings={onOpenTwcSettings}
+          twcSettings={twcSettings}
+          onChangeTwcSettings={onChangeTwcSettings}
           optionsAnalytics={optionsAnalytics}
           onChangeOptionsAnalytics={onChangeOptionsAnalytics}
         />

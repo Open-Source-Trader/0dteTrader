@@ -246,7 +246,7 @@ export class SnapTradeBrokerGateway implements BrokerGateway {
     }
     const mode = (user.tradingMode ?? 'live') as TradingMode;
     const connection = await this.prisma.brokerConnection.findUnique({
-      where: { userId_provider: { userId, provider: 'snaptrade' } },
+      where: { userId_provider_environment: { userId, provider: 'snaptrade', environment: mode } },
     });
     const accountId = connection?.selectedAccountId ?? connection?.accountIds[0] ?? null;
     if (!accountId) {

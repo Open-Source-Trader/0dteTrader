@@ -25,6 +25,7 @@ import { TwcSettingsView } from '../chart/TwcSettingsView';
 import { SymbolSearchView } from '../chart/SymbolSearchView';
 import { SymbolSpotlight } from '../chart/SymbolSpotlight';
 import { ProfileView } from '../profile/ProfileView';
+import { DesktopPositionsPanel } from './DesktopPositionsPanel';
 import { DesktopTradeTicket } from './DesktopTradeTicket';
 import { FloatingTradeButtons } from './FloatingTradeButtons';
 import { HistoryView } from './HistoryView';
@@ -303,6 +304,18 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
     />
   );
 
+  // Desktop grid: tabbed dense table instead of the phone strip's chip row.
+  const desktopPositionsPanel = (
+    <DesktopPositionsPanel
+      positions={trade.positions}
+      openOrders={trade.openOrders}
+      workingSymbols={trade.workingSymbols}
+      onFlatten={(position) => void tradeStore.flatten(position)}
+      onCancelOrder={(order) => void tradeStore.cancel(order)}
+      locked={locked}
+    />
+  );
+
   let contentArea: React.ReactNode;
   if (isDesktopGrid) {
     contentArea = (
@@ -369,7 +382,7 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
 
         {/* Positions/orders footer: full width, always visible so open
             risk is never a click away. */}
-        <div style={{ flex: 'none' }}>{positionsStrip}</div>
+        <div style={{ flex: 'none', height: 160, minHeight: 0 }}>{desktopPositionsPanel}</div>
       </div>
     );
   } else if (layout === 'fullscreen') {

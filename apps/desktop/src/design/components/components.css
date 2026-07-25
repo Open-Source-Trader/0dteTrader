@@ -828,3 +828,101 @@
 .spotlight-row:hover {
   background: rgba(46, 143, 255, 0.1);
 }
+
+/* --- Desktop positions/orders panel (desktop grid footer) ---
+   Tabbed dense table (TradingView Account Manager / ThinkOrSwim Monitor
+   convention) — replaces the phone strip's horizontally-scrolling chip row. */
+.desktop-positions-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+  background: var(--app-background);
+}
+
+.desktop-positions-tabs {
+  display: flex;
+  flex: none;
+  border-bottom: var(--border-hairline) solid var(--hud-stroke-dim);
+}
+
+.desktop-positions-tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px var(--space-3);
+  font-size: var(--fs-caption);
+  font-weight: 600;
+  color: var(--label-secondary);
+  border-bottom: 2px solid transparent;
+}
+
+.desktop-positions-tab.active {
+  color: var(--app-accent-text);
+  border-bottom-color: var(--hud-stroke);
+}
+
+.desktop-positions-tab-count {
+  font-size: var(--fs-caption2);
+  color: var(--label-secondary);
+  background: var(--app-surface-elevated);
+  border-radius: var(--radius-chip);
+  padding: 0 5px;
+}
+
+.desktop-positions-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.desktop-positions-empty {
+  padding: var(--space-3);
+  font-size: var(--fs-caption);
+  text-align: center;
+}
+
+.desktop-positions-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-caption);
+}
+
+.desktop-positions-table th {
+  position: sticky;
+  top: 0;
+  background: var(--app-background);
+  color: var(--label-secondary);
+  font-size: var(--fs-caption2);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 4px var(--space-2);
+  border-bottom: var(--border-hairline) solid var(--hud-stroke-dim);
+}
+
+.desktop-positions-table td {
+  padding: 3px var(--space-2);
+  border-bottom: var(--border-hairline) solid rgba(46, 143, 255, 0.08);
+  white-space: nowrap;
+}
+
+.desktop-positions-table tbody tr:hover {
+  background: var(--app-surface-elevated);
+}
+
+.desktop-positions-action {
+  font-size: var(--fs-caption2);
+  color: var(--app-accent-text);
+  padding: 2px 8px;
+  border: var(--border-hairline) solid var(--hud-stroke-dim);
+}
+
+.desktop-positions-action:hover:not(:disabled) {
+  border-color: var(--hud-stroke);
+  background: rgba(46, 143, 255, 0.1);
+}
+
+.desktop-positions-action:disabled {
+  opacity: var(--disabled-opacity);
+}

@@ -61,22 +61,9 @@
   letter-spacing: 0.03em;
 }
 
-/* Desktop grid: one dense strip, solid fill — terminal convention (TV,
-   Bloomberg, ThinkOrSwim all use a filled bar here, never text floating
-   over the candles). Symbol, live price/bid-ask, tick progress, and
-   controls all read together as one status line, tight but never cramped. */
-.chart-strip {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex: none;
-  height: 28px;
-  margin: 3px 8px 0;
-  padding: 0 8px;
-  background: var(--app-surface);
-  border-bottom: var(--border-hairline) solid var(--hud-stroke-dim);
-}
-
+/* Symbol/price sub-pieces reused by DesktopTopBar (features/trade) — the
+   desktop grid's single top row lives one level up now, merged with the
+   app's global actions instead of stacking a separate app NavBar above it. */
 .chart-strip-symbol {
   display: flex;
   align-items: center;

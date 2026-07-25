@@ -9,7 +9,6 @@ import { NavBar } from '../../design/components/NavBar';
 import { Format } from '../../design/format';
 import {
   ClockIcon,
-  InfoCircleFillIcon,
   LayoutFullIcon,
   LayoutSplitIcon,
   LockIcon,
@@ -28,6 +27,7 @@ import { SymbolSearchView } from '../chart/SymbolSearchView';
 import { SymbolSpotlight } from '../chart/SymbolSpotlight';
 import { ProfileView } from '../profile/ProfileView';
 import { DesktopPositionsPanel } from './DesktopPositionsPanel';
+import { DesktopTopBar } from './DesktopTopBar';
 import { DesktopTradeTicket } from './DesktopTradeTicket';
 import { FloatingTradeButtons } from './FloatingTradeButtons';
 import { HistoryView } from './HistoryView';
@@ -322,6 +322,19 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
   if (isDesktopGrid) {
     contentArea = (
       <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column' }}>
+        <DesktopTopBar
+          chartStore={chartStore}
+          chart={chart}
+          onSymbolSearch={() => setShowSymbolSearch(true)}
+          onIndicatorSettings={() => setShowIndicatorSettings(true)}
+          tradingMode={tradingMode}
+          onToggleMode={() => setShowModeConfirmation(true)}
+          locked={locked}
+          onToggleLock={toggleLock}
+          onShowProfile={() => setShowProfile(true)}
+          onShowHistory={() => setShowHistory(true)}
+          onShowShortcutsHelp={() => setShowShortcutsHelp(true)}
+        />
         <Group
           orientation="horizontal"
           style={{ flex: 1, minHeight: 0, display: 'flex' }}
@@ -496,50 +509,41 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
         position: 'relative',
       }}
     >
-      <NavBar
-        title="0dteTrader"
-        className={isDesktopGrid ? 'navbar-desktop' : undefined}
-        leading={
-          <>
-            <button
-              className="navbar-icon-button"
-              onClick={() => setShowProfile(true)}
-              aria-label="Profile"
-            >
-              <PersonCircleIcon size={22} />
-            </button>
-            <button
-              className="navbar-icon-button"
-              onClick={() => setShowHistory(true)}
-              aria-label="Trade history"
-            >
-              <ClockIcon size={22} />
-            </button>
-          </>
-        }
-        trailing={
-          <>
-            {isDesktopGrid ? (
+      {/* Desktop grid uses DesktopTopBar instead — one merged row with the
+          chart's own symbol/price alongside these same global actions,
+          rather than a full-width app NavBar stacked above a second,
+          separate chart header. */}
+      {isDesktopGrid ? null : (
+        <NavBar
+          title="0dteTrader"
+          leading={
+            <>
               <button
                 className="navbar-icon-button"
-                onClick={() => setShowShortcutsHelp(true)}
-                aria-label="Keyboard shortcuts"
+                onClick={() => setShowProfile(true)}
+                aria-label="Profile"
               >
-                <InfoCircleFillIcon size={20} />
+                <PersonCircleIcon size={22} />
               </button>
-            ) : null}
-            <button
-              className="navbar-icon-button"
-              onClick={toggleLock}
-              aria-pressed={locked}
-              aria-label={locked ? 'Unlock trading' : 'Lock trading'}
-            >
-              {locked ? <LockIcon size={22} /> : <LockOpenIcon size={22} />}
-            </button>
-            {/* Fullscreen/split only applies to the compact (phone-derived)
-                layout — the desktop grid always shows chart + ticket +
-                positions together, so the toggle is meaningless there. */}
-            {isDesktopGrid ? null : (
+              <button
+                className="navbar-icon-button"
+                onClick={() => setShowHistory(true)}
+                aria-label="Trade history"
+              >
+                <ClockIcon size={22} />
+              </button>
+            </>
+          }
+          trailing={
+            <>
+              <button
+                className="navbar-icon-button"
+                onClick={toggleLock}
+                aria-pressed={locked}
+                aria-label={locked ? 'Unlock trading' : 'Lock trading'}
+              >
+                {locked ? <LockIcon size={22} /> : <LockOpenIcon size={22} />}
+              </button>
               <button
                 className="navbar-icon-button"
                 onClick={toggleLayout}
@@ -554,10 +558,10 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
                   <LayoutFullIcon size={22} />
                 )}
               </button>
-            )}
-          </>
-        }
-      />
+            </>
+          }
+        />
+      )}
 
       {needsProviderConfig ? (
         <button

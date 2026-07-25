@@ -75,6 +75,34 @@
   opacity: 0.5;
 }
 
+/* --- Desktop grid top bar (features/trade/DesktopTopBar) ---
+   One row for the whole app: symbol/price (what you're trading), chart
+   controls, and global actions (profile/history/lock) together — not a
+   full-width app NavBar with a centered logo stacked above a second,
+   separate chart header. Solid fill, terminal convention. */
+.desktop-top-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+  height: 30px;
+  padding: 0 var(--pad-screen-desktop);
+  background: var(--app-surface);
+  border-bottom: var(--border-hairline) solid var(--hud-stroke-dim);
+}
+
+.desktop-top-bar-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.desktop-top-bar-divider {
+  width: var(--border-hairline);
+  height: 16px;
+  background: var(--hud-stroke-dim);
+}
+
 /* --- Spinner (ProgressView) --- */
 .spinner {
   display: inline-block;
@@ -902,8 +930,8 @@
    convention — one window instead of two separate iOS-style sheets, and
    dense two-column form rows instead of 44px touch-target grouped lists. */
 .desktop-settings-panel {
-  width: min(760px, 92%);
-  height: min(600px, 86vh);
+  width: min(920px, 94%);
+  height: min(720px, 88vh);
   display: flex;
   flex-direction: row;
   background: var(--hud-panel-fill);
@@ -984,8 +1012,10 @@
    container only — the standalone compact Sheet views (phone layout) keep
    the original .grouped-row/.section-card styling untouched. */
 .desktop-settings-body .grouped-list {
-  padding: var(--space-3);
-  gap: var(--space-4);
+  max-width: 560px;
+  margin: 0 auto;
+  padding: var(--space-4);
+  gap: var(--space-5);
 }
 
 .desktop-settings-body .grouped-section .section-header {

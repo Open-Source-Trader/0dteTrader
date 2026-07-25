@@ -7,7 +7,7 @@ import { Spinner } from '../../design/components/Spinner';
 import { Format } from '../../design/format';
 import { ChevronDownIcon, SlidersIcon } from '../../design/icons';
 import type { ChartStore } from './ChartStore';
-import { CHART_INTERVALS } from './ChartStore';
+import { CHART_INTERVALS, INTERVAL_HINTS } from './ChartStore';
 import { CandleChart, type OverlaySeries } from './CandleChart';
 import { overlayPalette, panePalette } from './chartColors';
 import { DrawToolsMenu, DrawToolsRail } from './DrawingToolbar';
@@ -55,17 +55,6 @@ const INTERVAL_SHORTCUTS: Record<string, ChartInterval> = {
   '4': '4h',
   D: '1d',
   W: '1w',
-};
-
-const INTERVAL_HINTS: Partial<Record<ChartInterval, string>> = {
-  '1m': '1',
-  '5m': '5',
-  '15m': '3',
-  '30m': '0',
-  '1h': '⇧H',
-  '4h': '4',
-  '1d': '⇧D',
-  '1w': '⇧W',
 };
 
 // Seeded pseudo-random bar heights for the empty-chart loading skeleton.
@@ -267,89 +256,7 @@ export function ChartView({
 
   return (
     <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-      {dense ? (
-        // Desktop grid: one dense strip, solid fill (Bloomberg/TV terminal
-        // convention — never text floating over the canvas, always a real
-        // background), symbol + price/bid-ask + controls all in one row.
-        <div className="chart-strip">
-          <button
-            className="chart-strip-symbol"
-            onClick={onSymbolSearch}
-            aria-label={`Symbol ${symbol}. Change symbol`}
-          >
-            <span>{symbol}</span>
-            <ChevronDownIcon size={11} />
-          </button>
-
-          {quote ? (
-            <span className="numeric chart-strip-quote">
-              <span className="chart-strip-last">{Format.price(quote.last)}</span>
-              <span style={{ color: 'var(--buy-green)' }}>{Format.price(quote.bid)}</span>
-              <span style={{ color: 'var(--label-secondary)' }}>/</span>
-              <span style={{ color: 'var(--sell-red)' }}>{Format.price(quote.ask)}</span>
-              {isStale ? (
-                <span style={{ color: 'var(--warning-orange)', fontWeight: 600 }}>STALE</span>
-              ) : null}
-            </span>
-          ) : null}
-
-          {tickProgress ? (
-            <span className="numeric chart-strip-ticks">
-              {tickProgress.count}/{tickProgress.size}
-            </span>
-          ) : null}
-
-          <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
-            <button
-              className={tradingMode === 'live' ? 'hud-badge hud-badge--live' : 'hud-badge'}
-              onClick={onToggleMode}
-              aria-label={`Trading mode ${tradingMode === 'live' ? 'LIVE' : 'PRACTICE'}. Switch mode`}
-            >
-              {tradingMode === 'live' ? 'LIVE' : 'PRACTICE'}
-            </button>
-            <Menu
-              trigger={
-                <button
-                  className="quick-chip"
-                  style={{ minHeight: 24, padding: '3px 7px' }}
-                  aria-label={`Chart interval ${interval}`}
-                  aria-haspopup="menu"
-                >
-                  {interval}
-                </button>
-              }
-              items={CHART_INTERVALS.map((option) => ({
-                key: option,
-                label: (
-                  <>
-                    {option.toUpperCase()}
-                    {INTERVAL_HINTS[option] ? (
-                      <span
-                        style={{
-                          marginLeft: 12,
-                          fontSize: 'var(--fs-caption)',
-                          color: 'var(--label-secondary)',
-                        }}
-                      >
-                        {INTERVAL_HINTS[option]}
-                      </span>
-                    ) : null}
-                  </>
-                ),
-                checked: option === interval,
-                onSelect: () => store.selectInterval(option),
-              }))}
-            />
-            <button
-              className="chart-icon-button chart-icon-button--sm"
-              onClick={onIndicatorSettings}
-              aria-label="Indicator settings"
-            >
-              <SlidersIcon size={14} />
-            </button>
-          </span>
-        </div>
-      ) : (
+      {dense ? null : (
         <div
           className="chart-header"
           style={{

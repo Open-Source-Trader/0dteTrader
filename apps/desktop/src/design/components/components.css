@@ -80,26 +80,31 @@
    controls, and global actions (profile/history/lock) together — not a
    full-width app NavBar with a centered logo stacked above a second,
    separate chart header. Solid fill, terminal convention. */
+/* Left/right padding matches the chart canvas edges below it exactly
+   (44px draw rail + 8px card margin on the left, 8px card margin on the
+   right — see ChartView's .draw-rail + .hud-card), so the bar's icon
+   groups line up with the chart itself instead of the outer panel edge. */
 .desktop-top-bar {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   flex: none;
-  height: 30px;
-  padding: 0 var(--pad-screen-desktop);
+  height: 34px;
+  padding: 0 8px 0 52px;
   background: var(--app-surface);
   border-bottom: var(--border-hairline) solid var(--hud-stroke-dim);
+  font-size: var(--fs-caption-desktop);
 }
 
 .desktop-top-bar-group {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 7px;
 }
 
 .desktop-top-bar-divider {
   width: var(--border-hairline);
-  height: 16px;
+  height: 18px;
   background: var(--hud-stroke-dim);
 }
 
@@ -635,7 +640,7 @@
 
 .trade-panel.desktop .chip-button {
   padding: 5px 9px;
-  font-size: var(--fs-caption);
+  font-size: var(--fs-caption-desktop);
 }
 
 .trade-panel.desktop .stepper {
@@ -645,7 +650,7 @@
 
 .trade-panel.desktop .quick-chip {
   padding: 3px 8px;
-  font-size: var(--fs-caption2);
+  font-size: var(--fs-caption2-desktop);
 }
 
 /* --- Option chain table (desktop grid only) ---
@@ -821,52 +826,55 @@
   background: #fff;
 }
 
-/* --- Symbol spotlight (desktop Cmd+K command palette) --- */
+/* --- Symbol spotlight (desktop Cmd+K command palette) ---
+   Real elevation (deep backdrop blur-equivalent, glow, layered surfaces)
+   instead of a flat bordered box — a command palette is a focal moment,
+   it should look considered, not like a plain modal with a blue outline. */
 .spotlight-backdrop {
   position: absolute;
   inset: 0;
-  background: rgba(0, 0, 0, 0.45);
+  background: rgba(2, 6, 14, 0.7);
   display: flex;
   align-items: flex-start;
   justify-content: center;
-  padding-top: 12vh;
+  padding-top: 11vh;
   animation: backdrop-in 120ms ease-out;
   z-index: var(--z-alert);
 }
 
 .spotlight-card {
-  width: min(480px, 90%);
-  max-height: 60vh;
+  width: min(560px, 92%);
+  max-height: 62vh;
   display: flex;
   flex-direction: column;
   background: var(--hud-panel-fill);
   border: 8px solid transparent;
   border-image: var(--hud-src-accent) 28 fill / 24px / 6px stretch;
-  box-shadow: var(--shadow-overlay);
+  box-shadow:
+    var(--shadow-overlay),
+    0 0 0 1px rgba(46, 143, 255, 0.15),
+    0 0 48px rgba(46, 143, 255, 0.12);
 }
 
 .spotlight-input-row {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
+  gap: var(--space-3);
   flex: none;
-  padding: var(--space-3) var(--space-4);
+  padding: var(--space-4);
   border-bottom: var(--border-hairline) solid var(--hud-stroke-dim);
 }
 
 .spotlight-input {
   flex: 1;
+  font-family: var(--font-mono);
   font-size: var(--fs-headline);
-  text-transform: uppercase;
+  letter-spacing: 0.02em;
 }
 
-.spotlight-hint {
-  flex: none;
-  font-size: var(--fs-caption2);
-  color: var(--label-secondary);
-  border: var(--border-hairline) solid var(--hud-stroke-dim);
-  border-radius: var(--radius-chip);
-  padding: 2px 6px;
+.spotlight-input::placeholder {
+  font-family: var(--font-sans);
+  letter-spacing: normal;
 }
 
 .spotlight-results {
@@ -877,25 +885,91 @@
 }
 
 .spotlight-section-header {
-  padding: var(--space-2) var(--space-4) 4px;
-  font-size: var(--fs-caption2);
-  color: var(--label-secondary);
+  padding: var(--space-3) var(--space-4) 6px;
+  font-size: var(--fs-caption2-desktop);
+  color: var(--app-accent-text);
+  font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.08em;
 }
 
 .spotlight-row {
+  position: relative;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: var(--space-2);
+  gap: var(--space-3);
   width: 100%;
-  padding: 8px var(--space-4);
-  font-size: var(--fs-subheadline);
+  padding: 9px var(--space-4);
+  font-size: var(--fs-subheadline-desktop);
+  border-left: 2px solid transparent;
 }
 
 .spotlight-row:hover {
-  background: rgba(46, 143, 255, 0.1);
+  background: rgba(46, 143, 255, 0.08);
+}
+
+.spotlight-row.active {
+  background: rgba(46, 143, 255, 0.14);
+  border-left-color: var(--hud-stroke);
+}
+
+.spotlight-row-dot {
+  flex: none;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--label-secondary);
+}
+
+.spotlight-row.active .spotlight-row-dot {
+  background: var(--app-accent);
+  box-shadow: 0 0 6px var(--hud-glow-strong);
+}
+
+.spotlight-row-icon {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--app-accent);
+}
+
+.spotlight-row-label {
+  flex: 1;
+  min-width: 0;
+}
+
+.spotlight-footer {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  flex: none;
+  padding: var(--space-2) var(--space-4);
+  border-top: var(--border-hairline) solid var(--hud-stroke-dim);
+  background: var(--app-surface);
+}
+
+.spotlight-footer-hint {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--fs-caption2-desktop);
+  color: var(--label-secondary);
+}
+
+.spotlight-footer-hint kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-caption2-desktop);
+  color: var(--label-primary);
+  background: var(--app-surface-elevated);
+  border: var(--border-hairline) solid var(--hud-stroke-dim);
+  border-radius: 4px;
 }
 
 /* --- Desktop settings/indicators/history panel (desktop grid only) ---
@@ -955,7 +1029,7 @@
 .desktop-settings-sidebar-title {
   padding: 4px 8px 8px;
   font-family: var(--font-display);
-  font-size: var(--fs-caption);
+  font-size: var(--fs-caption-desktop);
   font-weight: 700;
   letter-spacing: 0.04em;
   color: var(--app-accent);
@@ -965,9 +1039,9 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 7px 8px;
+  padding: 8px;
   border-radius: var(--radius-chip);
-  font-size: var(--fs-caption);
+  font-size: var(--fs-caption-desktop);
   color: var(--label-secondary);
   text-align: left;
 }
@@ -994,10 +1068,10 @@
   display: flex;
   align-items: center;
   flex: none;
-  height: 36px;
+  height: 38px;
   padding: 0 var(--space-3);
   border-bottom: var(--border-hairline) solid var(--hud-stroke-dim);
-  font-size: var(--fs-subheadline);
+  font-size: var(--fs-subheadline-desktop);
   font-weight: 700;
 }
 
@@ -1020,12 +1094,12 @@
 
 .desktop-settings-body .grouped-section .section-header {
   padding: 0 2px 4px;
-  font-size: var(--fs-caption2);
+  font-size: var(--fs-caption2-desktop);
 }
 
 .desktop-settings-body .grouped-section .section-footer {
   padding: 4px 2px 0;
-  font-size: var(--fs-caption2);
+  font-size: var(--fs-caption2-desktop);
 }
 
 .desktop-settings-body .grouped-section .section-card {
@@ -1034,9 +1108,9 @@
 }
 
 .desktop-settings-body .grouped-row {
-  min-height: 30px;
-  padding: 5px 10px;
-  font-size: var(--fs-caption);
+  min-height: 32px;
+  padding: 6px 10px;
+  font-size: var(--fs-caption-desktop);
   gap: 8px;
 }
 
@@ -1065,8 +1139,8 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 6px var(--space-3);
-  font-size: var(--fs-caption);
+  padding: 7px var(--space-3);
+  font-size: var(--fs-caption-desktop);
   font-weight: 600;
   color: var(--label-secondary);
   border-bottom: 2px solid transparent;
@@ -1078,7 +1152,7 @@
 }
 
 .desktop-positions-tab-count {
-  font-size: var(--fs-caption2);
+  font-size: var(--fs-caption2-desktop);
   color: var(--label-secondary);
   background: var(--app-surface-elevated);
   border-radius: var(--radius-chip);
@@ -1093,14 +1167,14 @@
 
 .desktop-positions-empty {
   padding: var(--space-3);
-  font-size: var(--fs-caption);
+  font-size: var(--fs-caption-desktop);
   text-align: center;
 }
 
 .desktop-positions-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: var(--fs-caption);
+  font-size: var(--fs-caption-desktop);
 }
 
 .desktop-positions-table th {
@@ -1108,16 +1182,16 @@
   top: 0;
   background: var(--app-background);
   color: var(--label-secondary);
-  font-size: var(--fs-caption2);
+  font-size: var(--fs-caption2-desktop);
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  padding: 4px var(--space-2);
+  padding: 5px var(--space-2);
   border-bottom: var(--border-hairline) solid var(--hud-stroke-dim);
 }
 
 .desktop-positions-table td {
-  padding: 3px var(--space-2);
+  padding: 4px var(--space-2);
   border-bottom: var(--border-hairline) solid rgba(46, 143, 255, 0.08);
   white-space: nowrap;
 }
@@ -1127,7 +1201,7 @@
 }
 
 .desktop-positions-action {
-  font-size: var(--fs-caption2);
+  font-size: var(--fs-caption2-desktop);
   color: var(--app-accent-text);
   padding: 2px 8px;
   border: var(--border-hairline) solid var(--hud-stroke-dim);

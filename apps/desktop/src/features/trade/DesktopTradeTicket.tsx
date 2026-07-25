@@ -81,7 +81,12 @@ export function DesktopTradeTicket({
       autoModeStatus = (
         <button
           className="text-secondary"
-          style={{ fontSize: 'var(--fs-caption)', display: 'flex', alignItems: 'center', gap: 6 }}
+          style={{
+            fontSize: 'var(--fs-caption-desktop)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+          }}
           onClick={() => void chainStore.load(chain.underlying)}
           aria-label={`Chain failed to load: ${chain.errorMessage}. Activate to retry`}
         >
@@ -178,7 +183,7 @@ export function DesktopTradeTicket({
             border: chain.errorMessage
               ? '1px solid var(--sell-red)'
               : '1px solid var(--hud-stroke-dim)',
-            fontSize: 'var(--fs-caption)',
+            fontSize: 'var(--fs-caption-desktop)',
           }}
         >
           {autoModeStatus}
@@ -216,7 +221,7 @@ export function DesktopTradeTicket({
       >
         {/* Quantity row */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span className="text-secondary" style={{ fontSize: 'var(--fs-caption)' }}>
+          <span className="text-secondary" style={{ fontSize: 'var(--fs-caption-desktop)' }}>
             Qty
           </span>
           <Stepper
@@ -228,7 +233,7 @@ export function DesktopTradeTicket({
           <span
             className="numeric"
             style={{
-              fontSize: 'var(--fs-subheadline)',
+              fontSize: 'var(--fs-subheadline-desktop)',
               fontWeight: 500,
               minWidth: 32,
               textAlign: 'center',
@@ -255,7 +260,7 @@ export function DesktopTradeTicket({
           <span
             className="text-secondary numeric"
             style={{
-              fontSize: 'var(--fs-caption)',
+              fontSize: 'var(--fs-caption-desktop)',
               flex: 'none',
               minWidth: 96,
               textAlign: 'right',

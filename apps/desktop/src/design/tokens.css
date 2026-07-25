@@ -131,4 +131,14 @@
   --h-trade-button-desktop: 48px;
   --h-navbar-desktop: 36px;
   --pad-screen-desktop: 12px;
+
+  /* Desktop-only type scale: ~15-20% larger than the equivalent phone-density
+     caption/footnote steps. The option chain (already tuned) keeps using the
+     base --fs-caption/--fs-caption2 tokens directly — this scale is for
+     everything else at desktop density (top bar, ticket controls, positions
+     table, settings panel), which read too small at the phone-derived sizes. */
+  --fs-caption2-desktop: 13px;
+  --fs-caption-desktop: 14px;
+  --fs-footnote-desktop: 15px;
+  --fs-subheadline-desktop: 17px;
 }

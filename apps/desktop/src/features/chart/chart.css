@@ -67,11 +67,11 @@
 .chart-strip-symbol {
   display: flex;
   align-items: center;
-  gap: 3px;
+  gap: 4px;
   flex: none;
   color: var(--app-accent-text);
   font-family: var(--font-display);
-  font-size: var(--fs-caption);
+  font-size: var(--fs-caption-desktop);
   font-weight: 700;
   letter-spacing: 0.04em;
 }
@@ -83,24 +83,24 @@
 .chart-strip-quote {
   display: flex;
   align-items: baseline;
-  gap: 6px;
-  font-size: var(--fs-caption);
+  gap: 7px;
+  font-size: var(--fs-caption-desktop);
 }
 
 .chart-strip-last {
-  font-size: var(--fs-subheadline);
+  font-size: var(--fs-subheadline-desktop);
   font-weight: 700;
   color: var(--label-primary);
 }
 
 .chart-strip-ticks {
-  font-size: var(--fs-caption2);
+  font-size: var(--fs-caption2-desktop);
   color: var(--label-secondary);
 }
 
 .chart-icon-button--sm {
-  width: 24px;
-  height: 24px;
+  width: 27px;
+  height: 27px;
 }
 
 /* Persistent left-edge drawing-tool rail (desktop grid only) — TradingView's

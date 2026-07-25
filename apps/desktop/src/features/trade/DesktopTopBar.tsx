@@ -6,7 +6,6 @@ import { Format } from '../../design/format';
 import {
   ChevronDownIcon,
   ClockIcon,
-  InfoCircleFillIcon,
   LockIcon,
   LockOpenIcon,
   PersonCircleIcon,
@@ -24,7 +23,6 @@ interface DesktopTopBarProps {
   onToggleLock: () => void;
   onShowProfile: () => void;
   onShowHistory: () => void;
-  onShowShortcutsHelp: () => void;
 }
 
 /**
@@ -32,8 +30,10 @@ interface DesktopTopBarProps {
  * generic app NavBar (logo, spanning the full width) stacked above the
  * chart's own header (symbol/price/controls). Symbol + live price/bid-ask
  * on the left (the thing being traded), interval/indicators in the middle
- * (chart controls), profile/history/shortcuts/lock on the right (global
- * app actions) — one coherent status line, terminal convention.
+ * (chart controls), lock/history/profile on the right (global app actions)
+ * — one coherent status line, terminal convention. The left/right groups
+ * align with the chart canvas edges below (draw rail + card margin), not
+ * the outer panel edges, so the whole bar reads as part of the chart.
  */
 export function DesktopTopBar({
   chartStore,
@@ -46,7 +46,6 @@ export function DesktopTopBar({
   onToggleLock,
   onShowProfile,
   onShowHistory,
-  onShowShortcutsHelp,
 }: DesktopTopBarProps) {
   const { symbol, interval, quote, isStale, tickProgress } = chart;
 
@@ -58,7 +57,7 @@ export function DesktopTopBar({
         aria-label={`Symbol ${symbol}. Change symbol`}
       >
         <span>{symbol}</span>
-        <ChevronDownIcon size={11} />
+        <ChevronDownIcon size={12} />
       </button>
 
       {quote ? (
@@ -91,7 +90,7 @@ export function DesktopTopBar({
           trigger={
             <button
               className="quick-chip"
-              style={{ minHeight: 24, padding: '3px 7px' }}
+              style={{ minHeight: 28, padding: '4px 8px' }}
               aria-label={`Chart interval ${interval}`}
               aria-haspopup="menu"
             >
@@ -107,7 +106,7 @@ export function DesktopTopBar({
                   <span
                     style={{
                       marginLeft: 12,
-                      fontSize: 'var(--fs-caption)',
+                      fontSize: 'var(--fs-caption-desktop)',
                       color: 'var(--label-secondary)',
                     }}
                   >
@@ -125,41 +124,36 @@ export function DesktopTopBar({
           onClick={onIndicatorSettings}
           aria-label="Indicator settings"
         >
-          <SlidersIcon size={14} />
+          <SlidersIcon size={15} />
         </button>
       </span>
 
       <span className="desktop-top-bar-divider" aria-hidden="true" />
 
+      {/* Order matches the icon's frequency of use: lock (most reached for
+          while trading), history, profile (least frequent). */}
       <span className="desktop-top-bar-group">
-        <button
-          className="chart-icon-button chart-icon-button--sm"
-          onClick={onShowProfile}
-          aria-label="Profile"
-        >
-          <PersonCircleIcon size={15} />
-        </button>
-        <button
-          className="chart-icon-button chart-icon-button--sm"
-          onClick={onShowHistory}
-          aria-label="Trade history"
-        >
-          <ClockIcon size={14} />
-        </button>
-        <button
-          className="chart-icon-button chart-icon-button--sm"
-          onClick={onShowShortcutsHelp}
-          aria-label="Keyboard shortcuts"
-        >
-          <InfoCircleFillIcon size={14} />
-        </button>
         <button
           className="chart-icon-button chart-icon-button--sm"
           onClick={onToggleLock}
           aria-pressed={locked}
           aria-label={locked ? 'Unlock trading' : 'Lock trading'}
         >
-          {locked ? <LockIcon size={15} /> : <LockOpenIcon size={15} />}
+          {locked ? <LockIcon size={16} /> : <LockOpenIcon size={16} />}
+        </button>
+        <button
+          className="chart-icon-button chart-icon-button--sm"
+          onClick={onShowHistory}
+          aria-label="Trade history"
+        >
+          <ClockIcon size={15} />
+        </button>
+        <button
+          className="chart-icon-button chart-icon-button--sm"
+          onClick={onShowProfile}
+          aria-label="Profile"
+        >
+          <PersonCircleIcon size={16} />
         </button>
       </span>
     </div>

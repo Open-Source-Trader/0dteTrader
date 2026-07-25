@@ -70,7 +70,6 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
   const [showTwcSettings, setShowTwcSettings] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
-  const [showShortcutsHelp, setShowShortcutsHelp] = useState(false);
 
   // 'practice' is only the pre-fetch placeholder; the server value wins.
   const [tradingMode, setTradingMode] = useState<TradingMode>('practice');
@@ -333,7 +332,6 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
           onToggleLock={toggleLock}
           onShowProfile={() => setShowProfile(true)}
           onShowHistory={() => setShowHistory(true)}
-          onShowShortcutsHelp={() => setShowShortcutsHelp(true)}
         />
         <Group
           orientation="horizontal"
@@ -703,14 +701,6 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
             { label: 'Cancel', role: 'cancel' },
           ]}
           onDismiss={() => setShowModeConfirmation(false)}
-        />
-      ) : null}
-      {showShortcutsHelp ? (
-        <AlertDialog
-          title="Keyboard shortcuts"
-          message="B — Buy   ·   S — Sell   ·   L — Toggle lock   ·   ⌘K — Symbol search"
-          actions={[{ label: 'Got it', role: 'cancel' }]}
-          onDismiss={() => setShowShortcutsHelp(false)}
         />
       ) : null}
     </div>

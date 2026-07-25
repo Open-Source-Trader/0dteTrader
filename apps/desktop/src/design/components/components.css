@@ -606,9 +606,9 @@
 
 .chain-table-header {
   display: grid;
-  grid-template-columns: 1fr 72px 1fr;
+  grid-template-columns: 1fr 60px 1fr;
   flex: none;
-  padding: var(--space-1) var(--space-2);
+  padding: 3px var(--space-2);
   color: var(--label-secondary);
   font-size: var(--fs-caption2);
   text-transform: uppercase;
@@ -632,31 +632,44 @@
   overflow-y: auto;
 }
 
+/* Ladder rows: minimal height, hairline separators only — no card padding.
+   This is a scan surface, not a list of tappable cards. */
 .chain-row {
   display: grid;
-  grid-template-columns: 1fr 72px 1fr;
+  grid-template-columns: 1fr 60px 1fr;
   align-items: center;
-  border-bottom: var(--border-hairline) solid rgba(46, 143, 255, 0.12);
+  border-bottom: var(--border-hairline) solid rgba(46, 143, 255, 0.1);
 }
 
+/* ATM row: a solid pinned band (DOM "current price" convention), not a
+   translucent tint — it must read as a fixed reference line, not a hover. */
 .chain-row--atm {
-  background: var(--hud-glow);
+  background: var(--app-accent-fill);
+  box-shadow:
+    inset 0 var(--border-hairline) 0 var(--hud-stroke),
+    inset 0 calc(-1 * var(--border-hairline)) 0 var(--hud-stroke);
+}
+
+.chain-row--atm .chain-row-strike {
+  color: #fff;
 }
 
 .chain-row-strike {
   text-align: center;
-  font-size: var(--fs-caption);
-  font-weight: 600;
-  padding: 2px 0;
+  font-size: var(--fs-caption2);
+  font-weight: 700;
+  padding: 1px 0;
 }
 
 .chain-cell {
   display: flex;
   justify-content: space-between;
-  gap: var(--space-2);
+  gap: 6px;
   width: 100%;
-  padding: 4px var(--space-2);
+  padding: 2px var(--space-2);
   border: none;
+  border-left: 2px solid transparent;
+  border-right: 2px solid transparent;
   background: none;
   cursor: pointer;
 }
@@ -680,13 +693,29 @@
   color: var(--sell-red);
 }
 
-.chain-cell:hover:not(:disabled) {
+/* Hover shows an "armed on click" edge accent in the leg's own color,
+   matching the DOM convention of color-coding the side you're about to act on. */
+.chain-cell--call:hover:not(:disabled) {
   background: var(--app-surface-elevated);
+  border-left-color: var(--buy-green);
+}
+
+.chain-cell--put:hover:not(:disabled) {
+  background: var(--app-surface-elevated);
+  border-right-color: var(--sell-red);
 }
 
 .chain-cell.selected {
   background: var(--app-surface-elevated);
   box-shadow: inset 0 0 0 1px var(--hud-stroke);
+}
+
+.chain-cell--call.selected {
+  border-left-color: var(--buy-green);
+}
+
+.chain-cell--put.selected {
+  border-right-color: var(--sell-red);
 }
 
 /* --- Symbol spotlight (desktop Cmd+K command palette) --- */

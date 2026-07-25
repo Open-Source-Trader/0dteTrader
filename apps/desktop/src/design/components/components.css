@@ -586,6 +586,40 @@
   padding: 5px 10px;
 }
 
+/* Desktop grid order ticket: terminal density (TWS Mosaic-style), not a
+   touch CTA — smaller controls, no chevron flourish on Buy/Sell, tighter
+   everything. Distinct from .compact/.dense above, which just shrink the
+   phone ticket for sub-pane pressure; this is a different density class
+   entirely, sized for a mouse. */
+.trade-panel.desktop .segmented {
+  height: var(--h-button-desktop);
+}
+
+.trade-panel.desktop .trade-action-button {
+  min-height: var(--h-trade-button-desktop);
+  font-size: var(--fs-subheadline);
+  gap: 4px;
+}
+
+.trade-panel.desktop .trade-action-button .hud-chevrons {
+  display: none;
+}
+
+.trade-panel.desktop .chip-button {
+  padding: 4px 8px;
+  font-size: var(--fs-caption2);
+}
+
+.trade-panel.desktop .stepper {
+  height: var(--h-button-desktop);
+  width: 72px;
+}
+
+.trade-panel.desktop .quick-chip {
+  padding: 3px 8px;
+  font-size: var(--fs-caption2);
+}
+
 /* --- Option chain table (desktop grid only) ---
    Calls | Strike | Puts, one row per strike. Replaces the phone ticket's
    single-strike dropdown chips at the standard/wide breakpoints — a scalper

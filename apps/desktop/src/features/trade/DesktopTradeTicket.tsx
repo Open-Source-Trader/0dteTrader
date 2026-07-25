@@ -102,12 +102,12 @@ export function DesktopTradeTicket({
 
   return (
     <div
-      className="trade-panel roomy"
+      className="trade-panel desktop"
       style={{
         display: 'flex',
         flexDirection: 'column',
-        gap: 8,
-        padding: '8px 12px 12px',
+        gap: 6,
+        padding: '6px 8px 8px',
         background: 'var(--app-background)',
         height: '100%',
         minHeight: 0,
@@ -118,7 +118,7 @@ export function DesktopTradeTicket({
         inert={locked}
         style={{
           display: 'flex',
-          gap: 8,
+          gap: 6,
           alignItems: 'center',
           flex: 'none',
           opacity: locked ? 0.55 : 1,
@@ -164,7 +164,7 @@ export function DesktopTradeTicket({
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            gap: 8,
+            gap: 6,
             background: 'var(--app-surface)',
             border: chain.errorMessage
               ? '1px solid var(--sell-red)'
@@ -191,12 +191,12 @@ export function DesktopTradeTicket({
         style={{
           display: 'flex',
           alignItems: 'center',
-          gap: 8,
+          gap: 6,
           flex: 'none',
           opacity: locked ? 0.55 : 1,
         }}
       >
-        <span className="text-secondary" style={{ fontSize: 'var(--fs-subheadline)' }}>
+        <span className="text-secondary" style={{ fontSize: 'var(--fs-caption)' }}>
           Qty
         </span>
         <Stepper
@@ -206,11 +206,11 @@ export function DesktopTradeTicket({
           onChange={(value) => tradeStore.setQuantity(value)}
         />
         <span
+          className="numeric"
           style={{
-            fontFamily: 'var(--font-mono)',
-            fontSize: 'var(--fs-body)',
+            fontSize: 'var(--fs-subheadline)',
             fontWeight: 500,
-            minWidth: 40,
+            minWidth: 32,
             textAlign: 'center',
             textShadow: '0 0 8px var(--hud-glow)',
           }}
@@ -228,7 +228,7 @@ export function DesktopTradeTicket({
         style={{
           display: 'flex',
           alignItems: 'center',
-          gap: 8,
+          gap: 6,
           flex: 'none',
           opacity: locked ? 0.55 : 1,
         }}
@@ -244,7 +244,7 @@ export function DesktopTradeTicket({
         <span
           className="text-secondary numeric"
           style={{
-            fontSize: 'var(--fs-caption)',
+            fontSize: 'var(--fs-caption2)',
             flex: 'none',
             minWidth: 96,
             textAlign: 'right',
@@ -256,7 +256,7 @@ export function DesktopTradeTicket({
       </div>
 
       {/* Action row */}
-      <div style={{ display: 'flex', gap: 8, flex: 'none' }}>
+      <div style={{ display: 'flex', gap: 6, flex: 'none' }}>
         <TradeActionButton
           title="SELL"
           color="var(--sell-red)"

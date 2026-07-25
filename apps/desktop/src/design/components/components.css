@@ -415,6 +415,62 @@
   border-right: 1px solid var(--hud-stroke-dim);
 }
 
+/* --- Number field (desktop settings: typeable value + nudge buttons) --- */
+.number-field {
+  display: flex;
+  align-items: stretch;
+  height: 24px;
+  background: var(--app-surface);
+  border: var(--border-hairline) solid var(--hud-stroke-dim);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.number-field:focus-within {
+  border-color: var(--hud-stroke);
+}
+
+.number-field-input {
+  width: 64px;
+  min-width: 0;
+  padding: 0 6px;
+  background: transparent;
+  border: none;
+  outline: none;
+  font: inherit;
+  font-size: var(--fs-caption-desktop);
+  color: var(--label-primary);
+  text-align: right;
+}
+
+.number-field-buttons {
+  display: flex;
+  flex-direction: column;
+  flex: none;
+  border-left: var(--border-hairline) solid var(--hud-stroke-dim);
+}
+
+.number-field-buttons button {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  color: var(--app-accent-text);
+}
+
+.number-field-buttons button:first-child {
+  border-bottom: var(--border-hairline) solid var(--hud-stroke-dim);
+}
+
+.number-field-buttons button:hover:not(:disabled) {
+  background: rgba(46, 143, 255, 0.1);
+}
+
+.number-field-buttons button:disabled {
+  opacity: var(--disabled-opacity);
+}
+
 /* --- Trade action buttons --- */
 .trade-action-button {
   flex: 1;
@@ -1143,6 +1199,155 @@
 
 .desktop-settings-body .grouped-row + .grouped-row {
   border-top: var(--border-hairline) solid var(--app-border);
+}
+
+/* --- Indicator settings (desktop grid) ---
+   VS Code / macOS System Settings convention: a searchable category tree
+   on the left, a form pane on the right — replacing the single scrolling
+   grouped-list (iOS Settings.app pattern) that the compact/phone layout
+   still uses via IndicatorSettingsView/IndicatorSettingsBody, unchanged. */
+.indicator-settings-desktop {
+  display: flex;
+  height: 100%;
+  min-height: 0;
+}
+
+.indicator-settings-tree-pane {
+  width: 200px;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-right: var(--border-hairline) solid var(--hud-stroke-dim);
+}
+
+.indicator-settings-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  height: 30px;
+  padding: 0 var(--space-2);
+  border-bottom: var(--border-hairline) solid var(--hud-stroke-dim);
+}
+
+.indicator-settings-search-input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  background: transparent;
+  border: none;
+  outline: none;
+  font: inherit;
+  font-size: var(--fs-caption-desktop);
+  color: var(--label-primary);
+}
+
+.indicator-settings-tree {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--space-2) 0;
+}
+
+.indicator-tree-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 6px var(--space-3);
+  font-size: var(--fs-caption-desktop);
+  color: var(--label-secondary);
+  text-align: left;
+}
+
+.indicator-tree-row:hover {
+  background: rgba(46, 143, 255, 0.08);
+  color: var(--label-primary);
+}
+
+.indicator-tree-row.active {
+  background: var(--app-accent-fill);
+  color: #fff;
+}
+
+.indicator-tree-row--child {
+  padding-left: calc(var(--space-3) + 17px);
+  font-size: var(--fs-caption2-desktop);
+}
+
+.indicator-tree-disclosure {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 11px;
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+
+.indicator-settings-detail {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  padding: var(--space-4);
+}
+
+.settings-fieldset {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  max-width: 420px;
+  padding: var(--space-4);
+  border: var(--border-hairline) solid var(--hud-stroke-dim);
+  border-radius: 6px;
+  background: var(--app-surface);
+}
+
+.settings-fieldset-legend {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: var(--space-2);
+  border-bottom: var(--border-hairline) solid var(--hud-stroke-dim);
+  font-size: var(--fs-subheadline-desktop);
+  font-weight: 700;
+}
+
+.settings-fieldset-hint {
+  font-size: var(--fs-caption2-desktop);
+  color: var(--label-secondary);
+}
+
+.settings-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.settings-field-label {
+  font-size: var(--fs-caption-desktop);
+  color: var(--label-secondary);
+}
+
+.settings-field--row {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.settings-field--row .settings-field-label {
+  color: var(--label-primary);
+}
+
+.settings-reset-button {
+  align-self: flex-start;
+  margin-top: var(--space-2);
+  font-size: var(--fs-caption-desktop);
+  color: var(--app-accent-text);
+}
+
+.settings-reset-button:hover {
+  color: var(--app-accent);
 }
 
 /* --- Desktop positions/orders panel (desktop grid footer) ---

@@ -495,8 +495,8 @@ export function IndicatorSettingsBody({
 }
 
 /** Indicator toggles and parameters; changes apply and persist immediately.
- *  Compact/phone layout only — desktop grid uses IndicatorSettingsBody
- *  directly as a tab inside DesktopSettingsPanel. */
+ *  Compact/phone layout only — desktop grid uses IndicatorSettingsDesktop
+ *  (tree nav + form fields) as a tab inside DesktopSettingsPanel instead. */
 export function IndicatorSettingsView({
   settings,
   onChange,

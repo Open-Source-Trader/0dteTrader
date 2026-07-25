@@ -21,7 +21,8 @@ import type { TradeLayout } from '../../core/storage/SettingsStore';
 import { enabledSubPanes } from '../chart/indicatorSettings';
 import { ChartView } from '../chart/ChartView';
 import { positionsForUnderlying } from '../chart/positionsForUnderlying';
-import { IndicatorSettingsBody, IndicatorSettingsView } from '../chart/IndicatorSettingsView';
+import { IndicatorSettingsView } from '../chart/IndicatorSettingsView';
+import { IndicatorSettingsDesktop } from '../chart/IndicatorSettingsDesktop';
 import { SymbolSearchView } from '../chart/SymbolSearchView';
 import { SymbolSpotlight } from '../chart/SymbolSpotlight';
 import { ProfileView } from '../profile/ProfileView';
@@ -631,7 +632,7 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
               label: 'Indicators',
               icon: <SlidersIcon size={18} />,
               content: (
-                <IndicatorSettingsBody
+                <IndicatorSettingsDesktop
                   settings={chart.indicatorSettings}
                   onChange={(settings) => chartStore.setIndicatorSettings(settings)}
                   twcEnabled={chart.twcSettings.enabled}

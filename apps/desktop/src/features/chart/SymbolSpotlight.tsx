@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { CheckmarkIcon, MagnifierIcon, TextCursorIcon } from '../../design/icons';
-import { SYMBOL_SECTIONS } from './symbolSections';
+import { resolveEnterSelection, SYMBOL_SECTIONS } from './symbolSections';
 
 interface SymbolSpotlightProps {
   currentSymbol: string;
@@ -67,8 +67,9 @@ export function SymbolSpotlight({ currentSymbol, onSelect, onDismiss }: SymbolSp
       setActiveIndex((index) => Math.min(visibleRows.length - 1, Math.max(0, index + delta)));
       return;
     }
-    if (event.key === 'Enter' && normalizedQuery) {
-      select(visibleRows[activeIndex] ?? normalizedQuery);
+    if (event.key === 'Enter') {
+      const selection = resolveEnterSelection(visibleRows, activeIndex, normalizedQuery);
+      if (selection) select(selection);
     }
   };
 

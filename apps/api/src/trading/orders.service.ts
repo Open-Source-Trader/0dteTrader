@@ -55,9 +55,14 @@ function isFill(row: TradeOrder): boolean {
  *
  * Shared by the trade history and the chart's entry-line anchors so both read
  * the same position out of the same fills.
+ *
+ * `key` is the caller's choice of what counts as one position. It must never
+ * merge environments: a practice buy and a live sell of the same contract are
+ * two unrelated positions, and averaging them would realize the live sale
+ * against a cost basis the account never paid.
  */
-function applyFill(book: Map<string, BookEntry>, row: TradeOrder): number | null {
-  const position = book.get(row.contractSymbol) ?? {
+function applyFill(book: Map<string, BookEntry>, key: string, row: TradeOrder): number | null {
+  const position = book.get(key) ?? {
     quantity: 0,
     avgPrice: 0,
     avgUnderlying: 0,
@@ -106,7 +111,7 @@ function applyFill(book: Map<string, BookEntry>, row: TradeOrder): number | null
       position.underlyingQty = Math.min(position.underlyingQty, Math.abs(position.quantity));
     }
   }
-  book.set(row.contractSymbol, position);
+  book.set(key, position);
   return realized;
 }
 
@@ -190,11 +195,29 @@ export class OrdersService implements OnModuleDestroy {
     order: OrderResult,
     underlyingPrice: number,
   ): Promise<void> {
-    await this.prisma.tradeOrder.upsert({
-      where: { id: order.orderId },
-      create: await this.createData(userId, order, underlyingPrice),
-      update: { underlyingPrice },
-    });
+    try {
+      await this.prisma.tradeOrder.upsert({
+        where: { id: order.orderId },
+        create: await this.createData(userId, order, underlyingPrice),
+        update: { underlyingPrice },
+      });
+      return;
+    } catch (err) {
+      // The events bus won the race to create this row between the upsert's own
+      // read and its insert. The row exists now, so the narrow update the upsert
+      // *would* have taken is still the right write — retry it rather than
+      // losing the anchor and drawing the entry line at the wrong level.
+      const { count } = await this.prisma.tradeOrder.updateMany({
+        where: { id: order.orderId },
+        data: { underlyingPrice },
+      });
+      if (count > 0) return;
+      // Genuinely could not record it. Never fail the order over an entry line,
+      // but say so — a silently missing anchor looks like a client bug.
+      this.logger.warn(
+        `failed to record underlying price for ${order.orderId}: ${(err as Error).message}`,
+      );
+    }
   }
 
   /**
@@ -218,7 +241,8 @@ export class OrdersService implements OnModuleDestroy {
 
     const book = new Map<string, BookEntry>();
     for (const row of rows) {
-      if (isFill(row)) applyFill(book, row);
+      // Already narrowed to one environment, so the symbol alone is the position.
+      if (isFill(row)) applyFill(book, row.contractSymbol, row);
     }
 
     const anchors = new Map<string, number>();
@@ -236,7 +260,10 @@ export class OrdersService implements OnModuleDestroy {
       orderBy: { placedAt: 'asc' },
     });
 
-    // Average-cost realized P/L, computed per contract in fill order.
+    // Average-cost realized P/L, computed per contract in fill order. History
+    // spans both environments, so the book is keyed by environment as well as
+    // symbol — otherwise a practice buy would become the cost basis for a live
+    // sale of the same contract.
     const book = new Map<string, BookEntry>();
     let total = 0;
     const entries: TradeHistoryEntry[] = rows.map((row) => {
@@ -254,7 +281,7 @@ export class OrdersService implements OnModuleDestroy {
       };
       if (!isFill(row)) return entry;
 
-      const realized = applyFill(book, row);
+      const realized = applyFill(book, `${row.environment}|${row.contractSymbol}`, row);
       if (realized !== null) {
         entry.realizedPnl = realized;
         total += realized;

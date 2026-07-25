@@ -439,6 +439,31 @@ describe('TradingService', () => {
     });
   });
 
+  describe('post-placement bookkeeping', () => {
+    /**
+     * Once the broker accepts, a bookkeeping failure must not surface as a
+     * thrown order. The catch deletes the idempotency claim so the caller can
+     * retry — after a real placement that retry would submit a SECOND order.
+     */
+    it('returns the order when the audit write fails after the broker accepted', async () => {
+      const place = jest.spyOn(gateway, 'placeOrder');
+      jest.spyOn(prisma.orderAudit, 'update').mockRejectedValueOnce(new Error('connection reset'));
+
+      const result = await trading.place(userId, autoOtmCall(), 'idem-audit-fail');
+
+      expect(place).toHaveBeenCalledTimes(1);
+      expect(result.orderId).toBeTruthy();
+
+      // The claim must survive the failed write. It still holds the result the
+      // audit row never received, so a retry cannot replay — but the invariant
+      // that matters is that it refuses rather than submitting a second order.
+      await expect(trading.place(userId, autoOtmCall(), 'idem-audit-fail')).rejects.toMatchObject({
+        code: 'ORDER_IN_FLIGHT',
+      });
+      expect(place).toHaveBeenCalledTimes(1);
+    });
+  });
+
   describe('validation', () => {
     it('requires optionType for option orders', async () => {
       await expect(

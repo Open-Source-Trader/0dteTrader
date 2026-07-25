@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ChartOrder } from '@0dtetrader/shared-types';
 import type { ApiClient } from '../../core/api/ApiClient';
-import { ChartOrdersStore, kindLabel, orderTypeLabel } from './chartOrders';
+import { ChartOrdersStore, isWorking, kindLabel, orderTypeLabel } from './chartOrders';
 
 function order(overrides: Partial<ChartOrder> = {}): ChartOrder {
   return {
@@ -226,6 +226,20 @@ describe('ChartOrdersStore', () => {
 
       expect(api.cancelChartOrder).toHaveBeenCalledWith('co-1');
       expect(store.byId('co-1')).toBeUndefined();
+    });
+
+    /**
+     * The ✕ routes on this predicate (OrderLineLayer): a working line raises
+     * `onCancelOrder` so TradeScreen can confirm, a terminal one is dismissed
+     * outright. Pinned here because it must stay identical to the iOS side —
+     * confirming a triggered line with "nothing was sent to the broker" would
+     * describe a live order as though it never left.
+     */
+    it('routes only working lines to the confirmation', () => {
+      expect(isWorking(order({ status: 'working' }))).toBe(true);
+      for (const status of ['triggered', 'failed', 'filled', 'cancelled', 'expired'] as const) {
+        expect(isWorking(order({ status }))).toBe(false);
+      }
     });
   });
 

@@ -7,7 +7,7 @@ import { Format } from '../../design/format';
 import { chartPalette } from './chartColors';
 import type { ChartCandle } from './ChartStore';
 import type { ChartOrdersStore } from './chartOrders';
-import { kindLabel, orderTypeLabel } from './chartOrders';
+import { isWorking, kindLabel, orderTypeLabel } from './chartOrders';
 import type { ChartTradingSettings } from './chartTradingSettings';
 import { OrderPlacementPopover } from './OrderPlacementPopover';
 import {
@@ -40,6 +40,10 @@ interface OrderLineLayerProps {
   /** Execution type a new line inherits from the panel. */
   defaultOrderType: 'mid' | 'market';
   onFlatten: (position: Position) => void;
+  /** Confirms cancelling a *working* line. Terminal lines are dismissed here
+   *  without asking — they already reached the broker, so "nothing was sent"
+   *  would misdescribe a live order (ChartTradingCoordinator does the same). */
+  onCancelOrder: (order: ChartOrder) => void;
   /** Live candles: repainting is event-driven, and data moves price→y. */
   candles: ChartCandle[];
   /** Keeps rows clear of the options-analytics rail when it is on. */
@@ -81,6 +85,7 @@ export function OrderLineLayer({
   selectedContract,
   defaultOrderType,
   onFlatten,
+  onCancelOrder,
   candles,
   rightInset,
 }: OrderLineLayerProps) {
@@ -91,6 +96,11 @@ export function OrderLineLayer({
    *  with what the user actually sees. */
   const rowsRef = useRef<LineRow[]>([]);
   const dragRef = useRef<DragState | null>(null);
+  /** Detaches the window-level drag listeners. A drag outlives the element it
+   *  started on (the pointer leaves the canvas), so the listeners live on
+   *  `window` — which means unmounting mid-drag has to tear them down here or
+   *  they survive with a disposed series behind them. */
+  const endDragRef = useRef<() => void>(() => {});
   const hoverRef = useRef<{ id: string; pill: PillKey | null } | null>(null);
   /** Price row the pointer is on, which is where the `+` affordance appears. */
   const [plusPrice, setPlusPrice] = useState<number | null>(null);
@@ -106,6 +116,7 @@ export function OrderLineLayer({
     selectedContract,
     defaultOrderType,
     onFlatten,
+    onCancelOrder,
     rightInset,
   });
   latest.current = {
@@ -116,6 +127,7 @@ export function OrderLineLayer({
     selectedContract,
     defaultOrderType,
     onFlatten,
+    onCancelOrder,
     rightInset,
   };
 
@@ -376,7 +388,12 @@ export function OrderLineLayer({
           const entry = entryLines().find((e) => e.position.symbol === entryId);
           if (entry) latest.current.onFlatten(entry.position);
         } else {
-          void store.cancel(hit.row.id);
+          const order = store.byId(hit.row.id);
+          // A working line still holds intent the user may not mean to throw
+          // away, so it goes through the same confirmation iOS shows. Terminal
+          // lines have nothing to cancel — ✕ just clears them.
+          if (order && isWorking(order)) latest.current.onCancelOrder(order);
+          else void store.cancel(hit.row.id);
         }
         return;
       }
@@ -420,11 +437,16 @@ export function OrderLineLayer({
         scheduleRef.current();
       };
 
+      const detach = () => {
+        endDragRef.current = () => {};
+        window.removeEventListener('pointermove', onMove);
+        window.removeEventListener('pointerup', onUp);
+      };
+
       const onUp = () => {
         const drag = dragRef.current;
         dragRef.current = null;
-        window.removeEventListener('pointermove', onMove);
-        window.removeEventListener('pointerup', onUp);
+        detach();
         if (!drag) return;
         if (drag.kind === 'move') {
           if (drag.price !== store.byId(drag.id)?.triggerPrice)
@@ -436,6 +458,12 @@ export function OrderLineLayer({
       };
       window.addEventListener('pointermove', onMove);
       window.addEventListener('pointerup', onUp);
+      // Unmounting mid-drag abandons the gesture rather than committing it: the
+      // series these coordinates mean is going away.
+      endDragRef.current = () => {
+        dragRef.current = null;
+        detach();
+      };
     };
 
     const onHover = (event: PointerEvent) => {
@@ -481,6 +509,7 @@ export function OrderLineLayer({
       containerEl.removeEventListener('pointermove', onHover);
       containerEl.removeEventListener('pointerleave', onLeave);
       containerEl.style.cursor = '';
+      endDragRef.current();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chart, series, store]);

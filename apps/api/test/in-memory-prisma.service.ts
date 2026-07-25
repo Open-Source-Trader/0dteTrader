@@ -41,6 +41,12 @@ function matches(row: any, where: any): boolean {
     if (key === 'AND') return (value as any[]).every((clause) => matches(row, clause));
     if (key === 'NOT') return !matches(row, value);
     if (value === null) return row[key] === null || row[key] === undefined;
+    // Dates are objects, so without this they fall into the operator branch
+    // below where every comparison is `undefined` and the row matches by
+    // accident — a `where` that should select one row would select all of them.
+    if (value instanceof Date) {
+      return row[key] instanceof Date && row[key].getTime() === value.getTime();
+    }
     if (typeof value === 'object' && value !== null) {
       const actual = row[key];
       const operator = value as Record<string, any>;
@@ -50,6 +56,17 @@ function matches(row: any, where: any): boolean {
       if (operator.gte !== undefined && !(actual >= operator.gte)) return false;
       if (operator.equals !== undefined && actual !== operator.equals) return false;
       if (operator.in !== undefined && !operator.in.includes(actual)) return false;
+      // Fail loudly on anything this double does not implement. Returning true
+      // means an unsupported operator silently matches EVERY row, so a query
+      // that should select one selects all — tests then pass on behaviour the
+      // database would never produce.
+      const supported = ['lt', 'lte', 'gt', 'gte', 'equals', 'in'];
+      const unsupported = Object.keys(operator).filter((k) => !supported.includes(k));
+      if (unsupported.length > 0) {
+        throw new Error(
+          `in-memory prisma: unsupported where operator(s) ${unsupported.join(', ')} on "${key}"`,
+        );
+      }
       return true;
     }
     return row[key] === value;

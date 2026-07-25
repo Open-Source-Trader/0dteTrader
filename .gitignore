@@ -35,3 +35,12 @@ apps/api/prisma/*.db
 
 # Internal working notes (sprint plans, lessons) — local only
 tasks/
+
+# Claude Code: the shared allowlist is committed, per-machine overrides are not
+.claude/settings.local.json
+
+# Throwaway repro/debug specs. These get written straight into src/ while
+# chasing a bug and are trivially forgotten — a committed one ships as a real
+# test and breaks format:check. Name scratch work with these prefixes.
+**/zz-*.spec.ts
+**/__tmp*

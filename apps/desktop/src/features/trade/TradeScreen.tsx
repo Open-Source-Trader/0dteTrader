@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type {
+  ChartOrder,
   Me,
   OptionContract,
   OrderSide,
@@ -23,6 +24,7 @@ import type { TradeLayout } from '../../core/storage/SettingsStore';
 import { enabledSubPanes } from '../chart/indicatorSettings';
 import type { ChartTradingProps } from '../chart/CandleChart';
 import { ChartView } from '../chart/ChartView';
+import { kindLabel } from '../chart/chartOrders';
 import { IndicatorSettingsView } from '../chart/IndicatorSettingsView';
 import { TwcSettingsView } from '../chart/TwcSettingsView';
 import { SymbolSearchView } from '../chart/SymbolSearchView';
@@ -80,6 +82,9 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
   const [positionPendingChartFlatten, setPositionPendingChartFlatten] = useState<Position | null>(
     null,
   );
+  // A working line's ✕ throws away a resting order the user set up deliberately,
+  // so it confirms — matching the iOS alert rather than cancelling on one click.
+  const [orderPendingCancel, setOrderPendingCancel] = useState<ChartOrder | null>(null);
   const [me, setMe] = useState<Me | null>(null);
   const nextMode: TradingMode = tradingMode === 'live' ? 'practice' : 'live';
 
@@ -307,6 +312,7 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
     selectedContract: chainStore.selectedContract,
     defaultOrderType: trade.orderType,
     onFlatten: (position) => setPositionPendingChartFlatten(position),
+    onCancelOrder: (order) => setOrderPendingCancel(order),
   };
 
   const positionsStrip = (
@@ -579,6 +585,23 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
             { label: 'Cancel', role: 'cancel' },
           ]}
           onDismiss={() => setPositionPendingChartFlatten(null)}
+        />
+      ) : null}
+      {orderPendingCancel ? (
+        <AlertDialog
+          title="Cancel order line?"
+          message={`Removes the ${kindLabel(orderPendingCancel.kind)} line at ${Format.price(
+            orderPendingCancel.triggerPrice,
+          )}. Nothing was sent to the broker.`}
+          actions={[
+            {
+              label: 'Cancel line',
+              role: 'destructive',
+              onSelect: () => void chartOrdersStore.cancel(orderPendingCancel.id),
+            },
+            { label: 'Keep', role: 'cancel' },
+          ]}
+          onDismiss={() => setOrderPendingCancel(null)}
         />
       ) : null}
     </div>

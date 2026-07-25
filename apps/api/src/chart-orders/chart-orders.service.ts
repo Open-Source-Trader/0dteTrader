@@ -136,7 +136,7 @@ export class ChartOrdersService {
     }
 
     const armPrice = await this.armPriceFor(userId, dto.underlying, dto.triggerPrice);
-    if (dto.ocoGroupId) await this.assertGroupOwned(userId, dto.ocoGroupId);
+    if (dto.ocoGroupId) await this.assertGroupJoinable(userId, dto.ocoGroupId);
 
     const row = await this.prisma.chartOrder.create({
       data: {
@@ -188,6 +188,12 @@ export class ChartOrdersService {
     }
     if (dto.quantity !== undefined) data.quantity = dto.quantity;
     if (dto.orderType !== undefined) data.orderType = dto.orderType;
+
+    // A patch that changes nothing must not write. `updatedAt` is load-bearing:
+    // the watcher reads it to decide whether a line is newer than its last
+    // observed price, and bumping it silently resets that line's crossing test
+    // back to `armPrice`. An empty (or no-op) PATCH is a read, so answer it.
+    if (Object.keys(data).length === 0) return toChartOrder(existing);
 
     // Re-check the status in the write itself: the watcher may have claimed the
     // line between the read above and here.
@@ -274,18 +280,24 @@ export class ChartOrdersService {
 
   /**
    * Claims and sends a line. Returns the resulting state whichever way it went:
-   * `triggered` on success (or when a concurrent caller got there first),
-   * `failed` with the reason when the broker refused it.
+   * `triggered` on success; `cancelled` when this leg lost an OCO race and the
+   * winner retired it; the winner's row when another caller claimed this same
+   * line first; `failed` with the reason when the broker refused it.
    *
    * A failed fire is left visible and re-armable rather than silently dropped —
    * "your stop tried to fire and was rejected, here is why" is the only honest
    * outcome, and retrying blindly could put an order in at a far worse level.
    */
   async fire(row: ChartOrderRow, now: Date): Promise<ChartOrder> {
-    if (!(await this.claimForFire(row.id, now))) {
+    const claim = await this.claimForFireWithSiblings(row, now);
+    if (!claim.won) {
       // Lost the claim: whatever the winner did is the truth.
       return toChartOrder((await this.byId(row.id)) ?? row);
     }
+    // Tell the clients the moment the siblings are retired, not after the
+    // broker round-trip — otherwise a dead leg is drawn as live and draggable
+    // for the few hundred milliseconds that matter most.
+    await this.emitByIds(row.userId, claim.retired);
 
     // Environment gate at the money boundary. TradingService routes to the
     // user's CURRENT trading mode, so a line armed in the other environment
@@ -297,12 +309,15 @@ export class ChartOrdersService {
     // to, exactly as the watcher treats it.
     const { environment } = await this.userContext(row.userId);
     if (row.environment !== environment) {
-      return toChartOrder(
+      const unclaimed = toChartOrder(
         await this.prisma.chartOrder.update({
           where: { id: row.id },
           data: { status: 'working', triggeredAt: null },
         }),
       );
+      // Nothing reached the broker, so the bracket must survive intact.
+      await this.restoreRetired(row.userId, claim.retired);
+      return unclaimed;
     }
 
     // A settled contract cannot be traded; retire the line instead of letting
@@ -314,21 +329,29 @@ export class ChartOrdersService {
           data: { status: 'expired' },
         }),
       );
+      // Again nothing was sent: re-arm the siblings rather than reporting them
+      // `cancelled`, which reads as "the other leg filled". Each one retires on
+      // its own `expiresAt` via the watcher's expiry sweep.
+      await this.restoreRetired(row.userId, claim.retired);
       this.events.emit(row.userId, expired);
       return expired;
     }
 
+    // The caller's row was read before the claim; a size or MID/MKT edit that
+    // committed in between is part of the line the user armed, so send what the
+    // row says now rather than the snapshot we were handed.
+    const fresh = (await this.byId(row.id)) ?? row;
     const request: OrderRequestDto = {
-      underlying: row.underlying,
+      underlying: fresh.underlying,
       assetClass: 'option',
-      side: row.side as OrderSide,
-      quantity: row.quantity,
-      orderType: row.orderType as OrderType,
+      side: fresh.side as OrderSide,
+      quantity: fresh.quantity,
+      orderType: fresh.orderType as OrderType,
       selection: {
         mode: 'explicit',
-        optionType: row.optionType as OptionType,
-        expiration: row.expiration,
-        strike: row.strike,
+        optionType: fresh.optionType as OptionType,
+        expiration: fresh.expiration,
+        strike: fresh.strike,
       },
     };
 
@@ -339,6 +362,7 @@ export class ChartOrdersService {
       // The other caller's submission for this same line is still in flight.
       // The claim is already correct — let their result stand.
       if (err instanceof ApiException && err.code === 'ORDER_IN_FLIGHT') {
+        // Their submission stands, so the retirement stands with it.
         return toChartOrder((await this.byId(row.id)) ?? row);
       }
       const message = err instanceof Error ? err.message : String(err);
@@ -348,6 +372,10 @@ export class ChartOrdersService {
           data: { status: 'failed', lastError: message.slice(0, 500) },
         }),
       );
+      // Nothing reached the broker, so the bracket should survive intact —
+      // re-arm the siblings this claim retired rather than leaving the position
+      // with neither a target nor a stop.
+      await this.restoreRetired(row.userId, claim.retired);
       this.events.emit(row.userId, failed);
       return failed;
     }
@@ -375,36 +403,114 @@ export class ChartOrdersService {
         brokerOrderId: placed.orderId,
       };
     }
-    try {
-      await this.retireSiblings(row);
-    } catch {
-      // The orphan sweep retires the sibling on the next reconcile pass once
-      // the position it brackets is gone — do not fail the fired leg over it.
-    }
     this.events.emit(row.userId, updated);
     return updated;
   }
 
-  /** OCO: the leg that fired retires the other one. */
-  private async retireSiblings(row: ChartOrderRow): Promise<void> {
-    if (!row.ocoGroupId) return;
-    for (const id of await this.cancelSiblings(row.ocoGroupId, row.id)) {
-      const sibling = await this.byId(id);
-      if (sibling) this.events.emit(row.userId, toChartOrder(sibling));
+  /**
+   * Claims a line for firing, taking its whole OCO group with it.
+   *
+   * A bracket must send at most one order. Claiming per-row does not achieve
+   * that: on a fast whipsaw the client fires the target and the stop within the
+   * same broker round-trip, each wins its own row, and both reach the broker —
+   * closing the position and then reversing it. Retiring the sibling after
+   * `place()` returns is far too late, and by then it is no longer `working` so
+   * the retirement matches nothing.
+   *
+   * So the claim is one statement over the entire group: the database
+   * serialises it, the loser matches zero rows, and the winner retires the
+   * siblings *before* anything is sent.
+   */
+  private async claimForFireWithSiblings(
+    row: ChartOrderRow,
+    now: Date,
+  ): Promise<{ won: boolean; retired: string[] }> {
+    if (!row.ocoGroupId) {
+      return { won: await this.claimForFire(row.id, now), retired: [] };
+    }
+    // Scope every query in this claim to the owner and environment as well as
+    // the group: a group id is client-supplied, and nothing should be able to
+    // reach across accounts or across live/practice even if one leaks.
+    const group = {
+      ocoGroupId: row.ocoGroupId,
+      userId: row.userId,
+      environment: row.environment,
+    };
+    // The stamp is minted here, not taken from `now`: the watcher passes one
+    // `now` to every fire in a tick, and the stamp has to identify THIS claim.
+    const claimedAt = new Date();
+
+    const claimed = await this.prisma.chartOrder.updateMany({
+      where: { ...group, status: 'working' },
+      data: { status: 'triggered', triggeredAt: claimedAt, lastError: null },
+    });
+    if (claimed.count === 0) return { won: false, retired: [] };
+
+    // `status: triggered` + `triggeredAt: now` is this claim's token: together
+    // they name exactly the rows this call took, and no concurrent caller can
+    // share it (they matched nothing). Both halves are needed — a leg this
+    // group already *failed* keeps its old `triggeredAt`, so matching on the
+    // timestamp alone could reach across generations and retire it.
+    const token = { ...group, status: 'triggered', triggeredAt: claimedAt };
+    const self = await this.byId(row.id);
+    if (self?.status !== 'triggered' || self.triggeredAt?.getTime() !== claimedAt.getTime()) {
+      // Our own leg was not in the group's working set — it was cancelled or
+      // already fired. Put back what we took instead of retiring a sibling that
+      // is still legitimately armed.
+      await this.prisma.chartOrder.updateMany({
+        where: token,
+        data: { status: 'working', triggeredAt: null },
+      });
+      return { won: false, retired: [] };
+    }
+
+    try {
+      const siblings = await this.prisma.chartOrder.findMany({
+        where: { ...token, NOT: { id: row.id } },
+      });
+      if (siblings.length > 0) {
+        await this.prisma.chartOrder.updateMany({
+          where: { ...token, NOT: { id: row.id } },
+          data: { status: 'cancelled', triggeredAt: null },
+        });
+      }
+      return { won: true, retired: siblings.map((sibling) => sibling.id) };
+    } catch {
+      // Retirement is what makes the claim safe, so a claim we cannot complete
+      // must be given back. Leaving the group half-claimed would strand every
+      // leg out of `working` with nothing sent and no path back: `update`,
+      // `cancel`, the expiry sweep and the orphan sweep all require `working`.
+      await this.prisma.chartOrder.updateMany({
+        where: token,
+        data: { status: 'working', triggeredAt: null },
+      });
+      return { won: false, retired: [] };
     }
   }
 
-  /** OCO: one leg firing retires the other. */
-  async cancelSiblings(ocoGroupId: string, exceptId: string): Promise<string[]> {
-    const siblings = await this.prisma.chartOrder.findMany({
-      where: { ocoGroupId, status: 'working', NOT: { id: exceptId } },
-    });
-    if (siblings.length === 0) return [];
+  /**
+   * Re-arms siblings a claim retired, after the fire turned out to send nothing.
+   *
+   * The invariant every early return in `fire()` shares: the group claim retires
+   * the siblings *before* the broker call, so any path that does not reach the
+   * broker — refused, wrong environment, settled contract — owes them back. A
+   * leg left `cancelled` without a fill reads to the user (and to the client's
+   * OCO logic) as "the other leg filled", and silently unbrackets the position.
+   */
+  private async restoreRetired(userId: string, ids: string[]): Promise<void> {
+    if (ids.length === 0) return;
     await this.prisma.chartOrder.updateMany({
-      where: { ocoGroupId, status: 'working', NOT: { id: exceptId } },
-      data: { status: 'cancelled' },
+      where: { id: { in: ids }, status: 'cancelled' },
+      data: { status: 'working' },
     });
-    return siblings.map((row) => row.id);
+    await this.emitByIds(userId, ids);
+  }
+
+  private async emitByIds(userId: string, ids: string[]): Promise<void> {
+    for (const id of ids) {
+      const row = await this.byId(id);
+      if (row) this.events.emit(userId, toChartOrder(row));
+    }
   }
 
   /** Retires working lines whose contract has settled. */
@@ -479,10 +585,24 @@ export class ChartOrdersService {
     return row;
   }
 
-  private async assertGroupOwned(userId: string, ocoGroupId: string): Promise<void> {
-    const existing = await this.prisma.chartOrder.findFirst({ where: { ocoGroupId } });
-    if (existing && existing.userId !== userId) {
+  /**
+   * A new leg may only join a bracket whose every existing leg is still armed.
+   *
+   * The group claim in `claimForFireWithSiblings` locks the rows that exist when
+   * it runs; under READ COMMITTED it takes no gap lock, so a leg INSERTed
+   * afterwards is a phantom it never saw. Both clients build a bracket as two
+   * separate POSTs, and this one spends a chain fetch and a quote on the way in
+   * — long enough for the first leg to fire in between. Without this check the
+   * late leg lands `working` in a group that already fired, and firing it later
+   * would close the position and then reverse it.
+   */
+  private async assertGroupJoinable(userId: string, ocoGroupId: string): Promise<void> {
+    const existing = await this.prisma.chartOrder.findMany({ where: { ocoGroupId } });
+    if (existing.some((leg) => leg.userId !== userId)) {
       throw errors.notFound('CHART_ORDER_NOT_FOUND', 'No such bracket group');
+    }
+    if (existing.some((leg) => leg.status !== 'working')) {
+      throw errors.conflict('OCO_GROUP_CLOSED', 'That bracket has already fired — draw a new one');
     }
   }
 

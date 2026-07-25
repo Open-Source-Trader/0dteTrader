@@ -423,5 +423,39 @@ describe('ChartOrderWatcherService', () => {
       expect(watcher.metrics.ticks + second.metrics.ticks).toBe(1);
       second.onModuleDestroy();
     });
+
+    /**
+     * Failover. The holder dies without releasing the lease, so the standby has
+     * to wait it out — and then process, or every line stops being watched until
+     * someone notices. The standby has no price history, which is exactly why a
+     * line resumes from its own `armPrice`: this crossing was never observed by
+     * the instance that ends up firing it.
+     */
+    it('hands the lease to a standby once the holder stops renewing, and it resumes from armPrice', async () => {
+      const place = jest.spyOn(gateway, 'placeOrder');
+      const order = await chartOrders.create(userId, draft({ triggerPrice: 98 }));
+      const standby = buildWatcher();
+
+      // The holder takes the lease on a tick that does not cross the level.
+      gateway.price = 99;
+      await watcher.tick(IN_SESSION);
+      expect(await statusOf(order.id)).toBe('working');
+
+      // Standby is locked out while the lease is live.
+      gateway.price = 90;
+      await standby.tick(new Date(IN_SESSION.getTime() + 5_000));
+      expect(place).not.toHaveBeenCalled();
+      expect(standby.metrics.ticks).toBe(0);
+
+      // Holder is gone. Past the 30s lease the standby takes over and fires the
+      // level it never watched cross.
+      watcher.onModuleDestroy();
+      await standby.tick(new Date(IN_SESSION.getTime() + 31_000));
+
+      expect(standby.metrics.ticks).toBe(1);
+      expect(place).toHaveBeenCalledTimes(1);
+      expect(await statusOf(order.id)).toBe('triggered');
+      standby.onModuleDestroy();
+    });
   });
 });

@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { OrderPreview, OrderRequest, OrderResult, Position } from '@0dtetrader/shared-types';
 import { BROKER_GATEWAY, BrokerGateway } from '../broker/broker-gateway.interface';
@@ -27,6 +27,8 @@ function usablePrice(value: number | undefined): number | undefined {
  */
 @Injectable()
 export class TradingService {
+  private readonly logger = new Logger(TradingService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     @Inject(BROKER_GATEWAY) private readonly gateway: BrokerGateway,
@@ -58,10 +60,21 @@ export class TradingService {
     try {
       const { request: normalized, underlyingPrice } = await this.resolveAndValidate(userId, dto);
       const result = await this.gateway.placeOrder(userId, normalized, idempotencyKey);
-      await this.prisma.orderAudit.update({
-        where: { id: replay.pendingId },
-        data: { response: result as never, status: result.status },
-      });
+      // The broker has accepted. Nothing from here may throw: the catch below
+      // deletes the idempotency claim so the caller can retry, which after a
+      // real placement would submit the order a SECOND time. Bookkeeping
+      // failures are logged, never propagated.
+      await this.prisma.orderAudit
+        .update({
+          where: { id: replay.pendingId },
+          data: { response: result as never, status: result.status },
+        })
+        .catch((auditErr: unknown) =>
+          this.logger.error(
+            `order ${result.orderId} placed but its audit row was not updated: ` +
+              `${(auditErr as Error).message}`,
+          ),
+        );
       // The gateway emits the placement on the order-events bus, which persists
       // the row without an underlying price (the broker has no such concept).
       // Recording it here converges on the same row from the one caller that

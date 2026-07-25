@@ -54,6 +54,15 @@ final class ChartTradingCoordinator: ObservableObject, OrderLineOverlayDelegate 
     // MARK: - OrderLineOverlayDelegate
 
     func orderLineOverlayDidTapCancel(order: ChartOrder) {
+        // Only a working line has something to cancel. A triggered or failed
+        // line already reached the broker, so ✕ just clears it from the chart —
+        // confirming it with "nothing was sent to the broker" would be a lie
+        // about a live order. Matches the desktop store, which dismisses
+        // terminal lines silently.
+        guard order.isWorking else {
+            Task { await chartOrders.cancel(id: order.id) }
+            return
+        }
         orderPendingCancel = order
     }
 

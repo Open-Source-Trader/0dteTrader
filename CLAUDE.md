@@ -20,8 +20,14 @@ npm run format:check   # Prettier
 **iOS (from `apps/ios/`):**
 
 ```bash
-xcodegen && xcodebuild build -scheme 0dteTrader -destination 'platform=iOS Simulator,name=iPhone 16 Pro'
+xcodegen && xcodebuild build -scheme 0dteTrader -destination 'generic/platform=iOS Simulator'
 ```
+
+A generic destination compiles without needing any particular simulator
+installed. Pinning a device name (`name=iPhone 16 Pro`) resolves it against
+`OS:latest`, which fails outright when that model is only installed for an
+older runtime. To run or test, pick a device that actually exists:
+`xcrun simctl list devices available`.
 
 **Key facts:**
 

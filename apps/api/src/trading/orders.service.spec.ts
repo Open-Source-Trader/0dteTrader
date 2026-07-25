@@ -162,6 +162,28 @@ describe('OrdersService', () => {
     expect(history.entries[0].contractSymbol).toBe(OCC);
   });
 
+  /**
+   * History spans both environments. A practice buy must never become the cost
+   * basis for a live sale of the same contract — that would report realized P/L
+   * the account never earned (and hide the real, still-open live short).
+   */
+  it('never averages a practice fill into a live position of the same contract', async () => {
+    const practiceUser = await prisma.user.create({
+      data: { email: 'env-book@example.com', passwordHash: 'x', tradingMode: 'practice' },
+    });
+    const practiceId = practiceUser.id as string;
+    // Same user, same contract, one fill in each environment.
+    await orders.record(practiceId, fill({ side: 'buy', quantity: 1, filledPrice: 1.0 }));
+    prisma.users.find((u) => u.id === practiceId).tradingMode = 'live';
+    await orders.record(practiceId, fill({ side: 'sell', quantity: 1, filledPrice: 3.0 }));
+
+    const history = await orders.history(practiceId);
+
+    // The live sell opens a short; it closes nothing, so it realizes nothing.
+    expect(history.entries.every((e) => e.realizedPnl === null)).toBe(true);
+    expect(history.totalRealizedPnl).toBe(0);
+  });
+
   describe('recordUnderlyingPrice', () => {
     /**
      * The broker's status poll starts before the placement path gets control,

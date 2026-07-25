@@ -15,6 +15,7 @@ import {
 } from 'lightweight-charts';
 import type {
   ChartInterval,
+  ChartOrder,
   OptionContract,
   OptionsAnalyticsSnapshot,
   OrderType,
@@ -75,6 +76,9 @@ export interface ChartTradingProps {
   selectedContract: OptionContract | null;
   defaultOrderType: OrderType;
   onFlatten: (position: Position) => void;
+  /** Confirms cancelling a working line — the desktop half of the alert iOS
+   *  shows in ChartTradingCoordinator. */
+  onCancelOrder: (order: ChartOrder) => void;
 }
 
 const VISIBLE_CANDLES = 120;
@@ -499,10 +503,15 @@ export function CandleChart({
           selectedContract={chartTrading.selectedContract}
           defaultOrderType={chartTrading.defaultOrderType}
           onFlatten={chartTrading.onFlatten}
+          onCancelOrder={chartTrading.onCancelOrder}
           candles={candles}
-          // Keep the button rows and the `+` clear of the analytics rail.
+          // Keep the button rows and the `+` clear of the analytics rail —
+          // guarded on the same condition the rail itself renders under, since
+          // a cached snapshot outlives the setting being switched off.
           rightInset={
-            optionsAnalyticsSnapshot ? optionsAnalyticsRailWidth(apis.chart.paneSize().width) : 0
+            optionsAnalyticsSnapshot && optionsAnalyticsSettings
+              ? optionsAnalyticsRailWidth(apis.chart.paneSize().width)
+              : 0
           }
         />
       ) : null}

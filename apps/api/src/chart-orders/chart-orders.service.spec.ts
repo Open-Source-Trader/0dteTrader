@@ -176,6 +176,24 @@ describe('ChartOrdersService', () => {
         service.update(other.id as string, order.id, { quantity: 5 }),
       ).rejects.toMatchObject({ status: 404, code: 'CHART_ORDER_NOT_FOUND' });
     });
+
+    /**
+     * `updatedAt` is load-bearing: the watcher compares it against its last
+     * observed price to decide whether to resume from `armPrice`. A patch that
+     * changes nothing must therefore not write, or it silently resets that
+     * line's crossing test.
+     */
+    it('does not write for a patch that changes nothing', async () => {
+      const order = await service.create(userId, draft({ triggerPrice: 98 }));
+      const before = prisma.chartOrders[0].updatedAt;
+
+      const empty = await service.update(userId, order.id, {});
+      const sameTrigger = await service.update(userId, order.id, { triggerPrice: 98 });
+
+      expect(empty.triggerPrice).toBe(98);
+      expect(sameTrigger.triggerPrice).toBe(98);
+      expect(prisma.chartOrders[0].updatedAt).toBe(before);
+    });
   });
 
   describe('cancel', () => {
@@ -293,14 +311,39 @@ describe('ChartOrdersService', () => {
           ocoGroupId: groupId,
         }),
       );
-      const retire = jest
-        .spyOn(service, 'cancelSiblings')
-        .mockRejectedValueOnce(new Error('db down'));
-
       const result = await service.triggerNow(userId, stop.id);
-      retire.mockRestore();
 
       expect(result.status).toBe('triggered');
+    });
+
+    /**
+     * Retirement is what makes the claim safe, so a claim that cannot complete
+     * it must be given back — a half-claimed group would strand every leg out
+     * of `working` with nothing sent and no path back.
+     */
+    it('gives the whole group back when the retirement write fails', async () => {
+      const place = jest.spyOn(gateway, 'placeOrder');
+      const groupId = 'aaaaaaaa-2222-3333-4444-555555555555';
+      const target = await service.create(
+        userId,
+        draft({ kind: 'target', triggerPrice: 105, orderType: 'market', ocoGroupId: groupId }),
+      );
+      const stop = await service.create(
+        userId,
+        draft({ kind: 'stop', triggerPrice: 95, orderType: 'market', ocoGroupId: groupId }),
+      );
+      const updateMany = jest.spyOn(prisma.chartOrder, 'updateMany');
+      // First call is the claim; make the sibling retirement blow up.
+      updateMany.mockImplementationOnce(updateMany.getMockImplementation()!);
+      updateMany.mockRejectedValueOnce(new Error('db down'));
+
+      const result = await service.fire((await service.byId(stop.id))!, new Date());
+      updateMany.mockRestore();
+
+      expect(place).not.toHaveBeenCalled();
+      expect(result.status).not.toBe('triggered');
+      expect((await service.byId(stop.id))?.status).toBe('working');
+      expect((await service.byId(target.id))?.status).toBe('working');
     });
 
     it("refuses to fire another user's line", async () => {
@@ -343,12 +386,213 @@ describe('ChartOrdersService', () => {
         draft({ kind: 'stop', triggerPrice: 95, ocoGroupId: groupId }),
       );
 
-      const cancelled = await service.cancelSiblings(groupId, stop.id);
+      await service.triggerNow(userId, stop.id);
 
-      expect(cancelled).toEqual([target.id]);
       const byId = Object.fromEntries((await service.list(userId)).map((o) => [o.id, o.status]));
+      expect(byId[stop.id]).toBe('triggered');
       expect(byId[target.id]).toBe('cancelled');
-      expect(byId[stop.id]).toBe('working');
+    });
+
+    /**
+     * The whipsaw case: price crosses the target and then the stop inside one
+     * broker round-trip, so the client fires both legs concurrently. Claiming
+     * per-row let both win and both reach the broker — closing the position and
+     * then reversing it into an unintended short.
+     */
+    it('sends ONE broker order when both legs fire concurrently', async () => {
+      const place = jest.spyOn(gateway, 'placeOrder');
+      const groupId = '33333333-2222-3333-4444-555555555555';
+      const target = await service.create(
+        userId,
+        draft({ kind: 'target', triggerPrice: 105, orderType: 'market', ocoGroupId: groupId }),
+      );
+      const stop = await service.create(
+        userId,
+        draft({ kind: 'stop', triggerPrice: 95, orderType: 'market', ocoGroupId: groupId }),
+      );
+
+      const [first, second] = await Promise.all([
+        service.triggerNow(userId, target.id),
+        service.triggerNow(userId, stop.id),
+      ]);
+
+      expect(place).toHaveBeenCalledTimes(1);
+      const statuses = [first.status, second.status].sort();
+      expect(statuses).toEqual(['cancelled', 'triggered']);
+      const byId = Object.fromEntries((await service.list(userId)).map((o) => [o.id, o.status]));
+      expect(Object.values(byId).filter((s) => s === 'triggered')).toHaveLength(1);
+      expect(Object.values(byId).filter((s) => s === 'cancelled')).toHaveLength(1);
+    });
+
+    it('retires the sibling before the broker call, not after it', async () => {
+      const groupId = '44444444-2222-3333-4444-555555555555';
+      const target = await service.create(
+        userId,
+        draft({ kind: 'target', triggerPrice: 105, orderType: 'market', ocoGroupId: groupId }),
+      );
+      const stop = await service.create(
+        userId,
+        draft({ kind: 'stop', triggerPrice: 95, orderType: 'market', ocoGroupId: groupId }),
+      );
+      // Observe the sibling's state at the moment the order reaches the broker.
+      let siblingStatusAtPlace: string | undefined;
+      jest.spyOn(gateway, 'placeOrder').mockImplementationOnce(async () => {
+        siblingStatusAtPlace = (await service.byId(target.id))?.status;
+        throw new Error('broker refused');
+      });
+
+      await service.triggerNow(userId, stop.id);
+
+      expect(siblingStatusAtPlace).toBe('cancelled');
+    });
+
+    /** Nothing was sent, so the bracket must survive intact. */
+    it('re-arms the retired sibling when the fire is rejected', async () => {
+      const groupId = '55555555-2222-3333-4444-555555555555';
+      const target = await service.create(
+        userId,
+        draft({ kind: 'target', triggerPrice: 105, orderType: 'market', ocoGroupId: groupId }),
+      );
+      const stop = await service.create(
+        userId,
+        draft({ kind: 'stop', triggerPrice: 95, orderType: 'market', ocoGroupId: groupId }),
+      );
+      gateway.placeError = new Error('insufficient buying power');
+
+      const fired = await service.triggerNow(userId, stop.id);
+
+      expect(fired.status).toBe('failed');
+      expect((await service.byId(target.id))?.status).toBe('working');
+    });
+
+    /**
+     * The environment gate un-claims the leg, but the group claim had already
+     * retired its sibling before the gate ran. Nothing was sent, so leaving the
+     * sibling `cancelled` would silently unbracket the position — and read to
+     * the user as though the other leg had filled.
+     */
+    it('re-arms the retired sibling when the environment gate un-claims the fire', async () => {
+      const practice = await prisma.user.create({
+        data: { email: 'oco-env@example.com', passwordHash: 'x', tradingMode: 'practice' },
+      });
+      const practiceId = practice.id as string;
+      const groupId = '77777777-2222-3333-4444-555555555555';
+      const target = await service.create(
+        practiceId,
+        draft({ kind: 'target', triggerPrice: 105, orderType: 'market', ocoGroupId: groupId }),
+      );
+      const stop = await service.create(
+        practiceId,
+        draft({ kind: 'stop', triggerPrice: 95, orderType: 'market', ocoGroupId: groupId }),
+      );
+      prisma.users.find((u) => u.id === practiceId).tradingMode = 'live';
+      const place = jest.spyOn(gateway, 'placeOrder');
+
+      const result = await service.triggerNow(practiceId, stop.id);
+
+      expect(place).not.toHaveBeenCalled();
+      expect(result.status).toBe('working');
+      expect((await service.byId(target.id))?.status).toBe('working');
+    });
+
+    /** A settled contract sends nothing either, so the sibling is not a fill. */
+    it('re-arms the retired sibling when the fired leg has already settled', async () => {
+      const groupId = '88888888-2222-3333-4444-555555555555';
+      const target = await service.create(
+        userId,
+        draft({ kind: 'target', triggerPrice: 105, orderType: 'market', ocoGroupId: groupId }),
+      );
+      const stop = await service.create(
+        userId,
+        draft({ kind: 'stop', triggerPrice: 95, orderType: 'market', ocoGroupId: groupId }),
+      );
+      const afterSettlement = new Date(Date.parse(stop.expiresAt) + 60_000);
+
+      const result = await service.triggerNow(userId, stop.id, afterSettlement);
+
+      expect(result.status).toBe('expired');
+      // Not `cancelled` — no leg filled. The expiry sweep retires it on its own
+      // `expiresAt`, which is what actually ended this bracket.
+      expect((await service.byId(target.id))?.status).toBe('working');
+      await service.expireSettled(afterSettlement);
+      expect((await service.byId(target.id))?.status).toBe('expired');
+    });
+
+    /**
+     * The claim locks the rows that exist when it runs; a leg inserted after it
+     * is a phantom the group claim never saw, and firing it would close the
+     * position and then reverse it. The server refuses the join.
+     */
+    it('refuses to add a leg to a bracket that already fired', async () => {
+      const groupId = '77777777-2222-3333-4444-555555555555';
+      const stop = await service.create(
+        userId,
+        draft({ kind: 'stop', triggerPrice: 95, orderType: 'market', ocoGroupId: groupId }),
+      );
+      await service.triggerNow(userId, stop.id);
+
+      await expect(
+        service.create(
+          userId,
+          draft({ kind: 'target', triggerPrice: 105, orderType: 'market', ocoGroupId: groupId }),
+        ),
+      ).rejects.toMatchObject({ status: 409, code: 'OCO_GROUP_CLOSED' });
+    });
+
+    it('still allows a second leg while the bracket is fully armed', async () => {
+      const groupId = '88888888-2222-3333-4444-555555555555';
+      await service.create(userId, draft({ kind: 'stop', triggerPrice: 95, ocoGroupId: groupId }));
+
+      await expect(
+        service.create(userId, draft({ kind: 'target', triggerPrice: 105, ocoGroupId: groupId })),
+      ).resolves.toBeDefined();
+    });
+
+    /**
+     * The watcher hands the same `now` to every fire in a tick, so the claim
+     * mints its own stamp — otherwise a later fire could match an earlier
+     * claim's rows by timestamp and retire a leg it never claimed.
+     */
+    it('keeps claims distinct when two fires share one timestamp', async () => {
+      const groupId = '99999999-2222-3333-4444-555555555555';
+      const stopA = await service.create(
+        userId,
+        draft({ kind: 'stop', triggerPrice: 95, orderType: 'market', ocoGroupId: groupId }),
+      );
+      const targetA = await service.create(
+        userId,
+        draft({ kind: 'target', triggerPrice: 105, orderType: 'market', ocoGroupId: groupId }),
+      );
+      gateway.placeError = new Error('broker refused');
+      const now = new Date();
+
+      await service.fire((await service.byId(stopA.id))!, now);
+      // Same clock value, second fire: must not reach across into the first
+      // claim's generation.
+      await service.fire((await service.byId(targetA.id))!, now);
+
+      expect((await service.byId(stopA.id))?.status).toBe('failed');
+    });
+
+    /** A leg cancelled by hand must not drag its still-armed sibling down. */
+    it('does not retire a sibling when the fired leg is no longer working', async () => {
+      const place = jest.spyOn(gateway, 'placeOrder');
+      const groupId = '66666666-2222-3333-4444-555555555555';
+      const target = await service.create(
+        userId,
+        draft({ kind: 'target', triggerPrice: 105, orderType: 'market', ocoGroupId: groupId }),
+      );
+      const stop = await service.create(
+        userId,
+        draft({ kind: 'stop', triggerPrice: 95, orderType: 'market', ocoGroupId: groupId }),
+      );
+      await service.cancel(userId, stop.id);
+
+      const result = await service.triggerNow(userId, stop.id);
+
+      expect(place).not.toHaveBeenCalled();
+      expect(result.status).toBe('cancelled');
+      expect((await service.byId(target.id))?.status).toBe('working');
     });
   });
 

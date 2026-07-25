@@ -103,6 +103,51 @@ final class BracketDirectionTests: XCTestCase {
     }
 }
 
+@MainActor
+final class ChartTradingCoordinatorCancelTests: XCTestCase {
+    private func makeCoordinator() -> (ChartTradingCoordinator, ChartOrdersModel) {
+        let baseURL = URL(string: "http://localhost:0")!
+        let sessionStore = SessionStore(
+            keychainStore: KeychainStore(service: "test.coordinator"),
+            baseURL: baseURL
+        )
+        let apiClient = APIClient(baseURL: baseURL, sessionStore: sessionStore)
+        let orders = ChartOrdersModel(apiClient: apiClient)
+        return (
+            ChartTradingCoordinator(chartOrders: orders, settingsStore: SettingsStore()),
+            orders
+        )
+    }
+
+    func testTapCancel_workingLine_asksForConfirmation() {
+        let (coordinator, _) = makeCoordinator()
+
+        coordinator.orderLineOverlayDidTapCancel(order: makeOrder(status: .working))
+
+        XCTAssertEqual(coordinator.orderPendingCancel?.id, "co-1")
+    }
+
+    /// A fired line's broker order is live; confirming "nothing was sent to the
+    /// broker" would misrepresent it, so ✕ just clears the chart marker.
+    func testTapCancel_triggeredLine_dismissesWithoutConfirmation() {
+        let (coordinator, orders) = makeCoordinator()
+        orders.applyServerUpdate(makeOrder(status: .triggered))
+
+        coordinator.orderLineOverlayDidTapCancel(order: makeOrder(status: .triggered))
+
+        XCTAssertNil(coordinator.orderPendingCancel)
+    }
+
+    func testTapCancel_failedLine_dismissesWithoutConfirmation() {
+        let (coordinator, orders) = makeCoordinator()
+        orders.applyServerUpdate(makeOrder(status: .failed))
+
+        coordinator.orderLineOverlayDidTapCancel(order: makeOrder(status: .failed))
+
+        XCTAssertNil(coordinator.orderPendingCancel)
+    }
+}
+
 final class ChartOrderLabelTests: XCTestCase {
     func testKindLabels() {
         XCTAssertEqual(makeOrder(kind: .limit).kindLabel, "LMT")

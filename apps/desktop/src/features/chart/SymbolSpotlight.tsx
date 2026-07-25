@@ -16,6 +16,7 @@ export function SymbolSpotlight({ currentSymbol, onSelect, onDismiss }: SymbolSp
   const [activeIndex, setActiveIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const backdropRef = useRef<HTMLDivElement>(null);
+  const activeRowRef = useRef<HTMLButtonElement>(null);
   const normalizedQuery = query.toUpperCase().trim();
 
   const filtered = (symbols: string[]) =>
@@ -36,6 +37,12 @@ export function SymbolSpotlight({ currentSymbol, onSelect, onDismiss }: SymbolSp
   );
 
   useEffect(() => setActiveIndex(0), [normalizedQuery]);
+
+  // Arrow-key navigation moves activeIndex, but that alone doesn't scroll a
+  // row that's outside the results pane's visible area into view.
+  useEffect(() => {
+    activeRowRef.current?.scrollIntoView({ block: 'nearest' });
+  }, [activeIndex]);
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -105,6 +112,7 @@ export function SymbolSpotlight({ currentSymbol, onSelect, onDismiss }: SymbolSp
             <div>
               <div className="spotlight-section-header">Jump to symbol</div>
               <button
+                ref={normalizedQuery === activeSymbol ? activeRowRef : undefined}
                 className={rowClassName(normalizedQuery)}
                 onClick={() => select(normalizedQuery)}
               >
@@ -112,7 +120,7 @@ export function SymbolSpotlight({ currentSymbol, onSelect, onDismiss }: SymbolSp
                   <TextCursorIcon size={14} />
                 </span>
                 <span className="spotlight-row-label numeric">{normalizedQuery}</span>
-                <span className="spotlight-row-hint">not in watchlist — press ↵</span>
+                <span className="spotlight-row-hint">not in quick list — press ↵</span>
               </button>
             </div>
           ) : null}
@@ -127,6 +135,7 @@ export function SymbolSpotlight({ currentSymbol, onSelect, onDismiss }: SymbolSp
                   const isCurrent = symbol === currentSymbol;
                   return (
                     <button
+                      ref={symbol === activeSymbol ? activeRowRef : undefined}
                       className={rowClassName(symbol)}
                       key={symbol}
                       aria-current={isCurrent ? 'true' : undefined}

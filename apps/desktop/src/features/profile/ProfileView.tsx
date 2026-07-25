@@ -19,9 +19,18 @@ interface ProfileViewProps {
   onDismiss: () => void;
   /** Desktop grid: centered floating panel instead of an iOS bottom sheet. */
   dense?: boolean;
+  /** Render just the settings content, no NavBar/Sheet chrome — used when
+   *  embedded as a tab inside DesktopSettingsPanel, which supplies its own
+   *  window chrome and tab navigation. */
+  bodyOnly?: boolean;
 }
 
-export function ProfileView({ onLogout, onDismiss, dense = false }: ProfileViewProps) {
+export function ProfileView({
+  onLogout,
+  onDismiss,
+  dense = false,
+  bodyOnly = false,
+}: ProfileViewProps) {
   const container = useContainer();
   const store = useMemo(() => new ProfileStore(container.apiClient), [container]);
   const state = useStore(store);
@@ -291,17 +300,9 @@ export function ProfileView({ onLogout, onDismiss, dense = false }: ProfileViewP
     );
   };
 
-  const body = (
-    <div className="profile-view">
-      <NavBar
-        title="Profile"
-        trailing={
-          <button className="navbar-text-button" onClick={onDismiss}>
-            Done
-          </button>
-        }
-      />
-      <div className="sheet-body grouped-list hide-scrollbar">
+  const settingsContent = (
+    <>
+      <div className={bodyOnly ? 'grouped-list' : 'sheet-body grouped-list hide-scrollbar'}>
         {/* Account */}
         <div className="grouped-section">
           <div className="section-header">Account</div>
@@ -438,6 +439,24 @@ export function ProfileView({ onLogout, onDismiss, dense = false }: ProfileViewP
           onDismiss={() => setShowLogoutConfirmation(false)}
         />
       ) : null}
+    </>
+  );
+
+  if (bodyOnly) {
+    return settingsContent;
+  }
+
+  const body = (
+    <div className="profile-view">
+      <NavBar
+        title="Profile"
+        trailing={
+          <button className="navbar-text-button" onClick={onDismiss}>
+            Done
+          </button>
+        }
+      />
+      {settingsContent}
     </div>
   );
 

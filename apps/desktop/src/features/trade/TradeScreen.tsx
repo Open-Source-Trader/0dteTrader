@@ -15,12 +15,14 @@ import {
   LockIcon,
   LockOpenIcon,
   PersonCircleIcon,
+  SlidersIcon,
 } from '../../design/icons';
+import { DesktopSettingsPanel } from '../../design/components/DesktopSettingsPanel';
 import type { TradeLayout } from '../../core/storage/SettingsStore';
 import { enabledSubPanes } from '../chart/indicatorSettings';
 import { ChartView } from '../chart/ChartView';
 import { positionsForUnderlying } from '../chart/positionsForUnderlying';
-import { IndicatorSettingsView } from '../chart/IndicatorSettingsView';
+import { IndicatorSettingsBody, IndicatorSettingsView } from '../chart/IndicatorSettingsView';
 import { TwcSettingsView } from '../chart/TwcSettingsView';
 import { SymbolSearchView } from '../chart/SymbolSearchView';
 import { SymbolSpotlight } from '../chart/SymbolSpotlight';
@@ -606,7 +608,48 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
           onDismiss={() => setShowSymbolSearch(false)}
         />
       ) : null}
-      {showIndicatorSettings ? (
+      {isDesktopGrid && (showIndicatorSettings || showProfile) ? (
+        <DesktopSettingsPanel
+          initialTabKey={showProfile ? 'account' : 'indicators'}
+          onDismiss={() => {
+            setShowIndicatorSettings(false);
+            setShowProfile(false);
+          }}
+          tabs={[
+            {
+              key: 'account',
+              label: 'Account',
+              icon: <PersonCircleIcon size={16} />,
+              content: (
+                <ProfileView onLogout={onLogout} onDismiss={() => setShowProfile(false)} bodyOnly />
+              ),
+            },
+            {
+              key: 'indicators',
+              label: 'Indicators',
+              icon: <SlidersIcon size={16} />,
+              content: (
+                <IndicatorSettingsBody
+                  settings={chart.indicatorSettings}
+                  onChange={(settings) => chartStore.setIndicatorSettings(settings)}
+                  twcEnabled={chart.twcSettings.enabled}
+                  onToggleTwc={(on) =>
+                    chartStore.setTwcSettings({ ...chart.twcSettings, enabled: on })
+                  }
+                  onOpenTwcSettings={() => {
+                    setShowIndicatorSettings(false);
+                    setShowProfile(false);
+                    setShowTwcSettings(true);
+                  }}
+                  optionsAnalytics={chart.optionsAnalytics}
+                  onChangeOptionsAnalytics={(settings) => chartStore.setOptionsAnalytics(settings)}
+                />
+              ),
+            },
+          ]}
+        />
+      ) : null}
+      {!isDesktopGrid && showIndicatorSettings ? (
         <IndicatorSettingsView
           settings={chart.indicatorSettings}
           onChange={(settings) => chartStore.setIndicatorSettings(settings)}
@@ -619,7 +662,6 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
           }}
           optionsAnalytics={chart.optionsAnalytics}
           onChangeOptionsAnalytics={(settings) => chartStore.setOptionsAnalytics(settings)}
-          dense={isDesktopGrid}
         />
       ) : null}
       {showTwcSettings ? (
@@ -634,12 +676,8 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
           dense={isDesktopGrid}
         />
       ) : null}
-      {showProfile ? (
-        <ProfileView
-          onLogout={onLogout}
-          onDismiss={() => setShowProfile(false)}
-          dense={isDesktopGrid}
-        />
+      {!isDesktopGrid && showProfile ? (
+        <ProfileView onLogout={onLogout} onDismiss={() => setShowProfile(false)} />
       ) : null}
       {showHistory ? (
         <HistoryView onDismiss={() => setShowHistory(false)} dense={isDesktopGrid} />

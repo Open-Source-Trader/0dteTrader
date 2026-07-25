@@ -897,6 +897,123 @@
   overflow: hidden;
 }
 
+/* --- Unified desktop settings window (Profile + Indicators) ---
+   Sidebar tabs + content pane, macOS System Settings / VS Code Settings
+   convention — one window instead of two separate iOS-style sheets, and
+   dense two-column form rows instead of 44px touch-target grouped lists. */
+.desktop-settings-panel {
+  width: min(760px, 92%);
+  height: min(600px, 86vh);
+  display: flex;
+  flex-direction: row;
+  background: var(--hud-panel-fill);
+  border: 8px solid transparent;
+  border-image: var(--hud-src-accent) 28 fill / 24px / 6px stretch;
+  box-shadow: var(--shadow-overlay);
+  overflow: hidden;
+}
+
+.desktop-settings-sidebar {
+  width: 168px;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--space-3) var(--space-2);
+  border-right: var(--border-hairline) solid var(--hud-stroke-dim);
+  overflow-y: auto;
+}
+
+.desktop-settings-sidebar-title {
+  padding: 4px 8px 8px;
+  font-family: var(--font-display);
+  font-size: var(--fs-caption);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--app-accent);
+}
+
+.desktop-settings-tab {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px;
+  border-radius: var(--radius-chip);
+  font-size: var(--fs-caption);
+  color: var(--label-secondary);
+  text-align: left;
+}
+
+.desktop-settings-tab:hover {
+  background: rgba(46, 143, 255, 0.08);
+  color: var(--label-primary);
+}
+
+.desktop-settings-tab.active {
+  background: var(--app-accent-fill);
+  color: #fff;
+}
+
+.desktop-settings-content {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.desktop-settings-content-header {
+  display: flex;
+  align-items: center;
+  flex: none;
+  height: 36px;
+  padding: 0 var(--space-3);
+  border-bottom: var(--border-hairline) solid var(--hud-stroke-dim);
+  font-size: var(--fs-subheadline);
+  font-weight: 700;
+}
+
+.desktop-settings-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* Dense two-column form rows, replacing the 44px touch-target grouped-list
+   for exactly the two views embedded in this panel. Scoped to this
+   container only — the standalone compact Sheet views (phone layout) keep
+   the original .grouped-row/.section-card styling untouched. */
+.desktop-settings-body .grouped-list {
+  padding: var(--space-3);
+  gap: var(--space-4);
+}
+
+.desktop-settings-body .grouped-section .section-header {
+  padding: 0 2px 4px;
+  font-size: var(--fs-caption2);
+}
+
+.desktop-settings-body .grouped-section .section-footer {
+  padding: 4px 2px 0;
+  font-size: var(--fs-caption2);
+}
+
+.desktop-settings-body .grouped-section .section-card {
+  border: var(--border-hairline) solid var(--hud-stroke-dim);
+  background: var(--app-surface);
+}
+
+.desktop-settings-body .grouped-row {
+  min-height: 30px;
+  padding: 5px 10px;
+  font-size: var(--fs-caption);
+  gap: 8px;
+}
+
+.desktop-settings-body .grouped-row + .grouped-row {
+  border-top: var(--border-hairline) solid var(--app-border);
+}
+
 /* --- Desktop positions/orders panel (desktop grid footer) ---
    Tabbed dense table (TradingView Account Manager / ThinkOrSwim Monitor
    convention) — replaces the phone strip's horizontally-scrolling chip row. */

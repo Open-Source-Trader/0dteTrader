@@ -1292,15 +1292,15 @@
   padding: var(--space-4);
 }
 
+/* No border/background here — the floating settings window already frames
+   the whole pane; a second border around every category's content read as
+   a box nested inside a box. Just a legend divider (below) separates the
+   title from its fields. */
 .settings-fieldset {
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
   max-width: 420px;
-  padding: var(--space-4);
-  border: var(--border-hairline) solid var(--hud-stroke-dim);
-  border-radius: 6px;
-  background: var(--app-surface);
 }
 
 .settings-fieldset-legend {

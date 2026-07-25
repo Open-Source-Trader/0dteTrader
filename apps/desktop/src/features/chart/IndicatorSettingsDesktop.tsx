@@ -57,6 +57,11 @@ interface TreeNode {
   label: string;
   render: () => React.ReactNode;
   children?: TreeNode[];
+  /** Field labels rendered inside this node (e.g. "VWAP Rip Markers" inside
+   *  the "VWAP Z-Score" group) — searched in addition to the node's own
+   *  label, so search finds a setting even though the tree only shows its
+   *  parent group name. */
+  searchTerms?: string[];
 }
 
 /** Indicator settings reimagined as a desktop application preferences pane:
@@ -93,6 +98,17 @@ export function IndicatorSettingsDesktop({
       {
         id: 'price-overlays',
         label: 'Price Overlays',
+        searchTerms: [
+          'SMA',
+          'SMA Period',
+          'EMA',
+          'EMA Period',
+          'VWAP',
+          'Volume',
+          'Bollinger Bands',
+          'Bollinger Period',
+          'Bollinger Width',
+        ],
         render: () => (
           <div className="settings-fieldset">
             <div className="settings-fieldset-legend">Price Overlays</div>
@@ -175,6 +191,20 @@ export function IndicatorSettingsDesktop({
       {
         id: 'sub-panes',
         label: `Sub-Panes (max ${MAX_SUB_PANES})`,
+        searchTerms: [
+          'RSI',
+          'RSI Period',
+          'MACD',
+          'MACD Fast Period',
+          'MACD Slow Period',
+          'MACD Signal Period',
+          'Stochastic',
+          '%K Period',
+          '%K Smoothing',
+          '%D Period',
+          'ATR',
+          'ATR Period',
+        ],
         render: () => (
           <div className="settings-fieldset">
             <div className="settings-fieldset-legend">Sub-Panes (max {MAX_SUB_PANES})</div>
@@ -300,11 +330,17 @@ export function IndicatorSettingsDesktop({
         ),
         children: twcSections
           .filter((s) => s.id !== 'reset')
-          .map((s) => ({ id: `twc-${s.id}`, label: s.label, render: () => s.content }))
+          .map((s) => ({
+            id: `twc-${s.id}`,
+            label: s.label,
+            searchTerms: s.searchTerms,
+            render: () => s.content,
+          }))
           .concat([
             {
               id: 'twc-reset',
               label: 'Reset to Defaults',
+              searchTerms: ['Reset to Defaults'],
               render: () => (
                 <div className="settings-fieldset">
                   <button
@@ -323,6 +359,19 @@ export function IndicatorSettingsDesktop({
       {
         id: 'options-structure',
         label: 'Options Structure',
+        searchTerms: [
+          'Implied 68% Range',
+          'Gamma Profile',
+          'Marked OI Value',
+          'Liquidity',
+          'Spread',
+          'Round Trip',
+          'Dealer Gamma Flip Proxy',
+          'Profile Strikes',
+          'Refresh',
+          'Diagnostics',
+          'Quality Warnings',
+        ],
         render: () => (
           <div className="settings-fieldset">
             <div className="settings-fieldset-legend">
@@ -402,7 +451,12 @@ export function IndicatorSettingsDesktop({
   const [selectedId, setSelectedId] = useState('price-overlays');
 
   const normalizedQuery = query.trim().toLowerCase();
-  const matches = (label: string) => label.toLowerCase().includes(normalizedQuery);
+  // A node matches on its own label or any of its field labels — so
+  // searching "VWAP Rip Markers" finds the "VWAP Z-Score" group even though
+  // the tree only ever shows the group name, not each field inside it.
+  const nodeMatches = (node: TreeNode) =>
+    node.label.toLowerCase().includes(normalizedQuery) ||
+    (node.searchTerms?.some((term) => term.toLowerCase().includes(normalizedQuery)) ?? false);
 
   // A parent matches if it matches directly or any child does; a filtered
   // tree with a query auto-expands parents so matches are always visible.
@@ -410,8 +464,8 @@ export function IndicatorSettingsDesktop({
     if (!normalizedQuery) return tree;
     const result: TreeNode[] = [];
     for (const node of tree) {
-      const children = node.children?.filter((child) => matches(child.label));
-      const selfMatches = matches(node.label);
+      const children = node.children?.filter((child) => nodeMatches(child));
+      const selfMatches = nodeMatches(node);
       if (!selfMatches && (!children || children.length === 0)) continue;
       result.push(selfMatches ? node : { ...node, children });
     }

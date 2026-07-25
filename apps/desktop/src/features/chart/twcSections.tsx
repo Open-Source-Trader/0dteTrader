@@ -22,6 +22,10 @@ export interface TwcSettingsSection {
   id: string;
   label: string;
   content: ReactNode;
+  /** Every field label rendered inside this section — lets the desktop
+   *  settings search match "VWAP Rip Markers" even though the tree only
+   *  shows the parent group name ("VWAP Z-Score"). */
+  searchTerms: string[];
 }
 
 /** TWC's input groups as addressable sections (id + label + rendered
@@ -34,9 +38,17 @@ export function buildTwcSections(
 ): TwcSettingsSection[] {
   const patch = (partial: Partial<TwcHeatmapSettings>) => onChange({ ...settings, ...partial });
 
+  // Reset per section (see `section` below) so each section's searchTerms
+  // only contains the labels of fields actually rendered inside it.
+  let currentLabels: string[] = [];
+  const track = (label: string) => {
+    currentLabels.push(label);
+    return label;
+  };
+
   const toggleRow = (label: string, key: keyof TwcHeatmapSettings): ReactNode => (
     <div className="grouped-row">
-      <span>{label}</span>
+      <span>{track(label)}</span>
       <span className="row-value">
         <Toggle on={settings[key] as boolean} onChange={(on) => patch({ [key]: on })} />
       </span>
@@ -53,7 +65,7 @@ export function buildTwcSections(
   ): ReactNode => (
     <div className="grouped-row param-row">
       <span>
-        {label}: {(settings[key] as number).toFixed(decimals)}
+        {track(label)}: {(settings[key] as number).toFixed(decimals)}
       </span>
       <span className="row-value">
         <Stepper
@@ -73,7 +85,7 @@ export function buildTwcSections(
     options: readonly T[],
   ): ReactNode => (
     <div className="grouped-row">
-      <span>{label}</span>
+      <span>{track(label)}</span>
       <span className="row-value">
         <Menu
           trigger={
@@ -98,7 +110,7 @@ export function buildTwcSections(
 
   const textRow = (label: string, key: keyof TwcHeatmapSettings): ReactNode => (
     <div className="grouped-row param-row">
-      <span style={{ flexShrink: 0, marginRight: 12 }}>{label}</span>
+      <span style={{ flexShrink: 0, marginRight: 12 }}>{track(label)}</span>
       <input
         className="row-text-input"
         style={{
@@ -117,16 +129,21 @@ export function buildTwcSections(
     </div>
   );
 
-  const section = (id: string, title: string, children: ReactNode): TwcSettingsSection => ({
-    id,
-    label: title,
-    content: (
-      <div className="grouped-section">
-        <div className="section-header">{title}</div>
-        <div className="section-card">{children}</div>
-      </div>
-    ),
-  });
+  const section = (id: string, title: string, children: ReactNode): TwcSettingsSection => {
+    const searchTerms = [title, ...currentLabels];
+    currentLabels = [];
+    return {
+      id,
+      label: title,
+      searchTerms,
+      content: (
+        <div className="grouped-section">
+          <div className="section-header">{title}</div>
+          <div className="section-card">{children}</div>
+        </div>
+      ),
+    };
+  };
 
   const sources: readonly TwcSource[] = ['close', 'open', 'high', 'low', 'hl2', 'hlc3', 'ohlc4'];
   const fibMethods: readonly TwcFibMethod[] = ['Simple Pivots', 'Volume Filtered'];
@@ -384,6 +401,7 @@ export function buildTwcSections(
     {
       id: 'reset',
       label: 'Reset to Defaults',
+      searchTerms: ['Reset to Defaults'],
       content: (
         <div className="grouped-section">
           <div className="section-card">

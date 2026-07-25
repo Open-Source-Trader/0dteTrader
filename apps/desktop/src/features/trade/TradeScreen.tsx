@@ -1,12 +1,15 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { Group, Panel, Separator, useDefaultLayout } from 'react-resizable-panels';
 import type { Me, OptionContract, OrderSide, TradingMode } from '@0dtetrader/shared-types';
 import { useContainer } from '../../app/container';
+import { useLayoutBreakpoint } from '../../app/useLayoutBreakpoint';
 import { useStore } from '../../core/observable';
 import { AlertDialog } from '../../design/components/AlertDialog';
 import { NavBar } from '../../design/components/NavBar';
 import { Format } from '../../design/format';
 import {
   ClockIcon,
+  InfoCircleFillIcon,
   LayoutFullIcon,
   LayoutSplitIcon,
   LockIcon,
@@ -27,6 +30,7 @@ import { PositionsStrip } from './PositionsStrip';
 import { ToastView } from './ToastView';
 import { TradePanel } from './TradePanel';
 import { optionsAnalyticsExpirationForChart } from './optionsAnalyticsSelection';
+import { useTradeShortcuts } from './useTradeShortcuts';
 
 const DIVIDER_HEIGHT = 1;
 
@@ -60,6 +64,7 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
   const [showTwcSettings, setShowTwcSettings] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
+  const [showShortcutsHelp, setShowShortcutsHelp] = useState(false);
 
   // 'practice' is only the pre-fetch placeholder; the server value wins.
   const [tradingMode, setTradingMode] = useState<TradingMode>('practice');
@@ -115,6 +120,16 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
 
   const contentRef = useRef<HTMLDivElement>(null);
   const [contentHeight, setContentHeight] = useState(0);
+  const [shellRef, breakpoint] = useLayoutBreakpoint();
+  const isDesktopGrid = breakpoint === 'standard' || breakpoint === 'wide';
+
+  // Chart/ticket column widths for the desktop grid, persisted across
+  // restarts (localStorage-backed, same mechanism SettingsStore uses).
+  const desktopGridLayout = useDefaultLayout({
+    id: 'trade-screen.desktop-grid',
+    storage: localStorage,
+    panelIds: ['chart', 'ticket'],
+  });
 
   // Startup: candles + stream, positions/orders, chain.
   useEffect(() => {
@@ -230,6 +245,17 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
   // disables every order-placing control while leaving the chart untouched.
   const canTrade = chainStore.selectedContract !== null && !locked;
 
+  // Desktop-grid-only hotkeys: B/S arm an order, Cmd/Ctrl+K jumps to symbol
+  // search, L toggles the lock. The compact layout already has floating
+  // touch buttons and no keyboard-first workflow, so hotkeys stay off there.
+  useTradeShortcuts({
+    enabled: isDesktopGrid,
+    canTrade,
+    onArm: arm,
+    onToggleLock: toggleLock,
+    onOpenSymbolSearch: () => setShowSymbolSearch(true),
+  });
+
   // Explains a disabled BUY/SELL; rendered above the floating buttons.
   let disabledReason: string | null = null;
   if (locked) {
@@ -268,8 +294,169 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
     />
   );
 
+  let contentArea: React.ReactNode;
+  if (isDesktopGrid) {
+    contentArea = (
+      <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column' }}>
+        <Group
+          orientation="horizontal"
+          style={{ flex: 1, minHeight: 0, display: 'flex' }}
+          defaultLayout={desktopGridLayout.defaultLayout}
+          onLayoutChanged={desktopGridLayout.onLayoutChanged}
+        >
+          <Panel
+            id="chart"
+            defaultSize={breakpoint === 'wide' ? '78' : '70'}
+            minSize="40"
+            style={{ minWidth: 0, display: 'flex', flexDirection: 'column' }}
+          >
+            <ChartView
+              store={chartStore}
+              drawingsStore={drawingsStore}
+              apiClient={apiClient}
+              onSymbolSearch={() => setShowSymbolSearch(true)}
+              onIndicatorSettings={() => setShowIndicatorSettings(true)}
+              tradingMode={tradingMode}
+              onToggleMode={() => setShowModeConfirmation(true)}
+              optionsAnalyticsExpiration={optionsAnalyticsExpiration}
+            />
+          </Panel>
+
+          {/* Draggable divider between chart and the order ticket rail. */}
+          <Separator
+            style={{
+              width: 5,
+              flex: 'none',
+              cursor: 'col-resize',
+              background: 'var(--hud-stroke-dim)',
+            }}
+          />
+
+          {/* Order ticket + chain rail: always visible, never a sheet —
+              a scalper needs the ticket armed and ready without a click
+              to reveal it. */}
+          <Panel
+            id="ticket"
+            defaultSize={breakpoint === 'wide' ? '22' : '30'}
+            minSize="18"
+            style={{ minHeight: 0, display: 'flex', flexDirection: 'column' }}
+          >
+            <TradePanel
+              tradeStore={tradeStore}
+              chainStore={chainStore}
+              onArm={arm}
+              density="roomy"
+              locked={locked}
+            />
+          </Panel>
+        </Group>
+
+        {/* Static hairline between the main row and the positions footer */}
+        <div
+          aria-hidden
+          style={{ height: DIVIDER_HEIGHT, flex: 'none', background: 'var(--hud-stroke-dim)' }}
+        />
+
+        {/* Positions/orders footer: full width, always visible so open
+            risk is never a click away. */}
+        <div style={{ flex: 'none' }}>{positionsStrip}</div>
+      </div>
+    );
+  } else if (layout === 'fullscreen') {
+    contentArea = (
+      <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column' }}>
+        <ChartView
+          store={chartStore}
+          drawingsStore={drawingsStore}
+          apiClient={apiClient}
+          onSymbolSearch={() => setShowSymbolSearch(true)}
+          onIndicatorSettings={() => setShowIndicatorSettings(true)}
+          tradingMode={tradingMode}
+          onToggleMode={() => setShowModeConfirmation(true)}
+          optionsAnalyticsExpiration={optionsAnalyticsExpiration}
+        />
+        {/* Scrim so the dock never lets chart content bleed through the buttons */}
+        <div
+          aria-hidden
+          style={{
+            position: 'absolute',
+            left: 0,
+            right: 0,
+            bottom: 0,
+            height: 190,
+            pointerEvents: 'none',
+            background: 'linear-gradient(to bottom, rgba(0,0,0,0), var(--app-background) 78%)',
+          }}
+        />
+        <div
+          style={{
+            position: 'absolute',
+            left: 0,
+            right: 0,
+            bottom: 16,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 8,
+          }}
+        >
+          {positionsStrip}
+          <FloatingTradeButtons isEnabled={canTrade} disabledReason={disabledReason} onSide={arm} />
+        </div>
+      </div>
+    );
+  } else {
+    contentArea = (
+      <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column' }}>
+        <div
+          style={{
+            height: chartHeight,
+            flex: 'none',
+            display: 'flex',
+            flexDirection: 'column',
+            transition: 'height 200ms cubic-bezier(0.32, 0.72, 0, 1)',
+          }}
+        >
+          <ChartView
+            store={chartStore}
+            drawingsStore={drawingsStore}
+            apiClient={apiClient}
+            onSymbolSearch={() => setShowSymbolSearch(true)}
+            onIndicatorSettings={() => setShowIndicatorSettings(true)}
+            tradingMode={tradingMode}
+            onToggleMode={() => setShowModeConfirmation(true)}
+            optionsAnalyticsExpiration={optionsAnalyticsExpiration}
+          />
+        </div>
+
+        {/* Static hairline between chart and panel */}
+        <div
+          aria-hidden
+          style={{ height: DIVIDER_HEIGHT, flex: 'none', background: 'var(--hud-stroke-dim)' }}
+        />
+
+        <div
+          style={{
+            height: panelHeight,
+            flex: 'none',
+            minHeight: 0,
+            transition: 'height 200ms cubic-bezier(0.32, 0.72, 0, 1)',
+          }}
+        >
+          <TradePanel
+            tradeStore={tradeStore}
+            chainStore={chainStore}
+            onArm={arm}
+            density={panelDensity}
+            locked={locked}
+          />
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div
+      ref={shellRef}
       style={{
         flex: 1,
         minHeight: 0,
@@ -280,6 +467,7 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
     >
       <NavBar
         title="0dteTrader"
+        className={isDesktopGrid ? 'navbar-desktop' : undefined}
         leading={
           <>
             <button
@@ -300,6 +488,15 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
         }
         trailing={
           <>
+            {isDesktopGrid ? (
+              <button
+                className="navbar-icon-button"
+                onClick={() => setShowShortcutsHelp(true)}
+                aria-label="Keyboard shortcuts"
+              >
+                <InfoCircleFillIcon size={20} />
+              </button>
+            ) : null}
             <button
               className="navbar-icon-button"
               onClick={toggleLock}
@@ -308,20 +505,25 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
             >
               {locked ? <LockIcon size={22} /> : <LockOpenIcon size={22} />}
             </button>
-            <button
-              className="navbar-icon-button"
-              onClick={toggleLayout}
-              aria-pressed={layout === 'split'}
-              aria-label={
-                layout === 'fullscreen' ? 'Switch to split layout' : 'Switch to fullscreen layout'
-              }
-            >
-              {layout === 'fullscreen' ? (
-                <LayoutSplitIcon size={22} />
-              ) : (
-                <LayoutFullIcon size={22} />
-              )}
-            </button>
+            {/* Fullscreen/split only applies to the compact (phone-derived)
+                layout — the desktop grid always shows chart + ticket +
+                positions together, so the toggle is meaningless there. */}
+            {isDesktopGrid ? null : (
+              <button
+                className="navbar-icon-button"
+                onClick={toggleLayout}
+                aria-pressed={layout === 'split'}
+                aria-label={
+                  layout === 'fullscreen' ? 'Switch to split layout' : 'Switch to fullscreen layout'
+                }
+              >
+                {layout === 'fullscreen' ? (
+                  <LayoutSplitIcon size={22} />
+                ) : (
+                  <LayoutFullIcon size={22} />
+                )}
+              </button>
+            )}
           </>
         }
       />
@@ -349,97 +551,7 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
       ) : null}
 
       <div ref={contentRef} style={{ flex: 1, minHeight: 0, position: 'relative' }}>
-        {layout === 'fullscreen' ? (
-          <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column' }}>
-            <ChartView
-              store={chartStore}
-              drawingsStore={drawingsStore}
-              apiClient={apiClient}
-              onSymbolSearch={() => setShowSymbolSearch(true)}
-              onIndicatorSettings={() => setShowIndicatorSettings(true)}
-              tradingMode={tradingMode}
-              onToggleMode={() => setShowModeConfirmation(true)}
-              optionsAnalyticsExpiration={optionsAnalyticsExpiration}
-            />
-            {/* Scrim so the dock never lets chart content bleed through the buttons */}
-            <div
-              aria-hidden
-              style={{
-                position: 'absolute',
-                left: 0,
-                right: 0,
-                bottom: 0,
-                height: 190,
-                pointerEvents: 'none',
-                background: 'linear-gradient(to bottom, rgba(0,0,0,0), var(--app-background) 78%)',
-              }}
-            />
-            <div
-              style={{
-                position: 'absolute',
-                left: 0,
-                right: 0,
-                bottom: 16,
-                display: 'flex',
-                flexDirection: 'column',
-                gap: 8,
-              }}
-            >
-              {positionsStrip}
-              <FloatingTradeButtons
-                isEnabled={canTrade}
-                disabledReason={disabledReason}
-                onSide={arm}
-              />
-            </div>
-          </div>
-        ) : (
-          <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column' }}>
-            <div
-              style={{
-                height: chartHeight,
-                flex: 'none',
-                display: 'flex',
-                flexDirection: 'column',
-                transition: 'height 200ms cubic-bezier(0.32, 0.72, 0, 1)',
-              }}
-            >
-              <ChartView
-                store={chartStore}
-                drawingsStore={drawingsStore}
-                apiClient={apiClient}
-                onSymbolSearch={() => setShowSymbolSearch(true)}
-                onIndicatorSettings={() => setShowIndicatorSettings(true)}
-                tradingMode={tradingMode}
-                onToggleMode={() => setShowModeConfirmation(true)}
-                optionsAnalyticsExpiration={optionsAnalyticsExpiration}
-              />
-            </div>
-
-            {/* Static hairline between chart and panel */}
-            <div
-              aria-hidden
-              style={{ height: DIVIDER_HEIGHT, flex: 'none', background: 'var(--hud-stroke-dim)' }}
-            />
-
-            <div
-              style={{
-                height: panelHeight,
-                flex: 'none',
-                minHeight: 0,
-                transition: 'height 200ms cubic-bezier(0.32, 0.72, 0, 1)',
-              }}
-            >
-              <TradePanel
-                tradeStore={tradeStore}
-                chainStore={chainStore}
-                onArm={arm}
-                density={panelDensity}
-                locked={locked}
-              />
-            </div>
-          </div>
-        )}
+        {contentArea}
       </div>
 
       {/* Toast overlay */}
@@ -505,6 +617,14 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
             { label: 'Cancel', role: 'cancel' },
           ]}
           onDismiss={() => setShowModeConfirmation(false)}
+        />
+      ) : null}
+      {showShortcutsHelp ? (
+        <AlertDialog
+          title="Keyboard shortcuts"
+          message="B — Buy   ·   S — Sell   ·   L — Toggle lock   ·   ⌘K — Symbol search"
+          actions={[{ label: 'Got it', role: 'cancel' }]}
+          onDismiss={() => setShowShortcutsHelp(false)}
         />
       ) : null}
     </div>

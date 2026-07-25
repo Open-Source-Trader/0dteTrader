@@ -1,57 +1,4 @@
-/* Shared iOS-look components. */
-
-/* --- Status bar + home indicator (cosmetic iPhone chrome) --- */
-.status-bar {
-  height: 59px;
-  flex: none;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 14px 28px 0;
-  position: relative;
-  z-index: var(--z-chrome);
-}
-
-.status-bar .time {
-  font-size: var(--fs-status-time);
-  font-weight: 600;
-  letter-spacing: 0.2px;
-  min-width: 54px;
-}
-
-.status-bar .island {
-  position: absolute;
-  left: 50%;
-  top: 11px;
-  transform: translateX(-50%);
-  width: 125px;
-  height: 36px;
-  background: #000;
-  border-radius: 20px;
-}
-
-.status-bar .glyphs {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-}
-
-.home-indicator {
-  height: 34px;
-  flex: none;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.home-indicator::after {
-  content: '';
-  width: 140px;
-  height: 5px;
-  border-radius: 3px;
-  background: var(--label-primary);
-  opacity: 0.9;
-}
+/* Shared HUD-look components. */
 
 /* --- NavBar (44px inline-title bar) --- */
 .navbar {
@@ -104,6 +51,18 @@
   justify-content: center;
   min-width: 44px;
   min-height: 44px;
+}
+
+/* Desktop grid (standard/wide breakpoints): tighter chrome for mouse+keyboard
+   use — a scalper wants more vertical room for chart/chain, not touch targets. */
+.navbar-desktop {
+  height: var(--h-navbar-desktop);
+  padding: 0 var(--pad-screen-desktop);
+}
+
+.navbar-desktop .navbar-icon-button {
+  min-width: 28px;
+  min-height: 28px;
 }
 
 .navbar-icon-button:hover,

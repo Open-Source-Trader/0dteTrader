@@ -122,4 +122,13 @@
   --pad-screen: 24px;
   --sheet-anim: 300ms cubic-bezier(0.32, 0.72, 0, 1);
   --toast-anim: 200ms cubic-bezier(0, 0, 0.2, 1); /* decelerate on entry */
+
+  /* Desktop-only density (standard/wide breakpoints): mouse+keyboard traders
+     tolerate — and scalpers prefer — tighter chrome than the touch targets
+     above. Additive; the touch-sized tokens above are untouched and still
+     drive the compact (phone-derived) layout. */
+  --h-button-desktop: 30px;
+  --h-trade-button-desktop: 32px;
+  --h-navbar-desktop: 36px;
+  --pad-screen-desktop: 12px;
 }

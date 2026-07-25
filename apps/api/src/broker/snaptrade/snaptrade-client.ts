@@ -3,7 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import {
   BrokerageAuthorization,
   Snaptrade,
-  UserIDandSecret,
+  SnaptradeAuth,
   AccountOrderRecord,
   AllAccountPositionsResponse,
   OptionImpact,
@@ -27,35 +27,32 @@ const SNAPTRADE_ERROR_CODES: Record<number, string> = {
   503: 'SNAPTRADE_UNAVAILABLE',
 };
 
+/**
+ * Wraps the SnapTrade SDK under **Personal API key** auth (docs.snaptrade.com/docs/personal-vs-commercial):
+ * every call authenticates with the end user's own `clientId`/`consumerKey` —
+ * there is no server-side integrator identity and no app-managed `userId`/
+ * `userSecret`. SnapTrade resolves "which user" purely from which key signed
+ * the request, so every method here takes the caller's own key pair.
+ */
 @Injectable()
 export class SnapTradeClient {
   private readonly logger = new Logger(SnapTradeClient.name);
-  private readonly clientId: string;
-  private readonly consumerKey: string;
 
-  constructor(private readonly config: ConfigService) {
-    this.clientId = config.get<string>('snaptrade.clientId') ?? '';
-    this.consumerKey = config.get<string>('snaptrade.consumerKey') ?? '';
-  }
+  constructor(private readonly config: ConfigService) {}
 
-  private ensureConfigured(): void {
-    if (!this.clientId || !this.consumerKey) {
-      throw brokerErrors.unavailable(
-        'SnapTrade is not configured on this server — set SNAPTRADE_CLIENT_ID and SNAPTRADE_CONSUMER_KEY',
+  private sdk(mode: TradingMode, clientId: string, consumerKey: string): Snaptrade<any> {
+    if (!clientId || !consumerKey) {
+      throw brokerErrors.authFailed(
+        'No SnapTrade credentials — save your Personal client ID/consumer key in Profile first',
       );
     }
-  }
-
-  private sdk(mode: TradingMode): Snaptrade {
-    this.ensureConfigured();
     const baseUrl =
       mode === 'practice'
         ? (this.config.get<string>('snaptrade.sandboxBaseUrl') ??
           'https://api.sandbox.snaptrade.com')
         : (this.config.get<string>('snaptrade.prodBaseUrl') ?? 'https://api.snaptrade.com');
     return new Snaptrade({
-      clientId: this.clientId,
-      consumerKey: this.consumerKey,
+      auth: SnaptradeAuth.personalApiKey({ clientId, consumerKey }),
       basePath: baseUrl,
     });
   }
@@ -69,29 +66,27 @@ export class SnapTradeClient {
     return new Error(`SnapTrade request failed: ${String(err)}`);
   }
 
-  private async call<T>(mode: TradingMode, fn: (sdk: Snaptrade) => Promise<T>): Promise<T> {
+  private async call<T>(
+    mode: TradingMode,
+    clientId: string,
+    consumerKey: string,
+    fn: (sdk: Snaptrade<any>) => Promise<T>,
+  ): Promise<T> {
     try {
-      return await fn(this.sdk(mode));
+      return await fn(this.sdk(mode, clientId, consumerKey));
     } catch (err) {
       throw this.mapError(err);
     }
   }
 
   // -------------------------------------------------------------------------
-  // Auth / identity
+  // Auth / connection portal
   // -------------------------------------------------------------------------
-
-  async registerUser(mode: TradingMode, userId: string): Promise<UserIDandSecret> {
-    this.logger.log(`registerUser mode=${mode} userId=${userId}`);
-    return this.call(mode, (sdk) =>
-      sdk.authentication.registerSnapTradeUser({ userId }).then((r) => r.data),
-    );
-  }
 
   async authorize(
     mode: TradingMode,
-    userId: string,
-    userSecret: string,
+    clientId: string,
+    consumerKey: string,
     opts?: {
       brokerage?: string;
       immediateRedirect?: boolean;
@@ -100,11 +95,9 @@ export class SnapTradeClient {
       connectionType?: 'read' | 'trade' | 'trade-if-available';
     },
   ): Promise<{ redirectUrl: string }> {
-    const response = await this.call<{ redirectURI?: string }>(mode, (sdk) =>
+    const response = await this.call<{ redirectURI?: string }>(mode, clientId, consumerKey, (sdk) =>
       sdk.authentication
         .loginSnapTradeUser({
-          userId,
-          userSecret,
           broker: opts?.brokerage,
           immediateRedirect: opts?.immediateRedirect,
           customRedirect: opts?.customRedirect,
@@ -126,48 +119,44 @@ export class SnapTradeClient {
 
   async listConnections(
     mode: TradingMode,
-    userId: string,
-    userSecret: string,
+    clientId: string,
+    consumerKey: string,
   ): Promise<BrokerageAuthorization[]> {
-    return this.call(mode, (sdk) =>
-      sdk.connections.listBrokerageAuthorizations({ userId, userSecret }).then((r) => r.data),
+    return this.call(mode, clientId, consumerKey, (sdk) =>
+      sdk.connections.listBrokerageAuthorizations({}).then((r) => r.data),
     );
   }
 
   async listConnectionAccounts(
     mode: TradingMode,
-    userId: string,
-    userSecret: string,
+    clientId: string,
+    consumerKey: string,
     authorizationId: string,
   ): Promise<Account[]> {
-    return this.call(mode, (sdk) =>
-      sdk.connections
-        .listBrokerageAuthorizationAccounts({ authorizationId, userId, userSecret })
-        .then((r) => r.data),
+    return this.call(mode, clientId, consumerKey, (sdk) =>
+      sdk.connections.listBrokerageAuthorizationAccounts({ authorizationId }).then((r) => r.data),
     );
   }
 
   async deleteConnection(
     mode: TradingMode,
-    userId: string,
-    userSecret: string,
+    clientId: string,
+    consumerKey: string,
     authorizationId: string,
   ): Promise<void> {
-    await this.call(mode, (sdk) =>
-      sdk.connections.removeBrokerageAuthorization({ authorizationId, userId, userSecret }),
+    await this.call(mode, clientId, consumerKey, (sdk) =>
+      sdk.connections.removeBrokerageAuthorization({ authorizationId }),
     );
   }
 
   async refreshConnection(
     mode: TradingMode,
-    userId: string,
-    userSecret: string,
+    clientId: string,
+    consumerKey: string,
     authorizationId: string,
   ): Promise<BrokerageAuthorizationRefreshConfirmation> {
-    return this.call(mode, (sdk) =>
-      sdk.connections
-        .refreshBrokerageAuthorization({ authorizationId, userId, userSecret })
-        .then((r) => r.data),
+    return this.call(mode, clientId, consumerKey, (sdk) =>
+      sdk.connections.refreshBrokerageAuthorization({ authorizationId }).then((r) => r.data),
     );
   }
 
@@ -177,26 +166,24 @@ export class SnapTradeClient {
 
   async getAllAccountPositions(
     mode: TradingMode,
-    userId: string,
-    userSecret: string,
+    clientId: string,
+    consumerKey: string,
     accountId: string,
   ): Promise<AllAccountPositionsResponse> {
-    return this.call(mode, (sdk) =>
-      sdk.accountInformation
-        .getAllAccountPositions({ userId, userSecret, accountId })
-        .then((r) => r.data),
+    return this.call(mode, clientId, consumerKey, (sdk) =>
+      sdk.accountInformation.getAllAccountPositions({ accountId }).then((r) => r.data),
     );
   }
 
   async getOpenOrders(
     mode: TradingMode,
-    userId: string,
-    userSecret: string,
+    clientId: string,
+    consumerKey: string,
     accountId: string,
   ): Promise<AccountOrderRecord[]> {
-    return this.call(mode, (sdk) =>
+    return this.call(mode, clientId, consumerKey, (sdk) =>
       sdk.accountInformation
-        .getUserAccountOrders({ userId, userSecret, accountId, state: 'open', days: 30 })
+        .getUserAccountOrders({ accountId, state: 'open', days: 30 })
         .then((r) => r.data),
     );
   }
@@ -207,8 +194,8 @@ export class SnapTradeClient {
 
   async previewEquityOrder(
     mode: TradingMode,
-    userId: string,
-    userSecret: string,
+    clientId: string,
+    consumerKey: string,
     payload: {
       account_id: string;
       action: 'BUY' | 'SELL';
@@ -220,15 +207,15 @@ export class SnapTradeClient {
       universal_symbol_id: null;
     },
   ): Promise<ManualTradeAndImpact> {
-    return this.call(mode, (sdk) =>
-      sdk.trading.getOrderImpact({ userId, userSecret, ...payload } as any).then((r) => r.data),
+    return this.call(mode, clientId, consumerKey, (sdk) =>
+      sdk.trading.getOrderImpact({ ...payload } as any).then((r) => r.data),
     );
   }
 
   async previewOptionOrder(
     mode: TradingMode,
-    userId: string,
-    userSecret: string,
+    clientId: string,
+    consumerKey: string,
     accountId: string,
     payload: {
       order_type: 'MARKET' | 'LIMIT';
@@ -242,10 +229,8 @@ export class SnapTradeClient {
       }[];
     },
   ): Promise<OptionImpact> {
-    return this.call(mode, (sdk) =>
-      sdk.trading
-        .getOptionImpact({ userId, userSecret, accountId, ...payload } as any)
-        .then((r) => r.data),
+    return this.call(mode, clientId, consumerKey, (sdk) =>
+      sdk.trading.getOptionImpact({ accountId, ...payload } as any).then((r) => r.data),
     );
   }
 
@@ -255,8 +240,8 @@ export class SnapTradeClient {
 
   async placeEquityOrder(
     mode: TradingMode,
-    userId: string,
-    userSecret: string,
+    clientId: string,
+    consumerKey: string,
     payload: {
       account_id: string;
       action: 'BUY' | 'SELL';
@@ -269,15 +254,15 @@ export class SnapTradeClient {
       universal_symbol_id: null;
     },
   ): Promise<AccountOrderRecord> {
-    return this.call(mode, (sdk) =>
-      sdk.trading.placeForceOrder({ userId, userSecret, ...payload } as any).then((r) => r.data),
+    return this.call(mode, clientId, consumerKey, (sdk) =>
+      sdk.trading.placeForceOrder({ ...payload } as any).then((r) => r.data),
     );
   }
 
   async placeOptionOrder(
     mode: TradingMode,
-    userId: string,
-    userSecret: string,
+    clientId: string,
+    consumerKey: string,
     accountId: string,
     payload: {
       order_type: 'MARKET' | 'LIMIT';
@@ -291,23 +276,21 @@ export class SnapTradeClient {
       }[];
     },
   ): Promise<MlegOrderResponse> {
-    return this.call(mode, (sdk) =>
-      sdk.trading
-        .placeMlegOrder({ userId, userSecret, accountId, ...payload } as any)
-        .then((r) => r.data),
+    return this.call(mode, clientId, consumerKey, (sdk) =>
+      sdk.trading.placeMlegOrder({ accountId, ...payload } as any).then((r) => r.data),
     );
   }
 
   async cancelOrder(
     mode: TradingMode,
-    userId: string,
-    userSecret: string,
+    clientId: string,
+    consumerKey: string,
     accountId: string,
     brokerageOrderId: string,
   ): Promise<CancelOrderResponse> {
-    return this.call(mode, (sdk) =>
+    return this.call(mode, clientId, consumerKey, (sdk) =>
       sdk.trading
-        .cancelOrder({ userId, userSecret, accountId, brokerage_order_id: brokerageOrderId })
+        .cancelOrder({ accountId, brokerage_order_id: brokerageOrderId } as any)
         .then((r) => r.data),
     );
   }
@@ -318,35 +301,31 @@ export class SnapTradeClient {
 
   async getAccountQuotes(
     mode: TradingMode,
-    userId: string,
-    userSecret: string,
+    clientId: string,
+    consumerKey: string,
     accountId: string,
     symbols: string[],
   ): Promise<unknown> {
-    return this.call(mode, (sdk) =>
+    return this.call(mode, clientId, consumerKey, (sdk) =>
       sdk.trading
         .getUserAccountQuotes({
-          userId,
-          userSecret,
           symbols: symbols.join(','),
           accountId,
           useTicker: false,
-        })
+        } as any)
         .then((r) => r.data),
     );
   }
 
   async getAccountOptionQuotes(
     mode: TradingMode,
-    userId: string,
-    userSecret: string,
+    clientId: string,
+    consumerKey: string,
     accountId: string,
     symbol: string,
   ): Promise<unknown> {
-    return this.call(mode, (sdk) =>
-      sdk.trading
-        .getUserAccountOptionQuotes({ userId, userSecret, accountId, symbol })
-        .then((r) => r.data),
+    return this.call(mode, clientId, consumerKey, (sdk) =>
+      sdk.trading.getUserAccountOptionQuotes({ accountId, symbol } as any).then((r) => r.data),
     );
   }
 }

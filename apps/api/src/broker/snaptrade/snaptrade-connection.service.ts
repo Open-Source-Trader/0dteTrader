@@ -2,7 +2,8 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CredentialsService } from '../../credentials/credentials.service';
 import { SnapTradeClient } from './snaptrade-client';
-import { TradingMode } from '@0dtetrader/shared-types';
+import { SnapTradeSecrets, TradingMode } from '@0dtetrader/shared-types';
+import { brokerErrors } from '../../common/broker-error';
 
 /** Locally persisted SnapTrade connection metadata. */
 export interface SnapTradeConnectionRecord {
@@ -16,11 +17,6 @@ export interface SnapTradeConnectionRecord {
   createdAt: Date;
 }
 
-/**
- * SnapTrade connection lifecycle: register, authorize, list connections,
- * list accounts, delete, and reconnect. All mutations are per-user and
- * scoped to the user's selected trading mode (live / practice).
- */
 type BrokerConnectionDelegate = {
   findMany(args: { where: { userId: string; provider: string } }): Promise<
     Array<{
@@ -51,6 +47,17 @@ type BrokerConnectionDelegate = {
   }): Promise<unknown>;
 };
 
+/**
+ * SnapTrade connection lifecycle: authorize (Connection Portal), list
+ * connections, list accounts, delete, and reconnect. All mutations are
+ * per-user and scoped to the user's selected trading mode (live / practice).
+ *
+ * **Personal API key model:** each user brings their own SnapTrade Personal
+ * `clientId`/`consumerKey` (entered in Profile, same as Alpaca's API key —
+ * see `CredentialsService`). There is no server-minted SnapTrade identity:
+ * we never call `registerUser`, never hold a `userId`/`userSecret`, and the
+ * operator is never the SnapTrade customer of record for any user's data.
+ */
 @Injectable()
 export class SnapTradeConnectionService {
   constructor(
@@ -61,32 +68,6 @@ export class SnapTradeConnectionService {
 
   private get brokerConnections() {
     return this.prisma as PrismaService & { brokerConnection: BrokerConnectionDelegate };
-  }
-
-  /**
-   * Register a new SnapTrade user (mint userId + userSecret) and persist
-   * the identity encrypted in `broker_credentials`. Idempotent: if the
-   * identity already exists, it is preserved.
-   */
-  async registerUser(
-    userId: string,
-    mode: TradingMode = 'live',
-  ): Promise<{
-    userId: string;
-    userSecret: string;
-  }> {
-    const existing = await this.credentials.getSnapTradeIdentity(userId, mode);
-    if (existing) {
-      return { userId: existing.snaptradeUserId, userSecret: existing.snaptradeUserSecret };
-    }
-    const result = await this.client.registerUser(mode, userId);
-    const userSecret = result.userSecret ?? '';
-    await this.credentials.saveSnapTradeIdentity(userId, {
-      provider: 'snaptrade',
-      snaptradeUserId: result.userId ?? userId,
-      snaptradeUserSecret: userSecret,
-    });
-    return { userId: result.userId ?? userId, userSecret };
   }
 
   /**
@@ -104,8 +85,8 @@ export class SnapTradeConnectionService {
       connectionType?: 'read' | 'trade' | 'trade-if-available';
     },
   ): Promise<{ redirectUrl: string }> {
-    const identity = await this.ensureIdentity(userId, mode);
-    return this.client.authorize(mode, identity.userId, identity.userSecret, opts);
+    const { clientId, consumerKey } = await this.credentialsFor(userId, mode);
+    return this.client.authorize(mode, clientId, consumerKey, opts);
   }
 
   /**
@@ -113,8 +94,8 @@ export class SnapTradeConnectionService {
    * persisted `BrokerConnection` rows.
    */
   async listConnections(userId: string, mode: TradingMode): Promise<SnapTradeConnectionRecord[]> {
-    const identity = await this.ensureIdentity(userId, mode);
-    const remote = await this.client.listConnections(mode, identity.userId, identity.userSecret);
+    const { clientId, consumerKey } = await this.credentialsFor(userId, mode);
+    const remote = await this.client.listConnections(mode, clientId, consumerKey);
     const local = await this.brokerConnections.brokerConnection.findMany({
       where: { userId, provider: 'snaptrade' },
     });
@@ -152,11 +133,11 @@ export class SnapTradeConnectionService {
     mode: TradingMode,
     connectionId: string,
   ): Promise<Array<{ accountId: string; name: string }>> {
-    const identity = await this.ensureIdentity(userId, mode);
+    const { clientId, consumerKey } = await this.credentialsFor(userId, mode);
     const accounts = await this.client.listConnectionAccounts(
       mode,
-      identity.userId,
-      identity.userSecret,
+      clientId,
+      consumerKey,
       connectionId,
     );
     return accounts.map((a) => ({ accountId: a.id ?? '', name: a.name ?? '' }));
@@ -166,8 +147,8 @@ export class SnapTradeConnectionService {
    * Delete a SnapTrade connection (both remote and local).
    */
   async deleteConnection(userId: string, mode: TradingMode, connectionId: string): Promise<void> {
-    const identity = await this.ensureIdentity(userId, mode);
-    await this.client.deleteConnection(mode, identity.userId, identity.userSecret, connectionId);
+    const { clientId, consumerKey } = await this.credentialsFor(userId, mode);
+    await this.client.deleteConnection(mode, clientId, consumerKey, connectionId);
     await this.brokerConnections.brokerConnection.deleteMany({
       where: { userId, provider: 'snaptrade', connectionId },
     });
@@ -181,10 +162,8 @@ export class SnapTradeConnectionService {
     mode: TradingMode,
     connectionId: string,
   ): Promise<{ redirectUrl: string }> {
-    const identity = await this.ensureIdentity(userId, mode);
-    return this.client.authorize(mode, identity.userId, identity.userSecret, {
-      reconnect: connectionId,
-    });
+    const { clientId, consumerKey } = await this.credentialsFor(userId, mode);
+    return this.client.authorize(mode, clientId, consumerKey, { reconnect: connectionId });
   }
 
   /**
@@ -213,15 +192,23 @@ export class SnapTradeConnectionService {
   // Internals
   // -------------------------------------------------------------------------
 
-  private async ensureIdentity(
-    userId: string,
-    mode: TradingMode,
-  ): Promise<{ userId: string; userSecret: string }> {
-    const identity = await this.credentials.getSnapTradeIdentity(userId, mode);
-    if (!identity) {
-      const created = await this.registerUser(userId, mode);
-      return { userId: created.userId, userSecret: created.userSecret };
+  /**
+   * Resolve the user's own stored SnapTrade Personal client ID/consumer key.
+   * Throws if the user hasn't entered one yet — there is no identity to mint
+   * on their behalf under the Personal API key model.
+   */
+  private async credentialsFor(userId: string, mode: TradingMode): Promise<SnapTradeSecrets> {
+    const stored = await this.credentials.getDecrypted(userId, 'snaptrade', mode);
+    if (!stored) {
+      throw brokerErrors.authFailed(
+        mode === 'practice'
+          ? 'No SnapTrade practice credentials — save your Personal client ID/consumer key in Profile first'
+          : 'No SnapTrade credentials — save your Personal client ID/consumer key in Profile first',
+      );
     }
-    return { userId: identity.snaptradeUserId, userSecret: identity.snaptradeUserSecret };
+    if (stored.provider !== 'snaptrade') {
+      throw brokerErrors.authFailed('Stored credentials are not SnapTrade credentials');
+    }
+    return stored;
   }
 }

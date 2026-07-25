@@ -11,10 +11,10 @@ describe('SnapTradeBrokerGateway', () => {
       getAllAccountPositions: jest.fn(async () => ({ results: [] })),
     } as unknown as jest.Mocked<SnapTradeClient>;
     const credentials = {
-      getSnapTradeIdentity: jest.fn(async () => ({
+      getDecrypted: jest.fn(async () => ({
         provider: 'snaptrade',
-        snaptradeUserId: 'snap-user',
-        snaptradeUserSecret: 'snap-secret',
+        clientId: 'snap-client',
+        consumerKey: 'snap-consumer-key',
       })),
     } as unknown as jest.Mocked<CredentialsService>;
     const prisma = {
@@ -41,8 +41,8 @@ describe('SnapTradeBrokerGateway', () => {
 
     expect(client.getAllAccountPositions).toHaveBeenCalledWith(
       'live',
-      'u1',
-      'snap-secret',
+      'snap-client',
+      'snap-consumer-key',
       'acct-1',
     );
   });

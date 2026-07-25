@@ -75,7 +75,7 @@ export class SnapTradeBrokerGateway implements BrokerGateway {
   // -------------------------------------------------------------------------
 
   async previewOrder(userId: string, order: OrderRequest): Promise<OrderPreview> {
-    const { mode, secrets, accountId } = await this.identityFor(userId);
+    const { mode, clientId, consumerKey, accountId } = await this.credentialsFor(userId);
     const limitPrice = order.orderType === 'market' ? undefined : this.estimatedMid(order);
 
     let impact: { estBuyingPower: number; warnings: string[] } | undefined;
@@ -93,8 +93,8 @@ export class SnapTradeBrokerGateway implements BrokerGateway {
         );
         const result = await this.client.previewOptionOrder(
           mode,
-          userId,
-          secrets.snaptradeUserSecret,
+          clientId,
+          consumerKey,
           accountId,
           payload,
         );
@@ -106,8 +106,8 @@ export class SnapTradeBrokerGateway implements BrokerGateway {
         const payload = buildEquityOrderPayload(accountId, order, limitPrice);
         const result = await this.client.previewEquityOrder(
           mode,
-          userId,
-          secrets.snaptradeUserSecret,
+          clientId,
+          consumerKey,
           payload as any,
         );
         impact = {
@@ -141,7 +141,7 @@ export class SnapTradeBrokerGateway implements BrokerGateway {
     order: OrderRequest,
     idempotencyKey: string,
   ): Promise<OrderResult> {
-    const { mode, secrets, accountId } = await this.identityFor(userId);
+    const { mode, clientId, consumerKey, accountId } = await this.credentialsFor(userId);
     const limitPrice = order.orderType === 'market' ? undefined : this.estimatedMid(order);
 
     if (order.assetClass === 'option') {
@@ -155,8 +155,8 @@ export class SnapTradeBrokerGateway implements BrokerGateway {
       );
       const result = await this.client.placeOptionOrder(
         mode,
-        userId,
-        secrets.snaptradeUserSecret,
+        clientId,
+        consumerKey,
         accountId,
         payload,
       );
@@ -167,12 +167,7 @@ export class SnapTradeBrokerGateway implements BrokerGateway {
     }
 
     const payload = buildEquityOrderPayload(accountId, order, limitPrice, idempotencyKey);
-    const result = await this.client.placeEquityOrder(
-      mode,
-      userId,
-      secrets.snaptradeUserSecret,
-      payload as any,
-    );
+    const result = await this.client.placeEquityOrder(mode, clientId, consumerKey, payload as any);
     const orderId = result.brokerage_order_id ?? idempotencyKey;
     const mapped = this.mapOrderResult(order, orderId, limitPrice);
     this.events.emit(userId, mapped);
@@ -180,34 +175,29 @@ export class SnapTradeBrokerGateway implements BrokerGateway {
   }
 
   async cancelOrder(userId: string, orderId: string): Promise<void> {
-    const { mode, secrets, accountId } = await this.identityFor(userId);
+    const { mode, clientId, consumerKey, accountId } = await this.credentialsFor(userId);
     const open = await this.getOpenOrders(userId);
     const target = open.find((o) => o.orderId === orderId);
     if (!target) throw brokerErrors.orderNotFound(orderId);
 
-    await this.client.cancelOrder(mode, userId, secrets.snaptradeUserSecret, accountId, orderId);
+    await this.client.cancelOrder(mode, clientId, consumerKey, accountId, orderId);
     this.events.emit(userId, { ...target, status: 'cancelled' });
   }
 
   async getPositions(userId: string): Promise<Position[]> {
-    const { mode, secrets, accountId } = await this.identityFor(userId);
+    const { mode, clientId, consumerKey, accountId } = await this.credentialsFor(userId);
     const response = await this.client.getAllAccountPositions(
       mode,
-      userId,
-      secrets.snaptradeUserSecret,
+      clientId,
+      consumerKey,
       accountId,
     );
     return toPositions(response);
   }
 
   async getOpenOrders(userId: string): Promise<OrderResult[]> {
-    const { mode, secrets, accountId } = await this.identityFor(userId);
-    const orders = await this.client.getOpenOrders(
-      mode,
-      userId,
-      secrets.snaptradeUserSecret,
-      accountId,
-    );
+    const { mode, clientId, consumerKey, accountId } = await this.credentialsFor(userId);
+    const orders = await this.client.getOpenOrders(mode, clientId, consumerKey, accountId);
     return orders
       .map((o: any) => toOrderResult(o))
       .filter((o) => o.status === 'submitted' || o.status === 'partially_filled');
@@ -238,9 +228,10 @@ export class SnapTradeBrokerGateway implements BrokerGateway {
   // Internals
   // -------------------------------------------------------------------------
 
-  private async identityFor(userId: string): Promise<{
+  private async credentialsFor(userId: string): Promise<{
     mode: TradingMode;
-    secrets: { snaptradeUserSecret: string };
+    clientId: string;
+    consumerKey: string;
     accountId: string;
   }> {
     const user = await this.prisma.user.findUnique({
@@ -261,13 +252,13 @@ export class SnapTradeBrokerGateway implements BrokerGateway {
     if (!accountId) {
       throw brokerErrors.authFailed('No SnapTrade trading account selected');
     }
-    const secrets = await this.credentials.getSnapTradeIdentity(userId, mode);
-    if (!secrets) {
+    const stored = await this.credentials.getDecrypted(userId, 'snaptrade', mode);
+    if (!stored || stored.provider !== 'snaptrade') {
       throw brokerErrors.authFailed(
-        'SnapTrade identity not found — re-register via the connection flow',
+        'No SnapTrade credentials — save your Personal client ID/consumer key in Profile first',
       );
     }
-    return { mode, secrets, accountId };
+    return { mode, clientId: stored.clientId, consumerKey: stored.consumerKey, accountId };
   }
 
   private async optionPositionIntent(userId: string, order: OrderRequest): Promise<PositionIntent> {

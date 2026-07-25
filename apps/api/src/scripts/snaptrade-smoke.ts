@@ -1,15 +1,17 @@
 /**
- * SnapTrade sandbox smoke test. This is intentionally conservative: it proves
- * server-side registration + portal URL generation against the configured
- * SnapTrade environment, and optionally exercises an existing connected
- * brokerage if SNAPTRADE_SMOKE_CONNECTION_ID / SNAPTRADE_SMOKE_ACCOUNT_ID are
- * provided.
+ * SnapTrade sandbox smoke test (Personal API key mode). This proves Connection
+ * Portal URL generation against a real Personal client ID/consumer key, and
+ * optionally exercises an existing connected brokerage if
+ * SNAPTRADE_SMOKE_CONNECTION_ID / SNAPTRADE_SMOKE_ACCOUNT_ID are provided.
+ *
+ * There is no server-side registration step under the Personal model — the
+ * key pair below must belong to a real SnapTrade Personal customer (create
+ * one for free in the SnapTrade Dashboard).
  *
  * Required env:
- *   SNAPTRADE_CLIENT_ID
- *   SNAPTRADE_CONSUMER_KEY
+ *   SNAPTRADE_SMOKE_CLIENT_ID
+ *   SNAPTRADE_SMOKE_CONSUMER_KEY
  * Optional env:
- *   SNAPTRADE_SMOKE_USER_ID      (defaults to smoke-<timestamp>)
  *   SNAPTRADE_SMOKE_MODE         (practice | live; default practice)
  *   SNAPTRADE_SMOKE_CONNECTION_ID
  *   SNAPTRADE_SMOKE_ACCOUNT_ID
@@ -37,31 +39,23 @@ loadDotEnv();
 
 const mode = (process.env.SNAPTRADE_SMOKE_MODE === 'live' ? 'live' : 'practice') as
   'live' | 'practice';
-const userId = process.env.SNAPTRADE_SMOKE_USER_ID ?? `smoke-${Date.now().toString(36)}`;
 const connectionId = process.env.SNAPTRADE_SMOKE_CONNECTION_ID ?? '';
 const accountId = process.env.SNAPTRADE_SMOKE_ACCOUNT_ID ?? '';
+const clientId = process.env.SNAPTRADE_SMOKE_CLIENT_ID ?? '';
+const consumerKey = process.env.SNAPTRADE_SMOKE_CONSUMER_KEY ?? '';
 
 const client = new SnapTradeClient(
   new ConfigService(process.env as Record<string, string>) as unknown as ConfigService,
 );
 
 async function main(): Promise<void> {
-  if (!process.env.SNAPTRADE_CLIENT_ID || !process.env.SNAPTRADE_CONSUMER_KEY) {
-    throw new Error('Set SNAPTRADE_CLIENT_ID and SNAPTRADE_CONSUMER_KEY.');
+  if (!clientId || !consumerKey) {
+    throw new Error('Set SNAPTRADE_SMOKE_CLIENT_ID and SNAPTRADE_SMOKE_CONSUMER_KEY.');
   }
 
-  console.log(`SnapTrade smoke test against ${mode} environment`);
-  console.log(`userId: ${userId}`);
+  console.log(`SnapTrade smoke test against ${mode} environment (Personal API key)`);
 
-  const identity = await client.registerUser(mode, userId);
-  const snaptradeUserId = identity.userId ?? userId;
-  const snaptradeUserSecret = identity.userSecret ?? '';
-  if (!snaptradeUserSecret) {
-    throw new Error('registerUser did not return a userSecret.');
-  }
-  console.log('registerUser:', JSON.stringify(identity, null, 2));
-
-  const auth = await client.authorize(mode, snaptradeUserId, snaptradeUserSecret, {
+  const auth = await client.authorize(mode, clientId, consumerKey, {
     connectionType: 'trade',
     immediateRedirect: true,
   });
@@ -74,23 +68,13 @@ async function main(): Promise<void> {
     return;
   }
 
-  const connections = await client.listConnections(mode, snaptradeUserId, snaptradeUserSecret);
+  const connections = await client.listConnections(mode, clientId, consumerKey);
   console.log('connections:', JSON.stringify(connections, null, 2));
 
-  const accounts = await client.listConnectionAccounts(
-    mode,
-    snaptradeUserId,
-    snaptradeUserSecret,
-    connectionId,
-  );
+  const accounts = await client.listConnectionAccounts(mode, clientId, consumerKey, connectionId);
   console.log('accounts:', JSON.stringify(accounts, null, 2));
 
-  const openOrders = await client.getOpenOrders(
-    mode,
-    snaptradeUserId,
-    snaptradeUserSecret,
-    accountId,
-  );
+  const openOrders = await client.getOpenOrders(mode, clientId, consumerKey, accountId);
   console.log('openOrders:', JSON.stringify(openOrders, null, 2));
 }
 

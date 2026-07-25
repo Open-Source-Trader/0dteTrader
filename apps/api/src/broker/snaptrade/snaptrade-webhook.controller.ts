@@ -1,25 +1,52 @@
 import { Controller, HttpCode, HttpStatus, Post, Req, Res } from '@nestjs/common';
 import { Request, Response } from 'express';
 import { createHmac, timingSafeEqual } from 'node:crypto';
-import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../prisma/prisma.service';
+import { CredentialsService } from '../../credentials/credentials.service';
 import { OrderEventsService } from '../order-events.service';
 
 const MAX_REPLAY_DRIFT_MS = 300_000;
 
+/** JSON.stringify with sorted keys and no extra whitespace — matches
+ *  SnapTrade's own canonicalization (`json.dumps(payload, separators=(",", ":"), sort_keys=True)`
+ *  per docs.snaptrade.com/docs/webhooks) so the HMAC is computed over the
+ *  exact bytes SnapTrade signed, regardless of the key order Express/JSON
+ *  parsing happens to preserve. */
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
+  if (value !== null && typeof value === 'object') {
+    const keys = Object.keys(value as Record<string, unknown>).sort();
+    const entries = keys.map(
+      (key) => `${JSON.stringify(key)}:${canonicalJson((value as Record<string, unknown>)[key])}`,
+    );
+    return `{${entries.join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
+
 /**
- * SnapTrade webhook receiver.
+ * SnapTrade webhook receiver (Personal API key mode).
  *
- * - Verifies the `Signature` header: HMAC-SHA256(canonical body, consumerKey), base64.
+ * - Every webhook payload carries a `clientId` (docs.snaptrade.com/docs/webhooks
+ *   — present on every event type). Under the Personal API key model each app
+ *   user has their own `clientId`, so this is what identifies which of our
+ *   users an event belongs to — **not** the payload's `userId`, which is
+ *   SnapTrade's own internal user identifier and is meaningless to us since
+ *   we never register or manage SnapTrade users.
+ * - Verifies the `Signature` header: HMAC-SHA256(canonical body, that user's
+ *   own consumerKey), base64. There is no single server-side consumer key to
+ *   verify against — each user's events are signed with their own key, so
+ *   the owning user must be resolved (via `clientId`) before the signature
+ *   can be checked.
  * - Rejects replays where `eventTimestamp` is older than 5 minutes.
  * - Always returns 2xx (SnapTrade retries with 30-min exponential backoff, 3 tries).
  *
- * Register this URL in the SnapTrade Dashboard.
+ * Each user registers this same URL in their own SnapTrade Dashboard.
  */
 @Controller('webhooks/snaptrade')
 export class SnapTradeWebhookController {
   constructor(
-    private readonly config: ConfigService,
+    private readonly credentials: CredentialsService,
     private readonly prisma: PrismaService,
     private readonly events: OrderEventsService,
   ) {}
@@ -29,17 +56,13 @@ export class SnapTradeWebhookController {
   async handle(@Req() req: Request, @Res() res: Response): Promise<void> {
     const signature = req.headers['signature'] as string | undefined;
     const timestampHeader = req.headers['eventtimestamp'] as string | undefined;
-    const consumerKey =
-      this.config.get<string>('snaptrade.webhookConsumerKey') ??
-      this.config.get<string>('snaptrade.consumerKey') ??
-      '';
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const clientId = typeof body['clientId'] === 'string' ? (body['clientId'] as string) : '';
 
-    if (!signature || !timestampHeader || !consumerKey) {
+    if (!signature || !timestampHeader || !clientId) {
       res.sendStatus(HttpStatus.BAD_REQUEST);
       return;
     }
-
-    const body = JSON.stringify(req.body ?? {});
 
     // Replay guard.
     const eventTimestamp = Date.parse(timestampHeader);
@@ -51,8 +74,31 @@ export class SnapTradeWebhookController {
       return;
     }
 
-    // Signature verification: HMAC-SHA256(body, consumerKey) base64.
-    const expected = createHmac('sha256', consumerKey).update(body).digest('base64');
+    // Resolve which app user this clientId belongs to, then verify the
+    // signature with THAT user's own consumerKey — there is no shared
+    // server-side key under the Personal API key model.
+    const owner = await this.credentials.findUserBySnapTradeClientId(clientId);
+    if (!owner) {
+      // Unknown clientId — not one of our users. 400 rather than 200 so
+      // SnapTrade's delivery logs surface the mismatch, but never touch
+      // local state for an unresolvable event.
+      res.sendStatus(HttpStatus.BAD_REQUEST);
+      return;
+    }
+    const stored = await this.credentials.getDecrypted(
+      owner.userId,
+      'snaptrade',
+      owner.environment,
+    );
+    if (!stored || stored.provider !== 'snaptrade') {
+      res.sendStatus(HttpStatus.BAD_REQUEST);
+      return;
+    }
+
+    const signedContent = canonicalJson(body);
+    const expected = createHmac('sha256', stored.consumerKey)
+      .update(signedContent)
+      .digest('base64');
     const actual = Buffer.from(signature);
     if (
       actual.length !== Buffer.from(expected).length ||
@@ -62,17 +108,10 @@ export class SnapTradeWebhookController {
       return;
     }
 
-    const event = (req.body ?? {}) as Record<string, unknown>;
-    const eventType = typeof event['event'] === 'string' ? (event['event'] as string) : '';
-    const userId = typeof event['userId'] === 'string' ? (event['userId'] as string) : '';
-
-    if (!userId) {
-      res.sendStatus(HttpStatus.BAD_REQUEST);
-      return;
-    }
+    const eventType = typeof body['eventType'] === 'string' ? (body['eventType'] as string) : '';
 
     try {
-      await this.dispatch(eventType, userId, event);
+      await this.dispatch(eventType, owner.userId, body);
     } catch {
       // Log but still 2xx so SnapTrade stops retrying.
     }
@@ -109,7 +148,9 @@ export class SnapTradeWebhookController {
     event: Record<string, unknown>,
   ): Promise<void> {
     const connectionId =
-      typeof event['connectionId'] === 'string' ? (event['connectionId'] as string) : '';
+      typeof event['brokerageAuthorizationId'] === 'string'
+        ? (event['brokerageAuthorizationId'] as string)
+        : '';
     if (!connectionId) return;
     const accounts = Array.isArray(event['accounts'])
       ? (event['accounts'] as Array<{ id?: string }>)
@@ -141,7 +182,9 @@ export class SnapTradeWebhookController {
     event: Record<string, unknown>,
   ): Promise<void> {
     const connectionId =
-      typeof event['connectionId'] === 'string' ? (event['connectionId'] as string) : '';
+      typeof event['brokerageAuthorizationId'] === 'string'
+        ? (event['brokerageAuthorizationId'] as string)
+        : '';
     if (!connectionId) return;
     await this.prisma.brokerConnection.updateMany({
       where: { userId, provider: 'snaptrade', connectionId },
@@ -154,7 +197,9 @@ export class SnapTradeWebhookController {
     event: Record<string, unknown>,
   ): Promise<void> {
     const connectionId =
-      typeof event['connectionId'] === 'string' ? (event['connectionId'] as string) : '';
+      typeof event['brokerageAuthorizationId'] === 'string'
+        ? (event['brokerageAuthorizationId'] as string)
+        : '';
     const accountId = typeof event['accountId'] === 'string' ? (event['accountId'] as string) : '';
     if (!connectionId || !accountId) return;
     await this.prisma.brokerConnection.updateMany({
@@ -164,7 +209,11 @@ export class SnapTradeWebhookController {
   }
 
   private async handleTradeUpdate(userId: string, event: Record<string, unknown>): Promise<void> {
-    const order = (event['order'] ?? event['trade']) as Record<string, unknown> | undefined;
+    const details = event['details'] as Record<string, unknown> | undefined;
+    const orders = Array.isArray(details?.['orders'])
+      ? (details['orders'] as Array<Record<string, unknown>>)
+      : [];
+    const order = orders[0];
     if (!order) return;
     const mapped = this.mapOrderResult(order);
     this.events.emit(userId, mapped);
@@ -222,13 +271,20 @@ export class SnapTradeWebhookController {
   }
 
   private extractSymbol(order: Record<string, unknown>): string {
+    const legs = Array.isArray(order['legs'])
+      ? (order['legs'] as Array<Record<string, unknown>>)
+      : [];
+    const instrument = legs[0]?.['instrument'] as Record<string, unknown> | undefined;
+    if (instrument?.['symbol'] && typeof instrument['symbol'] === 'string') {
+      return instrument['symbol'] as string;
+    }
     const optionSymbol = order['option_symbol'] as Record<string, unknown> | undefined;
-    if (optionSymbol?.ticker && typeof optionSymbol.ticker === 'string') {
-      return optionSymbol.ticker;
+    if (optionSymbol?.['ticker'] && typeof optionSymbol['ticker'] === 'string') {
+      return optionSymbol['ticker'] as string;
     }
     const universalSymbol = order['universal_symbol'] as Record<string, unknown> | undefined;
-    if (universalSymbol?.symbol && typeof universalSymbol.symbol === 'string') {
-      return universalSymbol.symbol;
+    if (universalSymbol?.['symbol'] && typeof universalSymbol['symbol'] === 'string') {
+      return universalSymbol['symbol'] as string;
     }
     return '';
   }

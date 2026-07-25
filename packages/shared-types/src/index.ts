@@ -287,10 +287,11 @@ export interface TradierSecrets {
   provider: 'tradier';
   apiKey: string;
 }
+/** SnapTrade Personal client ID + consumer key — the user's own SnapTrade identity. */
 export interface SnapTradeSecrets {
   provider: 'snaptrade';
-  snaptradeUserId: string;
-  snaptradeUserSecret: string;
+  clientId: string;
+  consumerKey: string;
 }
 export type BrokerSecrets = WebullSecrets | AlpacaSecrets | TradierSecrets | SnapTradeSecrets;
 
@@ -306,11 +307,11 @@ export interface TradierCredentialsInput {
   apiKey: string;
   environment?: TradingMode;
 }
-/** SnapTrade identity (server-minted; not user-entered). */
+/** SnapTrade Personal client ID + consumer key — user-entered, write-only, like Alpaca. */
 export interface SnapTradeCredentialsInput {
   provider: 'snaptrade';
-  snaptradeUserId: string;
-  snaptradeUserSecret: string;
+  clientId: string;
+  consumerKey: string;
   environment?: TradingMode;
 }
 export type BrokerCredentialsInput =

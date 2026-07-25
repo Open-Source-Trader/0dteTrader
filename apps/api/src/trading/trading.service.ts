@@ -7,11 +7,17 @@ import { errors, isUniqueViolation } from '../common/api-exception';
 import { BrokerError } from '../common/broker-error';
 import { PrismaService } from '../prisma/prisma.service';
 import { OrderRequestDto } from './dto/order-request.dto';
+import { OrdersService } from './orders.service';
 
 type AuditAction = 'preview' | 'place' | 'cancel';
 
 /** A pending idempotency claim older than this is a crashed attempt. */
 const PENDING_CLAIM_TTL_MS = 2 * 60_000;
+
+/** Guards against a source reporting 0 / NaN for a price we would anchor on. */
+function usablePrice(value: number | undefined): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : undefined;
+}
 
 /**
  * Order flow (docs/ARCHITECTURE.md §3, docs/SECURITY.md §4):
@@ -24,11 +30,12 @@ export class TradingService {
   constructor(
     private readonly prisma: PrismaService,
     @Inject(BROKER_GATEWAY) private readonly gateway: BrokerGateway,
+    private readonly orders: OrdersService,
   ) {}
 
   async preview(userId: string, dto: OrderRequestDto): Promise<OrderPreview> {
     await this.assertTradingEnabled(userId, 'preview', { order: dto });
-    const normalized = await this.resolveAndValidate(userId, dto);
+    const { request: normalized } = await this.resolveAndValidate(userId, dto);
     try {
       const preview = await this.gateway.previewOrder(userId, normalized);
       await this.audit(userId, 'preview', { order: dto }, preview, 'ok');
@@ -49,12 +56,23 @@ export class TradingService {
     if (replay.result) return replay.result;
 
     try {
-      const normalized = await this.resolveAndValidate(userId, dto);
+      const { request: normalized, underlyingPrice } = await this.resolveAndValidate(userId, dto);
       const result = await this.gateway.placeOrder(userId, normalized, idempotencyKey);
       await this.prisma.orderAudit.update({
         where: { id: replay.pendingId },
         data: { response: result as never, status: result.status },
       });
+      // The gateway emits the placement on the order-events bus, which persists
+      // the row without an underlying price (the broker has no such concept).
+      // Recording it here converges on the same row from the one caller that
+      // knows it — see OrdersService.record.
+      if (underlyingPrice !== undefined) {
+        // Writes only that column: the broker's status poll is already running,
+        // and a full re-record could roll a fill back to `submitted`.
+        await this.orders
+          .recordUnderlyingPrice(userId, result, underlyingPrice)
+          .catch(() => undefined); // an unanchored entry line is not worth failing an order over
+      }
       return result;
     } catch (err) {
       // Failed executions do not consume the key: the client may fix the
@@ -128,8 +146,25 @@ export class TradingService {
     return this.gateway.getOpenOrders(userId);
   }
 
-  getPositions(userId: string): Promise<Position[]> {
-    return this.gateway.getPositions(userId);
+  /**
+   * Broker positions, each annotated with the underlying price its opening
+   * fills happened at — the level the chart draws the entry line at. The
+   * annotation is best-effort: a position opened before the price was recorded
+   * (or outside this app) simply carries none.
+   */
+  async getPositions(userId: string): Promise<Position[]> {
+    const positions = await this.gateway.getPositions(userId);
+    if (positions.length === 0) return positions;
+    const anchors = await this.orders
+      .positionAnchors(
+        userId,
+        positions.map((position) => position.symbol),
+      )
+      .catch(() => new Map<string, number>());
+    return positions.map((position) => {
+      const underlyingEntryPrice = anchors.get(position.symbol);
+      return underlyingEntryPrice === undefined ? position : { ...position, underlyingEntryPrice };
+    });
   }
 
   // -------------------------------------------------------------------------
@@ -170,8 +205,15 @@ export class TradingService {
    * request is normalized to explicit mode so the gateway executes exactly
    * what the server validated. Mid prices are recomputed by the gateway from
    * live bid/ask at execution time (and in previews).
+   *
+   * Also returns the underlying's price at resolution time — the chain is
+   * fetched for every order anyway, so the entry-line anchor costs nothing
+   * extra. Undefined when the source reports an unusable price.
    */
-  private async resolveAndValidate(userId: string, dto: OrderRequestDto): Promise<OrderRequest> {
+  private async resolveAndValidate(
+    userId: string,
+    dto: OrderRequestDto,
+  ): Promise<{ request: OrderRequest; underlyingPrice: number | undefined }> {
     const { selection } = dto;
 
     if (!selection.optionType) {
@@ -184,13 +226,17 @@ export class TradingService {
       const quote = await this.gateway.getQuote(userId, dto.underlying);
       const contract = resolveAutoOtm(chain.contracts, selection.optionType, quote.last);
       return {
-        ...dto,
-        selection: {
-          mode: 'explicit',
-          optionType: selection.optionType,
-          expiration: contract.expiration,
-          strike: contract.strike,
+        request: {
+          ...dto,
+          selection: {
+            mode: 'explicit',
+            optionType: selection.optionType,
+            expiration: contract.expiration,
+            strike: contract.strike,
+          },
         },
+        // The quote that chose the strike is the honest anchor for this fill.
+        underlyingPrice: usablePrice(quote.last) ?? usablePrice(chain.underlyingPrice),
       };
     }
 
@@ -205,13 +251,16 @@ export class TradingService {
       );
     }
     return {
-      ...dto,
-      selection: {
-        mode: 'explicit',
-        optionType: selection.optionType,
-        expiration,
-        strike: selection.strike,
+      request: {
+        ...dto,
+        selection: {
+          mode: 'explicit',
+          optionType: selection.optionType,
+          expiration,
+          strike: selection.strike,
+        },
       },
+      underlyingPrice: usablePrice(chain.underlyingPrice),
     };
   }
 

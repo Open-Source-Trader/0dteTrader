@@ -153,6 +153,49 @@ export class TradeStore extends Store<TradeStoreState> {
 
     const chainState = chainStore.getState();
     const optionType = chainState.optionType;
+
+    // Selling the contract you are already long closes (part of) that position
+    // rather than opening a short. The ticket quantity is honored but capped at
+    // the position size — the cap is what stops a large ticket from flipping
+    // through zero into a short nobody asked for, while a smaller ticket still
+    // scales out partially. The summary says exactly what will happen.
+    const selected = chainStore.selectedContract;
+    const held =
+      side === 'sell' && selected
+        ? this.getState().positions.find((p) => p.symbol === selected.symbol && p.quantity > 0)
+        : undefined;
+    if (selected && held) {
+      const closeQuantity = Math.min(quantity, held.quantity);
+      const shortName = selected.optionType === 'call' ? 'C' : 'P';
+      const sizeLabel =
+        closeQuantity < held.quantity ? `${closeQuantity} of ${held.quantity}` : `${closeQuantity}`;
+      this.set({
+        armedTicket: {
+          id: nextId++,
+          request: {
+            underlying,
+            assetClass: 'option',
+            side,
+            quantity: closeQuantity,
+            orderType,
+            selection: {
+              mode: 'explicit',
+              optionType: selected.optionType,
+              expiration: selected.expiration,
+              strike: selected.strike,
+            },
+          },
+          idempotencyKey: newIdempotencyKey(),
+          side,
+          summary: `CLOSE ${sizeLabel} · ${underlying} ${Format.strike(selected.strike)}${shortName}`,
+        },
+        preview: null,
+        previewError: null,
+      });
+      void this.loadPreview();
+      return;
+    }
+
     if (chainState.isAutoMode) {
       selection = {
         mode: 'auto_otm',

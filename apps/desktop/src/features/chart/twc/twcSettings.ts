@@ -172,7 +172,7 @@ export const DEFAULT_TWC_SETTINGS: TwcHeatmapSettings = {
 
   vwapLook: 34,
   vwapWarn: 1.5,
-  showVwapRip: true,
+  showVwapRip: false,
 
   msiBullThr: 75,
   msiBearThr: 25,

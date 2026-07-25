@@ -1,4 +1,4 @@
-import type { OrderResult, Quote, StreamServerMessage } from '@0dtetrader/shared-types';
+import type { ChartOrder, OrderResult, Quote, StreamServerMessage } from '@0dtetrader/shared-types';
 import { Store } from '../observable';
 
 export type SocketConnectionState = 'disconnected' | 'connecting' | 'connected';
@@ -29,6 +29,7 @@ export class QuoteSocket extends Store<QuoteSocketState> {
   private watchdogTimer: ReturnType<typeof setTimeout> | null = null;
   private orderUpdateListeners = new Set<(update: OrderResult) => void>();
   private quoteListeners = new Set<(quote: Quote) => void>();
+  private chartOrderListeners = new Set<(order: ChartOrder) => void>();
 
   constructor(
     private readonly streamUrl: string,
@@ -45,6 +46,14 @@ export class QuoteSocket extends Store<QuoteSocketState> {
   onQuote(listener: (quote: Quote) => void): () => void {
     this.quoteListeners.add(listener);
     return () => this.quoteListeners.delete(listener);
+  }
+
+  /** Server-side chart-order watcher fired, failed, or retired a line. */
+  onChartOrder(listener: (order: ChartOrder) => void): () => void {
+    this.chartOrderListeners.add(listener);
+    return () => {
+      this.chartOrderListeners.delete(listener);
+    };
   }
 
   // MARK: - Lifecycle
@@ -233,6 +242,9 @@ export class QuoteSocket extends Store<QuoteSocketState> {
       }
       case 'orderUpdate':
         this.orderUpdateListeners.forEach((listener) => listener(message.data));
+        break;
+      case 'chartOrder':
+        this.chartOrderListeners.forEach((listener) => listener(message.data));
         break;
       case 'error':
         this.set({ lastErrorMessage: message.error.message });

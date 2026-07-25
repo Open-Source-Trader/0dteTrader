@@ -216,6 +216,9 @@ struct Position: Equatable, Sendable, Identifiable {
     var unrealizedPnl: Double
     /// Contract multiplier (options: 100) for live P/L math.
     let multiplier: Double
+    /// Underlying price the position was opened at — the level the chart's
+    /// entry line sits at. Nil when the server has no record of it.
+    var underlyingEntryPrice: Double?
 }
 
 extension Position {
@@ -230,7 +233,8 @@ extension Position {
             avgPrice: dto.avgPrice,
             markPrice: dto.markPrice,
             unrealizedPnl: dto.unrealizedPnl,
-            multiplier: dto.multiplier
+            multiplier: dto.multiplier,
+            underlyingEntryPrice: dto.underlyingEntryPrice
         )
     }
 }

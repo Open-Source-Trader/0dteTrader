@@ -121,6 +121,25 @@ describe('OrdersService', () => {
     expect(history.totalRealizedPnl).toBe(-40);
   });
 
+  it('ignores a degenerate filled row reporting zero executed quantity', async () => {
+    // A broker snapshot can report status `filled` with an explicit
+    // filledQuantity of 0 (transient poll state). Booking it would divide 0/0
+    // and NaN-poison the contract's average cost forever.
+    await orders.record(
+      USER,
+      fill({ side: 'buy', quantity: 5, filledPrice: 1.2, filledQuantity: 0 }),
+    );
+    // A real round trip afterwards must still compute cleanly.
+    await orders.record(USER, fill({ side: 'buy', quantity: 2, filledPrice: 1.0 }));
+    await orders.record(USER, fill({ side: 'sell', quantity: 2, filledPrice: 1.5 }));
+
+    const history = await orders.history(USER);
+    expect(history.entries[2].realizedPnl).toBeNull(); // the degenerate row
+    expect(history.entries[0].realizedPnl).toBe(100);
+    expect(Number.isNaN(history.totalRealizedPnl)).toBe(false);
+    expect(history.totalRealizedPnl).toBe(100);
+  });
+
   it('keeps rejected and cancelled orders in history with no P/L', async () => {
     await orders.record(USER, fill({ status: 'rejected', filledPrice: undefined }));
     await orders.record(
@@ -141,6 +160,196 @@ describe('OrdersService', () => {
     const history = await orders.history(USER);
     expect(history.entries).toHaveLength(1);
     expect(history.entries[0].contractSymbol).toBe(OCC);
+  });
+
+  describe('recordUnderlyingPrice', () => {
+    /**
+     * The broker's status poll starts before the placement path gets control,
+     * so a fill can land in between. Stamping the anchor must not drag the row
+     * back to the submitted snapshot the placement path is holding.
+     */
+    it('never rolls a fill back to the submitted status it raced', async () => {
+      const submitted = fill({ status: 'submitted', filledPrice: undefined, orderType: 'mid' });
+      await orders.record(USER, submitted);
+      // The poll reports the fill.
+      await orders.record(USER, { ...submitted, status: 'filled', filledPrice: 1.42 });
+
+      // Placement path stamps the anchor, still holding the submitted result.
+      await orders.recordUnderlyingPrice(USER, submitted, 600);
+
+      const row = prisma.tradeOrders.find((o) => o.id === submitted.orderId);
+      expect(row.status).toBe('filled');
+      expect(row.filledPrice).toBe(1.42);
+      expect(row.underlyingPrice).toBe(600);
+    });
+
+    it('creates the row when it wins the race against the events bus', async () => {
+      const order = fill({ filledPrice: 1.0 });
+
+      await orders.recordUnderlyingPrice(USER, order, 600);
+
+      const row = prisma.tradeOrders.find((o) => o.id === order.orderId);
+      expect(row.underlyingPrice).toBe(600);
+      expect(row.status).toBe('filled');
+    });
+
+    it('leaves the anchor alone when a later status update arrives', async () => {
+      const order = fill({ status: 'submitted', filledPrice: undefined });
+      await orders.recordUnderlyingPrice(USER, order, 600);
+
+      await orders.record(USER, { ...order, status: 'filled', filledPrice: 1.1 });
+
+      const row = prisma.tradeOrders.find((o) => o.id === order.orderId);
+      expect(row.underlyingPrice).toBe(600);
+      expect(row.filledPrice).toBe(1.1);
+    });
+  });
+
+  describe('positionAnchors (chart entry line)', () => {
+    it('averages the underlying price over the fills that opened the position', async () => {
+      await orders.recordUnderlyingPrice(
+        USER,
+        fill({ side: 'buy', quantity: 1, filledPrice: 1.0 }),
+        600,
+      );
+      await orders.recordUnderlyingPrice(
+        USER,
+        fill({ side: 'buy', quantity: 3, filledPrice: 1.2 }),
+        604,
+      );
+
+      // Quantity-weighted: (600×1 + 604×3) / 4
+      expect(await orders.positionAnchors(USER, [OCC])).toEqual(new Map([[OCC, 603]]));
+    });
+
+    it('omits a contract whose fills carry no underlying price', async () => {
+      // Opened before the column existed, or outside the app.
+      await orders.record(USER, fill({ side: 'buy', quantity: 1, filledPrice: 1.0 }));
+
+      expect(await orders.positionAnchors(USER, [OCC]).then((m) => m.size)).toBe(0);
+    });
+
+    it('blends only the fills that reported a price, never averaging a missing one in as zero', async () => {
+      await orders.record(USER, fill({ side: 'buy', quantity: 1, filledPrice: 1.0 }));
+      await orders.recordUnderlyingPrice(
+        USER,
+        fill({ side: 'buy', quantity: 1, filledPrice: 1.0 }),
+        604,
+      );
+
+      expect(await orders.positionAnchors(USER, [OCC])).toEqual(new Map([[OCC, 604]]));
+    });
+
+    it('leaves the anchor untouched when the position is only partially closed', async () => {
+      await orders.recordUnderlyingPrice(
+        USER,
+        fill({ side: 'buy', quantity: 2, filledPrice: 1.0 }),
+        600,
+      );
+      await orders.recordUnderlyingPrice(
+        USER,
+        fill({ side: 'buy', quantity: 2, filledPrice: 1.0 }),
+        610,
+      );
+      await orders.recordUnderlyingPrice(
+        USER,
+        fill({ side: 'sell', quantity: 2, filledPrice: 1.5 }),
+        615,
+      );
+
+      expect(await orders.positionAnchors(USER, [OCC])).toEqual(new Map([[OCC, 605]]));
+    });
+
+    it('re-weights a later add against the remaining open quantity, not the closed one', async () => {
+      await orders.recordUnderlyingPrice(
+        USER,
+        fill({ side: 'buy', quantity: 2, filledPrice: 1.0 }),
+        600,
+      );
+      await orders.recordUnderlyingPrice(
+        USER,
+        fill({ side: 'buy', quantity: 2, filledPrice: 1.0 }),
+        610,
+      );
+      await orders.recordUnderlyingPrice(
+        USER,
+        fill({ side: 'sell', quantity: 2, filledPrice: 1.5 }),
+        615,
+      );
+      await orders.recordUnderlyingPrice(
+        USER,
+        fill({ side: 'buy', quantity: 2, filledPrice: 1.0 }),
+        620,
+      );
+
+      // 2 open at 605 + 2 new at 620 — the closed 2 must not still carry weight.
+      expect(await orders.positionAnchors(USER, [OCC])).toEqual(new Map([[OCC, 612.5]]));
+    });
+
+    it('drops the anchor once the position is flat', async () => {
+      await orders.recordUnderlyingPrice(
+        USER,
+        fill({ side: 'buy', quantity: 1, filledPrice: 1.0 }),
+        600,
+      );
+      await orders.recordUnderlyingPrice(
+        USER,
+        fill({ side: 'sell', quantity: 1, filledPrice: 1.5 }),
+        610,
+      );
+
+      expect(await orders.positionAnchors(USER, [OCC]).then((m) => m.size)).toBe(0);
+    });
+
+    it('re-anchors on the flipping fill when a position reverses through zero', async () => {
+      await orders.recordUnderlyingPrice(
+        USER,
+        fill({ side: 'buy', quantity: 1, filledPrice: 1.0 }),
+        600,
+      );
+      await orders.recordUnderlyingPrice(
+        USER,
+        fill({ side: 'sell', quantity: 3, filledPrice: 1.5 }),
+        610,
+      );
+
+      // Now short 2, opened at the price the reversal happened at.
+      expect(await orders.positionAnchors(USER, [OCC])).toEqual(new Map([[OCC, 610]]));
+    });
+
+    it('only replays the contracts asked for, and none when asked for none', async () => {
+      const other = 'QQQ260717C00505000';
+      await orders.recordUnderlyingPrice(
+        USER,
+        fill({ side: 'buy', quantity: 1, filledPrice: 1.0 }),
+        600,
+      );
+      await orders.recordUnderlyingPrice(
+        USER,
+        fill({ contractSymbol: other, side: 'buy', quantity: 1, filledPrice: 1.0 }),
+        500,
+      );
+
+      expect(await orders.positionAnchors(USER, [other])).toEqual(new Map([[other, 500]]));
+      expect(await orders.positionAnchors(USER, [])).toEqual(new Map());
+    });
+
+    it('does not anchor a live position on a practice fill', async () => {
+      const practiceUser = await prisma.user.create({
+        data: { email: 'anchor@example.com', passwordHash: 'h', tradingMode: 'practice' },
+      });
+      await orders.recordUnderlyingPrice(
+        practiceUser.id as string,
+        fill({ filledPrice: 1.0 }),
+        600,
+      );
+      // Same user flips to live: the practice fill must not follow them over.
+      prisma.users.find((u) => u.id === practiceUser.id).tradingMode = 'live';
+
+      expect(
+        await orders.positionAnchors(practiceUser.id as string, [OCC]).then((m) => m.size),
+      ).toBe(0);
+    });
   });
 
   it("stamps the order with the user's current trading mode", async () => {

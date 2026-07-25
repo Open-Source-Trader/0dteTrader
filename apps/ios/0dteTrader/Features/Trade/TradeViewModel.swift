@@ -65,6 +65,13 @@ final class TradeViewModel: ObservableObject {
         self.apiClient = apiClient
     }
 
+    #if DEBUG
+    /// Seeds positions without a network round trip (tests only).
+    func setPositionsForTesting(_ positions: [Position]) {
+        self.positions = positions
+    }
+    #endif
+
     // MARK: - Quantity (FR-18)
 
     func setQuantity(_ value: Int) {
@@ -97,6 +104,46 @@ final class TradeViewModel: ObservableObject {
         let selection: OrderSelectionDTO
         let summary: String
         let optionType = chainViewModel.optionType
+
+        // Selling the contract you are already long closes (part of) that
+        // position rather than opening a short. The ticket quantity is honored
+        // but capped at the position size — the cap stops a large ticket from
+        // flipping through zero into a short, while a smaller ticket still
+        // scales out partially. The summary says exactly what will happen.
+        if side == .sell,
+           let contract = chainViewModel.selectedContract,
+           let position = positions.first(where: { $0.symbol == contract.symbol && $0.quantity > 0 }) {
+            let closeQuantity = min(quantity, position.quantity)
+            let sizeLabel = closeQuantity < position.quantity
+                ? "\(closeQuantity) of \(position.quantity)"
+                : "\(closeQuantity)"
+            let request = OrderRequestDTO(
+                underlying: underlying,
+                assetClass: "option",
+                side: side.rawValue,
+                quantity: closeQuantity,
+                orderType: orderType.rawValue,
+                selection: OrderSelectionDTO(
+                    mode: "explicit",
+                    optionType: contract.optionType.rawValue,
+                    expiration: contract.expiration,
+                    strike: contract.strike
+                )
+            )
+            armedTicket = ArmedOrderTicket(
+                id: UUID(),
+                request: request,
+                idempotencyKey: UUID().uuidString,
+                side: side,
+                summary: "CLOSE \(sizeLabel) · \(underlying) "
+                    + "\(Format.strike(contract.strike))\(contract.optionType.shortName)"
+            )
+            preview = nil
+            previewError = nil
+            submitError = nil
+            Task { await loadPreview() }
+            return
+        }
 
         if chainViewModel.isAutoMode {
             selection = OrderSelectionDTO(

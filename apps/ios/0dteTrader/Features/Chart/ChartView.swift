@@ -11,6 +11,13 @@ struct ChartView: View {
     /// Practice/live badge state; nil hides the badge (pre-fetch).
     let tradingMode: TradingMode?
     let onToggleMode: () -> Void
+    /// Chart trading: the order-line model plus the entry lines to draw.
+    /// Nil leaves the overlay off entirely.
+    var chartOrders: ChartOrdersModel?
+    var chartTradingSettings: ChartTradingSettings = .default
+    var entryLines: [EntryLineModel] = []
+    var placementPrice: Double?
+    weak var orderLineDelegate: OrderLineOverlayDelegate?
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var showClearConfirm = false
@@ -25,7 +32,12 @@ struct ChartView: View {
         onSymbolSearch: @escaping () -> Void,
         onIndicatorSettings: @escaping () -> Void,
         tradingMode: TradingMode? = nil,
-        onToggleMode: @escaping () -> Void = {}
+        onToggleMode: @escaping () -> Void = {},
+        chartOrders: ChartOrdersModel? = nil,
+        chartTradingSettings: ChartTradingSettings = .default,
+        entryLines: [EntryLineModel] = [],
+        placementPrice: Double? = nil,
+        orderLineDelegate: OrderLineOverlayDelegate? = nil
     ) {
         _viewModel = ObservedObject(wrappedValue: viewModel)
         _drawings = ObservedObject(wrappedValue: viewModel.drawings)
@@ -33,6 +45,11 @@ struct ChartView: View {
         self.onIndicatorSettings = onIndicatorSettings
         self.tradingMode = tradingMode
         self.onToggleMode = onToggleMode
+        self.chartOrders = chartOrders
+        self.chartTradingSettings = chartTradingSettings
+        self.entryLines = entryLines
+        self.placementPrice = placementPrice
+        self.orderLineDelegate = orderLineDelegate
     }
 
     var body: some View {
@@ -56,6 +73,11 @@ struct ChartView: View {
                         ? viewModel.optionsAnalyticsSnapshot
                         : nil,
                     optionsAnalyticsSettings: viewModel.optionsAnalyticsSettings,
+                    chartOrdersModel: chartOrders,
+                    chartTradingSettings: chartTradingSettings,
+                    entryLines: entryLines,
+                    placementPrice: placementPrice,
+                    orderLineDelegate: orderLineDelegate,
                     resetToken: chartResetToken
                 )
                 resetButton { chartResetToken += 1 }

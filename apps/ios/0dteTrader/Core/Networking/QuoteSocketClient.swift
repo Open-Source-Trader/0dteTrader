@@ -18,6 +18,15 @@ final class QuoteSocketClient: ObservableObject {
     @Published private(set) var quotes: [String: Quote] = [:]
     @Published private(set) var lastQuote: Quote?
     @Published private(set) var lastOrderUpdate: OrderResult?
+    /// Server-side chart-order watcher fired, failed, or retired a line.
+    ///
+    /// A callback, not a `@Published` slot: an OCO fire emits TWO messages
+    /// back-to-back (the cancelled sibling, then the fired leg), and a
+    /// single-value property observed with `onChange` coalesces them — the
+    /// sibling cancellation would be dropped and the dead stop would keep
+    /// rendering as a working line. A direct call also delivers with no view
+    /// re-render, so watcher pushes land even when the quote stream is idle.
+    var onChartOrder: ((ChartOrder) -> Void)?
     @Published private(set) var lastErrorMessage: String?
 
     private let streamURL: URL
@@ -226,6 +235,11 @@ final class QuoteSocketClient: ObservableObject {
         case "orderUpdate":
             if let payload = try? decoder.decode(SocketOrderUpdateMessage.self, from: data) {
                 lastOrderUpdate = OrderResult(dto: payload.data)
+            }
+        case "chartOrder":
+            if let payload = try? decoder.decode(SocketChartOrderMessage.self, from: data),
+               let order = ChartOrder(dto: payload.data) {
+                onChartOrder?(order)
             }
         case "error":
             if let payload = try? decoder.decode(SocketErrorMessage.self, from: data) {

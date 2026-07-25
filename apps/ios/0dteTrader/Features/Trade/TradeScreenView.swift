@@ -13,6 +13,8 @@ struct TradeScreenView: View {
     @StateObject private var chainViewModel: OptionsChainViewModel
     @StateObject private var tradeViewModel: TradeViewModel
     @StateObject private var profileViewModel: ProfileViewModel
+    @StateObject private var chartOrdersModel: ChartOrdersModel
+    @StateObject private var chartTrading: ChartTradingCoordinator
 
     @State private var layout: TradeLayout
     @State private var showSymbolSearch = false
@@ -20,6 +22,7 @@ struct TradeScreenView: View {
     @State private var showProfile = false
     @State private var showHistory = false
     @State private var showAIAnalysis = false
+    @State private var capturedScreenshot: CapturedScreenshot?
     // 'nil' until /v1/me answers; the server value wins (desktop parity).
     @State private var tradingMode: TradingMode?
     @State private var showModeConfirmation = false
@@ -35,6 +38,11 @@ struct TradeScreenView: View {
         _chainViewModel = StateObject(wrappedValue: container.makeOptionsChainViewModel())
         _tradeViewModel = StateObject(wrappedValue: container.makeTradeViewModel())
         _profileViewModel = StateObject(wrappedValue: container.makeProfileViewModel(onLogout: onLogout))
+        let chartOrders = container.makeChartOrdersModel()
+        _chartOrdersModel = StateObject(wrappedValue: chartOrders)
+        _chartTrading = StateObject(
+            wrappedValue: container.makeChartTradingCoordinator(chartOrders: chartOrders)
+        )
         _layout = State(initialValue: container.settingsStore.layoutMode)
         self.settingsStore = container.settingsStore
     }
@@ -81,6 +89,19 @@ struct TradeScreenView: View {
                     }
                     ToolbarItem(placement: .topBarTrailing) {
                         Button {
+                            Haptics.impact(.light)
+                            if let image = ScreenshotCapture.captureKeyWindow() {
+                                capturedScreenshot = CapturedScreenshot(image: image)
+                            } else {
+                                tradeViewModel.showToast("Screenshot failed. Try again.", style: .error)
+                            }
+                        } label: {
+                            Image(systemName: "camera")
+                        }
+                        .accessibilityLabel("Take screenshot")
+                    }
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button {
                             toggleLayout()
                         } label: {
                             Image(systemName: layout == .fullscreen ? "rectangle.split.1x2" : "rectangle")
@@ -98,6 +119,57 @@ struct TradeScreenView: View {
         .sheet(item: $tradeViewModel.armedTicket) { ticket in
             OrderConfirmSheet(tradeViewModel: tradeViewModel, ticket: ticket)
         }
+        .sheet(item: $capturedScreenshot) { screenshot in
+            ShareSheet(image: screenshot.image)
+        }
+        .sheet(item: $chartTrading.placementRequest) { request in
+            OrderPlacementSheet(
+                request: request,
+                defaultQuantity: chartTrading.settings.defaultQuantity,
+                defaultOrderType: tradeViewModel.orderType,
+                onPlace: { side, quantity, orderType in
+                    await chartTrading.placeFromSheet(
+                        side: side,
+                        quantity: quantity,
+                        orderType: orderType
+                    )
+                },
+                onCancel: { chartTrading.dismissPlacement() }
+            )
+        }
+        // Closing a position and cancelling a working line both confirm first:
+        // the first sends a real market order, and the second cannot be undone.
+        .alert(
+            "Close position?",
+            isPresented: Binding(
+                get: { chartTrading.positionPendingFlatten != nil },
+                set: { if !$0 { chartTrading.positionPendingFlatten = nil } }
+            ),
+            presenting: chartTrading.positionPendingFlatten
+        ) { position in
+            Button("Close \(position.symbol)", role: .destructive) {
+                chartTrading.confirmFlatten()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: { position in
+            Text("Sends a market order to close \(position.symbol). Only this contract is closed.")
+        }
+        .alert(
+            "Cancel order line?",
+            isPresented: Binding(
+                get: { chartTrading.orderPendingCancel != nil },
+                set: { if !$0 { chartTrading.orderPendingCancel = nil } }
+            ),
+            presenting: chartTrading.orderPendingCancel
+        ) { _ in
+            Button("Cancel line", role: .destructive) { chartTrading.confirmCancel() }
+            Button("Keep", role: .cancel) {}
+        } message: { order in
+            Text(
+                "Removes the \(order.kind.shortLabel) line at \(Format.price(order.triggerPrice)). "
+                    + "Nothing was sent to the broker."
+            )
+        }
         .sheet(isPresented: $showSymbolSearch) {
             SymbolSearchView(currentSymbol: chartViewModel.symbol) { symbol in
                 chartViewModel.selectSymbol(symbol)
@@ -109,7 +181,11 @@ struct TradeScreenView: View {
             IndicatorSettingsView(
                 settings: $chartViewModel.indicatorSettings,
                 twcSettings: $chartViewModel.twcSettings,
-                optionsAnalyticsSettings: $chartViewModel.optionsAnalyticsSettings
+                optionsAnalyticsSettings: $chartViewModel.optionsAnalyticsSettings,
+                chartTradingSettings: Binding(
+                    get: { chartTrading.settings },
+                    set: { chartTrading.updateSettings($0) }
+                )
             )
             .presentationDetents([.medium, .large])
             .presentationDragIndicator(.visible)
@@ -136,6 +212,13 @@ struct TradeScreenView: View {
         .task {
             if let me = try? await container.apiClient.me() {
                 tradingMode = me.tradingMode ?? .practice
+                // The session is proven valid at this point. If the initial
+                // candle load raced login (or failed before auth settled), the
+                // chart would sit empty until the user jiggles tickers — reload
+                // the CURRENT symbol instead.
+                if chartViewModel.candles.isEmpty, !chartViewModel.isLoading {
+                    await chartViewModel.start()
+                }
             }
         }
         .confirmationDialog(
@@ -172,11 +255,34 @@ struct TradeScreenView: View {
             tradeViewModel.optionContractResolver = { symbol in
                 chainViewModel.chain?.contracts.first { $0.symbol == symbol }
             }
+            // The overlay needs the same chain lookup the flatten path uses:
+            // an entry line only draws for a contract the chain can identify.
+            chartTrading.contractResolver = { symbol in
+                chainViewModel.chain?.contracts.first { $0.symbol == symbol }
+            }
+            chartTrading.selectedContract = { chainViewModel.selectedContract }
+            chartTrading.defaultOrderType = { tradeViewModel.orderType }
+            chartTrading.onFlattenConfirmed = { position in
+                Task { await tradeViewModel.flatten(position) }
+            }
+            // Per-message delivery: an OCO fire pushes two updates back-to-back
+            // and both must land — see QuoteSocketClient.onChartOrder.
+            container.quoteSocket.onChartOrder = { [weak chartOrdersModel, weak tradeViewModel] order in
+                chartOrdersModel?.applyServerUpdate(order)
+                // A fired line means a real order went out — refresh positions
+                // so the entry line appears without waiting for the next poll.
+                if order.status == .triggered || order.status == .failed {
+                    Task { await tradeViewModel?.refreshTradingData() }
+                }
+            }
+            chartOrdersModel.setSymbol(chartViewModel.symbol)
             Task { await chainViewModel.load(underlying: chartViewModel.symbol) }
+            Task { await chartOrdersModel.load() }
             container.quoteSocket.subscribe(symbols: watchedContractSymbols)
         }
         .onChange(of: chartViewModel.symbol) { _, newSymbol in
             Task { await chainViewModel.load(underlying: newSymbol) }
+            chartOrdersModel.setSymbol(newSymbol)
         }
         .onChange(of: chainViewModel.selectedExpiration) { _, expiration in
             chartViewModel.optionsAnalyticsExpiration = expiration
@@ -196,6 +302,23 @@ struct TradeScreenView: View {
             // Keep AUTO's reference price live instead of the chain-load snapshot.
             if let quote, quote.symbol == chainViewModel.underlying {
                 chainViewModel.underlyingLast = quote.last
+            }
+            // Chart order lines fire off the same tick. The model nudges the
+            // server, which is also polling — the shared idempotency key makes
+            // that a race with one winner rather than two orders.
+            if let quote {
+                for order in chartOrdersModel.crossedOrders(
+                    underlying: quote.symbol,
+                    last: quote.last
+                ) {
+                    Task { await chartOrdersModel.trigger(id: order.id) }
+                }
+            }
+        }
+        .onChange(of: chartOrdersModel.errorMessage) { _, message in
+            if let message {
+                tradeViewModel.showToast(message, style: .error)
+                chartOrdersModel.clearError()
             }
         }
         .onChange(of: container.quoteSocket.lastQuote) { _, quote in
@@ -294,7 +417,15 @@ struct TradeScreenView: View {
             onSymbolSearch: { showSymbolSearch = true },
             onIndicatorSettings: { showIndicatorSettings = true },
             tradingMode: tradingMode,
-            onToggleMode: { showModeConfirmation = true }
+            onToggleMode: { showModeConfirmation = true },
+            chartOrders: chartOrdersModel,
+            chartTradingSettings: chartTrading.settings,
+            entryLines: chartTrading.entryLines(
+                positions: tradeViewModel.positions,
+                symbol: chartViewModel.symbol
+            ),
+            placementPrice: chartTrading.placementRequest?.price,
+            orderLineDelegate: chartTrading
         )
     }
 
@@ -307,9 +438,13 @@ struct TradeScreenView: View {
         do {
             let me = try await container.apiClient.updateTradingMode(next)
             tradingMode = me.tradingMode ?? next
+            // Practice and live chart orders are separate sets; clearing first
+            // means the chart never shows a line that cannot fire in this mode.
+            chartOrdersModel.reset()
             await chartViewModel.start()
             await tradeViewModel.refreshTradingData()
             await chainViewModel.load(underlying: chartViewModel.symbol)
+            await chartOrdersModel.load()
         } catch {
             tradeViewModel.showToast("Mode switch failed. Try again.", style: .error)
         }

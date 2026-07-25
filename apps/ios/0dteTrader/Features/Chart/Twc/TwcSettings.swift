@@ -142,7 +142,7 @@ struct TwcHeatmapSettings: Codable, Equatable, Sendable {
         hmmStay: 0.88,
         vwapLook: 34,
         vwapWarn: 1.5,
-        showVwapRip: true,
+        showVwapRip: false,
         msiBullThr: 75,
         msiBearThr: 25,
         colorBars: false,

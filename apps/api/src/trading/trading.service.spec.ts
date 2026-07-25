@@ -20,7 +20,9 @@ import { optionExpirations } from '../broker/expiration-calendar';
 import { BrokerGateway } from '../broker/broker-gateway.interface';
 import { brokerErrors } from '../common/broker-error';
 import { InMemoryPrismaService } from '../../test/in-memory-prisma.service';
+import { OrderEventsService } from '../broker/order-events.service';
 import { OrderRequestDto } from './dto/order-request.dto';
+import { OrdersService } from './orders.service';
 import { TradingService } from './trading.service';
 
 const round2 = (v: number): number => Math.round(v * 100) / 100;
@@ -192,15 +194,21 @@ function autoOtmCall(overrides: Partial<OrderRequestDto> = {}): OrderRequestDto 
 describe('TradingService', () => {
   let prisma: InMemoryPrismaService;
   let gateway: StubBrokerGateway;
+  let orders: OrdersService;
   let trading: TradingService;
   let userId: string;
 
   beforeEach(async () => {
     prisma = new InMemoryPrismaService();
     gateway = new StubBrokerGateway();
+    orders = new OrdersService(
+      prisma as unknown as ConstructorParameters<typeof OrdersService>[0],
+      new OrderEventsService(),
+    );
     trading = new TradingService(
       prisma as unknown as ConstructorParameters<typeof TradingService>[0],
       gateway as BrokerGateway,
+      orders,
     );
     const user = await prisma.user.create({
       data: { email: 'trader@example.com', passwordHash: 'x' },
@@ -380,6 +388,47 @@ describe('TradingService', () => {
       const audits = await prisma.orderAudit.findMany({ where: { userId } });
       expect(audits.map((a) => a.request.action).sort()).toEqual(['cancel', 'place', 'preview']);
       expect(audits.every((a) => a.status === 'ok' || a.status === 'submitted')).toBe(true);
+    });
+  });
+
+  describe('entry-line anchor', () => {
+    /** Mirrors what the stub gateway would report after a market order fills. */
+    function positionFor(contractSymbol: string, quantity: number): Position {
+      return {
+        symbol: contractSymbol,
+        assetClass: 'option',
+        quantity,
+        avgPrice: 1,
+        markPrice: 1,
+        unrealizedPnl: 0,
+        multiplier: 100,
+      };
+    }
+
+    it('annotates a position with the underlying price its opening fill happened at', async () => {
+      const placed = await trading.place(userId, autoOtmCall(), 'idem-anchor-1');
+      jest
+        .spyOn(gateway, 'getPositions')
+        .mockResolvedValue([positionFor(placed.contractSymbol, 1)]);
+
+      const [position] = await trading.getPositions(userId);
+      // The stub quotes the underlying at a fixed 100 — that is the level the
+      // chart's entry line must be drawn at.
+      expect(position.underlyingEntryPrice).toBe(StubBrokerGateway.PRICE);
+    });
+
+    it('leaves a position unannotated when no fill of it recorded an underlying price', async () => {
+      jest.spyOn(gateway, 'getPositions').mockResolvedValue([positionFor('SPY260717C00505000', 1)]);
+
+      const [position] = await trading.getPositions(userId);
+      expect(position.underlyingEntryPrice).toBeUndefined();
+    });
+
+    it('never fails a positions read because the anchor lookup failed', async () => {
+      jest.spyOn(gateway, 'getPositions').mockResolvedValue([positionFor('SPY260717C00505000', 1)]);
+      jest.spyOn(orders, 'positionAnchors').mockRejectedValue(new Error('db down'));
+
+      await expect(trading.getPositions(userId)).resolves.toHaveLength(1);
     });
   });
 

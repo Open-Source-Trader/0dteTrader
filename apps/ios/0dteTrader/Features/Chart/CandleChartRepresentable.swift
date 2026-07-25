@@ -19,6 +19,14 @@ struct CandleChartRepresentable: UIViewRepresentable {
     /// Current options structure snapshot for the right-edge profile.
     var optionsAnalyticsSnapshot: OptionsAnalyticsSnapshotDTO?
     var optionsAnalyticsSettings: OptionsAnalyticsSettings = .default
+    /// Chart trading: the order-line model, its settings, and the open
+    /// positions whose entry lines are drawn.
+    var chartOrdersModel: ChartOrdersModel?
+    var chartTradingSettings: ChartTradingSettings = .default
+    var entryLines: [EntryLineModel] = []
+    /// Level the open placement sheet refers to; nil clears the dashed guide.
+    var placementPrice: Double?
+    weak var orderLineDelegate: OrderLineOverlayDelegate?
     var resetToken: Int = 0
 
     /// CombinedChartView that reports the end of each draw pass. DGCharts
@@ -42,6 +50,10 @@ struct CandleChartRepresentable: UIViewRepresentable {
         let twcOverlay = TwcOverlayView()
         let optionsAnalyticsOverlay = OptionsAnalyticsOverlayView()
         let overlay = DrawingOverlayView()
+        /// Topmost: an order line must win the touch over a drawing, because
+        /// mis-grabbing a trend line when you meant to move a stop is the
+        /// expensive mistake.
+        let orderLineOverlay = OrderLineOverlayView()
 
         override init(frame: CGRect) {
             super.init(frame: frame)
@@ -50,15 +62,40 @@ struct CandleChartRepresentable: UIViewRepresentable {
             addSubview(twcOverlay)
             addSubview(optionsAnalyticsOverlay)
             addSubview(overlay)
+            addSubview(orderLineOverlay)
             twcOverlay.chart = chart
             optionsAnalyticsOverlay.chart = chart
             overlay.chart = chart
+            orderLineOverlay.chart = chart
             chart.onPostDraw = { [weak self] in
                 guard let self else { return }
                 self.twcOverlay.setNeedsDisplay()
                 self.optionsAnalyticsOverlay.setNeedsDisplay()
                 self.overlay.setNeedsDisplay()
+                self.orderLineOverlay.setNeedsDisplay()
             }
+
+            // Long-press to arm the `+` placement affordance. It lives on the
+            // container, not the overlay: the overlay refuses touches on empty
+            // space by design, so a recognizer there would never fire.
+            let longPress = UILongPressGestureRecognizer(
+                target: self,
+                action: #selector(handleLongPress(_:))
+            )
+            longPress.minimumPressDuration = 1.5
+            longPress.allowableMovement = 12
+            addGestureRecognizer(longPress)
+        }
+
+        @objc private func handleLongPress(_ recognizer: UILongPressGestureRecognizer) {
+            guard recognizer.state == .began,
+                  orderLineOverlay.settings.enabled,
+                  let price = orderLineOverlay.price(
+                      at: recognizer.location(in: orderLineOverlay).y
+                  )
+            else { return }
+            Haptics.impact(.medium)
+            orderLineOverlay.armPlacement(at: price)
         }
 
         @available(*, unavailable)
@@ -72,6 +109,7 @@ struct CandleChartRepresentable: UIViewRepresentable {
             twcOverlay.frame = bounds
             optionsAnalyticsOverlay.frame = bounds
             overlay.frame = bounds
+            orderLineOverlay.frame = bounds
             // TradingView-style over-scroll: allow dragging the newest candle
             // well past mid-screen into empty space (and slightly past the
             // oldest on the left).
@@ -138,6 +176,7 @@ struct CandleChartRepresentable: UIViewRepresentable {
             container?.overlay.setNeedsDisplay()
             container?.twcOverlay.setNeedsDisplay()
             container?.optionsAnalyticsOverlay.setNeedsDisplay()
+            container?.orderLineOverlay.setNeedsDisplay()
         }
         context.coordinator.onTransform = redrawOverlays
         chart.delegate = context.coordinator
@@ -183,6 +222,16 @@ struct CandleChartRepresentable: UIViewRepresentable {
         container.twcOverlay.candles = candles
         container.optionsAnalyticsOverlay.snapshot = optionsAnalyticsSnapshot
         container.optionsAnalyticsOverlay.settings = optionsAnalyticsSettings
+        container.orderLineOverlay.model = chartOrdersModel
+        container.orderLineOverlay.settings = chartTradingSettings
+        container.orderLineOverlay.entryLines = entryLines
+        container.orderLineOverlay.placementPrice = placementPrice
+        container.orderLineOverlay.delegate = orderLineDelegate
+        // Keep the button rows clear of the analytics rail when it is on.
+        container.orderLineOverlay.rightInset = optionsAnalyticsSnapshot != nil
+            && optionsAnalyticsSettings.enabled
+            ? CGFloat(OptionsAnalyticsPresentation.railWidth(for: Double(container.bounds.width)))
+            : 0
 
         guard !candles.isEmpty else {
             chart.data = nil
@@ -190,6 +239,7 @@ struct CandleChartRepresentable: UIViewRepresentable {
             chart.accessibilityValue = nil
             container.overlay.setNeedsDisplay()
             container.optionsAnalyticsOverlay.setNeedsDisplay()
+            container.orderLineOverlay.setNeedsDisplay()
             return
         }
         let previousCount = (chart.data as? CombinedChartData)?.candleData?.entryCount ?? 0

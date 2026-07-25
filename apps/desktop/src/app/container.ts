@@ -5,6 +5,7 @@ import { QuoteSocket } from '../core/api/QuoteSocket';
 import { SessionStore } from '../core/api/SessionStore';
 import { SettingsStore } from '../core/storage/SettingsStore';
 import { AuthStore } from '../features/auth/AuthStore';
+import { ChartOrdersStore } from '../features/chart/chartOrders';
 import { ChartStore } from '../features/chart/ChartStore';
 import { DrawingsStore } from '../features/chart/drawings';
 import { ChainStore } from '../features/trade/ChainStore';
@@ -21,6 +22,7 @@ export class AppContainer {
   readonly chainStore: ChainStore;
   readonly tradeStore: TradeStore;
   readonly drawingsStore: DrawingsStore;
+  readonly chartOrdersStore: ChartOrdersStore;
 
   constructor() {
     this.settingsStore = new SettingsStore();
@@ -37,6 +39,7 @@ export class AppContainer {
     this.chainStore = new ChainStore(this.apiClient);
     this.tradeStore = new TradeStore(this.apiClient);
     this.drawingsStore = new DrawingsStore();
+    this.chartOrdersStore = new ChartOrdersStore(this.apiClient);
   }
 }
 

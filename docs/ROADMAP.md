@@ -93,11 +93,33 @@ Show off (or own up to) your trades without leaving the app:
 
 - **Discord connection** — link a Discord channel and every buy and sell is
   posted there automatically.
-- **Quick screenshot button** — capture the current chart/trade view with one tap.
+- **Quick screenshot button** ✅ — capture the current chart/trade view with
+  one tap; system share sheet for save/share (iOS).
 - **Screenshot on sell** — optional automatic screenshot when a position is
   closed, stamped with the realized P/L.
 - **Auto-post to social media** — optionally push those screenshots straight
   to your connected social accounts.
+
+## P10 — Chart Trading ✅
+
+TradingView-style order lines on the candle chart, on iOS and desktop:
+
+- **Entry line** per open position — quantity, live P/L, and a ✕ that closes
+  that contract only (never the whole book).
+- **Order lines** — limit / target / stop levels on the underlying, dragged to
+  move, with the execution type (`MID` / `MKT`) shown on the line and tappable
+  to flip. Neither is safe by default: `market` into a thin 0DTE spread can cost
+  more than the stop saved, and `mid` can sit unfilled exactly when the move is
+  fast, so the choice stays visible and one tap away.
+- **Futures-style bracket** — drag off the entry line to place a target and a
+  stop as an OCO pair. Direction follows the _contract_, not the screen: a long
+  put's target is below the entry, because that is where it wins.
+- **Placement** — long-press (iOS) or hover the price axis (desktop) for a `+`,
+  then a small window for side, size, and execution.
+- **Simulated, watched two ways** — the broker never sees a resting order. The
+  app fires on its own quote stream, and a leased server-side watcher fires with
+  the app closed; a deterministic idempotency key makes that race produce one
+  broker order.
 
 ## Later (not v1)
 

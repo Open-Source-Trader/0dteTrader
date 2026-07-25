@@ -15,6 +15,11 @@ export type OrderType = 'mid' | 'market';
 export type OptionType = 'call' | 'put';
 export type SelectionMode = 'auto_otm' | 'explicit';
 export type OrderStatus = 'submitted' | 'filled' | 'partially_filled' | 'cancelled' | 'rejected';
+export type ChartOrderKind = 'limit' | 'target' | 'stop';
+export type ChartOrderStatus =
+  'working' | 'triggered' | 'filled' | 'cancelled' | 'failed' | 'expired';
+/** Which side of its trigger the underlying sat on when the order was armed. */
+export type ChartOrderArmedSide = 'above' | 'below';
 export type CandleInterval = '1m' | '5m' | '15m' | '30m' | '1h' | '4h' | '1d' | '1w';
 export type TickInterval = '10t' | '25t' | '50t' | '100t' | '250t';
 export type ChartInterval = CandleInterval | TickInterval;
@@ -310,6 +315,12 @@ export interface Position {
   unrealizedPnl: number;
   /** Contract multiplier (options: 100). Lets clients recompute P/L from live quotes. */
   multiplier: number;
+  /**
+   * Quantity-weighted price of the UNDERLYING across the fills that opened this
+   * position — the level the chart's entry line is drawn at. Absent for
+   * positions opened before this was recorded, or outside the app.
+   */
+  underlyingEntryPrice?: number;
 }
 
 /** A historical order with the realized P/L its fill produced (closing fills only). */
@@ -323,6 +334,134 @@ export interface TradeHistory {
   entries: TradeHistoryEntry[];
   /** Sum of realized P/L across all closing fills. */
   totalRealizedPnl: number;
+}
+
+// ---------------------------------------------------------------------------
+// Chart trading (docs/ARCHITECTURE.md — order lines)
+// ---------------------------------------------------------------------------
+
+/**
+ * A resting order line drawn on the candle chart. The broker never sees it:
+ * the level is watched against the UNDERLYING's price, and a crossing fires a
+ * normal `mid`/`market` option order. Both the client and a server-side watcher
+ * are armed; they converge because the fire uses a deterministic idempotency
+ * key derived from `id`.
+ */
+export interface ChartOrder {
+  id: string;
+  /** Chart symbol whose price arms the trigger (for example SPY), not the contract. */
+  underlying: string;
+  /** Level on the underlying that fires the order. */
+  triggerPrice: number;
+  /**
+   * The underlying's price when the order was armed (created, or moved).
+   * Firing tests the segment armPrice → last, so a gap, an app restart, or a
+   * watcher failover cannot step over a level unnoticed. Never equal to
+   * `triggerPrice` — the server rejects that, since the side would be undefined.
+   */
+  armPrice: number;
+  side: OrderSide;
+  quantity: number;
+  /**
+   * Execution type used when the level is crossed. Owned by this order, not by
+   * the trade panel: a resting line must not change behaviour because a panel
+   * toggle moved. Rendered on the line and tappable to flip.
+   */
+  orderType: OrderType;
+  kind: ChartOrderKind;
+  optionType: OptionType;
+  /** YYYY-MM-DD. */
+  expiration: string;
+  strike: number;
+  contractSymbol: string;
+  /** Shared by the target and stop of one position; firing either cancels the other. */
+  ocoGroupId: string | null;
+  status: ChartOrderStatus;
+  /** ISO-8601 date-time. */
+  createdAt: string;
+  /** ISO-8601 date-time; the contract's expiration close. Past this the order expires unfilled. */
+  expiresAt: string;
+  /** ISO-8601 date-time; set when the level was crossed and the order was sent. */
+  triggeredAt: string | null;
+  /** Broker order id once sent. */
+  brokerOrderId: string | null;
+  /** Populated when the fire attempt failed, so the line can show why. */
+  lastError: string | null;
+}
+
+/** Client → server create payload. The server resolves the contract, arm price,
+ *  and expiry itself; client-supplied strikes are advisory (see TradingService). */
+export interface ChartOrderDraft {
+  underlying: string;
+  triggerPrice: number;
+  side: OrderSide;
+  quantity: number;
+  orderType: OrderType;
+  kind: ChartOrderKind;
+  optionType: OptionType;
+  expiration: string;
+  strike: number;
+  ocoGroupId?: string | null;
+}
+
+/** Client → server edit payload. Every field is optional; only `working` orders accept it. */
+export interface ChartOrderPatch {
+  /** Re-arms the order: `armPrice` is re-read from the live quote. */
+  triggerPrice?: number;
+  quantity?: number;
+  orderType?: OrderType;
+}
+
+/** The side of the trigger the order is waiting to be crossed *from*. */
+export function chartOrderArmedSide(
+  order: Pick<ChartOrder, 'armPrice' | 'triggerPrice'>,
+): ChartOrderArmedSide {
+  return order.armPrice >= order.triggerPrice ? 'above' : 'below';
+}
+
+/**
+ * Whether a move from `previousPrice` to `currentPrice` crosses the order's
+ * trigger from the side it was armed on.
+ *
+ * Callers pass the last price they actually observed as `previousPrice`, or
+ * `order.armPrice` when they have not observed one yet — that is what makes a
+ * restart or a missed poll safe. Testing the armed side (rather than a bare
+ * crossing) is what stops a buy limit placed below an already-lower price from
+ * firing the instant it is created.
+ */
+export function chartOrderCrossed(
+  order: Pick<ChartOrder, 'armPrice' | 'triggerPrice'>,
+  previousPrice: number,
+  currentPrice: number,
+): boolean {
+  if (!Number.isFinite(previousPrice) || !Number.isFinite(currentPrice)) return false;
+  return chartOrderArmedSide(order) === 'above'
+    ? previousPrice >= order.triggerPrice && currentPrice <= order.triggerPrice
+    : previousPrice <= order.triggerPrice && currentPrice >= order.triggerPrice;
+}
+
+/**
+ * The direction a position profits in, as a sign on the UNDERLYING.
+ *
+ * This is why a bracket cannot simply map screen-up to "target": a long put
+ * gains when the underlying falls, so its target sits BELOW the entry line and
+ * its stop above. Long call → +1, long put → -1, and a short position inverts.
+ */
+export function positionProfitDirection(optionType: OptionType, quantity: number): 1 | -1 {
+  const long = quantity >= 0;
+  const callish = optionType === 'call';
+  return long === callish ? 1 : -1;
+}
+
+/** Whether a bracket leg dragged to `price` from an entry at `entryPrice` is the target or the stop. */
+export function bracketKindFor(
+  optionType: OptionType,
+  quantity: number,
+  entryPrice: number,
+  price: number,
+): 'target' | 'stop' {
+  const profitable = (price - entryPrice) * positionProfitDirection(optionType, quantity) > 0;
+  return profitable ? 'target' : 'stop';
 }
 
 // ---------------------------------------------------------------------------
@@ -351,6 +490,12 @@ export interface StreamOrderUpdateMessage {
   data: OrderResult;
 }
 
+/** Server-side watcher fired, expired, or reconciled a chart order. */
+export interface StreamChartOrderMessage {
+  type: 'chartOrder';
+  data: ChartOrder;
+}
+
 export interface StreamErrorMessage {
   type: 'error';
   error: {
@@ -360,4 +505,4 @@ export interface StreamErrorMessage {
 }
 
 export type StreamServerMessage =
-  StreamQuoteMessage | StreamOrderUpdateMessage | StreamErrorMessage;
+  StreamQuoteMessage | StreamOrderUpdateMessage | StreamChartOrderMessage | StreamErrorMessage;

@@ -6,6 +6,7 @@ import { Format } from '../../design/format';
 import { SlidersIcon } from '../../design/icons';
 import type { IndicatorSettings } from './indicatorSettings';
 import { DEFAULT_INDICATOR_SETTINGS, enabledSubPanes, MAX_SUB_PANES } from './indicatorSettings';
+import type { ChartTradingSettings } from './chartTradingSettings';
 import type { OptionsAnalyticsSettings } from './optionsAnalytics/optionsAnalyticsSettings';
 
 interface IndicatorSettingsViewProps {
@@ -16,6 +17,8 @@ interface IndicatorSettingsViewProps {
   onToggleTwc: (on: boolean) => void;
   onOpenTwcSettings: () => void;
   optionsAnalytics: OptionsAnalyticsSettings;
+  chartTrading: ChartTradingSettings;
+  onChangeChartTrading: (settings: ChartTradingSettings) => void;
   onChangeOptionsAnalytics: (settings: OptionsAnalyticsSettings) => void;
 }
 
@@ -45,11 +48,15 @@ export function IndicatorSettingsView({
   onToggleTwc,
   onOpenTwcSettings,
   optionsAnalytics,
+  chartTrading,
+  onChangeChartTrading,
   onChangeOptionsAnalytics,
 }: IndicatorSettingsViewProps) {
   const patch = (partial: Partial<IndicatorSettings>) => onChange({ ...settings, ...partial });
   const patchOptionsAnalytics = (partial: Partial<OptionsAnalyticsSettings>) =>
     onChangeOptionsAnalytics({ ...optionsAnalytics, ...partial });
+  const patchChartTrading = (partial: Partial<ChartTradingSettings>) =>
+    onChangeChartTrading({ ...chartTrading, ...partial });
 
   // Sub-panes are capped: at the cap, toggles for the remaining panes are
   // disabled until one is turned off.
@@ -454,6 +461,54 @@ export function IndicatorSettingsView({
                         step={15}
                         onChange={(value) => patchOptionsAnalytics({ refreshSeconds: value })}
                       />
+                    </span>
+                  </div>
+                </>
+              ) : null}
+            </div>
+          </div>
+
+          <div className="grouped-section">
+            <div className="section-header">Chart Trading</div>
+            <div className="section-card">
+              <div className="grouped-row">
+                <span>
+                  <SeriesDot color="var(--app-accent)" />
+                  Order Lines
+                </span>
+                <span className="row-value">
+                  <Toggle
+                    on={chartTrading.enabled}
+                    onChange={(on) => patchChartTrading({ enabled: on })}
+                  />
+                </span>
+              </div>
+              {chartTrading.enabled ? (
+                <>
+                  <div className="grouped-row param-row">
+                    <span>Bracket from Entry Line</span>
+                    <span className="row-value">
+                      <Toggle
+                        on={chartTrading.bracketDrag}
+                        onChange={(on) => patchChartTrading({ bracketDrag: on })}
+                      />
+                    </span>
+                  </div>
+                  <div className="grouped-row param-row">
+                    <span>Default Quantity: {chartTrading.defaultQuantity}</span>
+                    <span className="row-value">
+                      <Stepper
+                        value={chartTrading.defaultQuantity}
+                        min={1}
+                        max={50}
+                        onChange={(value) => patchChartTrading({ defaultQuantity: value })}
+                      />
+                    </span>
+                  </div>
+                  <div className="grouped-row param-row">
+                    <span className="row-note">
+                      Order lines are watched by 0dteTrader, not resting at the broker. A crossed
+                      level fires a mid or market order — flip MID/MKT on the line itself.
                     </span>
                   </div>
                 </>

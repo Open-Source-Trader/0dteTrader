@@ -5,6 +5,11 @@ import {
   decodeOptionsAnalyticsSettings,
   DEFAULT_OPTIONS_ANALYTICS_SETTINGS,
 } from '../../features/chart/optionsAnalytics/optionsAnalyticsSettings';
+import type { ChartTradingSettings } from '../../features/chart/chartTradingSettings';
+import {
+  decodeChartTradingSettings,
+  DEFAULT_CHART_TRADING_SETTINGS,
+} from '../../features/chart/chartTradingSettings';
 import type { TwcHeatmapSettings } from '../../features/chart/twc/twcSettings';
 import { DEFAULT_TWC_SETTINGS } from '../../features/chart/twc/twcSettings';
 
@@ -17,6 +22,7 @@ export class SettingsStore {
     indicatorSettings: 'settings.indicatorSettings',
     twcSettings: 'settings.twcSettings',
     optionsAnalytics: 'settings.optionsAnalytics.v1',
+    chartTrading: 'settings.chartTrading.v1',
     riskDisclaimerAccepted: 'settings.riskDisclaimerAccepted',
     lastSymbol: 'settings.lastSymbol',
   };
@@ -70,6 +76,20 @@ export class SettingsStore {
 
   set optionsAnalytics(value: OptionsAnalyticsSettings) {
     localStorage.setItem(SettingsStore.keys.optionsAnalytics, JSON.stringify(value));
+  }
+
+  get chartTrading(): ChartTradingSettings {
+    const raw = localStorage.getItem(SettingsStore.keys.chartTrading);
+    if (!raw) return DEFAULT_CHART_TRADING_SETTINGS;
+    try {
+      return decodeChartTradingSettings(JSON.parse(raw));
+    } catch {
+      return DEFAULT_CHART_TRADING_SETTINGS;
+    }
+  }
+
+  set chartTrading(value: ChartTradingSettings) {
+    localStorage.setItem(SettingsStore.keys.chartTrading, JSON.stringify(value));
   }
 
   get hasAcceptedRiskDisclaimer(): boolean {

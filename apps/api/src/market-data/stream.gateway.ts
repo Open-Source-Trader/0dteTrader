@@ -7,6 +7,10 @@ import { WebSocket } from 'ws';
 import { StreamServerMessage } from '@0dtetrader/shared-types';
 import { BROKER_GATEWAY, BrokerGateway } from '../broker/broker-gateway.interface';
 import { OrderEventsService, OrderUpdateEvent } from '../broker/order-events.service';
+import {
+  ChartOrderEventsService,
+  ChartOrderUpdateEvent,
+} from '../chart-orders/chart-order-events.service';
 import { Subscription } from 'rxjs';
 import { CryptoDataService } from './crypto-data.service';
 import { IndexDataService } from './index-data.service';
@@ -46,6 +50,7 @@ export class StreamGateway implements OnGatewayConnection, OnGatewayDisconnect, 
   /** Last logged quote-tick warning per key — identical failures log once. */
   private readonly tickWarnings = new Map<string, string>();
   private readonly orderEventsSub: Subscription;
+  private readonly chartOrderEventsSub: Subscription;
 
   constructor(
     @Inject(BROKER_GATEWAY) private readonly broker: BrokerGateway,
@@ -54,12 +59,17 @@ export class StreamGateway implements OnGatewayConnection, OnGatewayDisconnect, 
     private readonly jwt: JwtService,
     private readonly config: ConfigService,
     orderEvents: OrderEventsService,
+    chartOrderEvents: ChartOrderEventsService,
   ) {
     this.orderEventsSub = orderEvents.events$.subscribe((event) => this.pushOrderUpdate(event));
+    this.chartOrderEventsSub = chartOrderEvents.events$.subscribe((event) =>
+      this.pushChartOrderUpdate(event),
+    );
   }
 
   onModuleDestroy(): void {
     this.orderEventsSub.unsubscribe();
+    this.chartOrderEventsSub.unsubscribe();
     for (const timer of this.timers.values()) clearInterval(timer);
     this.timers.clear();
   }
@@ -262,6 +272,16 @@ export class StreamGateway implements OnGatewayConnection, OnGatewayDisconnect, 
     for (const [client, state] of this.clients) {
       if (state.userId === event.userId) {
         this.send(client, { type: 'orderUpdate', data: event.order });
+      }
+    }
+  }
+
+  /** The server-side watcher fired, failed, or retired one of the user's chart
+   *  order lines — the chart must reflect it without waiting for a poll. */
+  private pushChartOrderUpdate(event: ChartOrderUpdateEvent): void {
+    for (const [client, state] of this.clients) {
+      if (state.userId === event.userId) {
+        this.send(client, { type: 'chartOrder', data: event.order });
       }
     }
   }

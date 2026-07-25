@@ -42,6 +42,14 @@ export interface AppConfig {
     captureEnabled: boolean;
     coreSymbols: string[];
   };
+  chartOrders: {
+    /** Server-side watcher that fires chart order lines with no client connected. */
+    watcherEnabled: boolean;
+    /** Poll cadence per (user, underlying) with at least one working line. */
+    tickMs: number;
+    /** A quote older than this never fires an order (halt, weekend, dead feed). */
+    staleQuoteMs: number;
+  };
 }
 
 function int(value: string | undefined, fallback: number): number {
@@ -103,6 +111,14 @@ export default (): AppConfig => ({
       .split(',')
       .map((symbol) => symbol.trim().toUpperCase())
       .filter((symbol) => symbol !== ''),
+  },
+  chartOrders: {
+    watcherEnabled: enabled(
+      process.env.CHART_ORDER_WATCHER_ENABLED,
+      (process.env.NODE_ENV ?? 'development') !== 'test',
+    ),
+    tickMs: int(process.env.CHART_ORDER_WATCHER_TICK_MS, 1_000),
+    staleQuoteMs: int(process.env.CHART_ORDER_STALE_QUOTE_MS, 10_000),
   },
 });
 

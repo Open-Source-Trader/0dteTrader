@@ -8,7 +8,7 @@ import { Format } from '../../design/format';
 import { ChevronDownIcon, SlidersIcon } from '../../design/icons';
 import type { ChartStore } from './ChartStore';
 import { CHART_INTERVALS } from './ChartStore';
-import { CandleChart, type OverlaySeries } from './CandleChart';
+import { CandleChart, type ChartTradingProps, type OverlaySeries } from './CandleChart';
 import { overlayPalette, panePalette } from './chartColors';
 import { DrawToolsMenu } from './DrawingToolbar';
 import type { DrawingsStore } from './drawings';
@@ -32,6 +32,8 @@ interface ChartViewProps {
   onToggleMode: () => void;
   /** Trade-ticket expiration for the exact options snapshot; null pauses shadow capture. */
   optionsAnalyticsExpiration: string | null;
+  /** Order-line overlay inputs; null when chart trading is off. */
+  chartTrading: ChartTradingProps | null;
 }
 
 // Interval hotkeys. 'H'/'D' are uppercase (shift held) so they don't collide
@@ -73,6 +75,7 @@ export function ChartView({
   tradingMode,
   onToggleMode,
   optionsAnalyticsExpiration,
+  chartTrading,
 }: ChartViewProps) {
   const {
     symbol,
@@ -413,6 +416,7 @@ export function ChartView({
             optionsAnalyticsSnapshot={optionsAnalyticsSnapshot}
             optionsAnalyticsSettings={optionsAnalytics.enabled ? optionsAnalytics : null}
             optionsAnalyticsRetained={optionsAnalyticsState.retained}
+            chartTrading={chartTrading}
           />
           {twcModel?.banner ? <TwcBiasBanner banner={twcModel.banner} /> : null}
           {optionsAnalytics.enabled && optionsAnalyticsState.errorMessage ? (

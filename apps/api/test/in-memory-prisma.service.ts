@@ -22,8 +22,23 @@ function p2002(target: string): Error {
   });
 }
 
+/**
+ * Prisma treats an `undefined` field in an update as "leave this column alone",
+ * whereas Object.assign would write the undefined over the stored value. Callers
+ * rely on that distinction (see OrdersService.record, where only the placement
+ * path knows the underlying price), so strip undefined before assigning.
+ */
+function definedOnly(data: any): any {
+  return Object.fromEntries(Object.entries(data ?? {}).filter(([, v]) => v !== undefined));
+}
+
 function matches(row: any, where: any): boolean {
   return Object.entries(where ?? {}).every(([key, value]) => {
+    // Boolean combinators, so callers can express the same filters they send to
+    // Prisma (chart-order listing and the watcher's lease both need them).
+    if (key === 'OR') return (value as any[]).some((clause) => matches(row, clause));
+    if (key === 'AND') return (value as any[]).every((clause) => matches(row, clause));
+    if (key === 'NOT') return !matches(row, value);
     if (value === null) return row[key] === null || row[key] === undefined;
     if (typeof value === 'object' && value !== null) {
       const actual = row[key];
@@ -46,6 +61,7 @@ export class InMemoryPrismaService {
   readonly refreshTokens: any[] = [];
   readonly orderAudits: any[] = [];
   readonly tradeOrders: any[] = [];
+  readonly chartOrders: any[] = [];
   readonly optionsAnalyticsSnapshots: any[] = [];
   readonly scheduledJobLeases: any[] = [];
 
@@ -56,6 +72,7 @@ export class InMemoryPrismaService {
       }
       return this.users.find((u) => u.id === where.id) ?? null;
     },
+    findMany: async ({ where }: any = {}) => this.users.filter((u) => matches(u, where)),
     create: async ({ data }: any) => {
       if (this.users.some((u) => u.email === data.email)) throw p2002('email');
       const now = new Date();
@@ -209,7 +226,7 @@ export class InMemoryPrismaService {
     upsert: async ({ where, create, update }: any) => {
       const existing = this.tradeOrders.find((o) => o.id === where.id);
       if (existing) {
-        Object.assign(existing, update, { updatedAt: new Date() });
+        Object.assign(existing, definedOnly(update), { updatedAt: new Date() });
         return existing;
       }
       const row = { updatedAt: new Date(), ...create };
@@ -270,6 +287,53 @@ export class InMemoryPrismaService {
     },
   };
 
+  readonly chartOrder = {
+    create: async ({ data }: any) => {
+      const now = new Date();
+      const row = {
+        id: `co-${this.chartOrders.length + 1}`,
+        ocoGroupId: null,
+        status: 'working',
+        triggeredAt: null,
+        brokerOrderId: null,
+        lastError: null,
+        createdAt: now,
+        updatedAt: now,
+        ...data,
+      };
+      this.chartOrders.push(row);
+      return row;
+    },
+    findUnique: async ({ where }: any) => this.chartOrders.find((o) => o.id === where.id) ?? null,
+    findFirst: async ({ where }: any) => this.chartOrders.find((o) => matches(o, where)) ?? null,
+    findMany: async ({ where, orderBy }: any = {}) => {
+      const rows = this.chartOrders.filter((o) => matches(o, where));
+      if (orderBy?.createdAt === 'asc') {
+        rows.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+      } else if (orderBy?.createdAt === 'desc') {
+        rows.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+      }
+      return rows;
+    },
+    count: async ({ where }: any = {}) => this.chartOrders.filter((o) => matches(o, where)).length,
+    update: async ({ where, data }: any) => {
+      const row = this.chartOrders.find((o) => o.id === where.id);
+      if (!row) throw new Error(`chartOrder ${where.id} not found`);
+      Object.assign(row, definedOnly(data), { updatedAt: new Date() });
+      return row;
+    },
+    updateMany: async ({ where, data }: any) => {
+      let count = 0;
+      for (const row of this.chartOrders) {
+        if (matches(row, where)) {
+          Object.assign(row, definedOnly(data), { updatedAt: new Date() });
+          count += 1;
+        }
+      }
+      return { count };
+    },
+  };
+
   readonly scheduledJobLease = {
     create: async ({ data }: any) => {
       if (this.scheduledJobLeases.some((row) => row.name === data.name)) {
@@ -304,6 +368,7 @@ export class InMemoryPrismaService {
     this.refreshTokens.length = 0;
     this.orderAudits.length = 0;
     this.tradeOrders.length = 0;
+    this.chartOrders.length = 0;
     this.optionsAnalyticsSnapshots.length = 0;
     this.scheduledJobLeases.length = 0;
   }

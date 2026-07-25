@@ -6,6 +6,7 @@ struct IndicatorSettingsView: View {
     @Binding var settings: IndicatorSettings
     @Binding var twcSettings: TwcHeatmapSettings
     @Binding var optionsAnalyticsSettings: OptionsAnalyticsSettings
+    @Binding var chartTradingSettings: ChartTradingSettings
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -160,6 +161,29 @@ struct IndicatorSettingsView: View {
                     }
                 }
                 .listRowBackground(Color.appSurface)
+
+                Section("Chart Trading") {
+                    Toggle(isOn: $chartTradingSettings.enabled) {
+                        labelWithSwatch("Order Lines", id: "chartTrading")
+                    }
+                    if chartTradingSettings.enabled {
+                        Toggle("Bracket from Entry Line", isOn: $chartTradingSettings.bracketDrag)
+                        Stepper("Default Quantity: \(chartTradingSettings.defaultQuantity)",
+                                value: $chartTradingSettings.defaultQuantity,
+                                in: 1...50)
+                            .monospacedDigit()
+                            .accessibilityLabel("Chart trading default quantity")
+                            .accessibilityValue("\(chartTradingSettings.defaultQuantity)")
+                        Text(
+                            "Order lines are watched by 0dteTrader, not resting at the broker. "
+                                + "A crossed level fires a mid or market order — tap MID/MKT on "
+                                + "the line to switch."
+                        )
+                        .font(.caption)
+                        .foregroundStyle(Color.appWarning)
+                    }
+                }
+                .listRowBackground(Color.appSurface)
             }
             .tint(.appAccent)
             .scrollContentBackground(.hidden)
@@ -187,7 +211,9 @@ struct IndicatorSettingsView: View {
                 .fill(
                     id == "optionsAnalytics"
                         ? Color(OptionsAnalyticsPresentation.rangeColor)
-                        : ChartStyle.overlayColor(for: id)
+                        : id == "chartTrading"
+                            ? Color.appAccent
+                            : ChartStyle.overlayColor(for: id)
                 )
                 .frame(width: 8, height: 8)
                 .accessibilityHidden(true)

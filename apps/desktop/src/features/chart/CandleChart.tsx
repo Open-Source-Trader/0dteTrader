@@ -13,15 +13,25 @@ import {
   type LineWidth,
   type UTCTimestamp,
 } from 'lightweight-charts';
-import type { ChartInterval, OptionsAnalyticsSnapshot } from '@0dtetrader/shared-types';
+import type {
+  ChartInterval,
+  OptionContract,
+  OptionsAnalyticsSnapshot,
+  OrderType,
+  Position,
+} from '@0dtetrader/shared-types';
 import { useStore } from '../../core/observable';
 import { Format } from '../../design/format';
 import { chartPalette } from './chartColors';
 import type { ChartCandle } from './ChartStore';
 import { intervalSeconds } from './ChartStore';
+import type { ChartOrdersStore } from './chartOrders';
+import type { ChartTradingSettings } from './chartTradingSettings';
 import { DrawingLayer } from './DrawingLayer';
 import type { DrawingsStore } from './drawings';
+import { OrderLineLayer } from './OrderLineLayer';
 import { OptionsAnalyticsOverlay } from './optionsAnalytics/OptionsAnalyticsOverlay';
+import { optionsAnalyticsRailWidth } from './optionsAnalytics/optionsAnalyticsGeometry';
 import type { OptionsAnalyticsSettings } from './optionsAnalytics/optionsAnalyticsSettings';
 import { TwcOverlay } from './TwcOverlay';
 import type { TwcRenderModel } from './twc/twcTypes';
@@ -51,6 +61,19 @@ interface CandleChartProps {
   optionsAnalyticsSnapshot?: OptionsAnalyticsSnapshot | null;
   optionsAnalyticsSettings?: OptionsAnalyticsSettings | null;
   optionsAnalyticsRetained?: boolean;
+  /** Chart trading: everything the order-line overlay needs, or null when off. */
+  chartTrading?: ChartTradingProps | null;
+}
+
+/** Inputs for the order-line overlay, passed through from the trade screen. */
+export interface ChartTradingProps {
+  store: ChartOrdersStore;
+  settings: ChartTradingSettings;
+  positions: Position[];
+  resolveContract: (contractSymbol: string) => OptionContract | null;
+  selectedContract: OptionContract | null;
+  defaultOrderType: OrderType;
+  onFlatten: (position: Position) => void;
 }
 
 const VISIBLE_CANDLES = 120;
@@ -83,6 +106,7 @@ export function CandleChart({
   optionsAnalyticsSnapshot = null,
   optionsAnalyticsSettings = null,
   optionsAnalyticsRetained = false,
+  chartTrading = null,
 }: CandleChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -393,6 +417,25 @@ export function CandleChart({
           store={drawingsStore}
           candles={candles}
           intervalSec={intervalSeconds(interval)}
+        />
+      ) : null}
+      {apis && candles.length > 0 && chartTrading?.settings.enabled ? (
+        <OrderLineLayer
+          chart={apis.chart}
+          series={apis.series}
+          store={chartTrading.store}
+          settings={chartTrading.settings}
+          symbol={symbol}
+          positions={chartTrading.positions}
+          resolveContract={chartTrading.resolveContract}
+          selectedContract={chartTrading.selectedContract}
+          defaultOrderType={chartTrading.defaultOrderType}
+          onFlatten={chartTrading.onFlatten}
+          candles={candles}
+          // Keep the button rows and the `+` clear of the analytics rail.
+          rightInset={
+            optionsAnalyticsSnapshot ? optionsAnalyticsRailWidth(apis.chart.paneSize().width) : 0
+          }
         />
       ) : null}
     </div>

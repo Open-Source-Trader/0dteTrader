@@ -82,6 +82,11 @@ quotes and candles — no Webull credentials needed.
 | DELETE | `/v1/orders/{orderId}` | —                                         | 204                    |
 | GET    | `/v1/positions`        | —                                         | `Position[]`           |
 
+`Position` carries `underlyingEntryPrice` when the opening fills recorded it —
+the quantity-weighted price of the _underlying_, which is where the chart draws
+the position's entry line. Absent for positions opened before it was recorded or
+outside the app.
+
 ### OrderRequest
 
 ```json
@@ -107,6 +112,70 @@ Server behavior:
   the spread is crossed/locked abnormally.
 - Kill switch on → `403 TRADING_DISABLED`. Duplicate `Idempotency-Key` → prior `OrderResult`.
 
+## Chart Trading
+
+Order lines drawn on the candle chart. The broker never receives these: the
+trigger is watched against the **underlying's** price, and a crossing fires an
+ordinary `mid`/`market` option order through the normal order path — so the kill
+switch, idempotency claim, server-side re-validation, and audit trail all apply
+unchanged.
+
+| Method | Path                            | Body              | Returns        |
+| ------ | ------------------------------- | ----------------- | -------------- |
+| GET    | `/v1/chart-orders`              | —                 | `ChartOrder[]` |
+| POST   | `/v1/chart-orders`              | `ChartOrderDraft` | `ChartOrder`   |
+| POST   | `/v1/chart-orders/{id}/trigger` | —                 | `ChartOrder`   |
+| PATCH  | `/v1/chart-orders/{id}`         | `ChartOrderPatch` | `ChartOrder`   |
+| DELETE | `/v1/chart-orders/{id}`         | —                 | 204            |
+
+### ChartOrderDraft
+
+```json
+{
+  "underlying": "SPY",
+  "triggerPrice": 598.5,
+  "side": "buy" | "sell",
+  "quantity": 1,
+  "orderType": "mid" | "market",
+  "kind": "limit" | "target" | "stop",
+  "optionType": "call" | "put",
+  "expiration": "2026-07-27",
+  "strike": 600,
+  "ocoGroupId": null                     // shared by a position's target + stop
+}
+```
+
+`ChartOrderPatch` accepts any of `triggerPrice`, `quantity`, `orderType`; only
+`working` lines accept it (`409 CHART_ORDER_NOT_WORKING` otherwise).
+
+Server behavior:
+
+- The contract is re-resolved from live chain data; a client-supplied strike is
+  advisory, exactly as for `POST /v1/orders`.
+- `armPrice` is read from a live quote at create time (and again on every move).
+  Firing tests the segment `armPrice → last`, so a gap, an app relaunch, or a
+  watcher failover cannot step over a level unnoticed. A trigger equal to the
+  current price is rejected — it would have no side to be crossed from.
+- Max 20 `working` lines per user; each one costs the watcher a broker quote per
+  second while the session is open.
+- Lines are stamped with the trading environment: a practice line never fires
+  against live.
+- `POST .../trigger` is the client saying it saw the crossing first. It shares a
+  deterministic idempotency key (`chartorder:{id}`) with the server-side
+  watcher, so the two racing produces exactly one broker order.
+- A fire the broker refuses leaves the line `failed` with `lastError` rather than
+  retrying — a rejected stop should be visible and re-armable, not silently
+  retried into a worse level.
+
+### Server-side watcher
+
+A leased singleton polls every `(user, underlying)` with a working line once a
+second during the regular cash session, so lines fire with no client connected.
+It also expires settled lines and cancels bracket legs whose position is gone
+(after a 60s grace, so placing a bracket as a position opens does not race the
+sweep). Configured by `CHART_ORDER_WATCHER_ENABLED`, `CHART_ORDER_WATCHER_TICK_MS`,
+`CHART_ORDER_STALE_QUOTE_MS`.
+
 ## WebSocket
 
 `GET /v1/stream?token=<accessToken>` (upgrade).
@@ -123,6 +192,7 @@ Server → client:
 ```json
 { "type": "quote",      "data": Quote }
 { "type": "orderUpdate","data": OrderResult }
+{ "type": "chartOrder", "data": ChartOrder }
 { "type": "error",      "error": { "code": "...", "message": "..." } }
 ```
 

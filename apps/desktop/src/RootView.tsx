@@ -111,7 +111,15 @@ export function RootView() {
           ) : state === 'unauthenticated' ? (
             <LoginView store={container.authStore} />
           ) : (
-            <TradeScreen onLogout={() => container.authStore.logout()} />
+            <TradeScreen
+              onLogout={() => {
+                // AppContainer outlives the screen, so per-account state has to
+                // be dropped explicitly — otherwise the next sign-in draws the
+                // previous account's order lines.
+                container.chartOrdersStore.reset();
+                return container.authStore.logout();
+              }}
+            />
           )}
         </StateFade>
       </div>

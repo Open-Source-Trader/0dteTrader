@@ -42,16 +42,27 @@ interface PositionAgg {
  * the BROKER_GATEWAY token with this). Deterministic: fixed underlying price,
  * chain from the real expiration calendar, market fills at last, mid fills at
  * mid after 200 ms, positions aggregate on fills. Never leaves the process.
+ *
+ * `price`, `quoteTimestamp`, and `placeError` are writable so the chart-order
+ * tests can walk the underlying across a trigger level, serve a deliberately
+ * stale quote, or make a fire fail.
  */
 export class StubBrokerGateway implements BrokerGateway {
   static readonly PRICE = 100;
+
+  /** Current underlying price; move it to walk price across a trigger. */
+  price = StubBrokerGateway.PRICE;
+  /** Overrides the quote timestamp — set it into the past to test staleness. */
+  quoteTimestamp: string | null = null;
+  /** When set, placeOrder throws it instead of accepting the order. */
+  placeError: Error | null = null;
 
   private readonly orders = new Map<string, Map<string, StoredOrder>>();
   private readonly positions = new Map<string, Map<string, PositionAgg>>();
   private counter = 0;
 
   async getQuote(_userId: string, symbol: string): Promise<Quote> {
-    const last = StubBrokerGateway.PRICE;
+    const last = this.price;
     return {
       symbol,
       bid: round2(last - 0.02),
@@ -60,7 +71,7 @@ export class StubBrokerGateway implements BrokerGateway {
       bidSize: 10,
       askSize: 10,
       volume: 1_000_000,
-      timestamp: new Date().toISOString(),
+      timestamp: this.quoteTimestamp ?? new Date().toISOString(),
     };
   }
 
@@ -83,7 +94,7 @@ export class StubBrokerGateway implements BrokerGateway {
     const lastBucket = Math.floor(Date.now() / intervalMs);
     const candles: Candle[] = [];
     for (let b = lastBucket - 50; b < lastBucket; b++) {
-      const level = StubBrokerGateway.PRICE + Math.sin(b / 7) * 2;
+      const level = this.price + Math.sin(b / 7) * 2;
       candles.push({
         time: new Date(b * intervalMs).toISOString(),
         open: round2(level - 0.1),
@@ -108,7 +119,7 @@ export class StubBrokerGateway implements BrokerGateway {
         `No chain for expiration ${chosen}. Available: ${expirations.join(', ')}`,
       );
     }
-    const price = StubBrokerGateway.PRICE;
+    const price = this.price;
     const contracts: OptionContract[] = [];
     for (let k = -24; k <= 24; k++) {
       const strike = price + k;
@@ -155,6 +166,7 @@ export class StubBrokerGateway implements BrokerGateway {
     order: OrderRequest,
     _idempotencyKey: string,
   ): Promise<OrderResult> {
+    if (this.placeError) throw this.placeError;
     const resolved = await this.resolveContract(userId, order);
     const record: StoredOrder = {
       orderId: `STUB-${String(++this.counter).padStart(6, '0')}`,
@@ -217,7 +229,7 @@ export class StubBrokerGateway implements BrokerGateway {
     const out: Position[] = [];
     for (const [symbol, agg] of positions) {
       if (agg.quantity === 0) continue;
-      const last = StubBrokerGateway.PRICE;
+      const last = this.price;
       out.push({
         symbol,
         assetClass: 'option',

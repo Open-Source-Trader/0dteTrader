@@ -22,7 +22,9 @@ import { ChartView } from '../chart/ChartView';
 import { IndicatorSettingsView } from '../chart/IndicatorSettingsView';
 import { TwcSettingsView } from '../chart/TwcSettingsView';
 import { SymbolSearchView } from '../chart/SymbolSearchView';
+import { SymbolSpotlight } from '../chart/SymbolSpotlight';
 import { ProfileView } from '../profile/ProfileView';
+import { DesktopTradeTicket } from './DesktopTradeTicket';
 import { FloatingTradeButtons } from './FloatingTradeButtons';
 import { HistoryView } from './HistoryView';
 import { OrderConfirmSheet } from './OrderConfirmSheet';
@@ -341,11 +343,10 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
             minSize="18"
             style={{ minHeight: 0, display: 'flex', flexDirection: 'column' }}
           >
-            <TradePanel
+            <DesktopTradeTicket
               tradeStore={tradeStore}
               chainStore={chainStore}
               onArm={arm}
-              density="roomy"
               locked={locked}
             />
           </Panel>
@@ -563,7 +564,14 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
       {trade.armedTicket ? (
         <OrderConfirmSheet tradeStore={tradeStore} ticket={trade.armedTicket} />
       ) : null}
-      {showSymbolSearch ? (
+      {showSymbolSearch && isDesktopGrid ? (
+        <SymbolSpotlight
+          currentSymbol={chart.symbol}
+          onSelect={(symbol) => chartStore.selectSymbol(symbol)}
+          onDismiss={() => setShowSymbolSearch(false)}
+        />
+      ) : null}
+      {showSymbolSearch && !isDesktopGrid ? (
         <SymbolSearchView
           currentSymbol={chart.symbol}
           onSelect={(symbol) => chartStore.selectSymbol(symbol)}

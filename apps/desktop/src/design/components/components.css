@@ -585,3 +585,183 @@
 .trade-panel.dense .quick-chip {
   padding: 5px 10px;
 }
+
+/* --- Option chain table (desktop grid only) ---
+   Calls | Strike | Puts, one row per strike. Replaces the phone ticket's
+   single-strike dropdown chips at the standard/wide breakpoints — a scalper
+   needs to scan the whole ladder for spread/liquidity before picking a
+   strike, not tap a menu to reveal one strike at a time. */
+.chain-table {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+  font-size: var(--fs-caption);
+}
+
+.chain-table-empty {
+  padding: var(--space-4);
+  text-align: center;
+}
+
+.chain-table-header {
+  display: grid;
+  grid-template-columns: 1fr 72px 1fr;
+  flex: none;
+  padding: var(--space-1) var(--space-2);
+  color: var(--label-secondary);
+  font-size: var(--fs-caption2);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  border-bottom: var(--border-hairline) solid var(--hud-stroke-dim);
+}
+
+.chain-table-header span:first-child {
+  text-align: left;
+  color: var(--buy-green);
+}
+
+.chain-table-header span:last-child {
+  text-align: right;
+  color: var(--sell-red);
+}
+
+.chain-table-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.chain-row {
+  display: grid;
+  grid-template-columns: 1fr 72px 1fr;
+  align-items: center;
+  border-bottom: var(--border-hairline) solid rgba(46, 143, 255, 0.12);
+}
+
+.chain-row--atm {
+  background: var(--hud-glow);
+}
+
+.chain-row-strike {
+  text-align: center;
+  font-size: var(--fs-caption);
+  font-weight: 600;
+  padding: 2px 0;
+}
+
+.chain-cell {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-2);
+  width: 100%;
+  padding: 4px var(--space-2);
+  border: none;
+  background: none;
+  cursor: pointer;
+}
+
+.chain-cell:disabled {
+  cursor: default;
+  opacity: var(--disabled-opacity);
+}
+
+.chain-cell--empty {
+  cursor: default;
+}
+
+.chain-cell--call .chain-cell-bid,
+.chain-cell--call .chain-cell-ask {
+  color: var(--buy-green);
+}
+
+.chain-cell--put .chain-cell-bid,
+.chain-cell--put .chain-cell-ask {
+  color: var(--sell-red);
+}
+
+.chain-cell:hover:not(:disabled) {
+  background: var(--app-surface-elevated);
+}
+
+.chain-cell.selected {
+  background: var(--app-surface-elevated);
+  box-shadow: inset 0 0 0 1px var(--hud-stroke);
+}
+
+/* --- Symbol spotlight (desktop Cmd+K command palette) --- */
+.spotlight-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 12vh;
+  animation: backdrop-in 120ms ease-out;
+  z-index: var(--z-alert);
+}
+
+.spotlight-card {
+  width: min(480px, 90%);
+  max-height: 60vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--hud-panel-fill);
+  border: 8px solid transparent;
+  border-image: var(--hud-src-accent) 28 fill / 24px / 6px stretch;
+  box-shadow: var(--shadow-overlay);
+}
+
+.spotlight-input-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex: none;
+  padding: var(--space-3) var(--space-4);
+  border-bottom: var(--border-hairline) solid var(--hud-stroke-dim);
+}
+
+.spotlight-input {
+  flex: 1;
+  font-size: var(--fs-headline);
+  text-transform: uppercase;
+}
+
+.spotlight-hint {
+  flex: none;
+  font-size: var(--fs-caption2);
+  color: var(--label-secondary);
+  border: var(--border-hairline) solid var(--hud-stroke-dim);
+  border-radius: var(--radius-chip);
+  padding: 2px 6px;
+}
+
+.spotlight-results {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--space-2) 0;
+}
+
+.spotlight-section-header {
+  padding: var(--space-2) var(--space-4) 4px;
+  font-size: var(--fs-caption2);
+  color: var(--label-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.spotlight-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  width: 100%;
+  padding: 8px var(--space-4);
+  font-size: var(--fs-subheadline);
+}
+
+.spotlight-row:hover {
+  background: rgba(46, 143, 255, 0.1);
+}

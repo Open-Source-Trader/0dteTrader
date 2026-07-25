@@ -148,4 +148,15 @@ describe('SettingsStore boolean device preferences', () => {
     new SettingsStore().bypassOrderConfirmation = false;
     expect(new SettingsStore().bypassOrderConfirmation).toBe(false);
   });
+
+  it('defaults keyboardShortcutsEnabled to true', () => {
+    expect(new SettingsStore().keyboardShortcutsEnabled).toBe(true);
+  });
+
+  it('round-trips keyboardShortcutsEnabled through localStorage', () => {
+    new SettingsStore().keyboardShortcutsEnabled = false;
+    expect(new SettingsStore().keyboardShortcutsEnabled).toBe(false);
+    new SettingsStore().keyboardShortcutsEnabled = true;
+    expect(new SettingsStore().keyboardShortcutsEnabled).toBe(true);
+  });
 });

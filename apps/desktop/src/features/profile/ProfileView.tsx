@@ -31,10 +31,18 @@ export function ProfileView({ onLogout, onDismiss }: ProfileViewProps) {
   const [bypassConfirmation, setBypassConfirmation] = useState(
     () => container.settingsStore.bypassOrderConfirmation,
   );
+  const [shortcutsEnabled, setShortcutsEnabled] = useState(
+    () => container.settingsStore.keyboardShortcutsEnabled,
+  );
 
   const handleBypassChange = (on: boolean) => {
     setBypassConfirmation(on);
     container.settingsStore.bypassOrderConfirmation = on;
+  };
+
+  const handleShortcutsChange = (on: boolean) => {
+    setShortcutsEnabled(on);
+    container.settingsStore.keyboardShortcutsEnabled = on;
   };
 
   useEffect(() => {
@@ -353,6 +361,23 @@ export function ProfileView({ onLogout, onDismiss }: ProfileViewProps) {
             <div className="section-footer">
               When on, tapping Buy or Sell places the order immediately without the confirmation
               step. This device only.
+            </div>
+          </div>
+
+          {/* Desktop-grid-only: hotkeys have no meaning on the phone layout. */}
+          <div className="grouped-section">
+            <div className="section-header">Desktop</div>
+            <div className="section-card">
+              <div className="grouped-row">
+                <span>Keyboard shortcuts</span>
+                <span style={{ marginLeft: 'auto' }}>
+                  <Toggle on={shortcutsEnabled} onChange={handleShortcutsChange} />
+                </span>
+              </div>
+            </div>
+            <div className="section-footer">
+              B/S arm Buy/Sell, L toggles the trading lock, ⌘K jumps to a symbol. Applies only to
+              the desktop grid layout; disabled while typing in any field.
             </div>
           </div>
 

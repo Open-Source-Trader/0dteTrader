@@ -250,8 +250,11 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
   // Desktop-grid-only hotkeys: B/S arm an order, Cmd/Ctrl+K jumps to symbol
   // search, L toggles the lock. The compact layout already has floating
   // touch buttons and no keyboard-first workflow, so hotkeys stay off there.
+  // Also gated by the user's "Keyboard shortcuts" preference (Profile ›
+  // Desktop) — read live off the store, same as bypassOrderConfirmation,
+  // so toggling it while Profile is open takes effect immediately.
   useTradeShortcuts({
-    enabled: isDesktopGrid,
+    enabled: isDesktopGrid && settingsStore.keyboardShortcutsEnabled,
     canTrade,
     onArm: arm,
     onToggleLock: toggleLock,

@@ -21,6 +21,7 @@ export class SettingsStore {
     lastSymbol: 'settings.lastSymbol',
     tradingLocked: 'settings.tradingLocked',
     bypassOrderConfirmation: 'settings.bypassOrderConfirmation',
+    keyboardShortcutsEnabled: 'settings.keyboardShortcutsEnabled',
   };
 
   get layoutMode(): TradeLayout {
@@ -99,6 +100,17 @@ export class SettingsStore {
 
   set bypassOrderConfirmation(value: boolean) {
     localStorage.setItem(SettingsStore.keys.bypassOrderConfirmation, String(value));
+  }
+
+  /** Desktop-grid trading hotkeys (B/S/L/Cmd+K). Defaults on; a trader who
+   *  doesn't want keys hijacked while typing elsewhere can turn them off. */
+  get keyboardShortcutsEnabled(): boolean {
+    const stored = localStorage.getItem(SettingsStore.keys.keyboardShortcutsEnabled);
+    return stored === null ? true : stored === 'true';
+  }
+
+  set keyboardShortcutsEnabled(value: boolean) {
+    localStorage.setItem(SettingsStore.keys.keyboardShortcutsEnabled, String(value));
   }
 
   get lastSymbol(): string | null {

@@ -57,6 +57,42 @@
   color: var(--pnl-negative-text);
 }
 
+/* On-chart position marker (desktop grid) — TradingView convention: risk
+   lives at the price it affects, closeable in one click, no chart trip
+   required. */
+.position-line-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 4px 2px 8px;
+  background: var(--hud-panel-fill);
+  border: var(--border-hairline) solid currentColor;
+  font-size: var(--fs-caption2);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.position-line-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  color: inherit;
+  border-radius: 50%;
+  font-size: 12px;
+  line-height: 1;
+}
+
+.position-line-close:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.position-line-close:disabled {
+  opacity: var(--disabled-opacity);
+  cursor: default;
+}
+
 /* Empty-chart loading skeleton: chart-shaped bars instead of a bare spinner,
    so the layout pre-commits before data arrives. */
 .chart-skeleton {

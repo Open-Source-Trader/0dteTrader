@@ -20,6 +20,7 @@ import type { TradeLayout } from '../../core/storage/SettingsStore';
 import { enabledSubPanes } from '../chart/indicatorSettings';
 import { ChartView } from '../chart/ChartView';
 import { DrawToolsRail } from '../chart/DrawingToolbar';
+import { positionsForUnderlying } from '../chart/positionsForUnderlying';
 import { IndicatorSettingsView } from '../chart/IndicatorSettingsView';
 import { TwcSettingsView } from '../chart/TwcSettingsView';
 import { SymbolSearchView } from '../chart/SymbolSearchView';
@@ -343,6 +344,13 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
               onToggleMode={() => setShowModeConfirmation(true)}
               optionsAnalyticsExpiration={optionsAnalyticsExpiration}
               dense
+              positionsForSymbol={positionsForUnderlying(
+                trade.positions,
+                chart.symbol,
+                chain.chain?.contracts ?? [],
+              )}
+              onFlattenPosition={(position) => void tradeStore.flatten(position)}
+              positionsLocked={locked}
             />
           </Panel>
 

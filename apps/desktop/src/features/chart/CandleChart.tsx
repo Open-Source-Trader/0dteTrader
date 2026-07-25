@@ -13,7 +13,7 @@ import {
   type LineWidth,
   type UTCTimestamp,
 } from 'lightweight-charts';
-import type { ChartInterval, OptionsAnalyticsSnapshot } from '@0dtetrader/shared-types';
+import type { ChartInterval, OptionsAnalyticsSnapshot, Position } from '@0dtetrader/shared-types';
 import { useStore } from '../../core/observable';
 import { Format } from '../../design/format';
 import { chartPalette } from './chartColors';
@@ -24,6 +24,7 @@ import type { DrawingsStore } from './drawings';
 import { sameColorsExceptLast } from './candleRepaint';
 import { OptionsAnalyticsOverlay } from './optionsAnalytics/OptionsAnalyticsOverlay';
 import type { OptionsAnalyticsSettings } from './optionsAnalytics/optionsAnalyticsSettings';
+import { PositionLineOverlay } from './PositionLineOverlay';
 import { TwcOverlay } from './TwcOverlay';
 import type { TwcRenderModel } from './twc/twcTypes';
 
@@ -52,6 +53,11 @@ interface CandleChartProps {
   optionsAnalyticsSnapshot?: OptionsAnalyticsSnapshot | null;
   optionsAnalyticsSettings?: OptionsAnalyticsSettings | null;
   optionsAnalyticsRetained?: boolean;
+  /** Open positions whose contract's underlying is this chart's symbol
+   *  (caller filters — see positionsForUnderlying). Desktop grid only. */
+  positionsForSymbol?: Position[];
+  onFlattenPosition?: (position: Position) => void;
+  positionsLocked?: boolean;
 }
 
 const VISIBLE_CANDLES = 120;
@@ -84,6 +90,9 @@ export function CandleChart({
   optionsAnalyticsSnapshot = null,
   optionsAnalyticsSettings = null,
   optionsAnalyticsRetained = false,
+  positionsForSymbol = [],
+  onFlattenPosition,
+  positionsLocked = false,
 }: CandleChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -461,6 +470,15 @@ export function CandleChart({
           store={drawingsStore}
           candles={candles}
           intervalSec={intervalSeconds(interval)}
+        />
+      ) : null}
+      {apis && candles.length > 0 && positionsForSymbol.length > 0 && onFlattenPosition ? (
+        <PositionLineOverlay
+          chart={apis.chart}
+          series={apis.series}
+          positions={positionsForSymbol}
+          onFlatten={onFlattenPosition}
+          locked={positionsLocked}
         />
       ) : null}
     </div>

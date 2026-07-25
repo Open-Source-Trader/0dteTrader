@@ -1,5 +1,5 @@
 import { useEffect, useMemo } from 'react';
-import type { ChartInterval, TradingMode } from '@0dtetrader/shared-types';
+import type { ChartInterval, Position, TradingMode } from '@0dtetrader/shared-types';
 import type { ApiClient } from '../../core/api/ApiClient';
 import { useStore } from '../../core/observable';
 import { Menu } from '../../design/components/Menu';
@@ -36,6 +36,12 @@ interface ChartViewProps {
    *  of a header dropdown, decluttered header. Compact/phone layout omits
    *  this and keeps its existing single-row header untouched. */
   dense?: boolean;
+  /** Open positions whose contract's underlying is this chart's symbol —
+   *  caller resolves the filter (needs the loaded option chain). Desktop
+   *  grid only; draws an on-chart entry/P&L line with a close button. */
+  positionsForSymbol?: Position[];
+  onFlattenPosition?: (position: Position) => void;
+  positionsLocked?: boolean;
 }
 
 // Interval hotkeys. 'H'/'D' are uppercase (shift held) so they don't collide
@@ -78,6 +84,9 @@ export function ChartView({
   onToggleMode,
   optionsAnalyticsExpiration,
   dense = false,
+  positionsForSymbol = [],
+  onFlattenPosition,
+  positionsLocked = false,
 }: ChartViewProps) {
   const {
     symbol,
@@ -420,6 +429,9 @@ export function ChartView({
             optionsAnalyticsSnapshot={optionsAnalyticsSnapshot}
             optionsAnalyticsSettings={optionsAnalytics.enabled ? optionsAnalytics : null}
             optionsAnalyticsRetained={optionsAnalyticsState.retained}
+            positionsForSymbol={positionsForSymbol}
+            onFlattenPosition={onFlattenPosition}
+            positionsLocked={positionsLocked}
           />
           {twcModel?.banner ? <TwcBiasBanner banner={twcModel.banner} /> : null}
           {optionsAnalytics.enabled && optionsAnalyticsState.errorMessage ? (

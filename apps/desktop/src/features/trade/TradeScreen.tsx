@@ -27,7 +27,7 @@ import { SymbolSearchView } from '../chart/SymbolSearchView';
 import { SymbolSpotlight } from '../chart/SymbolSpotlight';
 import { ProfileView } from '../profile/ProfileView';
 import { DesktopPositionsPanel } from './DesktopPositionsPanel';
-import { DesktopTopBar } from './DesktopTopBar';
+import { DesktopAppTopBar, DesktopChartTopBar } from './DesktopTopBar';
 import { DesktopTradeTicket } from './DesktopTradeTicket';
 import { FloatingTradeButtons } from './FloatingTradeButtons';
 import { HistoryView } from './HistoryView';
@@ -321,18 +321,6 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
   if (isDesktopGrid) {
     contentArea = (
       <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column' }}>
-        <DesktopTopBar
-          chartStore={chartStore}
-          chart={chart}
-          onSymbolSearch={() => setShowSymbolSearch(true)}
-          onIndicatorSettings={() => setShowIndicatorSettings(true)}
-          tradingMode={tradingMode}
-          onToggleMode={() => setShowModeConfirmation(true)}
-          locked={locked}
-          onToggleLock={toggleLock}
-          onShowProfile={() => setShowProfile(true)}
-          onShowHistory={() => setShowHistory(true)}
-        />
         <Group
           orientation="horizontal"
           style={{ flex: 1, minHeight: 0, display: 'flex' }}
@@ -345,6 +333,14 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
             minSize="40"
             style={{ minWidth: 0, display: 'flex', flexDirection: 'column' }}
           >
+            <DesktopChartTopBar
+              chartStore={chartStore}
+              chart={chart}
+              onSymbolSearch={() => setShowSymbolSearch(true)}
+              onIndicatorSettings={() => setShowIndicatorSettings(true)}
+              tradingMode={tradingMode}
+              onToggleMode={() => setShowModeConfirmation(true)}
+            />
             <ChartView
               store={chartStore}
               drawingsStore={drawingsStore}
@@ -384,6 +380,12 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
             minSize="18"
             style={{ minHeight: 0, display: 'flex', flexDirection: 'column' }}
           >
+            <DesktopAppTopBar
+              locked={locked}
+              onToggleLock={toggleLock}
+              onShowProfile={() => setShowProfile(true)}
+              onShowHistory={() => setShowHistory(true)}
+            />
             <DesktopTradeTicket
               tradeStore={tradeStore}
               chainStore={chainStore}

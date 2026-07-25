@@ -12,41 +12,31 @@ import {
   SlidersIcon,
 } from '../../design/icons';
 
-interface DesktopTopBarProps {
+interface DesktopChartTopBarProps {
   chartStore: ChartStore;
   chart: ChartStoreState;
   onSymbolSearch: () => void;
   onIndicatorSettings: () => void;
   tradingMode: TradingMode;
   onToggleMode: () => void;
-  locked: boolean;
-  onToggleLock: () => void;
-  onShowProfile: () => void;
-  onShowHistory: () => void;
 }
 
 /**
- * Desktop grid's single top bar: one row for the whole app instead of a
- * generic app NavBar (logo, spanning the full width) stacked above the
- * chart's own header (symbol/price/controls). Symbol + live price/bid-ask
- * on the left (the thing being traded), interval/indicators in the middle
- * (chart controls), lock/history/profile on the right (global app actions)
- * — one coherent status line, terminal convention. The left/right groups
- * align with the chart canvas edges below (draw rail + card margin), not
- * the outer panel edges, so the whole bar reads as part of the chart.
+ * Chart panel's own top bar: symbol + live price/bid-ask on the left (the
+ * thing being traded), interval/mode/indicators on the right. Rendered
+ * inside the resizable chart Panel (not the app shell), so its right edge
+ * always sits at the chart's actual right edge — including while the user
+ * is live-dragging the chart/ticket split — instead of a fixed position
+ * that only lined up at the default split ratio.
  */
-export function DesktopTopBar({
+export function DesktopChartTopBar({
   chartStore,
   chart,
   onSymbolSearch,
   onIndicatorSettings,
   tradingMode,
   onToggleMode,
-  locked,
-  onToggleLock,
-  onShowProfile,
-  onShowHistory,
-}: DesktopTopBarProps) {
+}: DesktopChartTopBarProps) {
   const { symbol, interval, quote, isStale, tickProgress } = chart;
 
   return (
@@ -89,8 +79,7 @@ export function DesktopTopBar({
         <Menu
           trigger={
             <button
-              className="quick-chip"
-              style={{ minHeight: 28, padding: '4px 8px' }}
+              className="desktop-top-bar-chip"
               aria-label={`Chart interval ${interval}`}
               aria-haspopup="menu"
             >
@@ -124,12 +113,33 @@ export function DesktopTopBar({
           onClick={onIndicatorSettings}
           aria-label="Indicator settings"
         >
-          <SlidersIcon size={20} />
+          <SlidersIcon size={22} />
         </button>
       </span>
+    </div>
+  );
+}
 
-      <span className="desktop-top-bar-divider" aria-hidden="true" />
+interface DesktopAppTopBarProps {
+  locked: boolean;
+  onToggleLock: () => void;
+  onShowProfile: () => void;
+  onShowHistory: () => void;
+}
 
+/**
+ * Order-ticket panel's own top bar: global app actions (lock/history/
+ * profile). Rendered inside the resizable ticket Panel for the same reason
+ * as DesktopChartTopBar — its edges track that panel's real width.
+ */
+export function DesktopAppTopBar({
+  locked,
+  onToggleLock,
+  onShowProfile,
+  onShowHistory,
+}: DesktopAppTopBarProps) {
+  return (
+    <div className="desktop-top-bar desktop-top-bar--ticket">
       {/* Order matches the icon's frequency of use: lock (most reached for
           while trading), history, profile (least frequent). */}
       <span className="desktop-top-bar-group">
@@ -139,21 +149,21 @@ export function DesktopTopBar({
           aria-pressed={locked}
           aria-label={locked ? 'Unlock trading' : 'Lock trading'}
         >
-          {locked ? <LockIcon size={20} /> : <LockOpenIcon size={20} />}
+          {locked ? <LockIcon size={22} /> : <LockOpenIcon size={22} />}
         </button>
         <button
           className="chart-icon-button chart-icon-button--sm"
           onClick={onShowHistory}
           aria-label="Trade history"
         >
-          <ClockIcon size={20} />
+          <ClockIcon size={22} />
         </button>
         <button
           className="chart-icon-button chart-icon-button--sm"
           onClick={onShowProfile}
           aria-label="Profile"
         >
-          <PersonCircleIcon size={20} />
+          <PersonCircleIcon size={22} />
         </button>
       </span>
     </div>

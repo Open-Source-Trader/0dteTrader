@@ -80,32 +80,55 @@
    controls, and global actions (profile/history/lock) together — not a
    full-width app NavBar with a centered logo stacked above a second,
    separate chart header. Solid fill, terminal convention. */
-/* Left/right padding matches the chart canvas edges below it exactly
-   (44px draw rail + 8px card margin on the left, 8px card margin on the
-   right — see ChartView's .draw-rail + .hud-card), so the bar's icon
-   groups line up with the chart itself instead of the outer panel edge. */
+/* Each resizable panel (chart, order ticket) gets its own top bar, rendered
+   inside that panel — so the bar's right edge always tracks the panel's
+   real width, including while the user is live-dragging the chart/ticket
+   split, instead of a single full-width bar with icons floating at a fixed
+   position that only lined up with the chart at the default split ratio.
+   Height is generous enough to clear the tallest child (the interval chip,
+   with its own chamfer border) without clipping — the chip needs real
+   headroom, not just its own min-height. */
 .desktop-top-bar {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   flex: none;
-  height: 34px;
-  padding: 0 8px 0 52px;
+  height: 40px;
+  padding: 0 8px;
   background: var(--app-surface);
   border-bottom: var(--border-hairline) solid var(--hud-stroke-dim);
   font-size: var(--fs-caption-desktop);
 }
 
+.desktop-top-bar--ticket {
+  justify-content: flex-end;
+}
+
 .desktop-top-bar-group {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 8px;
 }
 
-.desktop-top-bar-divider {
-  width: var(--border-hairline);
-  height: 18px;
-  background: var(--hud-stroke-dim);
+/* Interval selector: a plain flat chip, not the shared .quick-chip's
+   chamfered border-image — that border alone is 10px of vertical overhead
+   (5px top + bottom), which is what overflowed the bar in the first place. */
+.desktop-top-bar-chip {
+  display: flex;
+  align-items: center;
+  height: 26px;
+  padding: 0 10px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-caption-desktop);
+  font-weight: 600;
+  color: var(--app-accent-text);
+  background: var(--app-surface-elevated);
+  border: var(--border-hairline) solid var(--hud-stroke-dim);
+  border-radius: var(--radius-chip);
+}
+
+.desktop-top-bar-chip:hover {
+  border-color: var(--hud-stroke);
 }
 
 /* --- Spinner (ProgressView) --- */

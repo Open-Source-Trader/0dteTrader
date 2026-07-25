@@ -30,6 +30,12 @@ final class ProfileViewModel: ObservableObject {
     @Published private(set) var deletingTradier: Set<TradingMode> = []
     @Published private(set) var editingTradier: Set<TradingMode> = []
 
+    // SnapTrade Personal client ID / consumer key — user-entered, write-only,
+    // same lifecycle shape as Alpaca. Never server-minted.
+    @Published private(set) var savingSnapTradeKey: Set<TradingMode> = []
+    @Published private(set) var deletingSnapTradeKey: Set<TradingMode> = []
+    @Published private(set) var editingSnapTradeKey: Set<TradingMode> = []
+
     @Published private(set) var connectingSnaptrade: Set<TradingMode> = []
     @Published private(set) var disconnectingSnaptrade: Set<TradingMode> = []
     @Published private(set) var reconnectingSnaptrade: Set<TradingMode> = []
@@ -89,6 +95,14 @@ final class ProfileViewModel: ObservableObject {
 
     func setEditingTradier(_ environment: TradingMode, _ isEditing: Bool) {
         if isEditing { editingTradier.insert(environment) } else { editingTradier.remove(environment) }
+    }
+
+    func setEditingSnapTradeKey(_ environment: TradingMode, _ isEditing: Bool) {
+        if isEditing {
+            editingSnapTradeKey.insert(environment)
+        } else {
+            editingSnapTradeKey.remove(environment)
+        }
     }
 
     func load() async {
@@ -316,6 +330,51 @@ final class ProfileViewModel: ObservableObject {
         do {
             try await apiClient.deleteBrokerCredentials(provider: .tradier, environment: environment)
             successMessage = "Tradier \(environment.label) API key removed."
+            await load()
+        } catch {
+            setError(error)
+        }
+    }
+
+    // MARK: - SnapTrade Personal client ID / consumer key (generic broker-credentials endpoint)
+
+    func saveSnapTradeKey(environment: TradingMode, clientId: String, consumerKey: String) async {
+        guard !savingSnapTradeKey.contains(environment),
+              !clientId.trimmingCharacters(in: .whitespaces).isEmpty,
+              !consumerKey.isEmpty else { return }
+        savingSnapTradeKey.insert(environment)
+        errorMessage = nil
+        successMessage = nil
+        messageEnv = environment
+        messageProvider = .snaptrade
+        defer { savingSnapTradeKey.remove(environment) }
+        do {
+            try await apiClient.putSnapTradeCredentials(
+                SnapTradeCredentialsInputDTO(
+                    clientId: clientId.trimmingCharacters(in: .whitespaces),
+                    consumerKey: consumerKey,
+                    environment: environment
+                )
+            )
+            editingSnapTradeKey.remove(environment)
+            successMessage = "SnapTrade \(environment.label) credentials saved."
+            await load()
+        } catch {
+            setError(error)
+        }
+    }
+
+    func deleteSnapTradeKey(environment: TradingMode) async {
+        guard !deletingSnapTradeKey.contains(environment) else { return }
+        deletingSnapTradeKey.insert(environment)
+        errorMessage = nil
+        successMessage = nil
+        messageEnv = environment
+        messageProvider = .snaptrade
+        defer { deletingSnapTradeKey.remove(environment) }
+        do {
+            try await apiClient.deleteBrokerCredentials(provider: .snaptrade, environment: environment)
+            successMessage = "SnapTrade \(environment.label) credentials removed."
             await load()
         } catch {
             setError(error)

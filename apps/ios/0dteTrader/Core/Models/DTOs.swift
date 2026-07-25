@@ -129,6 +129,16 @@ struct TradierCredentialsInputDTO: Encodable, Sendable {
     let environment: TradingMode
 }
 
+/// SnapTrade Personal client ID + consumer key (docs.snaptrade.com/docs/personal-vs-commercial)
+/// — the user's own SnapTrade identity, entered the same way as an Alpaca API key. Never
+/// server-minted.
+struct SnapTradeCredentialsInputDTO: Encodable, Sendable {
+    let provider = "snaptrade"
+    let clientId: String
+    let consumerKey: String
+    let environment: TradingMode
+}
+
 struct BrokerCredentialsSavedDTO: Decodable, Equatable, Sendable {
     let provider: BrokerProvider
     let configured: Bool

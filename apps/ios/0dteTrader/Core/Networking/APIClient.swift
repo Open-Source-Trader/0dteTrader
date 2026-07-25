@@ -182,6 +182,13 @@ struct APIClient: @unchecked Sendable {
         return try await request(endpoint, body: encode(credentials))
     }
 
+    /// Save a SnapTrade Personal client ID/consumer key via the generic broker-credentials endpoint.
+    @discardableResult
+    func putSnapTradeCredentials(_ credentials: SnapTradeCredentialsInputDTO) async throws -> BrokerCredentialsSavedDTO {
+        let endpoint = Endpoint(method: .put, path: "v1/me/broker-credentials")
+        return try await request(endpoint, body: encode(credentials))
+    }
+
     /// Delete stored broker credentials by provider (defaults to live env).
     func deleteBrokerCredentials(provider: BrokerProvider, environment: TradingMode = .live) async throws {
         var query = [URLQueryItem(name: "provider", value: provider.rawValue)]

@@ -30,6 +30,23 @@ import { optionsAnalyticsExpirationForChart } from './optionsAnalyticsSelection'
 
 const DIVIDER_HEIGHT = 1;
 
+function providerDisplayName(provider: Me['tradingProvider']): string {
+  if (provider === 'alpaca') return 'Alpaca';
+  if (provider === 'snaptrade') return 'SnapTrade';
+  return 'Webull';
+}
+
+function isProviderConfigured(me: Me, provider: Me['tradingProvider'], mode: TradingMode): boolean {
+  const isPractice = mode === 'practice';
+  if (provider === 'alpaca') {
+    return Boolean(isPractice ? me.alpacaPracticeConfigured : me.alpacaConfigured);
+  }
+  if (provider === 'snaptrade') {
+    return Boolean(isPractice ? me.snaptradePracticeConfigured : me.snaptradeConfigured);
+  }
+  return Boolean(isPractice ? me.webullPracticeConfigured : me.webullConfigured);
+}
+
 /**
  * The main screen (TradeScreenView.swift):
  * Layout A (fullscreen) — chart fills the screen, floating Buy/Sell overlaid;
@@ -81,24 +98,9 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
   // stored for the current trading mode — drives the provider-aware copy and
   // the "configure provider" empty state.
   const tradingProvider = me?.tradingProvider ?? 'webull';
-  const providerName =
-    tradingProvider === 'alpaca'
-      ? 'Alpaca'
-      : tradingProvider === 'snaptrade'
-        ? 'SnapTrade'
-        : 'Webull';
+  const providerName = providerDisplayName(tradingProvider);
   const activeProviderConfigured = me
-    ? tradingProvider === 'alpaca'
-      ? tradingMode === 'practice'
-        ? Boolean(me.alpacaPracticeConfigured)
-        : Boolean(me.alpacaConfigured)
-      : tradingProvider === 'snaptrade'
-        ? tradingMode === 'practice'
-          ? Boolean(me.snaptradePracticeConfigured)
-          : Boolean(me.snaptradeConfigured)
-        : tradingMode === 'practice'
-          ? Boolean(me.webullPracticeConfigured)
-          : Boolean(me.webullConfigured)
+    ? isProviderConfigured(me, tradingProvider, tradingMode)
     : true;
   const needsProviderConfig = me != null && !activeProviderConfigured;
 

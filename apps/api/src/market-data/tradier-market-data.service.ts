@@ -12,6 +12,11 @@ import { aggregateCandles } from './candle-aggregation';
 
 const TRADIER_INTRADAY_INTERVALS = new Set<CandleInterval>(['1m', '5m', '15m']);
 const TRADIER_DAILY_INTERVALS = new Set<CandleInterval>(['1d', '1w']);
+const TRADIER_TIMESALES_INTERVAL: Record<string, '1min' | '5min' | '15min'> = {
+  '1m': '1min',
+  '5m': '5min',
+  '15m': '15min',
+};
 
 /**
  * Market-data provider backed by Tradier. Used by {@link MarketDataController}
@@ -51,12 +56,7 @@ export class TradierMarketDataService {
       // Tradier ~20/40-day lookback; if the caller asked further back, honor
       // the request and let Tradier return what it can.
       const start = from ?? new Date(end.getTime() - 40 * 24 * 60 * 60 * 1000);
-      return this.tradier.getTimeSales(
-        symbol,
-        interval === '1m' ? '1min' : interval === '5m' ? '5min' : '15min',
-        start,
-        end,
-      );
+      return this.tradier.getTimeSales(symbol, TRADIER_TIMESALES_INTERVAL[interval], start, end);
     }
 
     // 2) Native Tradier daily/weekly: /markets/history?interval=daily.

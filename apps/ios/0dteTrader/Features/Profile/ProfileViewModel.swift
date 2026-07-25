@@ -389,7 +389,7 @@ final class ProfileViewModel: ObservableObject {
         reconnectingSnaptrade.remove(key)
         errorMessage = nil
         do {
-            let response = try await apiClient.getSnapTradeConnections()
+            let response = try await apiClient.getSnapTradeConnections(environment: environment)
             snapTradeConnections = response.connections
             snapTradeAccounts = response.accounts
             snapTradeStatus = response.status
@@ -407,7 +407,7 @@ final class ProfileViewModel: ObservableObject {
         messageEnv = key
         defer { connectingSnaptrade.remove(key) }
         do {
-            let response = try await apiClient.authorizeSnapTrade(connectionType: "trade")
+            let response = try await apiClient.authorizeSnapTrade(environment: environment, connectionType: "trade")
             snapTradeRedirectURL = URL(string: response.redirectUrl)
             snapTradePendingRefreshEnvironment = key
             successMessage = "SnapTrade brokerage connected."
@@ -425,7 +425,7 @@ final class ProfileViewModel: ObservableObject {
         messageEnv = key
         defer { reconnectingSnaptrade.remove(key) }
         do {
-            let response = try await apiClient.reconnectSnapTrade(connectionId: connectionId)
+            let response = try await apiClient.reconnectSnapTrade(environment: environment, connectionId: connectionId)
             snapTradeRedirectURL = URL(string: response.redirectUrl)
             snapTradePendingRefreshEnvironment = key
             successMessage = "SnapTrade connection refreshed."
@@ -440,7 +440,11 @@ final class ProfileViewModel: ObservableObject {
         accountId: String
     ) async {
         do {
-            _ = try await apiClient.selectSnapTradeAccount(connectionId: connectionId, accountId: accountId)
+            _ = try await apiClient.selectSnapTradeAccount(
+                environment: environment,
+                connectionId: connectionId,
+                accountId: accountId
+            )
             await loadSnapTradeConnections(environment: environment)
             successMessage = "SnapTrade trading account selected."
         } catch {
@@ -457,7 +461,7 @@ final class ProfileViewModel: ObservableObject {
         messageEnv = key
         defer { disconnectingSnaptrade.remove(key) }
         do {
-            try await apiClient.deleteSnapTradeConnection(connectionId: connectionId)
+            try await apiClient.deleteSnapTradeConnection(environment: key, connectionId: connectionId)
             await loadSnapTradeConnections(environment: key)
             successMessage = "SnapTrade connection removed."
         } catch {

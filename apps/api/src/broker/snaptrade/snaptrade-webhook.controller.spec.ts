@@ -22,12 +22,16 @@ function sign(body: unknown, key = CONSUMER_KEY): string {
   return createHmac('sha256', key).update(canonicalJson(body)).digest('base64');
 }
 
-function makeCredentials(opts?: { noOwner?: boolean; consumerKey?: string }) {
+function makeCredentials(opts?: {
+  noOwner?: boolean;
+  consumerKey?: string;
+  environment?: 'live' | 'practice';
+}) {
   return {
     findUserBySnapTradeClientId: jest.fn(async (clientId: string) => {
       if (opts?.noOwner) return null;
       if (clientId !== CLIENT_ID) return null;
-      return { userId: OWNER_USER_ID, environment: 'live' as const };
+      return { userId: OWNER_USER_ID, environment: opts?.environment ?? ('live' as const) };
     }),
     getDecrypted: jest.fn(async () => ({
       provider: 'snaptrade' as const,
@@ -203,10 +207,17 @@ describe('SnapTradeWebhookController', () => {
       await controller.handle({ body, headers: headersFor(body) } as any, response);
       expect(sendStatus).toHaveBeenCalledWith(200);
       expect(prisma.brokerConnection.upsert).toHaveBeenCalledWith({
-        where: { userId_provider: { userId: OWNER_USER_ID, provider: 'snaptrade' } },
+        where: {
+          userId_provider_environment: {
+            userId: OWNER_USER_ID,
+            provider: 'snaptrade',
+            environment: 'live',
+          },
+        },
         create: {
           userId: OWNER_USER_ID,
           provider: 'snaptrade',
+          environment: 'live',
           connectionId: 'conn-1',
           accountIds: ['acc-1', 'acc-2'],
           selectedAccountId: 'acc-1',
@@ -218,6 +229,32 @@ describe('SnapTradeWebhookController', () => {
           status: 'active',
         },
       });
+    });
+
+    it('upserts against the practice row when the resolved owner is in practice mode', async () => {
+      credentials = makeCredentials({ environment: 'practice' });
+      controller = new SnapTradeWebhookController(credentials, prisma, events);
+      const body = {
+        eventType: 'CONNECTION_ADDED',
+        clientId: CLIENT_ID,
+        brokerageAuthorizationId: 'conn-practice',
+        accounts: [{ id: 'acc-1' }],
+      };
+      const { response, sendStatus } = makeResponse();
+      await controller.handle({ body, headers: headersFor(body) } as any, response);
+      expect(sendStatus).toHaveBeenCalledWith(200);
+      expect(prisma.brokerConnection.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            userId_provider_environment: {
+              userId: OWNER_USER_ID,
+              provider: 'snaptrade',
+              environment: 'practice',
+            },
+          },
+          create: expect.objectContaining({ environment: 'practice' }),
+        }),
+      );
     });
 
     it('ignores CONNECTION_ADDED when brokerageAuthorizationId is missing', async () => {
@@ -244,7 +281,12 @@ describe('SnapTradeWebhookController', () => {
       await controller.handle({ body, headers: headersFor(body) } as any, response);
       expect(sendStatus).toHaveBeenCalledWith(200);
       expect(prisma.brokerConnection.updateMany).toHaveBeenCalledWith({
-        where: { userId: OWNER_USER_ID, provider: 'snaptrade', connectionId: 'conn-1' },
+        where: {
+          userId: OWNER_USER_ID,
+          provider: 'snaptrade',
+          environment: 'live',
+          connectionId: 'conn-1',
+        },
         data: { status: 'broken' },
       });
     });
@@ -262,7 +304,12 @@ describe('SnapTradeWebhookController', () => {
       await controller.handle({ body, headers: headersFor(body) } as any, response);
       expect(sendStatus).toHaveBeenCalledWith(200);
       expect(prisma.brokerConnection.updateMany).toHaveBeenCalledWith({
-        where: { userId: OWNER_USER_ID, provider: 'snaptrade', connectionId: 'conn-1' },
+        where: {
+          userId: OWNER_USER_ID,
+          provider: 'snaptrade',
+          environment: 'live',
+          connectionId: 'conn-1',
+        },
         data: { accountIds: { push: 'acc-3' } },
       });
     });

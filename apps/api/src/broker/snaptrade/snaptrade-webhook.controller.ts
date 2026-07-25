@@ -1,6 +1,7 @@
 import { Controller, HttpCode, HttpStatus, Post, Req, Res } from '@nestjs/common';
 import { Request, Response } from 'express';
 import { createHmac, timingSafeEqual } from 'node:crypto';
+import { TradingMode } from '@0dtetrader/shared-types';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CredentialsService } from '../../credentials/credentials.service';
 import { OrderEventsService } from '../order-events.service';
@@ -111,7 +112,7 @@ export class SnapTradeWebhookController {
     const eventType = typeof body['eventType'] === 'string' ? (body['eventType'] as string) : '';
 
     try {
-      await this.dispatch(eventType, owner.userId, body);
+      await this.dispatch(eventType, owner.userId, owner.environment, body);
     } catch {
       // Log but still 2xx so SnapTrade stops retrying.
     }
@@ -122,17 +123,18 @@ export class SnapTradeWebhookController {
   private async dispatch(
     eventType: string,
     userId: string,
+    environment: TradingMode,
     event: Record<string, unknown>,
   ): Promise<void> {
     switch (eventType) {
       case 'CONNECTION_ADDED':
-        await this.handleConnectionAdded(userId, event);
+        await this.handleConnectionAdded(userId, environment, event);
         break;
       case 'CONNECTION_BROKEN':
-        await this.handleConnectionBroken(userId, event);
+        await this.handleConnectionBroken(userId, environment, event);
         break;
       case 'NEW_ACCOUNT_AVAILABLE':
-        await this.handleNewAccountAvailable(userId, event);
+        await this.handleNewAccountAvailable(userId, environment, event);
         break;
       case 'TRADE_UPDATE':
       case 'TRADE_DETECTION':
@@ -145,6 +147,7 @@ export class SnapTradeWebhookController {
 
   private async handleConnectionAdded(
     userId: string,
+    environment: TradingMode,
     event: Record<string, unknown>,
   ): Promise<void> {
     const connectionId =
@@ -160,10 +163,11 @@ export class SnapTradeWebhookController {
       .filter((id): id is string => typeof id === 'string');
 
     await this.prisma.brokerConnection.upsert({
-      where: { userId_provider: { userId, provider: 'snaptrade' } },
+      where: { userId_provider_environment: { userId, provider: 'snaptrade', environment } },
       create: {
         userId,
         provider: 'snaptrade',
+        environment,
         connectionId,
         accountIds,
         selectedAccountId: accountIds[0] ?? null,
@@ -179,6 +183,7 @@ export class SnapTradeWebhookController {
 
   private async handleConnectionBroken(
     userId: string,
+    environment: TradingMode,
     event: Record<string, unknown>,
   ): Promise<void> {
     const connectionId =
@@ -187,13 +192,14 @@ export class SnapTradeWebhookController {
         : '';
     if (!connectionId) return;
     await this.prisma.brokerConnection.updateMany({
-      where: { userId, provider: 'snaptrade', connectionId },
+      where: { userId, provider: 'snaptrade', environment, connectionId },
       data: { status: 'broken' },
     });
   }
 
   private async handleNewAccountAvailable(
     userId: string,
+    environment: TradingMode,
     event: Record<string, unknown>,
   ): Promise<void> {
     const connectionId =
@@ -203,7 +209,7 @@ export class SnapTradeWebhookController {
     const accountId = typeof event['accountId'] === 'string' ? (event['accountId'] as string) : '';
     if (!connectionId || !accountId) return;
     await this.prisma.brokerConnection.updateMany({
-      where: { userId, provider: 'snaptrade', connectionId },
+      where: { userId, provider: 'snaptrade', environment, connectionId },
       data: { accountIds: { push: accountId } },
     });
   }

@@ -69,8 +69,8 @@ export function SymbolSpotlight({ currentSymbol, onSelect, onDismiss }: SymbolSp
     }
   };
 
-  const activeStyle = (symbol: string) =>
-    rowIndex.get(symbol) === activeIndex ? { background: 'rgba(46, 143, 255, 0.12)' } : undefined;
+  const rowClassName = (symbol: string) =>
+    rowIndex.get(symbol) === activeIndex ? 'spotlight-row active' : 'spotlight-row';
 
   return (
     <div
@@ -86,7 +86,7 @@ export function SymbolSpotlight({ currentSymbol, onSelect, onDismiss }: SymbolSp
     >
       <div className="spotlight-card">
         <div className="spotlight-input-row">
-          <MagnifierIcon size={15} style={{ color: 'var(--label-secondary)' }} />
+          <MagnifierIcon size={16} style={{ color: 'var(--app-accent)' }} />
           <input
             ref={inputRef}
             placeholder="Jump to symbol…"
@@ -97,18 +97,18 @@ export function SymbolSpotlight({ currentSymbol, onSelect, onDismiss }: SymbolSp
             value={query}
             onChange={(event) => setQuery(event.target.value)}
           />
-          <span className="spotlight-hint">esc</span>
         </div>
 
         <div className="spotlight-results hide-scrollbar">
           {showsCustomSymbol ? (
             <button
-              className="spotlight-row"
-              style={activeStyle(normalizedQuery)}
+              className={rowClassName(normalizedQuery)}
               onClick={() => select(normalizedQuery)}
             >
-              <TextCursorIcon size={14} style={{ color: 'var(--app-accent)' }} />
-              <span>Use &quot;{normalizedQuery}&quot;</span>
+              <span className="spotlight-row-icon">
+                <TextCursorIcon size={14} />
+              </span>
+              <span className="spotlight-row-label">Use &quot;{normalizedQuery}&quot;</span>
             </button>
           ) : null}
 
@@ -118,23 +118,39 @@ export function SymbolSpotlight({ currentSymbol, onSelect, onDismiss }: SymbolSp
             return (
               <div key={section.title}>
                 <div className="spotlight-section-header">{section.title}</div>
-                {symbols.map((symbol) => (
-                  <button
-                    className="spotlight-row"
-                    key={symbol}
-                    style={activeStyle(symbol)}
-                    aria-current={symbol === currentSymbol ? 'true' : undefined}
-                    onClick={() => select(symbol)}
-                  >
-                    <span>{symbol}</span>
-                    {symbol === currentSymbol ? (
-                      <CheckmarkIcon size={14} style={{ color: 'var(--app-accent)' }} />
-                    ) : null}
-                  </button>
-                ))}
+                {symbols.map((symbol) => {
+                  const isCurrent = symbol === currentSymbol;
+                  return (
+                    <button
+                      className={rowClassName(symbol)}
+                      key={symbol}
+                      aria-current={isCurrent ? 'true' : undefined}
+                      onClick={() => select(symbol)}
+                    >
+                      <span className="spotlight-row-dot" aria-hidden="true" />
+                      <span className="spotlight-row-label numeric">{symbol}</span>
+                      {isCurrent ? (
+                        <CheckmarkIcon size={14} style={{ color: 'var(--app-accent)' }} />
+                      ) : null}
+                    </button>
+                  );
+                })}
               </div>
             );
           })}
+        </div>
+
+        <div className="spotlight-footer">
+          <span className="spotlight-footer-hint">
+            <kbd>↑</kbd>
+            <kbd>↓</kbd> navigate
+          </span>
+          <span className="spotlight-footer-hint">
+            <kbd>↵</kbd> select
+          </span>
+          <span className="spotlight-footer-hint">
+            <kbd>esc</kbd> close
+          </span>
         </div>
       </div>
     </div>

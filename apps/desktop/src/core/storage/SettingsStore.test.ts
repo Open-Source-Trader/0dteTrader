@@ -149,8 +149,8 @@ describe('SettingsStore boolean device preferences', () => {
     expect(new SettingsStore().bypassOrderConfirmation).toBe(false);
   });
 
-  it('defaults keyboardShortcutsEnabled to true', () => {
-    expect(new SettingsStore().keyboardShortcutsEnabled).toBe(true);
+  it('defaults keyboardShortcutsEnabled to false', () => {
+    expect(new SettingsStore().keyboardShortcutsEnabled).toBe(false);
   });
 
   it('round-trips keyboardShortcutsEnabled through localStorage', () => {

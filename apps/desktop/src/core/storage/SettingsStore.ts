@@ -102,11 +102,13 @@ export class SettingsStore {
     localStorage.setItem(SettingsStore.keys.bypassOrderConfirmation, String(value));
   }
 
-  /** Desktop-grid trading hotkeys (B/S/L/Cmd+K). Defaults on; a trader who
-   *  doesn't want keys hijacked while typing elsewhere can turn them off. */
+  /** Desktop-grid trading hotkeys (B/S/L — Cmd+K symbol search is always on,
+   *  see useTradeShortcuts). Defaults off: arming a real order from a single
+   *  keystroke should be opt-in, not a surprise the first time a trader
+   *  types "b" somewhere unexpected. */
   get keyboardShortcutsEnabled(): boolean {
     const stored = localStorage.getItem(SettingsStore.keys.keyboardShortcutsEnabled);
-    return stored === null ? true : stored === 'true';
+    return stored === null ? false : stored === 'true';
   }
 
   set keyboardShortcutsEnabled(value: boolean) {

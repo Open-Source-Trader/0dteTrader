@@ -5,6 +5,7 @@ import { useStore } from '../../core/observable';
 import { AlertDialog } from '../../design/components/AlertDialog';
 import { DesktopSheet } from '../../design/components/DesktopSheet';
 import { NavBar } from '../../design/components/NavBar';
+import { SegmentedControl } from '../../design/components/SegmentedControl';
 import { Sheet } from '../../design/components/Sheet';
 import { Spinner } from '../../design/components/Spinner';
 import { Toggle } from '../../design/components/Toggle';
@@ -313,25 +314,20 @@ export function ProfileView({
         <div className="grouped-section">
           <div className="section-header">Trading Provider</div>
           <div className="section-card">
-            <div className="segmented-control" role="group" aria-label="Trading provider">
-              {(['webull', 'alpaca'] as BrokerProvider[]).map((provider) => (
-                <button
-                  key={provider}
-                  type="button"
-                  className={`segment${state.tradingProvider === provider ? ' active' : ''}`}
-                  aria-pressed={state.tradingProvider === provider}
-                  onClick={async () => {
-                    await store.setTradingProvider(provider);
-                    // Re-establish the market-data stream so live quotes use the
-                    // newly selected provider immediately (the subscription was
-                    // established under the previous provider).
-                    container.quoteSocket.reconnect();
-                  }}
-                >
-                  {provider === 'webull' ? 'Webull' : 'Alpaca'}
-                </button>
-              ))}
-            </div>
+            <SegmentedControl
+              options={[
+                { value: 'webull', label: 'Webull' },
+                { value: 'alpaca', label: 'Alpaca' },
+              ]}
+              value={state.tradingProvider}
+              onChange={async (provider: BrokerProvider) => {
+                await store.setTradingProvider(provider);
+                // Re-establish the market-data stream so live quotes use the
+                // newly selected provider immediately (the subscription was
+                // established under the previous provider).
+                container.quoteSocket.reconnect();
+              }}
+            />
           </div>
           <div className="section-footer">
             Switch providers any time. Credentials for the other provider stay saved.

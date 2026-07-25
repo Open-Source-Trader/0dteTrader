@@ -558,6 +558,21 @@
   min-width: 0;
 }
 
+/* A script's full parameter set, expanded inline in place (disclosure
+   triangle) instead of navigating to a separate settings screen — desktop
+   settings read as one persistent window, not a stack of screens. Inset
+   background + accent rail mark it as nested under its parent row. */
+.indicator-nested-settings {
+  padding: var(--space-2) 0 var(--space-2) var(--space-3);
+  margin: 0 0 0 var(--space-2);
+  background: rgba(0, 0, 0, 0.15);
+  border-left: 2px solid var(--hud-stroke-dim);
+}
+
+.indicator-nested-settings .grouped-section:first-child .section-header {
+  padding-top: 0;
+}
+
 /* --- Toast --- */
 .toast {
   position: absolute;

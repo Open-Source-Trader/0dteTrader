@@ -597,7 +597,7 @@
 
 .trade-panel.desktop .trade-action-button {
   min-height: var(--h-trade-button-desktop);
-  font-size: var(--fs-subheadline);
+  font-size: var(--fs-headline);
   gap: 4px;
 }
 
@@ -606,8 +606,8 @@
 }
 
 .trade-panel.desktop .chip-button {
-  padding: 4px 8px;
-  font-size: var(--fs-caption2);
+  padding: 5px 9px;
+  font-size: var(--fs-caption);
 }
 
 .trade-panel.desktop .stepper {

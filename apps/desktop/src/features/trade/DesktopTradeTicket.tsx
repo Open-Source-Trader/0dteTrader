@@ -185,90 +185,88 @@ export function DesktopTradeTicket({
         />
       )}
 
-      {/* Quantity row */}
+      {/* Order-entry controls: quantity through Buy/Sell. Deliberately
+          roomier than the chain/read-only rows above — a mis-click here
+          places or mis-sizes a real order, so this section trades density
+          for a safer, more deliberate hit target. */}
       <div
         inert={locked}
         style={{
           display: 'flex',
-          alignItems: 'center',
-          gap: 6,
+          flexDirection: 'column',
+          gap: 10,
           flex: 'none',
+          padding: '8px 2px 2px',
           opacity: locked ? 0.55 : 1,
         }}
       >
-        <span className="text-secondary" style={{ fontSize: 'var(--fs-caption)' }}>
-          Qty
-        </span>
-        <Stepper
-          value={trade.quantity}
-          min={1}
-          max={1000}
-          onChange={(value) => tradeStore.setQuantity(value)}
-        />
-        <span
-          className="numeric"
-          style={{
-            fontSize: 'var(--fs-subheadline)',
-            fontWeight: 500,
-            minWidth: 32,
-            textAlign: 'center',
-            textShadow: '0 0 8px var(--hud-glow)',
-          }}
-        >
-          {trade.quantity}
-        </span>
-        <span style={{ flex: 1 }} />
-        <QuickChip title="+5" onClick={() => tradeStore.addQuantity(5)} />
-        <QuickChip title="+10" onClick={() => tradeStore.addQuantity(10)} />
-      </div>
+        {/* Quantity row */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span className="text-secondary" style={{ fontSize: 'var(--fs-caption)' }}>
+            Qty
+          </span>
+          <Stepper
+            value={trade.quantity}
+            min={1}
+            max={1000}
+            onChange={(value) => tradeStore.setQuantity(value)}
+          />
+          <span
+            className="numeric"
+            style={{
+              fontSize: 'var(--fs-subheadline)',
+              fontWeight: 500,
+              minWidth: 32,
+              textAlign: 'center',
+              textShadow: '0 0 8px var(--hud-glow)',
+            }}
+          >
+            {trade.quantity}
+          </span>
+          <span style={{ flex: 1 }} />
+          <QuickChip title="+5" onClick={() => tradeStore.addQuantity(5)} />
+          <QuickChip title="+10" onClick={() => tradeStore.addQuantity(10)} />
+        </div>
 
-      {/* Order type row */}
-      <div
-        inert={locked}
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 6,
-          flex: 'none',
-          opacity: locked ? 0.55 : 1,
-        }}
-      >
-        <SegmentedControl
-          options={[
-            { value: 'mid', label: 'Mid' },
-            { value: 'market', label: 'Market' },
-          ]}
-          value={trade.orderType}
-          onChange={(value) => tradeStore.setOrderType(value)}
-        />
-        <span
-          className="text-secondary numeric"
-          style={{
-            fontSize: 'var(--fs-caption2)',
-            flex: 'none',
-            minWidth: 96,
-            textAlign: 'right',
-            visibility: selectedContract ? 'visible' : 'hidden',
-          }}
-        >
-          {orderTypeQuoteLabel}
-        </span>
-      </div>
+        {/* Order type row */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <SegmentedControl
+            options={[
+              { value: 'mid', label: 'Mid' },
+              { value: 'market', label: 'Market' },
+            ]}
+            value={trade.orderType}
+            onChange={(value) => tradeStore.setOrderType(value)}
+          />
+          <span
+            className="text-secondary numeric"
+            style={{
+              fontSize: 'var(--fs-caption)',
+              flex: 'none',
+              minWidth: 96,
+              textAlign: 'right',
+              visibility: selectedContract ? 'visible' : 'hidden',
+            }}
+          >
+            {orderTypeQuoteLabel}
+          </span>
+        </div>
 
-      {/* Action row */}
-      <div style={{ display: 'flex', gap: 6, flex: 'none' }}>
-        <TradeActionButton
-          title="SELL"
-          color="var(--sell-red)"
-          isEnabled={canTrade}
-          onClick={() => onArm('sell')}
-        />
-        <TradeActionButton
-          title="BUY"
-          color="var(--buy-green)"
-          isEnabled={canTrade}
-          onClick={() => onArm('buy')}
-        />
+        {/* Action row */}
+        <div style={{ display: 'flex', gap: 10 }}>
+          <TradeActionButton
+            title="SELL"
+            color="var(--sell-red)"
+            isEnabled={canTrade}
+            onClick={() => onArm('sell')}
+          />
+          <TradeActionButton
+            title="BUY"
+            color="var(--buy-green)"
+            isEnabled={canTrade}
+            onClick={() => onArm('buy')}
+          />
+        </div>
       </div>
     </div>
   );

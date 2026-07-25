@@ -362,6 +362,8 @@ describe('0dteTrader API (e2e)', () => {
       alpacaPracticeAccountId: null,
       tradierConfigured: false,
       tradierPracticeConfigured: false,
+      snaptradeKeyConfigured: false,
+      snaptradeKeyPracticeConfigured: false,
       snaptradeConfigured: false,
       snaptradePracticeConfigured: false,
       snaptradeAccountId: null,

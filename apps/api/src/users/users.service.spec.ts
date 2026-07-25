@@ -40,6 +40,20 @@ describe('UsersService', () => {
     });
   };
 
+  const addSnapTradeCredential = (userId: string, environment: 'live' | 'practice') => {
+    prisma.brokerCredentials.push({
+      id: `snaptrade-${environment}`,
+      userId,
+      provider: 'snaptrade',
+      environment,
+      encSecrets: Buffer.from(
+        JSON.stringify({ provider: 'snaptrade', clientId: 'c1', consumerKey: 'k1' }),
+      ),
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+  };
+
   beforeEach(() => {
     prisma = new InMemoryPrismaService();
     const crypto = { decrypt: (buf: Buffer) => buf.toString() };
@@ -69,6 +83,8 @@ describe('UsersService', () => {
       alpacaPracticeAccountId: null,
       tradierConfigured: false,
       tradierPracticeConfigured: false,
+      snaptradeKeyConfigured: false,
+      snaptradeKeyPracticeConfigured: false,
       snaptradeConfigured: false,
       snaptradePracticeConfigured: false,
       snaptradeAccountId: null,
@@ -135,6 +151,24 @@ describe('UsersService', () => {
     const me = await users.getMe(userId);
     expect(me.tradierConfigured).toBe(true);
     expect(me.tradierPracticeConfigured).toBe(false);
+  });
+
+  it('reports SnapTrade key-configured flags per environment, independent of connection status', async () => {
+    const userId = await seedUser();
+    addSnapTradeCredential(userId, 'practice');
+
+    const me = await users.getMe(userId);
+    expect(me.snaptradeKeyConfigured).toBe(false);
+    expect(me.snaptradeKeyPracticeConfigured).toBe(true);
+    // No brokerConnection row exists yet — connection flags stay false even
+    // though the practice key is saved (they're independent concerns).
+    expect(me.snaptradeConfigured).toBe(false);
+    expect(me.snaptradePracticeConfigured).toBe(false);
+
+    addSnapTradeCredential(userId, 'live');
+    const meBoth = await users.getMe(userId);
+    expect(meBoth.snaptradeKeyConfigured).toBe(true);
+    expect(meBoth.snaptradeKeyPracticeConfigured).toBe(true);
   });
 
   it('reports SnapTrade connection flags from broker_connections', async () => {

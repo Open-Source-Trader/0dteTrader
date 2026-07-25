@@ -506,8 +506,8 @@ function SnapTradeConnectionSection({
   const activeConnection = env.connections.find((c) => c.status === 'active');
   const keyConfigured =
     environment === 'live'
-      ? state.me?.snaptradeConfigured === true
-      : state.me?.snaptradePracticeConfigured === true;
+      ? state.me?.snaptradeKeyConfigured === true
+      : state.me?.snaptradeKeyPracticeConfigured === true;
   return (
     <div className="grouped-section" key={`snaptrade-${environment}`}>
       <div className="section-header">{title}</div>
@@ -651,12 +651,12 @@ function ProviderCredentials({
     <>
       <SnapTradeKeySection
         environment="live"
-        configured={state.me?.snaptradeConfigured === true}
+        configured={state.me?.snaptradeKeyConfigured === true}
         onRequestDelete={onRequestDelete}
       />
       <SnapTradeKeySection
         environment="practice"
-        configured={state.me?.snaptradePracticeConfigured === true}
+        configured={state.me?.snaptradeKeyPracticeConfigured === true}
         onRequestDelete={onRequestDelete}
       />
       <SnapTradeConnectionSection environment="live" onRequestDelete={onRequestDelete} />

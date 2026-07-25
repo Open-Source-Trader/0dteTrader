@@ -619,6 +619,7 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
           }}
           optionsAnalytics={chart.optionsAnalytics}
           onChangeOptionsAnalytics={(settings) => chartStore.setOptionsAnalytics(settings)}
+          dense={isDesktopGrid}
         />
       ) : null}
       {showTwcSettings ? (
@@ -630,12 +631,19 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
             setShowIndicatorSettings(true);
           }}
           onDismiss={() => setShowTwcSettings(false)}
+          dense={isDesktopGrid}
         />
       ) : null}
       {showProfile ? (
-        <ProfileView onLogout={onLogout} onDismiss={() => setShowProfile(false)} />
+        <ProfileView
+          onLogout={onLogout}
+          onDismiss={() => setShowProfile(false)}
+          dense={isDesktopGrid}
+        />
       ) : null}
-      {showHistory ? <HistoryView onDismiss={() => setShowHistory(false)} /> : null}
+      {showHistory ? (
+        <HistoryView onDismiss={() => setShowHistory(false)} dense={isDesktopGrid} />
+      ) : null}
       {showModeConfirmation ? (
         <AlertDialog
           title={nextMode === 'live' ? 'Switch to LIVE trading?' : 'Switch to PRACTICE mode?'}

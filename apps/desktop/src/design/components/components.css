@@ -871,6 +871,33 @@
   background: rgba(46, 143, 255, 0.1);
 }
 
+/* --- Desktop settings/indicators/history panel (desktop grid only) ---
+   A centered floating window, not an iOS sheet sliding up full-height —
+   settings/indicators/history read as app panels on a desktop, matching
+   the spotlight/alert chrome already used elsewhere in the grid. */
+.desktop-sheet-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: backdrop-in 120ms ease-out;
+  z-index: var(--z-sheet);
+}
+
+.desktop-sheet-panel {
+  width: min(480px, 90%);
+  max-height: 82vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--hud-panel-fill);
+  border: 8px solid transparent;
+  border-image: var(--hud-src-accent) 28 fill / 24px / 6px stretch;
+  box-shadow: var(--shadow-overlay);
+  overflow: hidden;
+}
+
 /* --- Desktop positions/orders panel (desktop grid footer) ---
    Tabbed dense table (TradingView Account Manager / ThinkOrSwim Monitor
    convention) — replaces the phone strip's horizontally-scrolling chip row. */

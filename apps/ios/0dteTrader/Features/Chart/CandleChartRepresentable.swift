@@ -227,10 +227,15 @@ struct CandleChartRepresentable: UIViewRepresentable {
         container.orderLineOverlay.entryLines = entryLines
         container.orderLineOverlay.placementPrice = placementPrice
         container.orderLineOverlay.delegate = orderLineDelegate
-        // Keep the button rows clear of the analytics rail when it is on.
+        // Keep the button rows clear of the analytics rail when it is on. The
+        // rail sizes itself from the chart's content rect, not the view bounds,
+        // so measuring from bounds would drift by the axis gutter and leave the
+        // rows either overlapping the rail or short of it.
+        let analyticsContent = container.chart.viewPortHandler.contentRect
         container.orderLineOverlay.rightInset = optionsAnalyticsSnapshot != nil
             && optionsAnalyticsSettings.enabled
-            ? CGFloat(OptionsAnalyticsPresentation.railWidth(for: Double(container.bounds.width)))
+            ? (container.bounds.width - analyticsContent.maxX)
+                + CGFloat(OptionsAnalyticsPresentation.railWidth(for: analyticsContent.width))
             : 0
 
         guard !candles.isEmpty else {

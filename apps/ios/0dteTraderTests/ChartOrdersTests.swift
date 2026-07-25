@@ -129,22 +129,28 @@ final class ChartTradingCoordinatorCancelTests: XCTestCase {
 
     /// A fired line's broker order is live; confirming "nothing was sent to the
     /// broker" would misrepresent it, so ✕ just clears the chart marker.
-    func testTapCancel_triggeredLine_dismissesWithoutConfirmation() {
+    func testTapCancel_triggeredLine_dismissesWithoutConfirmation() async {
         let (coordinator, orders) = makeCoordinator()
         orders.applyServerUpdate(makeOrder(status: .triggered))
 
         coordinator.orderLineOverlayDidTapCancel(order: makeOrder(status: .triggered))
+        await Task.yield()
 
         XCTAssertNil(coordinator.orderPendingCancel)
+        // The local-dismissal branch returns before any request, so the line is
+        // gone from the chart even with no server reachable.
+        XCTAssertNil(orders.order(id: "co-1"))
     }
 
-    func testTapCancel_failedLine_dismissesWithoutConfirmation() {
+    func testTapCancel_failedLine_dismissesWithoutConfirmation() async {
         let (coordinator, orders) = makeCoordinator()
         orders.applyServerUpdate(makeOrder(status: .failed))
 
         coordinator.orderLineOverlayDidTapCancel(order: makeOrder(status: .failed))
+        await Task.yield()
 
         XCTAssertNil(coordinator.orderPendingCancel)
+        XCTAssertNil(orders.order(id: "co-1"))
     }
 }
 

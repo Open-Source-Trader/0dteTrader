@@ -7,6 +7,7 @@ import {
   CredentialProvider,
   SnapTradeSecrets,
   TradierCredentialsInput,
+  SnapTradeCredentialsInput,
   TradingMode,
   WebullCredentialsInput,
   WebullSecrets,
@@ -21,14 +22,14 @@ const WEBULL_PROVIDER: BrokerProvider = 'webull';
  * Persists broker credentials encrypted at rest in the provider-agnostic
  * `broker_credentials` table. **Per-user isolation:** each row is keyed by
  * `(userId, provider, environment)` — one encrypted blob per user per
- * provider per environment. No credentials are shared across users. Server
- * config (AppConfig) holds only the integrator-level keys (e.g. SnapTrade
- * `clientId`/`consumerKey`) which authenticate our server to the provider;
- * they never identify or scope a user's data.
+ * provider per environment. No credentials are shared across users, and the
+ * server holds no broker credentials of its own — every provider (Webull,
+ * Alpaca, SnapTrade) is authenticated with credentials the user brings.
  *
  * `encSecrets` is one AES-256-GCM blob of the provider-specific secret JSON
  * (Webull: {appKey, appSecret, accountId}; Alpaca: {apiKey, apiSecret};
- * Tradier: {apiKey} — a market-data key, not a trading provider). Plaintext
+ * Tradier: {apiKey} — a market-data key, not a trading provider; SnapTrade:
+ * {clientId, consumerKey} — the user's own Personal API key pair). Plaintext
  * only exists in memory for the duration of the request and is never
  * logged. One set per (user, provider, environment) (live / practice).
  *
@@ -165,16 +166,8 @@ export class CredentialsService {
 
   private toSecrets(input: BrokerCredentialsInput, provider: CredentialProvider): BrokerSecrets {
     if (provider === 'snaptrade') {
-      const s = input as {
-        provider: 'snaptrade';
-        snaptradeUserId: string;
-        snaptradeUserSecret: string;
-      };
-      return {
-        provider: 'snaptrade',
-        snaptradeUserId: s.snaptradeUserId,
-        snaptradeUserSecret: s.snaptradeUserSecret,
-      };
+      const s = input as SnapTradeCredentialsInput;
+      return { provider: 'snaptrade', clientId: s.clientId, consumerKey: s.consumerKey };
     }
     if (provider === 'alpaca') {
       const a = input as AlpacaCredentialsInput;
@@ -218,11 +211,32 @@ export class CredentialsService {
     secrets: BrokerSecrets,
   ): Promise<void> {
     const encSecrets = this.crypto.encrypt(JSON.stringify(secrets));
+    // snaptradeClientId is stored in plaintext alongside the encrypted blob
+    // (it isn't a secret on its own) so the SnapTrade webhook receiver can
+    // resolve which user a webhook's `clientId` belongs to without
+    // decrypting every stored SnapTrade credential row.
+    const snaptradeClientId = secrets.provider === 'snaptrade' ? secrets.clientId : null;
     await this.prisma.brokerCredential.upsert({
       where: { userId_provider_environment: { userId, provider, environment } },
-      create: { userId, provider, environment, encSecrets },
-      update: { encSecrets },
+      create: { userId, provider, environment, encSecrets, snaptradeClientId },
+      update: { encSecrets, snaptradeClientId },
     });
+  }
+
+  /**
+   * Resolve which app user a SnapTrade webhook's `clientId` belongs to.
+   * Returns null if no stored SnapTrade credential matches — the webhook
+   * receiver should ignore such events rather than guess.
+   */
+  async findUserBySnapTradeClientId(
+    clientId: string,
+  ): Promise<{ userId: string; environment: TradingMode } | null> {
+    const row = await this.prisma.brokerCredential.findFirst({
+      where: { provider: 'snaptrade', snaptradeClientId: clientId },
+      select: { userId: true, environment: true },
+    });
+    if (!row) return null;
+    return { userId: row.userId, environment: row.environment as TradingMode };
   }
 
   /** Lazily copy a legacy `webull_credentials` row into `broker_credentials`.
@@ -244,49 +258,5 @@ export class CredentialsService {
       accountId: legacy.encAccountId ? this.crypto.decrypt(legacy.encAccountId) : undefined,
     };
     await this.upsertSecrets(userId, WEBULL_PROVIDER, environment, secrets);
-  }
-
-  // ------------------------------------------------------------------
-  // SnapTrade identity (server-minted, not user-entered)
-  // ------------------------------------------------------------------
-
-  /**
-   * Persist the server-minted SnapTrade identity ({@link SnapTradeSecrets})
-   * encrypted in `broker_credentials`. Called only by the SnapTrade
-   * connection service after `registerUser` — never via the generic
-   * `PUT /me/broker-credentials` (which expects user-entered secrets).
-   * Idempotent (upsert).
-   */
-  async saveSnapTradeIdentity(
-    userId: string,
-    secrets: SnapTradeSecrets,
-    environment: TradingMode = 'live',
-  ): Promise<void> {
-    const encSecrets = this.crypto.encrypt(JSON.stringify(secrets));
-    await this.prisma.brokerCredential.upsert({
-      where: { userId_provider_environment: { userId, provider: 'snaptrade', environment } },
-      create: { userId, provider: 'snaptrade', environment, encSecrets },
-      update: { encSecrets },
-    });
-  }
-
-  /**
-   * Return the decrypted SnapTrade identity for a user. Returns {@code null}
-   * when the user has not yet registered with SnapTrade. Plaintext stays in
-   * memory only — callers must not log it.
-   */
-  async getSnapTradeIdentity(
-    userId: string,
-    environment: TradingMode = 'live',
-  ): Promise<SnapTradeSecrets | null> {
-    const row = await this.prisma.brokerCredential.findUnique({
-      where: { userId_provider_environment: { userId, provider: 'snaptrade', environment } },
-    });
-    if (!row) return null;
-    try {
-      return JSON.parse(this.crypto.decrypt(row.encSecrets)) as SnapTradeSecrets;
-    } catch {
-      throw new Error('Corrupt SnapTrade identity blob — re-register via the connection flow');
-    }
   }
 }

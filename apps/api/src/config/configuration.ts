@@ -44,15 +44,9 @@ export interface AppConfig {
     paperDataBaseUrl: string;
   };
   snaptrade: {
-    /** SnapTrade Commercial client id. */
-    clientId: string;
-    /** SnapTrade consumer key (used for request signing + webhook verification). */
-    consumerKey: string;
-    /** Webhook consumer key (may equal consumerKey). */
-    webhookConsumerKey: string;
-    /** Production API base URL. */
+    /** Production API base URL. Fixed host — not a secret. */
     prodBaseUrl: string;
-    /** Sandbox (practice) API base URL. */
+    /** Sandbox (practice) API base URL. Fixed host — not a secret. */
     sandboxBaseUrl: string;
   };
   optionsAnalytics: {
@@ -127,9 +121,6 @@ export default (): AppConfig => ({
     paperDataBaseUrl: process.env.ALPACA_PAPER_DATA_BASE_URL || 'https://paper-data.alpaca.markets',
   },
   snaptrade: {
-    clientId: process.env.SNAPTRADE_CLIENT_ID ?? '',
-    consumerKey: process.env.SNAPTRADE_CONSUMER_KEY ?? '',
-    webhookConsumerKey: process.env.SNAPTRADE_WEBHOOK_CONSUMER_KEY ?? '',
     prodBaseUrl: process.env.SNAPTRADE_PROD_BASE_URL || 'https://api.snaptrade.com',
     sandboxBaseUrl: process.env.SNAPTRADE_SANDBOX_BASE_URL || 'https://api.sandbox.snaptrade.com',
   },

@@ -93,8 +93,14 @@ model BrokerCredential {
   encSecrets  Bytes
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+  /// SnapTrade Personal client ID, stored in plaintext (not a secret on its
+  /// own — the consumerKey is) so the webhook receiver can resolve which app
+  /// user a `clientId` in an inbound webhook payload belongs to without
+  /// decrypting every stored SnapTrade credential. Null for other providers.
+  snaptradeClientId String?
 
   @@unique([userId, provider, environment])
+  @@index([provider, snaptradeClientId])
   @@map("broker_credentials")
 }
 

@@ -137,79 +137,38 @@ describe('CredentialsService', () => {
     expect(prisma.brokerCredentials).toHaveLength(0);
   });
 
-  it('persists SnapTrade identity via saveSnapTradeIdentity', async () => {
-    const identity: SnapTradeSecrets = {
-      provider: 'snaptrade',
-      snaptradeUserId: 'uid-1',
-      snaptradeUserSecret: 'secret-1',
-    };
-    await service.saveSnapTradeIdentity('u1', identity);
+  it('round-trips SnapTrade credentials through the encrypted blob', async () => {
+    await service.save('u1', { provider: 'snaptrade', clientId: 'cid-1', consumerKey: 'ck-1' });
     expect(prisma.brokerCredentials).toHaveLength(1);
     expect(prisma.brokerCredentials[0].provider).toBe('snaptrade');
-
-    const retrieved = await service.getSnapTradeIdentity('u1');
-    expect(retrieved).toEqual(identity);
-  });
-
-  it('saveSnapTradeIdentity is idempotent (upsert)', async () => {
-    const identity: SnapTradeSecrets = {
+    expect(await service.getDecrypted('u1', 'snaptrade')).toEqual<SnapTradeSecrets>({
       provider: 'snaptrade',
-      snaptradeUserId: 'uid-1',
-      snaptradeUserSecret: 'secret-1',
-    };
-    await service.saveSnapTradeIdentity('u1', identity);
-    await service.saveSnapTradeIdentity('u1', {
-      ...identity,
-      snaptradeUserSecret: 'secret-2',
-    });
-    expect(prisma.brokerCredentials).toHaveLength(1);
-    expect(await service.getSnapTradeIdentity('u1')).toEqual({
-      ...identity,
-      snaptradeUserSecret: 'secret-2',
+      clientId: 'cid-1',
+      consumerKey: 'ck-1',
     });
   });
 
-  it('returns null when no SnapTrade identity is stored', async () => {
-    expect(await service.getSnapTradeIdentity('u1')).toBeNull();
-  });
-
-  it('getSnapTradeIdentity is environment-scoped', async () => {
-    const liveIdentity: SnapTradeSecrets = {
+  it('SnapTrade credentials are environment-scoped', async () => {
+    await service.save('u1', {
       provider: 'snaptrade',
-      snaptradeUserId: 'uid-live',
-      snaptradeUserSecret: 'secret-live',
-    };
-    await service.saveSnapTradeIdentity('u1', liveIdentity);
-    await service.saveSnapTradeIdentity(
+      clientId: 'cid-live',
+      consumerKey: 'ck-live',
+    });
+    await service.save(
       'u1',
-      { provider: 'snaptrade', snaptradeUserId: 'uid-prac', snaptradeUserSecret: 'secret-prac' },
+      { provider: 'snaptrade', clientId: 'cid-prac', consumerKey: 'ck-prac' },
       'practice',
     );
 
-    expect(await service.getSnapTradeIdentity('u1')).toEqual(liveIdentity);
-    expect(await service.getSnapTradeIdentity('u1', 'practice')).toEqual({
+    expect(await service.getDecrypted('u1', 'snaptrade')).toEqual({
       provider: 'snaptrade',
-      snaptradeUserId: 'uid-prac',
-      snaptradeUserSecret: 'secret-prac',
+      clientId: 'cid-live',
+      consumerKey: 'ck-live',
     });
-  });
-
-  it('toSecrets maps SnapTrade input to SnapTradeSecrets', async () => {
-    // Accessible indirectly: saving a SnapTrade identity stores it encrypted
-    // and getDecrypted returns the raw broker_credentials blob, which is
-    // keyed on provider — proving the discriminator is preserved.
-    await service.save('u1', {
+    expect(await service.getDecrypted('u1', 'snaptrade', 'practice')).toEqual({
       provider: 'snaptrade',
-      snaptradeUserId: 'uid-x',
-      snaptradeUserSecret: 'secret-x',
-    } as any);
-    const row = prisma.brokerCredentials[0];
-    expect(row.provider).toBe('snaptrade');
-    const decrypted = await service.getDecrypted('u1', 'snaptrade');
-    expect(decrypted).toEqual<SnapTradeSecrets>({
-      provider: 'snaptrade',
-      snaptradeUserId: 'uid-x',
-      snaptradeUserSecret: 'secret-x',
+      clientId: 'cid-prac',
+      consumerKey: 'ck-prac',
     });
   });
 });

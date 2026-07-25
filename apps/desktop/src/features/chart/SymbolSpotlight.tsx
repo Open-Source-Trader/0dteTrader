@@ -34,10 +34,6 @@ export function SymbolSpotlight({ currentSymbol, onSelect, onDismiss }: SymbolSp
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [normalizedQuery, showsCustomSymbol],
   );
-  const rowIndex = useMemo(
-    () => new Map(visibleRows.map((symbol, index) => [symbol, index])),
-    [visibleRows],
-  );
 
   useEffect(() => setActiveIndex(0), [normalizedQuery]);
 
@@ -69,8 +65,13 @@ export function SymbolSpotlight({ currentSymbol, onSelect, onDismiss }: SymbolSp
     }
   };
 
+  // Exactly one row can be "active" (keyboard-highlighted): the row whose
+  // position in the flat visibleRows list matches activeIndex. Comparing
+  // symbol identity directly (not via a second index lookup) removes any
+  // chance of two rows matching at once.
+  const activeSymbol = visibleRows[activeIndex];
   const rowClassName = (symbol: string) =>
-    rowIndex.get(symbol) === activeIndex ? 'spotlight-row active' : 'spotlight-row';
+    symbol === activeSymbol ? 'spotlight-row active' : 'spotlight-row';
 
   return (
     <div
@@ -127,7 +128,6 @@ export function SymbolSpotlight({ currentSymbol, onSelect, onDismiss }: SymbolSp
                       aria-current={isCurrent ? 'true' : undefined}
                       onClick={() => select(symbol)}
                     >
-                      <span className="spotlight-row-dot" aria-hidden="true" />
                       <span className="spotlight-row-label numeric">{symbol}</span>
                       {isCurrent ? (
                         <CheckmarkIcon size={14} style={{ color: 'var(--app-accent)' }} />

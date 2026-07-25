@@ -872,6 +872,16 @@
   letter-spacing: 0.02em;
 }
 
+/* Override the app-wide input:focus-visible box-shadow ring (base.css) —
+   the input is auto-focused for the palette's entire open duration, so that
+   ring was permanently visible, nested inside the card's own accent border
+   ("a box within a box"). No ring needed here: the whole card already reads
+   as the focused surface. */
+.spotlight-input:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+
 .spotlight-input::placeholder {
   font-family: var(--font-sans);
   letter-spacing: normal;
@@ -911,19 +921,6 @@
 .spotlight-row.active {
   background: rgba(46, 143, 255, 0.14);
   border-left-color: var(--hud-stroke);
-}
-
-.spotlight-row-dot {
-  flex: none;
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: var(--label-secondary);
-}
-
-.spotlight-row.active .spotlight-row-dot {
-  background: var(--app-accent);
-  box-shadow: 0 0 6px var(--hud-glow-strong);
 }
 
 .spotlight-row-icon {

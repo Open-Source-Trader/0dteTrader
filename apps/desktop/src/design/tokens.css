@@ -128,7 +128,7 @@
      above. Additive; the touch-sized tokens above are untouched and still
      drive the compact (phone-derived) layout. */
   --h-button-desktop: 30px;
-  --h-trade-button-desktop: 38px;
+  --h-trade-button-desktop: 48px;
   --h-navbar-desktop: 36px;
   --pad-screen-desktop: 12px;
 }

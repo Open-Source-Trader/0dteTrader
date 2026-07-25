@@ -35,6 +35,45 @@
   box-shadow: 0 0 8px var(--hud-glow);
 }
 
+/* Chart header (symbol + last/bid/ask legend + controls), one dense row. */
+.chart-header {
+  border: 7px solid transparent;
+  border-image: var(--hud-src-flat) 28 fill / 21px / 6px stretch;
+}
+
+.chart-header-symbol {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  padding: 3px 6px;
+  border-radius: var(--radius-chip);
+}
+
+.chart-header-symbol:hover {
+  background: rgba(46, 143, 255, 0.1);
+}
+
+.chart-header-symbol-text {
+  font-family: var(--font-display);
+  font-size: var(--fs-subheadline);
+  font-weight: 700;
+  letter-spacing: 0.03em;
+}
+
+.chart-header--dense .chart-header-symbol-text {
+  font-size: var(--fs-caption);
+}
+
+/* Last / bid / ask inline on one line — replaces the old two-line stacked
+   price block, which cost real chart height for no added information. */
+.chart-header-quote {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: var(--fs-caption2);
+}
+
 /* Persistent left-edge drawing-tool rail (desktop grid only) — TradingView's
    always-visible toolbar convention instead of a dropdown menu. */
 .draw-rail {

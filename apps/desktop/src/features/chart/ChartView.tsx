@@ -10,7 +10,7 @@ import type { ChartStore } from './ChartStore';
 import { CHART_INTERVALS } from './ChartStore';
 import { CandleChart, type OverlaySeries } from './CandleChart';
 import { overlayPalette, panePalette } from './chartColors';
-import { DrawToolsMenu } from './DrawingToolbar';
+import { DrawToolsMenu, DrawToolsRail } from './DrawingToolbar';
 import type { DrawingsStore } from './drawings';
 import { IndicatorPane, type PaneSeries } from './IndicatorPane';
 import { PaneCard, type PaneReadout } from './PaneCard';
@@ -267,84 +267,50 @@ export function ChartView({
 
   return (
     <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-      {/* Header */}
+      {/* Header: one dense row (TradingView legend convention) — symbol,
+          last/bid/ask inline, controls right-aligned. The old two-line
+          stacked price block cost real chart height for no added
+          information; a scalper reads this in one glance either way. */}
       <div
-        className="hud-chip hud-card--flat"
+        className={dense ? 'chart-header chart-header--dense' : 'chart-header'}
         style={{
           display: 'flex',
           alignItems: 'center',
-          gap: 8,
-          margin: '3px 8px 0',
-          padding: '4px 6px',
+          gap: dense ? 10 : 8,
+          margin: dense ? '2px 6px 0' : '3px 8px 0',
+          padding: dense ? '2px 6px' : '4px 6px',
           flex: 'none',
         }}
       >
         <button
-          className="hud-chip"
-          style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '5px 6px' }}
+          className="chart-header-symbol"
           onClick={onSymbolSearch}
           aria-label={`Symbol ${symbol}. Change symbol`}
         >
-          <span
-            style={{
-              fontFamily: 'var(--font-display)',
-              fontSize: 'var(--fs-subheadline)',
-              fontWeight: 700,
-              letterSpacing: '0.03em',
-            }}
-          >
-            {symbol}
-          </span>
+          <span className="chart-header-symbol-text">{symbol}</span>
           <span aria-hidden="true" style={{ display: 'flex', color: 'var(--app-accent)' }}>
             <ChevronDownIcon size={12} />
           </span>
         </button>
 
         {quote ? (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-            <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <span
-                style={{
-                  fontFamily: 'var(--font-mono)',
-                  fontSize: 18,
-                  fontWeight: 600,
-                  fontVariantNumeric: 'tabular-nums',
-                  textShadow: '0 0 8px var(--hud-glow)',
-                }}
-              >
-                {Format.price(quote.last)}
-              </span>
-              {isStale ? (
-                <span
-                  style={{
-                    fontSize: 'var(--fs-caption2)',
-                    color: 'var(--warning-orange)',
-                    fontWeight: 600,
-                  }}
-                >
-                  ● STALE
-                </span>
-              ) : null}
-            </span>
+          <span className="numeric chart-header-quote">
             <span
               style={{
-                fontFamily: 'var(--font-mono)',
-                fontSize: 'var(--fs-caption2)',
-                fontVariantNumeric: 'tabular-nums',
-                display: 'flex',
-                gap: 10,
+                fontSize: dense ? 15 : 18,
+                fontWeight: 600,
+                textShadow: '0 0 8px var(--hud-glow)',
               }}
             >
-              <span>
-                <span style={{ color: 'var(--buy-green)', fontWeight: 600 }}>BID </span>
-                <span style={{ color: 'var(--buy-green)' }}>{Format.price(quote.bid)}</span>
-              </span>
-              <span>
-                <span style={{ color: 'var(--sell-red)', fontWeight: 600 }}>ASK </span>
-                <span style={{ color: 'var(--sell-red)' }}>{Format.price(quote.ask)}</span>
-              </span>
+              {Format.price(quote.last)}
             </span>
-          </div>
+            <span style={{ color: 'var(--buy-green)' }}>{Format.price(quote.bid)}</span>
+            <span style={{ color: 'var(--label-secondary)' }}>×</span>
+            <span style={{ color: 'var(--sell-red)' }}>{Format.price(quote.ask)}</span>
+            {isStale ? (
+              <span style={{ color: 'var(--warning-orange)', fontWeight: 600 }}>● STALE</span>
+            ) : null}
+          </span>
         ) : null}
 
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -368,7 +334,7 @@ export function ChartView({
             trigger={
               <button
                 className="quick-chip"
-                style={{ minHeight: 32, padding: '6px 10px' }}
+                style={{ minHeight: dense ? 26 : 32, padding: dense ? '4px 8px' : '6px 10px' }}
                 aria-label={`Chart interval ${interval}`}
                 aria-haspopup="menu"
               >
@@ -410,111 +376,120 @@ export function ChartView({
         </div>
       </div>
 
-      {/* Chart area: HUD card wrapping a chamfer-clipped canvas region. The
-          glow is baked into the card raster — never a CSS filter here. */}
-      <div
-        className="hud-card hud-card--flat"
-        style={{ flex: 1, minHeight: 100, margin: '3px 8px', padding: 0, display: 'flex' }}
-      >
-        <div className="hud-clip" style={{ flex: 1, minHeight: 0, position: 'relative' }}>
-          <CandleChart
-            candles={candles}
-            overlays={twcLineOverlays.length > 0 ? [...overlays, ...twcLineOverlays] : overlays}
-            symbol={symbol}
-            interval={interval}
-            showVolume={indicatorSettings.volumeEnabled}
-            drawingsStore={drawingsStore}
-            candleColors={twcModel?.candleColors ?? null}
-            twcModel={twcModel}
-            optionsAnalyticsSnapshot={optionsAnalyticsSnapshot}
-            optionsAnalyticsSettings={optionsAnalytics.enabled ? optionsAnalytics : null}
-            optionsAnalyticsRetained={optionsAnalyticsState.retained}
-            positionsForSymbol={positionsForSymbol}
-            onFlattenPosition={onFlattenPosition}
-            positionsLocked={positionsLocked}
-            bid={dense ? (quote?.bid ?? null) : null}
-            ask={dense ? (quote?.ask ?? null) : null}
-          />
-          {twcModel?.banner ? <TwcBiasBanner banner={twcModel.banner} /> : null}
-          {optionsAnalytics.enabled && optionsAnalyticsState.errorMessage ? (
-            <div
-              style={{
-                position: 'absolute',
-                top: 8,
-                left: 65,
-                fontSize: 'var(--fs-caption2)',
-                color: 'var(--warning-orange)',
-                pointerEvents: 'none',
-                zIndex: 3,
-              }}
-            >
-              Options analytics unavailable: {optionsAnalyticsState.errorMessage}
-            </div>
-          ) : null}
-          {isLoading && candles.length === 0 && (
-            <div className="chart-skeleton" aria-hidden="true">
-              {SKELETON_BARS.map((height, index) => (
-                <div className="bar" key={index} style={{ height: `${height}%` }} />
-              ))}
-            </div>
-          )}
-          {isLoading && candles.length > 0 && (
-            <div
-              style={{
-                position: 'absolute',
-                inset: 0,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                pointerEvents: 'none',
-              }}
-            >
-              <Spinner />
-            </div>
-          )}
-          {errorMessage && candles.length === 0 ? (
-            <div
-              role="alert"
-              style={{
-                position: 'absolute',
-                inset: 0,
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: 12,
-                padding: 16,
-                textAlign: 'center',
-              }}
-            >
-              <span className="text-secondary" style={{ fontSize: 'var(--fs-footnote)' }}>
-                {errorMessage}
-              </span>
-              <button
-                onClick={() => void store.loadCandles()}
+      {/* Chart area row: the persistent drawing-tool rail (desktop grid
+          only) sits flush with the chart canvas card, not the header above
+          it — TradingView's left toolbar is always vertically aligned with
+          the chart itself. */}
+      <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
+        {dense ? <DrawToolsRail store={drawingsStore} /> : null}
+        {/* HUD card wrapping a chamfer-clipped canvas region. The glow is
+            baked into the card raster — never a CSS filter here. */}
+        <div
+          className="hud-card hud-card--flat"
+          style={{ flex: 1, minHeight: 100, margin: '3px 8px', padding: 0, display: 'flex' }}
+        >
+          <div className="hud-clip" style={{ flex: 1, minHeight: 0, position: 'relative' }}>
+            <CandleChart
+              candles={candles}
+              overlays={twcLineOverlays.length > 0 ? [...overlays, ...twcLineOverlays] : overlays}
+              symbol={symbol}
+              interval={interval}
+              showVolume={indicatorSettings.volumeEnabled}
+              drawingsStore={drawingsStore}
+              candleColors={twcModel?.candleColors ?? null}
+              twcModel={twcModel}
+              optionsAnalyticsSnapshot={optionsAnalyticsSnapshot}
+              optionsAnalyticsSettings={optionsAnalytics.enabled ? optionsAnalytics : null}
+              optionsAnalyticsRetained={optionsAnalyticsState.retained}
+              positionsForSymbol={positionsForSymbol}
+              onFlattenPosition={onFlattenPosition}
+              positionsLocked={positionsLocked}
+              bid={dense ? (quote?.bid ?? null) : null}
+              ask={dense ? (quote?.ask ?? null) : null}
+            />
+            {twcModel?.banner ? <TwcBiasBanner banner={twcModel.banner} /> : null}
+            {optionsAnalytics.enabled && optionsAnalyticsState.errorMessage ? (
+              <div
                 style={{
-                  color: 'var(--app-accent-text)',
-                  fontSize: 'var(--fs-footnote)',
-                  fontWeight: 600,
-                  minHeight: 44,
-                  padding: '0 16px',
+                  position: 'absolute',
+                  top: 8,
+                  left: 65,
+                  fontSize: 'var(--fs-caption2)',
+                  color: 'var(--warning-orange)',
+                  pointerEvents: 'none',
+                  zIndex: 3,
                 }}
               >
-                Retry
-              </button>
-            </div>
-          ) : null}
-          {errorMessage && candles.length > 0 ? (
-            // Refresh failed over live candles: surface it without blocking.
-            <div className="toast" role="alert">
-              <div
-                className="toast-capsule"
-                style={{ borderColor: 'color-mix(in srgb, var(--pnl-negative) 60%, transparent)' }}
-              >
-                {errorMessage}
+                Options analytics unavailable: {optionsAnalyticsState.errorMessage}
               </div>
-            </div>
-          ) : null}
+            ) : null}
+            {isLoading && candles.length === 0 && (
+              <div className="chart-skeleton" aria-hidden="true">
+                {SKELETON_BARS.map((height, index) => (
+                  <div className="bar" key={index} style={{ height: `${height}%` }} />
+                ))}
+              </div>
+            )}
+            {isLoading && candles.length > 0 && (
+              <div
+                style={{
+                  position: 'absolute',
+                  inset: 0,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  pointerEvents: 'none',
+                }}
+              >
+                <Spinner />
+              </div>
+            )}
+            {errorMessage && candles.length === 0 ? (
+              <div
+                role="alert"
+                style={{
+                  position: 'absolute',
+                  inset: 0,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 12,
+                  padding: 16,
+                  textAlign: 'center',
+                }}
+              >
+                <span className="text-secondary" style={{ fontSize: 'var(--fs-footnote)' }}>
+                  {errorMessage}
+                </span>
+                <button
+                  onClick={() => void store.loadCandles()}
+                  style={{
+                    color: 'var(--app-accent-text)',
+                    fontSize: 'var(--fs-footnote)',
+                    fontWeight: 600,
+                    minHeight: 44,
+                    padding: '0 16px',
+                  }}
+                >
+                  Retry
+                </button>
+              </div>
+            ) : null}
+            {errorMessage && candles.length > 0 ? (
+              // Refresh failed over live candles: surface it without blocking.
+              <div className="toast" role="alert">
+                <div
+                  className="toast-capsule"
+                  style={{
+                    borderColor: 'color-mix(in srgb, var(--pnl-negative) 60%, transparent)',
+                  }}
+                >
+                  {errorMessage}
+                </div>
+              </div>
+            ) : null}
+          </div>
         </div>
       </div>
 

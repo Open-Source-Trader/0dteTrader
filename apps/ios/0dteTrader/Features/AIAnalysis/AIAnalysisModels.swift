@@ -81,8 +81,47 @@ enum AIAnalysisPromptBuilder {
         recommendations — only analysis of the data.
         """
 
+    private static let maxPromptCharacters = 6_000
+
     // swiftlint:disable:next function_body_length
     static func buildPrompt(from snap: AIAnalysisSnapshot) -> String {
+        var configuration = PromptConfiguration(
+            candleLimit: min(50, snap.candles.count),
+            includeScenario: true,
+            includeChain: true,
+            includeExtendedIndicators: true
+        )
+
+        var prompt = composePrompt(from: snap, configuration: configuration)
+        while prompt.count > maxPromptCharacters {
+            if configuration.includeScenario {
+                configuration.includeScenario = false
+            } else if configuration.includeChain {
+                configuration.includeChain = false
+            } else if configuration.candleLimit > 1 {
+                configuration.candleLimit = max(1, configuration.candleLimit / 2)
+            } else if configuration.includeExtendedIndicators {
+                configuration.includeExtendedIndicators = false
+            } else {
+                break
+            }
+            prompt = composePrompt(from: snap, configuration: configuration)
+        }
+
+        return prompt
+    }
+
+    private struct PromptConfiguration {
+        var candleLimit: Int
+        var includeScenario: Bool
+        var includeChain: Bool
+        var includeExtendedIndicators: Bool
+    }
+
+    private static func composePrompt(
+        from snap: AIAnalysisSnapshot,
+        configuration: PromptConfiguration
+    ) -> String {
         var parts: [String] = []
 
         parts.append("MARKET DATA SNAPSHOT FOR \(snap.symbol)")
@@ -96,36 +135,16 @@ enum AIAnalysisPromptBuilder {
             parts.append(line)
         }
 
-        let recentCandles = snap.candles.suffix(50)
+        let recentCandles = Array(snap.candles.suffix(configuration.candleLimit))
         if !recentCandles.isEmpty {
-            let formatter = DateFormatter()
-            formatter.dateFormat = "yyyy-MM-dd HH:mm"
-            formatter.timeZone = TimeZone(identifier: "America/New_York")
             parts.append("")
-            parts.append("RECENT PRICE ACTION (last \(recentCandles.count) candles, newest last):")
-            parts.append("Time | Open | High | Low | Close | Volume")
-            for c in recentCandles {
-                parts.append("\(formatter.string(from: c.time)) | \(f(c.open)) | \(f(c.high)) | \(f(c.low)) | \(f(c.close)) | \(c.volume)")
-            }
+            parts.append(buildCandleTable(recentCandles, interval: snap.interval))
         }
 
-        if let ind = snap.indicators {
-            var lines: [String] = []
-            for overlay in ind.overlays {
-                appendIndicator(overlay.name, values: overlay.values, to: &lines)
-            }
-            if let rsi = ind.rsi { appendIndicator("RSI", values: rsi, to: &lines) }
-            if let v = ind.macdLine { appendIndicator("MACD Line", values: v, to: &lines) }
-            if let v = ind.macdSignal { appendIndicator("MACD Signal", values: v, to: &lines) }
-            if let v = ind.macdHistogram { appendIndicator("MACD Histogram", values: v, to: &lines) }
-            if let v = ind.stochK { appendIndicator("Stochastic %K", values: v, to: &lines) }
-            if let v = ind.stochD { appendIndicator("Stochastic %D", values: v, to: &lines) }
-            if let v = ind.atr { appendIndicator("ATR", values: v, to: &lines) }
-            if !lines.isEmpty {
-                parts.append("")
-                parts.append("TECHNICAL INDICATORS (latest readings):")
-                parts.append(contentsOf: lines)
-            }
+        if let ind = snap.indicators,
+           let indicatorsSection = buildIndicatorsSection(ind, includeExtended: configuration.includeExtendedIndicators) {
+            parts.append("")
+            parts.append(indicatorsSection)
         }
 
         if let bias = snap.twcBias {
@@ -135,46 +154,10 @@ enum AIAnalysisPromptBuilder {
 
         if let options = snap.optionsAnalytics {
             parts.append("")
-            parts.append("OPTIONS STRUCTURE (modeled from observed quotes and open interest):")
-            parts.append(
-                "Expiration: \(options.scope.expiration) | Product: \(options.scope.rootSymbol) " +
-                "\(options.scope.settlementStyle.rawValue.uppercased()) | Status: " +
-                "\(options.quality.status.rawValue) | Coverage: " +
-                "\(options.quality.coverage.contractsIncluded)/\(options.quality.coverage.contractsTotal)"
-            )
-            parts.append(
-                "Gamma per 1% move — Calls: \(optionalDollarText(options.structure.callGammaExposure)) | " +
-                "Puts: \(optionalDollarText(options.structure.putGammaExposure)) | " +
-                "Gross: \(optionalDollarText(options.structure.grossGammaExposure))"
-            )
-            var levels: [String] = []
-            if let cw = options.structure.callWall { levels.append("Call Wall: \(f(cw))") }
-            if let pw = options.structure.putWall { levels.append("Put Wall: \(f(pw))") }
-            if let oi = options.structure.maxOpenInterestStrike {
-                levels.append("Max OI Strike: \(f(oi))")
-            }
-            if !levels.isEmpty { parts.append(levels.joined(separator: " | ")) }
-            if let range = options.impliedRange {
-                parts.append(
-                    "Model-implied 68% range: \(f(range.lower)) to \(f(range.upper)) | " +
-                    "Straddle breakevens: \(f(range.straddleLower)) to \(f(range.straddleUpper))"
-                )
-            }
-            if let proxy = options.scenarios.callPutDealerProxy {
-                let roots = proxy.gammaRoots.map(f).joined(separator: ", ")
-                parts.append(
-                    "OPTIONAL DEALER POSITIONING SCENARIO — Gamma: \(dollarText(proxy.gammaExposure)) | " +
-                    "Primary root: \(proxy.primaryGammaRoot.map(f) ?? "Unavailable") | " +
-                    "All roots: \(roots.isEmpty ? "None" : roots)"
-                )
-                parts.append("Scenario assumption: \(proxy.assumption)")
-            }
-            if !options.quality.warnings.isEmpty {
-                parts.append("Data quality warnings: \(options.quality.warnings.joined(separator: "; "))")
-            }
+            parts.append(buildOptionsAnalyticsSection(options, includeScenario: configuration.includeScenario))
         }
 
-        if let chain = snap.chain {
+        if configuration.includeChain, let chain = snap.chain {
             parts.append("")
             parts.append("OPTIONS CHAIN SUMMARY:")
             var line = "Underlying: \(chain.underlying) at \(f(chain.underlyingPrice))"
@@ -190,6 +173,107 @@ enum AIAnalysisPromptBuilder {
     }
 
     // MARK: - Helpers
+
+    static func buildCandleTable(_ candles: [Candle], interval: String) -> String {
+        guard let first = candles.first else { return "" }
+
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd HH:mm"
+        formatter.timeZone = TimeZone(identifier: "America/New_York")
+
+        var lines: [String] = []
+        lines.append("RECENT PRICE ACTION (last \(candles.count) candles, newest last):")
+        lines.append(
+            "CANDLES \(interval) start=\(formatter.string(from: first.time)) tz=NY " +
+            "columns=open,high,low,close,volume encoding=b1-absolute-bars2plus-delta-from-previous-close"
+        )
+
+        var previousClose: Double?
+        for (index, candle) in candles.enumerated() {
+            if index == 0 {
+                lines.append(
+                    "B1: \(f(candle.open)),\(f(candle.high)),\(f(candle.low)),\(f(candle.close)),\(candle.volume)"
+                )
+            } else {
+                let base = previousClose ?? candle.close
+                lines.append(
+                    "B\(index + 1): \(sf(candle.open - base)),\(sf(candle.high - base))," +
+                    "\(sf(candle.low - base)),\(sf(candle.close - base)),\(candle.volume)"
+                )
+            }
+            previousClose = candle.close
+        }
+
+        return lines.joined(separator: "\n")
+    }
+
+    private static func buildIndicatorsSection(
+        _ indicators: AIAnalysisSnapshot.Indicators,
+        includeExtended: Bool
+    ) -> String? {
+        var lines: [String] = []
+        for overlay in indicators.overlays {
+            appendIndicator(overlay.name, values: overlay.values, to: &lines)
+        }
+        if let rsi = indicators.rsi { appendIndicator("RSI", values: rsi, to: &lines) }
+        if let v = indicators.macdLine { appendIndicator("MACD Line", values: v, to: &lines) }
+        if let v = indicators.macdSignal { appendIndicator("MACD Signal", values: v, to: &lines) }
+        if let v = indicators.macdHistogram { appendIndicator("MACD Histogram", values: v, to: &lines) }
+        if includeExtended {
+            if let v = indicators.stochK { appendIndicator("Stochastic %K", values: v, to: &lines) }
+            if let v = indicators.stochD { appendIndicator("Stochastic %D", values: v, to: &lines) }
+            if let v = indicators.atr { appendIndicator("ATR", values: v, to: &lines) }
+        }
+        guard !lines.isEmpty else { return nil }
+        return (["TECHNICAL INDICATORS (latest readings):"] + lines).joined(separator: "\n")
+    }
+
+    static func buildOptionsAnalyticsSection(
+        _ options: OptionsAnalyticsSnapshotDTO,
+        includeScenario: Bool = true
+    ) -> String {
+        let coverageRatio = String(format: "%.2f", options.quality.coverage.ratio)
+        let grossConcentration = options.structure.grossGammaConcentration.map { String(format: "%.2f", $0) } ?? "n/a"
+        let rangeConfidence = options.impliedRange.map { String(format: "%.2f", $0.confidence) }
+        let atmIv = options.impliedRange.map { String(format: "%.3f", $0.atmIv) }
+        let warnings = options.quality.warnings.isEmpty ? "none" : options.quality.warnings.joined(separator: " | ")
+
+        var lines: [String] = []
+        lines.append("OPTIONS")
+        lines.append(
+            "s sym=\(options.scope.symbol) root=\(options.scope.rootSymbol) exp=\(options.scope.expiration) " +
+            "set=\(options.scope.settlementStyle.rawValue.uppercased()) obs=\(options.scope.observedAt) " +
+            "stl=\(options.scope.settlementAt) spot=\(f(options.scope.spot)) fwd=\(f(options.scope.forward))"
+        )
+        lines.append(
+            "q=\(options.quality.status.rawValue)/\(options.quality.feedMode.rawValue) cov=\(options.quality.coverage.contractsIncluded)/\(options.quality.coverage.contractsTotal) " +
+            "r=\(coverageRatio) qa=\(options.quality.quoteAsOf ?? "n/a") ga=\(options.quality.greeksAsOf ?? "n/a") " +
+            "oi=\(options.quality.oiEffectiveDate ?? "n/a") c=\(options.quality.cacheStatus.rawValue) " +
+            "v=\(options.quality.calculationVersion) w=\(warnings)"
+        )
+        lines.append(
+            "x cg=\(optionalDollarText(options.structure.callGammaExposure)) pg=\(optionalDollarText(options.structure.putGammaExposure)) " +
+            "gg=\(optionalDollarText(options.structure.grossGammaExposure)) cd=\(optionalDollarText(options.structure.callDeltaNotional)) " +
+            "pd=\(optionalDollarText(options.structure.putDeltaNotional)) cw=\(options.structure.callWall.map(f) ?? "n/a") " +
+            "pw=\(options.structure.putWall.map(f) ?? "n/a") oi=\(options.structure.maxOpenInterestStrike.map(f) ?? "n/a") " +
+            "gc=\(grossConcentration)"
+        )
+        if let range = options.impliedRange {
+            lines.append(
+                "r label=\(range.label) lo=\(f(range.lower)) hi=\(f(range.upper)) c=\(rangeConfidence ?? "n/a") " +
+                "atm=\(atmIv ?? "n/a") sl=\(f(range.straddleLower)) sh=\(f(range.straddleUpper))"
+            )
+        }
+        if includeScenario, options.quality.status == .complete, let proxy = options.scenarios.callPutDealerProxy {
+            let roots = proxy.gammaRoots.map(f).joined(separator: ",")
+            lines.append(
+                "d assumption=\(proxy.assumption) g=\(dollarText(proxy.gammaExposure)) " +
+                "d=\(dollarText(proxy.deltaNotional)) root=\(proxy.primaryGammaRoot.map(f) ?? "n/a") roots=\(roots.isEmpty ? "none" : roots)"
+            )
+        }
+
+        return lines.joined(separator: "\n")
+    }
 
     private static func f(_ value: Double) -> String {
         String(format: "%.2f", value)

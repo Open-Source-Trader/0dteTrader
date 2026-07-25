@@ -239,6 +239,10 @@ export interface Me {
   tradierConfigured?: boolean;
   /** Sandbox (practice) Tradier API key is stored. */
   tradierPracticeConfigured?: boolean;
+  /** Live SnapTrade Personal clientId/consumerKey are stored. */
+  snaptradeKeyConfigured?: boolean;
+  /** Practice SnapTrade Personal clientId/consumerKey are stored. */
+  snaptradeKeyPracticeConfigured?: boolean;
   /** Live SnapTrade brokerage connection is active. */
   snaptradeConfigured?: boolean;
   /** Practice SnapTrade brokerage connection is active. */

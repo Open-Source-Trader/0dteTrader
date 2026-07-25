@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react';
 import type { OptionContract, OptionType } from '@0dtetrader/shared-types';
 import { Format } from '../../design/format';
 import type { ChainStore } from './ChainStore';
@@ -10,6 +11,11 @@ interface OptionChainTableProps {
   selectedStrike: number | null;
   optionType: OptionType;
   locked?: boolean;
+  /** AUTO mode: the chain stays visible and readable (never hidden — that
+   *  hides exactly the liquidity/spread info a scalper needs) but isn't
+   *  manually clickable, since AUTO owns the pick. Distinct from `locked`:
+   *  this is "not yours to change right now," not "trading is disabled." */
+  autoSelected?: boolean;
 }
 
 function LegCell({
@@ -17,17 +23,20 @@ function LegCell({
   side,
   selected,
   disabled,
+  autoSelected,
   onSelect,
 }: {
   contract: OptionContract | undefined;
   side: OptionType;
   selected: boolean;
   disabled: boolean;
+  autoSelected: boolean;
   onSelect: () => void;
 }) {
   if (!contract) {
     return <div className="chain-cell chain-cell--empty" aria-hidden="true" />;
   }
+  const label = `${side === 'call' ? 'Call' : 'Put'} ${Format.strike(contract.strike)}, bid ${Format.price(contract.bid)}, ask ${Format.price(contract.ask)}`;
   return (
     <button
       type="button"
@@ -35,10 +44,15 @@ function LegCell({
       onClick={onSelect}
       disabled={disabled}
       aria-pressed={selected}
-      aria-label={`${side === 'call' ? 'Call' : 'Put'} ${Format.strike(contract.strike)}, bid ${Format.price(contract.bid)}, ask ${Format.price(contract.ask)}`}
+      aria-label={autoSelected && selected ? `${label}, AUTO-selected` : label}
     >
       <span className="numeric chain-cell-bid">{Format.price(contract.bid)}</span>
       <span className="numeric chain-cell-ask">{Format.price(contract.ask)}</span>
+      {autoSelected && selected ? (
+        <span className="chain-cell-auto-badge" aria-hidden="true">
+          AUTO
+        </span>
+      ) : null}
     </button>
   );
 }
@@ -47,7 +61,9 @@ function LegCell({
  *  click a bid/ask cell to select that leg. This is the actual chain a
  *  scalper scans for spread/liquidity before picking a strike — a dropdown
  *  chip (the phone ticket's approach) hides exactly the information that
- *  matters for that read. */
+ *  matters for that read. In AUTO mode the chain stays visible (readOnly)
+ *  with the auto-picked leg tracked live as `selectedStrike`/`optionType`
+ *  move with price, instead of swapping the whole table out for a status box. */
 export function OptionChainTable({
   chainStore,
   underlyingLast,
@@ -56,7 +72,17 @@ export function OptionChainTable({
   selectedStrike,
   optionType,
   locked = false,
+  autoSelected = false,
 }: OptionChainTableProps) {
+  const selectedRowRef = useRef<HTMLDivElement>(null);
+
+  // Keep the auto-picked (or manually selected) row in view as it moves —
+  // AUTO's strike tracks live price, so the highlighted row can drift off
+  // screen without this.
+  useEffect(() => {
+    selectedRowRef.current?.scrollIntoView({ block: 'nearest' });
+  }, [selectedStrike]);
+
   if (strikes.length === 0) {
     return (
       <div className="chain-table-empty text-secondary" style={{ fontSize: 'var(--fs-caption)' }}>
@@ -65,8 +91,16 @@ export function OptionChainTable({
     );
   }
 
+  const readOnly = locked || autoSelected;
+
   return (
-    <div className="chain-table hide-scrollbar" role="table" aria-label="Option chain">
+    <div
+      className={
+        autoSelected ? 'chain-table chain-table--auto hide-scrollbar' : 'chain-table hide-scrollbar'
+      }
+      role="table"
+      aria-label={autoSelected ? 'Option chain, AUTO selection active' : 'Option chain'}
+    >
       <div className="chain-table-header" role="row">
         <span role="columnheader">Call</span>
         <span role="columnheader">Strike</span>
@@ -78,12 +112,18 @@ export function OptionChainTable({
           const isSelected = strike === selectedStrike;
           const isAtm = underlyingLast !== null && Math.abs(strike - underlyingLast) < 0.5;
           return (
-            <div key={strike} role="row" className={`chain-row${isAtm ? ' chain-row--atm' : ''}`}>
+            <div
+              key={strike}
+              ref={isSelected ? selectedRowRef : undefined}
+              role="row"
+              className={`chain-row${isAtm ? ' chain-row--atm' : ''}`}
+            >
               <LegCell
                 contract={legs?.call}
                 side="call"
                 selected={isSelected && optionType === 'call'}
-                disabled={locked}
+                disabled={readOnly}
+                autoSelected={autoSelected}
                 onSelect={() => {
                   chainStore.setOptionType('call');
                   chainStore.selectStrike(strike);
@@ -96,7 +136,8 @@ export function OptionChainTable({
                 contract={legs?.put}
                 side="put"
                 selected={isSelected && optionType === 'put'}
-                disabled={locked}
+                disabled={readOnly}
+                autoSelected={autoSelected}
                 onSelect={() => {
                   chainStore.setOptionType('put');
                   chainStore.selectStrike(strike);

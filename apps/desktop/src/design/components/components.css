@@ -752,6 +752,48 @@
   border-right-color: var(--sell-red);
 }
 
+/* AUTO mode: the chain stays fully readable — not the trading-locked
+   "faded/inert" look — since the point is to keep spread/liquidity info
+   visible while AUTO owns the pick. Only the cursor communicates
+   non-interactivity; the highlighted (auto-picked) cell gets its own
+   badge instead of relying on opacity to convey "this one is active." */
+.chain-table--auto .chain-cell:disabled {
+  cursor: default;
+  opacity: 1;
+}
+
+.chain-table--auto .chain-cell.selected {
+  background: var(--app-accent-fill);
+  box-shadow: none;
+}
+
+.chain-table--auto .chain-cell--call.selected .chain-cell-bid,
+.chain-table--auto .chain-cell--call.selected .chain-cell-ask,
+.chain-table--auto .chain-cell--put.selected .chain-cell-bid,
+.chain-table--auto .chain-cell--put.selected .chain-cell-ask {
+  color: #fff;
+}
+
+.chain-cell {
+  position: relative;
+}
+
+.chain-cell-auto-badge {
+  position: absolute;
+  top: 1px;
+  left: 4px;
+  font-size: 7px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: #fff;
+  opacity: 0.85;
+}
+
+.chain-cell--put .chain-cell-auto-badge {
+  left: auto;
+  right: 4px;
+}
+
 /* --- Symbol spotlight (desktop Cmd+K command palette) --- */
 .spotlight-backdrop {
   position: absolute;

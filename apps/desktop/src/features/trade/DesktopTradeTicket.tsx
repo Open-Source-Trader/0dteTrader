@@ -64,40 +64,49 @@ export function DesktopTradeTicket({
     }
   }
 
-  let autoModeStatus: React.ReactNode;
-  if (chain.errorMessage) {
-    autoModeStatus = (
-      <button
-        className="text-secondary"
-        style={{ fontSize: 'var(--fs-caption)', display: 'flex', alignItems: 'center', gap: 6 }}
-        onClick={() => void chainStore.load(chain.underlying)}
-        aria-label={`Chain failed to load: ${chain.errorMessage}. Activate to retry`}
-      >
-        <span style={{ color: 'var(--pnl-negative)' }}>
-          Chain unavailable — <u>Retry</u>
-        </span>
-      </button>
-    );
-  } else if (chain.isLoading) {
-    autoModeStatus = <Spinner size={16} />;
-  } else if (selectedContract) {
-    autoModeStatus = (
-      <>
-        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--fs-title3)' }}>
-          {Format.strike(selectedContract.strike)}
-          {selectedContract.optionType === 'call' ? 'C' : 'P'}
-        </span>
-        <span className="text-secondary numeric" style={{ fontSize: 'var(--fs-caption)' }}>
-          ≈ {indicativeMid !== null ? Format.price(indicativeMid) : '—'}
-        </span>
-      </>
-    );
-  } else {
-    autoModeStatus = (
-      <span className="text-secondary" style={{ fontSize: 'var(--fs-caption)' }}>
-        No contract
-      </span>
-    );
+  // AUTO mode: the chain stays visible (see OptionChainTable's autoSelected
+  // prop) instead of being swapped out for a status box — hiding it hid
+  // exactly the spread/liquidity info a scalper needs. The auto-picked
+  // strike/type drive the table's highlighted row and move live with price.
+  const effectiveStrike = chain.isAutoMode
+    ? (selectedContract?.strike ?? null)
+    : chain.selectedStrike;
+  const effectiveOptionType = chain.isAutoMode
+    ? (selectedContract?.optionType ?? chain.optionType)
+    : chain.optionType;
+
+  let autoModeStatus: React.ReactNode = null;
+  if (chain.isAutoMode) {
+    if (chain.errorMessage) {
+      autoModeStatus = (
+        <button
+          className="text-secondary"
+          style={{ fontSize: 'var(--fs-caption)', display: 'flex', alignItems: 'center', gap: 6 }}
+          onClick={() => void chainStore.load(chain.underlying)}
+          aria-label={`Chain failed to load: ${chain.errorMessage}. Activate to retry`}
+        >
+          <span style={{ color: 'var(--pnl-negative)' }}>
+            Chain unavailable — <u>Retry</u>
+          </span>
+        </button>
+      );
+    } else if (chain.isLoading) {
+      autoModeStatus = <Spinner size={14} />;
+    } else if (selectedContract) {
+      autoModeStatus = (
+        <>
+          <span className="numeric" style={{ fontWeight: 700 }}>
+            {Format.strike(selectedContract.strike)}
+            {selectedContract.optionType === 'call' ? 'C' : 'P'}
+          </span>
+          <span className="text-secondary numeric">
+            ≈ {indicativeMid !== null ? Format.price(indicativeMid) : '—'}
+          </span>
+        </>
+      );
+    } else {
+      autoModeStatus = <span className="text-secondary">No contract</span>;
+    }
   }
 
   return (
@@ -154,36 +163,41 @@ export function DesktopTradeTicket({
         </button>
       </div>
 
-      {/* The chain itself: click a bid/ask cell to select that leg. Hidden
-          in AUTO mode since the auto-picker owns the selection there. */}
+      {/* AUTO status strip: slim, not a chain replacement — the chain below
+          stays visible and readable so spread/liquidity info is never hidden. */}
       {chain.isAutoMode ? (
         <div
           style={{
-            flex: 1,
-            minHeight: 0,
+            flex: 'none',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
             gap: 6,
+            padding: '3px 6px',
             background: 'var(--app-surface)',
             border: chain.errorMessage
               ? '1px solid var(--sell-red)'
               : '1px solid var(--hud-stroke-dim)',
+            fontSize: 'var(--fs-caption)',
           }}
         >
           {autoModeStatus}
         </div>
-      ) : (
-        <OptionChainTable
-          chainStore={chainStore}
-          underlyingLast={chain.underlyingLast}
-          strikes={chainStore.strikes}
-          contractsByStrike={contractsByStrike}
-          selectedStrike={chain.selectedStrike}
-          optionType={chain.optionType}
-          locked={locked}
-        />
-      )}
+      ) : null}
+
+      {/* The chain: click a bid/ask cell to select that leg. In AUTO mode
+          it's read-only and the auto-picked leg is highlighted — see
+          OptionChainTable's autoSelected prop. */}
+      <OptionChainTable
+        chainStore={chainStore}
+        underlyingLast={chain.underlyingLast}
+        strikes={chainStore.strikes}
+        contractsByStrike={contractsByStrike}
+        selectedStrike={effectiveStrike}
+        optionType={effectiveOptionType}
+        locked={locked}
+        autoSelected={chain.isAutoMode}
+      />
 
       {/* Order-entry controls: quantity through Buy/Sell. Deliberately
           roomier than the chain/read-only rows above — a mis-click here

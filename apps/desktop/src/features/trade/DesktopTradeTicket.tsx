@@ -166,6 +166,15 @@ export function DesktopTradeTicket({
         >
           AUTO
         </button>
+        <span style={{ flex: 1 }} />
+        <SegmentedControl
+          options={[
+            { value: 'call', label: 'Call' },
+            { value: 'put', label: 'Put' },
+          ]}
+          value={chain.optionType}
+          onChange={(value) => chainStore.setOptionType(value)}
+        />
       </div>
 
       {/* AUTO status strip: slim, not a chain replacement — the chain below

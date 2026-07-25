@@ -31,39 +31,37 @@ export function DesktopSettingsPanel({
   const active = tabs.find((tab) => tab.key === activeKey) ?? tabs[0];
 
   return (
-    <DesktopSheet onDismiss={onDismiss}>
-      <div className="desktop-settings-panel">
-        <div className="desktop-settings-sidebar" role="tablist" aria-label="Settings">
-          <div className="desktop-settings-sidebar-title">Settings</div>
-          {tabs.map((tab) => (
-            <button
-              key={tab.key}
-              role="tab"
-              aria-selected={tab.key === active?.key}
-              className={
-                tab.key === active?.key ? 'desktop-settings-tab active' : 'desktop-settings-tab'
-              }
-              onClick={() => setActiveKey(tab.key)}
-            >
-              {tab.icon}
-              <span>{tab.label}</span>
-            </button>
-          ))}
+    <DesktopSheet onDismiss={onDismiss} panelClassName="desktop-settings-panel">
+      <div className="desktop-settings-sidebar" role="tablist" aria-label="Settings">
+        <div className="desktop-settings-sidebar-title">Settings</div>
+        {tabs.map((tab) => (
+          <button
+            key={tab.key}
+            role="tab"
+            aria-selected={tab.key === active?.key}
+            className={
+              tab.key === active?.key ? 'desktop-settings-tab active' : 'desktop-settings-tab'
+            }
+            onClick={() => setActiveKey(tab.key)}
+          >
+            {tab.icon}
+            <span>{tab.label}</span>
+          </button>
+        ))}
+      </div>
+      <div className="desktop-settings-content">
+        <div className="desktop-settings-content-header">
+          <span>{active?.label}</span>
+          <button
+            className="navbar-text-button"
+            style={{ marginLeft: 'auto' }}
+            onClick={onDismiss}
+            aria-label="Close settings"
+          >
+            Done
+          </button>
         </div>
-        <div className="desktop-settings-content">
-          <div className="desktop-settings-content-header">
-            <span>{active?.label}</span>
-            <button
-              className="navbar-text-button"
-              style={{ marginLeft: 'auto' }}
-              onClick={onDismiss}
-              aria-label="Close settings"
-            >
-              Done
-            </button>
-          </div>
-          <div className="desktop-settings-body hide-scrollbar">{active?.content}</div>
-        </div>
+        <div className="desktop-settings-body hide-scrollbar">{active?.content}</div>
       </div>
     </DesktopSheet>
   );

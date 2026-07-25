@@ -4,6 +4,10 @@ import type { ReactNode } from 'react';
 interface DesktopSheetProps {
   onDismiss: () => void;
   children: ReactNode;
+  /** Override the panel's own chrome/sizing class — pass this when the
+   *  child already supplies its own window chrome (e.g. DesktopSettingsPanel),
+   *  so the panel isn't chamfered/bordered twice (once here, once inside). */
+  panelClassName?: string;
 }
 
 const FOCUSABLE = 'button, input, select, textarea, a[href], [tabindex]:not([tabindex="-1"])';
@@ -15,7 +19,7 @@ const FOCUSABLE = 'button, input, select, textarea, a[href], [tabindex]:not([tab
  * height — settings/indicators/history read as app windows on a desktop,
  * not phone screens. Compact/phone layout keeps using Sheet unchanged.
  */
-export function DesktopSheet({ onDismiss, children }: DesktopSheetProps) {
+export function DesktopSheet({ onDismiss, children, panelClassName }: DesktopSheetProps) {
   const panelRef = useRef<HTMLDivElement>(null);
   const onDismissRef = useRef(onDismiss);
   onDismissRef.current = onDismiss;
@@ -65,7 +69,7 @@ export function DesktopSheet({ onDismiss, children }: DesktopSheetProps) {
     >
       <div
         ref={panelRef}
-        className="desktop-sheet-panel"
+        className={panelClassName ?? 'desktop-sheet-panel'}
         role="dialog"
         aria-modal="true"
         tabIndex={-1}

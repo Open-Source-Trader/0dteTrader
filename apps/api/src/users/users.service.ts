@@ -75,26 +75,19 @@ export class UsersService {
     return { exists: Boolean(broker) };
   }
 
-  /** SnapTrade brokerage-connection status for /me. NOTE: BrokerConnection
-   *  is not currently environment-scoped (one row per (userId, provider) —
-   *  see docs/plans/snaptrade-connection-environment-scoping.md), so this
-   *  necessarily returns the same connection state for both live and
-   *  practice today. */
-  private async snapTradeCred(userId: string): Promise<{
-    exists: boolean;
-    accountId: string | null;
-    practiceAccountId: string | null;
-  }> {
+  /** SnapTrade brokerage-connection status for /me, scoped to one
+   *  environment — a user can have an independent live and practice
+   *  connection (see docs/plans/snaptrade-connection-environment-scoping.md). */
+  private async snapTradeConnectionCred(
+    userId: string,
+    environment: TradingMode,
+  ): Promise<{ exists: boolean; accountId: string | null }> {
     const connections = await this.prisma.brokerConnection.findMany({
-      where: { userId, provider: 'snaptrade' },
+      where: { userId, provider: 'snaptrade', environment },
     });
     const active = connections.find((connection) => connection.status === 'active') ?? null;
     const accountId = active?.selectedAccountId ?? connections[0]?.selectedAccountId ?? null;
-    return {
-      exists: Boolean(active),
-      accountId,
-      practiceAccountId: accountId,
-    };
+    return { exists: Boolean(active), accountId };
   }
 
   async getMe(userId: string): Promise<Me> {
@@ -111,7 +104,8 @@ export class UsersService {
       tradierPractice,
       snaptradeKeyLive,
       snaptradeKeyPractice,
-      snaptrade,
+      snaptradeLive,
+      snaptradePractice,
     ] = await Promise.all([
       this.webullCred(userId, 'live'),
       this.webullCred(userId, 'practice'),
@@ -121,7 +115,8 @@ export class UsersService {
       this.tradierCred(userId, 'practice'),
       this.snapTradeKeyCred(userId, 'live'),
       this.snapTradeKeyCred(userId, 'practice'),
-      this.snapTradeCred(userId),
+      this.snapTradeConnectionCred(userId, 'live'),
+      this.snapTradeConnectionCred(userId, 'practice'),
     ]);
     return {
       id: user.id,
@@ -147,10 +142,10 @@ export class UsersService {
       tradierPracticeConfigured: tradierPractice,
       snaptradeKeyConfigured: snaptradeKeyLive.exists,
       snaptradeKeyPracticeConfigured: snaptradeKeyPractice.exists,
-      snaptradeConfigured: snaptrade.exists,
-      snaptradePracticeConfigured: snaptrade.exists,
-      snaptradeAccountId: snaptrade.accountId,
-      snaptradePracticeAccountId: snaptrade.practiceAccountId,
+      snaptradeConfigured: snaptradeLive.exists,
+      snaptradePracticeConfigured: snaptradePractice.exists,
+      snaptradeAccountId: snaptradeLive.accountId,
+      snaptradePracticeAccountId: snaptradePractice.accountId,
     };
   }
 

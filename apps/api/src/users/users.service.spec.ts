@@ -171,23 +171,43 @@ describe('UsersService', () => {
     expect(meBoth.snaptradeKeyPracticeConfigured).toBe(true);
   });
 
-  it('reports SnapTrade connection flags from broker_connections', async () => {
+  it('reports SnapTrade connection flags per environment, independent of each other', async () => {
     const userId = await seedUser();
     prisma.brokerConnections.push({
-      id: 'snaptrade-conn',
+      id: 'snaptrade-conn-live',
       userId,
       provider: 'snaptrade',
-      connectionId: 'conn-1',
-      accountIds: ['acct-1'],
-      selectedAccountId: 'acct-1',
+      environment: 'live',
+      connectionId: 'conn-live',
+      accountIds: ['acct-live'],
+      selectedAccountId: 'acct-live',
       status: 'active',
       createdAt: new Date(),
       updatedAt: new Date(),
     });
     const me = await users.getMe(userId);
     expect(me.snaptradeConfigured).toBe(true);
-    expect(me.snaptradePracticeConfigured).toBe(true);
-    expect(me.snaptradeAccountId).toBe('acct-1');
-    expect(me.snaptradePracticeAccountId).toBe('acct-1');
+    expect(me.snaptradeAccountId).toBe('acct-live');
+    // No practice connection row exists — must not inherit the live one.
+    expect(me.snaptradePracticeConfigured).toBe(false);
+    expect(me.snaptradePracticeAccountId).toBeNull();
+
+    prisma.brokerConnections.push({
+      id: 'snaptrade-conn-practice',
+      userId,
+      provider: 'snaptrade',
+      environment: 'practice',
+      connectionId: 'conn-practice',
+      accountIds: ['acct-practice'],
+      selectedAccountId: 'acct-practice',
+      status: 'active',
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    const meBoth = await users.getMe(userId);
+    expect(meBoth.snaptradeConfigured).toBe(true);
+    expect(meBoth.snaptradeAccountId).toBe('acct-live');
+    expect(meBoth.snaptradePracticeConfigured).toBe(true);
+    expect(meBoth.snaptradePracticeAccountId).toBe('acct-practice');
   });
 });

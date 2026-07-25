@@ -171,7 +171,7 @@ struct IndicatorSettingsView: View {
                         Toggle("Bracket from Entry Line", isOn: $chartTradingSettings.bracketDrag)
                         Stepper("Default Quantity: \(chartTradingSettings.defaultQuantity)",
                                 value: $chartTradingSettings.defaultQuantity,
-                                in: 1...50)
+                                in: ChartTradingSettings.defaultQuantityRange)
                             .monospacedDigit()
                             .accessibilityLabel("Chart trading default quantity")
                             .accessibilityValue("\(chartTradingSettings.defaultQuantity)")

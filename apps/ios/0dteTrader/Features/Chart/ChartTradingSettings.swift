@@ -12,6 +12,12 @@ struct ChartTradingSettings: Codable, Equatable, Sendable {
     /// Contracts a new line is created with.
     var defaultQuantity: Int
 
+    /// Bounds for the per-line default size, shared by the settings stepper and
+    /// `init(from:)`. They must be one constant: when decoding accepted more
+    /// than the stepper could show, a stored value out of range armed a size the
+    /// UI could neither display nor correct.
+    static let defaultQuantityRange = 1...50
+
     static let `default` = ChartTradingSettings(
         enabled: true,
         bracketDrag: true,
@@ -28,7 +34,7 @@ struct ChartTradingSettings: Codable, Equatable, Sendable {
             ?? ChartTradingSettings.default.bracketDrag
         let quantity = try container.decodeIfPresent(Int.self, forKey: .defaultQuantity)
             ?? ChartTradingSettings.default.defaultQuantity
-        defaultQuantity = (1...1000).contains(quantity)
+        defaultQuantity = ChartTradingSettings.defaultQuantityRange.contains(quantity)
             ? quantity
             : ChartTradingSettings.default.defaultQuantity
     }

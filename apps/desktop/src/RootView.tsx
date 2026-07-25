@@ -59,6 +59,10 @@ export function RootView() {
   // Foreground/visibility: re-establish the stream if it dropped.
   useEffect(() => {
     const onVisibilityChange = () => {
+      // Both of these need a session. On the login screen they would open a
+      // socket nobody is authorised for and issue a GET that 401s, surfacing a
+      // stale error from the previous session.
+      if (state !== 'authenticated') return;
       if (document.visibilityState === 'visible') {
         container.quoteSocket.reconnectIfNeeded();
         // A backgrounded tab can have its socket killed without a close event
@@ -69,7 +73,7 @@ export function RootView() {
     };
     document.addEventListener('visibilitychange', onVisibilityChange);
     return () => document.removeEventListener('visibilitychange', onVisibilityChange);
-  }, [container]);
+  }, [container, state]);
 
   let content: ReactNode;
   if (state === 'checking') {

@@ -15,6 +15,15 @@ export interface ChartTradingSettings {
   defaultQuantity: number;
 }
 
+/**
+ * Bounds for the per-line default size, shared by the settings stepper and the
+ * decoder below. They must be one constant: when the decoder accepted more than
+ * the stepper could show, a stored value out of range armed a size the UI could
+ * neither display nor correct.
+ */
+export const CHART_TRADING_QUANTITY_MIN = 1;
+export const CHART_TRADING_QUANTITY_MAX = 50;
+
 export const DEFAULT_CHART_TRADING_SETTINGS: ChartTradingSettings = {
   enabled: true,
   bracketDrag: true,
@@ -40,8 +49,8 @@ export function decodeChartTradingSettings(value: unknown): ChartTradingSettings
     defaultQuantity:
       typeof quantity === 'number' &&
       Number.isInteger(quantity) &&
-      quantity >= 1 &&
-      quantity <= 1000
+      quantity >= CHART_TRADING_QUANTITY_MIN &&
+      quantity <= CHART_TRADING_QUANTITY_MAX
         ? quantity
         : DEFAULT_CHART_TRADING_SETTINGS.defaultQuantity,
   };

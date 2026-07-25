@@ -241,6 +241,36 @@ final class ChartOrderLabelTests: XCTestCase {
     }
 }
 
+final class ChartTradingSettingsDecodingTests: XCTestCase {
+    private func decode(_ json: String) -> ChartTradingSettings? {
+        try? JSONDecoder().decode(ChartTradingSettings.self, from: Data(json.utf8))
+    }
+
+    /// The decode bound and the settings stepper must agree. When decoding was
+    /// wider, a stored value out of range armed a default size the stepper could
+    /// neither show nor correct.
+    func testRejectsAQuantityTheStepperCouldNotRepresent() {
+        let max = ChartTradingSettings.defaultQuantityRange.upperBound
+        for quantity in [max + 1, 1000, 0, -3] {
+            let decoded = decode("{\"defaultQuantity\": \(quantity)}")
+            XCTAssertEqual(decoded?.defaultQuantity, ChartTradingSettings.default.defaultQuantity)
+        }
+    }
+
+    func testKeepsBothEndsOfTheStepperRange() {
+        for quantity in [
+            ChartTradingSettings.defaultQuantityRange.lowerBound,
+            ChartTradingSettings.defaultQuantityRange.upperBound,
+        ] {
+            XCTAssertEqual(decode("{\"defaultQuantity\": \(quantity)}")?.defaultQuantity, quantity)
+        }
+    }
+
+    func testMissingFieldsFallBackToDefaults() {
+        XCTAssertEqual(decode("{}"), ChartTradingSettings.default)
+    }
+}
+
 final class ChartOrderDecodingTests: XCTestCase {
     private func dto(
         side: String = "buy",

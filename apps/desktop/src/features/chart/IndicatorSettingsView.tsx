@@ -7,6 +7,7 @@ import { SlidersIcon } from '../../design/icons';
 import type { IndicatorSettings } from './indicatorSettings';
 import { DEFAULT_INDICATOR_SETTINGS, enabledSubPanes, MAX_SUB_PANES } from './indicatorSettings';
 import type { ChartTradingSettings } from './chartTradingSettings';
+import { CHART_TRADING_QUANTITY_MAX, CHART_TRADING_QUANTITY_MIN } from './chartTradingSettings';
 import type { OptionsAnalyticsSettings } from './optionsAnalytics/optionsAnalyticsSettings';
 
 interface IndicatorSettingsViewProps {
@@ -508,8 +509,8 @@ export function IndicatorSettingsView({
                     <span className="row-value">
                       <Stepper
                         value={chartTrading.defaultQuantity}
-                        min={1}
-                        max={50}
+                        min={CHART_TRADING_QUANTITY_MIN}
+                        max={CHART_TRADING_QUANTITY_MAX}
                         onChange={(value) => patchChartTrading({ defaultQuantity: value })}
                       />
                     </span>

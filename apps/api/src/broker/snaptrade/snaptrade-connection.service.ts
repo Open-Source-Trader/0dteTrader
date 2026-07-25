@@ -18,7 +18,7 @@ export interface SnapTradeConnectionRecord {
 }
 
 type BrokerConnectionDelegate = {
-  findMany(args: { where: { userId: string; provider: string } }): Promise<
+  findMany(args: { where: { userId: string; provider: string; environment: string } }): Promise<
     Array<{
       connectionId: string;
       accountIds: string[];
@@ -27,13 +27,16 @@ type BrokerConnectionDelegate = {
     }>
   >;
   deleteMany(args: {
-    where: { userId: string; provider: string; connectionId: string };
+    where: { userId: string; provider: string; environment: string; connectionId: string };
   }): Promise<unknown>;
   upsert(args: {
-    where: { userId_provider: { userId: string; provider: string } };
+    where: {
+      userId_provider_environment: { userId: string; provider: string; environment: string };
+    };
     create: {
       userId: string;
       provider: string;
+      environment: string;
       connectionId: string;
       accountIds: string[];
       selectedAccountId: string;
@@ -97,7 +100,7 @@ export class SnapTradeConnectionService {
     const { clientId, consumerKey } = await this.credentialsFor(userId, mode);
     const remote = await this.client.listConnections(mode, clientId, consumerKey);
     const local = await this.brokerConnections.brokerConnection.findMany({
-      where: { userId, provider: 'snaptrade' },
+      where: { userId, provider: 'snaptrade', environment: mode },
     });
     const localMap = new Map(
       local.map(
@@ -150,7 +153,7 @@ export class SnapTradeConnectionService {
     const { clientId, consumerKey } = await this.credentialsFor(userId, mode);
     await this.client.deleteConnection(mode, clientId, consumerKey, connectionId);
     await this.brokerConnections.brokerConnection.deleteMany({
-      where: { userId, provider: 'snaptrade', connectionId },
+      where: { userId, provider: 'snaptrade', environment: mode, connectionId },
     });
   }
 
@@ -169,12 +172,18 @@ export class SnapTradeConnectionService {
   /**
    * Persist the user's selected trading account for a connection.
    */
-  async selectAccount(userId: string, connectionId: string, accountId: string): Promise<void> {
+  async selectAccount(
+    userId: string,
+    mode: TradingMode,
+    connectionId: string,
+    accountId: string,
+  ): Promise<void> {
     await this.brokerConnections.brokerConnection.upsert({
-      where: { userId_provider: { userId, provider: 'snaptrade' } },
+      where: { userId_provider_environment: { userId, provider: 'snaptrade', environment: mode } },
       create: {
         userId,
         provider: 'snaptrade',
+        environment: mode,
         connectionId,
         accountIds: [accountId],
         selectedAccountId: accountId,

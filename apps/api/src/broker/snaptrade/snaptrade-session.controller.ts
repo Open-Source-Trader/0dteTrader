@@ -11,6 +11,12 @@ import { TradingMode } from '@0dtetrader/shared-types';
  * SnapTrade connection lifecycle endpoints.
  *
  * All routes are prefixed with `/v1/me/broker-connections/snaptrade`.
+ *
+ * Every route accepts an optional `?environment=live|practice` query param so
+ * the caller can act on a specific environment's connection (the desktop/iOS
+ * Profile screen renders independent "Live" and "Practice" cards). When
+ * omitted, falls back to the user's current global `tradingMode` — this
+ * preserves the behavior older clients (that don't send the param) relied on.
  */
 @Controller('me/broker-connections/snaptrade')
 export class SnapTradeConnectionController {
@@ -20,12 +26,15 @@ export class SnapTradeConnectionController {
   ) {}
 
   @Get()
-  async list(@CurrentUser() user: AuthenticatedUser): Promise<{
+  async list(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query('environment') environment?: TradingMode,
+  ): Promise<{
     connections: SnapTradeConnectionRecord[];
     accounts: Record<string, { accountId: string; name: string }[]>;
     status: { configured: boolean; selectedAccountId: string | null };
   }> {
-    const mode = await this.tradingModeFor(user.userId);
+    const mode = environment ?? (await this.tradingModeFor(user.userId));
     const connections = await this.connections.listConnections(user.userId, mode);
     const accounts: Record<string, { accountId: string; name: string }[]> = {};
     for (const conn of connections) {
@@ -51,8 +60,9 @@ export class SnapTradeConnectionController {
     @Query('brokerage') brokerage?: string,
     @Query('reconnect') reconnect?: string,
     @Query('connectionType') connectionType?: 'read' | 'trade' | 'trade-if-available',
+    @Query('environment') environment?: TradingMode,
   ): Promise<{ redirectUrl: string }> {
-    const mode = await this.tradingModeFor(user.userId);
+    const mode = environment ?? (await this.tradingModeFor(user.userId));
     return this.connections.authorize(user.userId, mode, {
       brokerage,
       reconnect,
@@ -64,8 +74,9 @@ export class SnapTradeConnectionController {
   async reconnect(
     @CurrentUser() user: AuthenticatedUser,
     @Query('connectionId') connectionId: string,
+    @Query('environment') environment?: TradingMode,
   ): Promise<{ redirectUrl: string }> {
-    const mode = await this.tradingModeFor(user.userId);
+    const mode = environment ?? (await this.tradingModeFor(user.userId));
     return this.connections.reconnect(user.userId, mode, connectionId);
   }
 
@@ -74,8 +85,10 @@ export class SnapTradeConnectionController {
     @CurrentUser() user: AuthenticatedUser,
     @Query('connectionId') connectionId: string,
     @Query('accountId') accountId: string,
+    @Query('environment') environment?: TradingMode,
   ): Promise<{ accountId: string }> {
-    await this.connections.selectAccount(user.userId, connectionId, accountId);
+    const mode = environment ?? (await this.tradingModeFor(user.userId));
+    await this.connections.selectAccount(user.userId, mode, connectionId, accountId);
     return { accountId };
   }
 
@@ -84,8 +97,9 @@ export class SnapTradeConnectionController {
   async disconnect(
     @CurrentUser() user: AuthenticatedUser,
     @Query('connectionId') connectionId: string,
+    @Query('environment') environment?: TradingMode,
   ): Promise<void> {
-    const mode = await this.tradingModeFor(user.userId);
+    const mode = environment ?? (await this.tradingModeFor(user.userId));
     await this.connections.deleteConnection(user.userId, mode, connectionId);
   }
 

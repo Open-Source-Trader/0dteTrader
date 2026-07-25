@@ -1023,6 +1023,19 @@
   min-width: 0;
 }
 
+/* Clarifies the custom-symbol row isn't a dead end (it read as a "no
+   results" state without this) — it's a valid jump, just not one of the
+   curated watchlist symbols. */
+.spotlight-row-hint {
+  flex: none;
+  font-size: var(--fs-caption2-desktop);
+  color: var(--label-secondary);
+}
+
+.spotlight-row.active .spotlight-row-hint {
+  color: rgba(255, 255, 255, 0.75);
+}
+
 .spotlight-footer {
   display: flex;
   align-items: center;

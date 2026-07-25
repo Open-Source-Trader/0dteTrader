@@ -102,15 +102,19 @@ export function SymbolSpotlight({ currentSymbol, onSelect, onDismiss }: SymbolSp
 
         <div className="spotlight-results hide-scrollbar">
           {showsCustomSymbol ? (
-            <button
-              className={rowClassName(normalizedQuery)}
-              onClick={() => select(normalizedQuery)}
-            >
-              <span className="spotlight-row-icon">
-                <TextCursorIcon size={14} />
-              </span>
-              <span className="spotlight-row-label">Use &quot;{normalizedQuery}&quot;</span>
-            </button>
+            <div>
+              <div className="spotlight-section-header">Jump to symbol</div>
+              <button
+                className={rowClassName(normalizedQuery)}
+                onClick={() => select(normalizedQuery)}
+              >
+                <span className="spotlight-row-icon">
+                  <TextCursorIcon size={14} />
+                </span>
+                <span className="spotlight-row-label numeric">{normalizedQuery}</span>
+                <span className="spotlight-row-hint">not in watchlist — press ↵</span>
+              </button>
+            </div>
           ) : null}
 
           {SYMBOL_SECTIONS.map((section) => {

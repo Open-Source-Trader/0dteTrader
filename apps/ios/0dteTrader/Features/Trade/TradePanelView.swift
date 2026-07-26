@@ -50,8 +50,10 @@ enum TradePanelDensity: Sendable {
         }
     }
 
-    /// Call/Put + Mid/Market segmented rows, and the AUTO contract label
-    /// (desktop parity: .segmented 36 → 32 → 30px per tier).
+    /// Call/Put + Mid/Market segmented rows (desktop parity: .segmented
+    /// 36 → 32 → 30px per tier). The AUTO contract used to be pinned to this
+    /// too, which is what made the contract row change height with the toggle;
+    /// it wears the strike chip now and takes `chipMinHeight` like its twin.
     var segmentedMinHeight: CGFloat {
         switch self {
         case .roomy: return 34
@@ -231,12 +233,7 @@ struct TradePanelView: View {
 
             HStack(spacing: AppSpacing.sm) {
                 expirationMenu
-
-                if chainViewModel.isAutoMode {
-                    autoContractLabel
-                } else {
-                    strikeMenu
-                }
+                strikeSlot
             }
             .disabled(tradingLocked)
             .opacity(tradingLocked ? 0.55 : 1)
@@ -286,6 +283,24 @@ struct TradePanelView: View {
         return expiration
     }
 
+    /// The strike side of the contract row, in either mode.
+    ///
+    /// It used to be two unrelated views: the menu trigger below, built by
+    /// `chipLabel` with the chip's own vertical padding and `chipMinHeight`
+    /// floor (44pt when roomy), and — with AUTO on — a plain label pinned to
+    /// `segmentedMinHeight` (34pt). *That* is why the row changed height with
+    /// the toggle; nothing was wrapping or clipping. Both states are the same
+    /// chip now, so this half always matches the expiration half beside it, and
+    /// both carry the contract's mid.
+    @ViewBuilder
+    private var strikeSlot: some View {
+        if chainViewModel.isAutoMode {
+            autoContractChip
+        } else {
+            strikeMenu
+        }
+    }
+
     /// The strike picker. A `HudMenu` rather than a `Menu` for the branding and
     /// for the bug: a `Menu`'s content is rebuilt on every body pass, this
     /// panel's body runs on every option-quote tick, and UIKit answers a
@@ -302,6 +317,7 @@ struct TradePanelView: View {
                 chipLabel(
                     title: chainViewModel.selectedStrike.map(Format.strike) ?? "Strike",
                     systemImage: "chart.line.uptrend.xyaxis",
+                    detail: midDetail,
                     isPlaceholder: chainViewModel.selectedStrike == nil
                 )
             }
@@ -309,33 +325,38 @@ struct TradePanelView: View {
         .accessibilityLabel("Strike")
     }
 
-    private var autoContractLabel: some View {
-        HStack {
+    /// AUTO's pick, wearing the strike chip it stands in for. Not a control:
+    /// AUTO is what chooses, so there is nothing here to open.
+    private var autoContractChip: some View {
+        Group {
             if chainViewModel.isLoading {
-                ProgressView()
-                    .controlSize(.small)
+                chipLabel(
+                    title: "Loading…",
+                    systemImage: "chart.line.uptrend.xyaxis",
+                    isPlaceholder: true
+                )
             } else if let contract = chainViewModel.autoContract {
-                Text("\(Format.strike(contract.strike))\(contract.optionType.shortName)")
-                    .font(.priceMedium)
-                Text(contract.mid.map { "≈ \(Format.price($0))" } ?? "—")
-                    .font(.priceSmall)
-                    .foregroundStyle(.secondary)
+                chipLabel(
+                    title: "\(Format.strike(contract.strike))\(contract.optionType.shortName)",
+                    systemImage: "chart.line.uptrend.xyaxis",
+                    detail: midDetail
+                )
             } else {
-                Text("No contract")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                chipLabel(
+                    title: "No contract",
+                    systemImage: "chart.line.uptrend.xyaxis",
+                    isPlaceholder: true
+                )
             }
         }
-        .frame(maxWidth: .infinity, minHeight: density.segmentedMinHeight)
-        .padding(.horizontal, 10)
-        .background {
-            HudPanelShape(chamfer: 6)
-                .fill(Color.appSurface)
-                .overlay {
-                    HudPanelShape(chamfer: 6)
-                        .strokeBorder(Color.hudStroke.opacity(0.35), lineWidth: 1)
-                }
-        }
+        .accessibilityLabel("Auto-selected contract")
+    }
+
+    /// The mid printed beside the strike, in either mode — `selectedContract`
+    /// already resolves to AUTO's pick when AUTO is on.
+    private var midDetail: String? {
+        guard let contract = chainViewModel.selectedContract else { return nil }
+        return contract.mid.map { "≈ \(Format.price($0))" } ?? "—"
     }
 
     // MARK: - Quantity & order type
@@ -344,13 +365,14 @@ struct TradePanelView: View {
         HStack(spacing: AppSpacing.md) {
             Text("Qty")
                 .font(.panelLabel)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Color.secondary)
 
             Button {
                 Haptics.selection()
                 tradeViewModel.addQuantity(-1)
             } label: {
                 Image(systemName: "minus")
+                    .foregroundStyle(Color.secondary)
                     .frame(width: density.stepperTouchSize, height: density.stepperTouchSize)
                     .background {
                         HudPanelShape(chamfer: 5)
@@ -368,6 +390,7 @@ struct TradePanelView: View {
 
             Text("\(tradeViewModel.quantity)")
                 .font(.priceMedium)
+                .foregroundStyle(Color.secondary)
                 .shadow(color: .hudGlow, radius: 6)
                 .frame(minWidth: 36)
                 .accessibilityLabel("Quantity")
@@ -385,6 +408,7 @@ struct TradePanelView: View {
                 tradeViewModel.addQuantity(1)
             } label: {
                 Image(systemName: "plus")
+                    .foregroundStyle(Color.secondary)
                     .frame(width: density.stepperTouchSize, height: density.stepperTouchSize)
                     .background {
                         HudPanelShape(chamfer: 5)
@@ -416,35 +440,57 @@ struct TradePanelView: View {
         }
     }
 
+    /// Mid hard left, Market hard right, the selected contract's bid/mid/ask
+    /// between them — replacing the single `≈ 2.46` that used to trail the row.
+    ///
+    /// Still one `HudSegmentedControl`, not two buttons: Mid and Market are one
+    /// either/or, and two separately-bordered chips at opposite ends of a row
+    /// would read as two independent toggles. The track's own frame runs behind
+    /// all three, so the pair stays visibly bracketed, and only the chosen end
+    /// carries the accent border and fill.
     private var orderTypeRow: some View {
-        HStack(spacing: AppSpacing.md) {
-            HudSegmentedControl(
-                options: [
-                    .init(OrderType.mid, "Mid"),
-                    .init(OrderType.market, "Market"),
-                ],
-                selection: $tradeViewModel.orderType,
-                minHeight: density.segmentedMinHeight
-            )
-            .accessibilityLabel("Order type")
-
-            if let line = quoteLine {
-                Text(line)
-                    .font(.priceSmall)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
-                    .layoutPriority(1)
-            }
-        }
+        HudSegmentedControl(
+            options: [
+                .init(OrderType.mid, "Mid"),
+                .init(OrderType.market, "Market"),
+            ],
+            selection: $tradeViewModel.orderType,
+            minHeight: density.segmentedMinHeight,
+            labelColor: .secondary,
+            center: { quoteColumns }
+        )
+        .accessibilityLabel("Order type")
     }
 
-    private var quoteLine: String? {
-        guard let contract = chainViewModel.selectedContract else { return nil }
-        if tradeViewModel.orderType == .mid, let mid = contract.mid {
-            return "≈ \(Format.price(mid))"
+    /// Bid / mid / ask with their names beneath them. Em dashes rather than an
+    /// empty middle while the chain is loading or nothing is selected: the row
+    /// keeps its three columns and its height either way, and a dash says "no
+    /// quote yet" where a blank says nothing at all.
+    private var quoteColumns: some View {
+        let contract = chainViewModel.selectedContract
+        return HStack(spacing: AppSpacing.xs) {
+            quoteColumn("Bid", contract.map { Format.price($0.bid) })
+            quoteColumn("Mid", contract?.mid.map { Format.price($0) })
+            quoteColumn("Ask", contract.map { Format.price($0.ask) })
         }
-        return "\(Format.price(contract.bid)) × \(Format.price(contract.ask))"
+        .frame(maxWidth: .infinity)
+    }
+
+    /// One column: price over its label. Both grey — the panel's chrome text is
+    /// one colour now — so the hierarchy is carried by type size and position
+    /// rather than by brightness.
+    private func quoteColumn(_ label: String, _ value: String?) -> some View {
+        VStack(spacing: 0) {
+            Text(value ?? "—")
+                .font(.priceSmall)
+            Text(label)
+                .font(.caption2)
+        }
+        .foregroundStyle(Color.secondary)
+        .lineLimit(1)
+        .minimumScaleFactor(0.7)
+        .frame(maxWidth: .infinity)
+        .accessibilityElement(children: .combine)
     }
 
     private var canTrade: Bool {
@@ -461,12 +507,12 @@ struct TradePanelView: View {
                 .accessibilityHidden(true)
             Text(message)
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Color.secondary)
                 .lineLimit(2)
             Spacer()
             Button("Retry", action: retry)
                 .font(.chipLabel)
-                .foregroundStyle(Color.appAccent)
+                .foregroundStyle(Color.secondary)
         }
         .padding(.horizontal, AppSpacing.md)
         .padding(.vertical, AppSpacing.sm)
@@ -485,6 +531,9 @@ struct TradePanelView: View {
     private func chipLabel(
         title: String,
         systemImage: String,
+        /// Trailing readout inside the same chip — the contract's mid, which
+        /// both halves of the strike slot now print.
+        detail: String? = nil,
         isPlaceholder: Bool = false,
         fillWidth: Bool = true
     ) -> some View {
@@ -494,7 +543,6 @@ struct TradePanelView: View {
                 .accessibilityHidden(true)
             Text(title)
                 .font(.system(.caption, design: .monospaced).weight(.semibold))
-                .foregroundStyle(isPlaceholder ? .secondary : .primary)
                 .lineLimit(1)
                 // Both chips on this row take `maxWidth: .infinity`, which an
                 // HStack divides evenly — but only for as long as neither
@@ -505,8 +553,18 @@ struct TradePanelView: View {
                 // visibly narrower. With a floor the minimum is a fraction of
                 // that and the two always come out the same size.
                 .minimumScaleFactor(0.6)
+            if let detail {
+                Text(detail)
+                    .font(.priceSmall)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
+            }
         }
-        .foregroundStyle(isPlaceholder ? .secondary : .primary)
+        // One grey for the whole chip. The placeholder flag no longer changes
+        // the colour — the panel's chrome text is all `.secondary` now — but it
+        // still marks "nothing chosen yet" for the dimming below.
+        .foregroundStyle(Color.secondary)
+        .opacity(isPlaceholder ? 0.7 : 1)
         .padding(.horizontal, AppSpacing.md)
         .padding(.vertical, density.chipVerticalPadding)
         .frame(maxWidth: fillWidth ? .infinity : nil, minHeight: density.chipMinHeight)

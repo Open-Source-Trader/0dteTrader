@@ -16,7 +16,7 @@
   font-weight: 700;
   font-size: var(--fs-caption2);
   letter-spacing: 0.04em;
-  color: var(--app-accent-text);
+  color: var(--label-secondary);
   background: var(--hud-panel);
   border: 1px solid var(--hud-stroke-dim);
   clip-path: polygon(

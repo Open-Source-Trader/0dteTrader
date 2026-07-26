@@ -56,6 +56,22 @@ function expirationLabel(expiration: string): string {
   return expiration === dayString() ? `${expiration} · 0DTE` : expiration;
 }
 
+/**
+ * One column of the order-type row's readout: the price over its name. Both
+ * grey — the panel's chrome text is one colour now — so the hierarchy is
+ * carried by type size and position rather than by brightness. An em dash
+ * rather than a blank while the chain is loading or nothing is selected: the
+ * row keeps its three columns and its height either way.
+ */
+function QuoteColumn({ label, value }: { label: string; value: string | null }) {
+  return (
+    <div className="quote-column">
+      <span className="quote-column__value numeric">{value || '—'}</span>
+      <span className="quote-column__label">{label}</span>
+    </div>
+  );
+}
+
 /** Layout B's bottom trade panel (TradePanelView.swift). */
 export function TradePanel({
   tradeStore,
@@ -79,17 +95,19 @@ export function TradePanel({
 
   const d = DENSITY[density];
 
+  // The mid printed beside the strike, in either mode: `selectedContract`
+  // already resolves to AUTO's pick when AUTO is on.
+  const strikeMid = indicativeMid !== null ? `≈ ${Format.price(indicativeMid)}` : null;
+
+  // AUTO's pick, wearing the strike chip it stands in for — same class, so the
+  // two halves of the contract row are the same height whichever mode is on.
+  // They used to be a `.chip-button` against a hand-rolled `minHeight: 36` div,
+  // which is what made the row change height with the toggle.
   let autoModeContent;
   if (chain.errorMessage) {
     autoModeContent = (
       <button
-        className="text-secondary"
-        style={{
-          fontSize: 'var(--fs-caption)',
-          display: 'flex',
-          alignItems: 'center',
-          gap: 6,
-        }}
+        className="chip-button"
         onClick={() => void chainStore.load(chain.underlying)}
         aria-label={`Chain failed to load: ${chain.errorMessage}. Activate to retry`}
       >
@@ -99,39 +117,31 @@ export function TradePanel({
       </button>
     );
   } else if (chain.isLoading) {
-    autoModeContent = <Spinner size={14} />;
+    autoModeContent = (
+      <div className="chip-button chip-button--static">
+        <Spinner size={14} />
+      </div>
+    );
   } else if (autoContract) {
     autoModeContent = (
-      <>
-        <span
-          style={{
-            fontFamily: 'var(--font-mono)',
-            fontSize: 'var(--fs-body)',
-            fontWeight: 500,
-          }}
-        >
+      <div className="chip-button chip-button--static" aria-label="Auto-selected contract">
+        <ChartLineIcon size={13} />
+        <span className="chip-title">
           {Format.strike(autoContract.strike)}
           {autoContract.optionType === 'call' ? 'C' : 'P'}
         </span>
-        <span className="text-secondary numeric" style={{ fontSize: 'var(--fs-caption)' }}>
-          ≈ {autoMid !== null ? Format.price(autoMid) : '—'}
+        <span className="chip-detail numeric">
+          {autoMid !== null ? `≈ ${Format.price(autoMid)}` : '—'}
         </span>
-      </>
+      </div>
     );
   } else {
     autoModeContent = (
-      <span className="text-secondary" style={{ fontSize: 'var(--fs-caption)' }}>
-        No contract
-      </span>
+      <div className="chip-button chip-button--static chip-button--placeholder">
+        <ChartLineIcon size={13} />
+        <span className="chip-title">No contract</span>
+      </div>
     );
-  }
-
-  let orderTypeQuoteLabel = '';
-  if (selectedQuote) {
-    orderTypeQuoteLabel =
-      trade.orderType === 'mid'
-        ? `≈ ${indicativeMid !== null ? Format.price(indicativeMid) : '—'}`
-        : `${Format.price(selectedQuote.bid)} × ${Format.price(selectedQuote.ask)}`;
   }
 
   return (
@@ -249,26 +259,7 @@ export function TradePanel({
             />
 
             {chain.isAutoMode ? (
-              <div
-                style={{
-                  flex: 1,
-                  minWidth: 0,
-                  minHeight: 36,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: 8,
-                  padding: '0 10px',
-                  background: 'var(--app-surface)',
-                  border: chain.errorMessage
-                    ? '1px solid var(--sell-red)'
-                    : '1px solid var(--hud-stroke-dim)',
-                  boxShadow: chain.errorMessage ? '0 0 8px rgba(255, 59, 78, 0.35)' : undefined,
-                  borderRadius: 'var(--radius-chip)',
-                }}
-              >
-                {autoModeContent}
-              </div>
+              <div className="chip-flex chip-static">{autoModeContent}</div>
             ) : (
               <Menu
                 className="chip-flex"
@@ -282,6 +273,7 @@ export function TradePanel({
                         ? Format.strike(chain.selectedStrike)
                         : 'Strike'}
                     </span>
+                    {strikeMid ? <span className="chip-detail numeric">{strikeMid}</span> : null}
                   </button>
                 }
                 items={chainStore.strikes.map((strike) => ({
@@ -316,6 +308,7 @@ export function TradePanel({
               fontWeight: 500,
               minWidth: 40,
               textAlign: 'center',
+              color: 'var(--label-secondary)',
               textShadow: '0 0 8px var(--hud-glow)',
             }}
           >
@@ -326,31 +319,40 @@ export function TradePanel({
           <QuickChip title="+10" onClick={() => tradeStore.addQuantity(10)} />
         </div>
 
-        {/* Order type row */}
+        {/* Order-type row: Mid hard left, Market hard right, the selected
+            contract's bid/mid/ask between them — replacing the single `≈ 2.46`
+            that used to trail the row. Still one segmented track, because Mid
+            and Market are one either/or and two separately-bordered chips at
+            opposite ends would read as two independent toggles. */}
         <div
           inert={locked}
           style={{ display: 'flex', alignItems: 'center', gap: 8, opacity: locked ? 0.55 : 1 }}
         >
           <SegmentedControl
+            className="segmented--split"
             options={[
               { value: 'mid', label: 'Mid' },
               { value: 'market', label: 'Market' },
             ]}
             value={trade.orderType}
             onChange={(value) => tradeStore.setOrderType(value)}
+            center={
+              <div className="quote-columns">
+                <QuoteColumn
+                  label="Bid"
+                  value={selectedQuote ? Format.price(selectedQuote.bid) : null}
+                />
+                <QuoteColumn
+                  label="Mid"
+                  value={indicativeMid !== null ? Format.price(indicativeMid) : null}
+                />
+                <QuoteColumn
+                  label="Ask"
+                  value={selectedQuote ? Format.price(selectedQuote.ask) : null}
+                />
+              </div>
+            }
           />
-          <span
-            className="text-secondary numeric"
-            style={{
-              fontSize: 'var(--fs-caption)',
-              flex: 'none',
-              minWidth: 96,
-              textAlign: 'right',
-              visibility: selectedQuote ? 'visible' : 'hidden',
-            }}
-          >
-            {orderTypeQuoteLabel}
-          </span>
         </div>
 
         {/* Action row — pinned to the panel's bottom edge */}

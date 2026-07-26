@@ -74,6 +74,17 @@ enum ChartChip {
     static let iconSize: CGFloat = 11
     static let iconBox = CGSize(width: 14, height: 14)
 
+    /// Fill, stroke strength and label colour, named once here because the
+    /// corner controls seated on the same pane wear them too — the `A` reset
+    /// buttons used to carry a hand-copied fill, a stronger stroke and a 0.7
+    /// dim, which is why they read duller than the row above them.
+    ///
+    /// The label is the panel's grey rather than the accent: the chrome text
+    /// across this screen is one colour now, and the blue is left to the
+    /// borders it draws.
+    static let fill = Color.hudPanel
+    static let strokeOpacity: Double = 0.35
+    static let label = Color.secondary
 }
 
 /// Width of the widest chip group on the pane's first line.
@@ -109,12 +120,15 @@ extension View {
     /// `strokeOpacity` is the one thing that varies — the symbol menu keeps the
     /// brighter border it had, since it is the control that changes what you
     /// are looking at.
-    func chartChipChrome(strokeOpacity: Double = 0.35, lineWidth: CGFloat = 1) -> some View {
+    func chartChipChrome(
+        strokeOpacity: Double = ChartChip.strokeOpacity,
+        lineWidth: CGFloat = 1
+    ) -> some View {
         padding(.horizontal, AppSpacing.sm)
             .padding(.vertical, AppSpacing.xs)
             .background {
                 HudPanelShape(chamfer: ChartChip.chamfer)
-                    .fill(Color.hudPanel)
+                    .fill(ChartChip.fill)
                     .overlay {
                         HudPanelShape(chamfer: ChartChip.chamfer)
                             .strokeBorder(Color.hudStroke.opacity(strokeOpacity), lineWidth: lineWidth)
@@ -123,6 +137,29 @@ extension View {
             // This box, not the 44pt target wrapped around it below, is what a
             // popup opened from this chip hangs from.
             .hudMenuAnchorSource()
+    }
+
+    /// The chips' chrome on a corner control's own square geometry — the `A`
+    /// reset buttons seated in the price pane's and the sub-panes' bottom-right
+    /// corners.
+    ///
+    /// Same fill, same stroke, same label colour, read from `ChartChip` rather
+    /// than restated, so "the reset button matches the chips" cannot quietly
+    /// stop being true. What is *not* shared is the silhouette: the pane's `A`
+    /// sits at an inset `ChartMetrics.cornerSeat` derives from its corner
+    /// radius, and it stands in one column with the placement guide's `+`, so
+    /// its box stays the rounded square that arithmetic describes.
+    func chartCornerControlChrome(size: CGFloat, cornerRadius: CGFloat) -> some View {
+        foregroundStyle(ChartChip.label)
+            .frame(width: size, height: size)
+            .background(ChartChip.fill, in: RoundedRectangle(cornerRadius: cornerRadius))
+            .overlay(
+                RoundedRectangle(cornerRadius: cornerRadius)
+                    .strokeBorder(
+                        Color.hudStroke.opacity(ChartChip.strokeOpacity),
+                        lineWidth: 1
+                    )
+            )
     }
 
     /// Grows a chip's touch target to the 44pt minimum without growing the chip.
@@ -180,9 +217,8 @@ struct ChartSymbolButton: View {
                         .font(ChartChip.font)
                     Image(systemName: "chevron.down")
                         .font(.system(size: 8, weight: .bold))
-                        .foregroundStyle(Color.appAccent)
                 }
-                .foregroundStyle(.primary)
+                .foregroundStyle(ChartChip.label)
                 .chartChipChrome(strokeOpacity: 0.6, lineWidth: 1.2)
                 .chartChipTouchTarget()
             }
@@ -212,7 +248,7 @@ struct ChartIntervalMenu: View {
         ) {
             Text(interval.rawValue.uppercased())
                 .font(ChartChip.font)
-                .foregroundStyle(Color.appAccent)
+                .foregroundStyle(ChartChip.label)
                 .chartChipChrome()
                 .chartChipTouchTarget()
         }
@@ -233,7 +269,7 @@ struct ChartIndicatorButton: View {
         } label: {
             Image(systemName: "slider.horizontal.3")
                 .font(.system(size: ChartChip.iconSize, weight: .semibold))
-                .foregroundStyle(Color.appAccent)
+                .foregroundStyle(ChartChip.label)
                 .frame(minWidth: ChartChip.iconBox.width, minHeight: ChartChip.iconBox.height)
                 .chartChipChrome()
                 .chartChipTouchTarget()
@@ -278,7 +314,10 @@ struct ChartDrawingToolsMenu: View {
                 let glyph = drawings.tool == .cursor ? "pencil.and.outline" : drawings.tool.systemImage
                 Image(systemName: glyph)
                     .font(.system(size: ChartChip.iconSize, weight: .semibold))
-                    .foregroundStyle(drawings.tool == .cursor ? Color.appAccent : Color.hudAmber)
+                    // Amber stays: it is not chrome colour but the armed
+                    // state of a tool that changes what a drag on the chart
+                    // does, and the row has no other way to say so.
+                    .foregroundStyle(drawings.tool == .cursor ? ChartChip.label : Color.hudAmber)
                     .frame(minWidth: ChartChip.iconBox.width, minHeight: ChartChip.iconBox.height)
                     .chartChipChrome()
                     .chartChipTouchTarget()
@@ -322,7 +361,7 @@ struct ChartStructChip: View {
             .font(.system(size: 8, weight: .bold, design: .monospaced))
             .foregroundStyle(
                 snapshot.quality.warnings.isEmpty || !settings.showDiagnostics
-                    ? Color.appAccent
+                    ? ChartChip.label
                     : Color.appWarning
             )
             .padding(.horizontal, 6)

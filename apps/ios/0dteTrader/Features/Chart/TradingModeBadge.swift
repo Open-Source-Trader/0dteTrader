@@ -14,16 +14,15 @@ import SwiftUI
 /// PRACTICE is the longer word, so the chip is laid out trailing-aligned: both
 /// labels end on the same pixel.
 ///
-/// It stands as tall as the two buttons at the other end of the strip. Nothing
-/// about it was ever clipped — the chip measures exactly the 22pt its type and
-/// padding ask for, and its centre already sat on the profile glyph's — but a
-/// 22pt box between two 36pt-framed buttons reads as cramped, and 11pt Orbitron
-/// caps fill 8.3pt of that 22pt. The height goes to internal breathing room;
-/// the type is unchanged.
+/// Its border is the diameter of the profile glyph's circle — the ring you see
+/// inside that button, `ChartHeader.badgeHeight`, not the 36pt frame the button
+/// reserves for touches. It briefly stood at 36 on a misreading of which of the
+/// two was meant; at that height it was half the header.
 ///
-/// `minHeight`, not `height`: a hard frame is exactly what *would* sever the
-/// glyphs at the top of the Dynamic Type range. The header caps at XXXL, where
-/// the line box is still under 36pt, so in practice this is 36pt flat.
+/// A hard `height`, unusually, and only because the type is so much shorter than
+/// the box: 11pt Orbitron caps fill 8.3pt of it, so there is nothing for a
+/// smaller layout box to sever. The header caps Dynamic Type at XXXL, where the
+/// caps are still well inside 20pt.
 struct TradingModeBadge: View {
     let mode: TradingMode
     let action: () -> Void
@@ -38,7 +37,7 @@ struct TradingModeBadge: View {
                 .kerning(1)
                 .foregroundStyle(mode == .live ? Color.buyGreen : Color.hudAmber)
                 .padding(.horizontal, AppSpacing.sm)
-                .frame(minHeight: ChartHeader.controlHeight)
+                .frame(height: ChartHeader.badgeHeight)
                 .background {
                     HudPanelShape(chamfer: 5)
                         // Opaque behind the chip, the way it was over candles:
@@ -52,6 +51,10 @@ struct TradingModeBadge: View {
                                 )
                         }
                 }
+                // Drawn at the circle's diameter, targeted at the row's: the
+                // two buttons at the other end keep a 36pt frame and so does
+                // this, as hit area around the box rather than as the box.
+                .frame(height: ChartHeader.controlHeight)
                 .contentShape(Rectangle())
         }
         .accessibilityLabel("Trading mode \(mode == .live ? "live" : "practice"). Switch mode")

@@ -486,7 +486,7 @@
 }
 
 .stepper button {
-  color: var(--app-accent-text);
+  color: var(--label-secondary);
 }
 
 .stepper button:first-child {
@@ -529,7 +529,7 @@
   font-size: var(--fs-caption);
   font-weight: 600;
   padding: 0 14px;
-  color: var(--app-accent-text);
+  color: var(--label-secondary);
   border: 5px solid transparent;
   border-image: var(--hud-src-flat) 28 fill / 14px / 4px stretch;
 }
@@ -566,11 +566,19 @@
   border-image: var(--hud-src-flat) 28 fill / 14px / 4px stretch;
   font-size: var(--fs-caption);
   font-weight: 600;
+  color: var(--label-secondary);
 }
 
 .chip-button .chip-title {
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The contract's mid, printed inside the strike chip in both modes. */
+.chip-button .chip-detail {
+  flex: none;
+  font-family: var(--font-mono);
   white-space: nowrap;
 }
 
@@ -581,6 +589,29 @@
 .chip-button:active {
   transform: scale(var(--press-scale));
   transition: transform var(--dur-fast) var(--ease-out);
+}
+
+/* AUTO's pick, wearing the strike chip it stands in for. Not a control — AUTO
+   is what chooses — so it takes the chrome and none of the feedback. */
+.chip-static {
+  display: flex;
+  min-width: 0;
+}
+
+.chip-button--static {
+  cursor: default;
+}
+
+.chip-button--static:hover {
+  border-image-source: var(--hud-src-flat);
+}
+
+.chip-button--static:active {
+  transform: none;
+}
+
+.chip-button--placeholder {
+  opacity: 0.7;
 }
 
 /* --- Grouped list (iOS Form/List style used by sheets) --- */
@@ -738,4 +769,67 @@
 .trade-panel.dense .quick-chip {
   height: 30px;
   padding: 0 10px;
+}
+
+/* --- Order-type row: Mid at one end, Market at the other, bid/mid/ask between.
+   One track still, because the two are one either/or; only the chosen end takes
+   the accent frame. The segments hug their labels with a shared floor so the
+   pair reads as matched ends rather than as a small button and a large one, and
+   the track grows to the two-line readout instead of pinning to 36px — which is
+   why it must beat the density heights above rather than sit before them. --- */
+.segmented--split,
+.trade-panel.compact .segmented--split,
+.trade-panel.dense .segmented--split {
+  height: auto;
+  align-items: stretch;
+}
+
+.segmented--split {
+  min-height: 36px;
+}
+
+.trade-panel.compact .segmented--split {
+  min-height: 32px;
+}
+
+.trade-panel.dense .segmented--split {
+  min-height: 30px;
+}
+
+.segmented--split .segment {
+  flex: 0 0 auto;
+  min-width: 68px;
+}
+
+/* The panel's chrome text is one grey; which end is chosen is still said by the
+   selected segment's border, fill and glow. */
+.segmented--split .segment.selected {
+  color: var(--label-secondary);
+}
+
+.quote-columns {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+}
+
+.quote-column {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: var(--label-secondary);
+  line-height: 1.15;
+}
+
+.quote-column__value {
+  font-family: var(--font-mono);
+  font-size: var(--fs-footnote);
+}
+
+.quote-column__label {
+  font-size: var(--fs-caption2);
 }

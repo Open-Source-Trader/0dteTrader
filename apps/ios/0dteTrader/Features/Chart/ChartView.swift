@@ -6,6 +6,18 @@ import UIKit
 enum ChartHeader {
     static let controlWidth: CGFloat = 34
     static let controlHeight: CGFloat = 36
+
+    /// The mode badge's drawn box — the *glyph's* circle, not the button's
+    /// touch frame.
+    ///
+    /// `controlHeight` is the 36pt target the profile and history buttons keep;
+    /// the ring you actually see inside the profile button is smaller, and it is
+    /// the thing the badge's border is supposed to match. Measured off the
+    /// running app at 60px on a 3x screen — exactly 20pt, which is also what
+    /// `person.circle` draws at `.title3`. The badge keeps its own 44pt-class
+    /// row height from the buttons beside it, so shrinking the box costs it no
+    /// touch area.
+    static let badgeHeight: CGFloat = 20
 }
 
 /// Chart surface: header (symbol, last price, interval, indicator settings),
@@ -334,7 +346,7 @@ struct ChartView: View {
         VStack(spacing: 0) {
             HStack(alignment: .firstTextBaseline, spacing: AppSpacing.md) {
                 Text(title)
-                    .foregroundStyle(Color.appAccent)
+                    .foregroundStyle(Color.secondary)
                     .fontWeight(.semibold)
                 ForEach(readouts) { readout in
                     Text(readout.label.isEmpty ? readout.value : "\(readout.label) \(readout.value)")
@@ -355,12 +367,8 @@ struct ChartView: View {
                     } label: {
                         Text("A")
                             .font(.system(size: 9, weight: .semibold, design: .monospaced))
-                            .foregroundStyle(.secondary)
-                            .frame(width: 20, height: 20)
-                            .background(Color.appSurface, in: RoundedRectangle(cornerRadius: 3))
-                            .overlay(RoundedRectangle(cornerRadius: 3).strokeBorder(Color.hudStroke.opacity(0.5), lineWidth: 1))
+                            .chartCornerControlChrome(size: 20, cornerRadius: 3)
                     }
-                    .opacity(0.7)
                     .accessibilityLabel("Reset pane view")
                     .padding(.trailing, AppSpacing.sm)
                     .padding(.bottom, AppSpacing.xs)
@@ -382,7 +390,7 @@ struct ChartView: View {
                 .tint(.secondary)
             Text("Loading \(viewModel.symbol)…")
                 .font(.footnote)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Color.secondary)
         }
         .transition(.opacity)
     }
@@ -458,7 +466,7 @@ struct ChartView: View {
             .accessibilityLabel("Deselect drawing")
         }
         .font(.subheadline.weight(.semibold))
-        .foregroundStyle(.primary)
+        .foregroundStyle(Color.secondary)
         .background(Color.appSurfaceElevated, in: Capsule())
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
         .padding(.bottom, AppSpacing.md)
@@ -472,18 +480,11 @@ struct ChartView: View {
         } label: {
             Text("A")
                 .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                .foregroundStyle(.secondary)
-                .frame(width: ChartMetrics.cornerControlSize, height: ChartMetrics.cornerControlSize)
-                .background(
-                    Color.appSurface,
-                    in: RoundedRectangle(cornerRadius: ChartMetrics.cornerControlRadius)
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: ChartMetrics.cornerControlRadius)
-                        .strokeBorder(Color.hudStroke.opacity(0.5), lineWidth: 1)
+                .chartCornerControlChrome(
+                    size: ChartMetrics.cornerControlSize,
+                    cornerRadius: ChartMetrics.cornerControlRadius
                 )
         }
-        .opacity(0.7)
         .accessibilityLabel("Reset chart view")
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
         // Seated in the corner cut rather than parked above the time axis: the
@@ -580,7 +581,7 @@ struct ChartView: View {
         ZStack {
             Text("0dteTrader")
                 .font(.hudTitle)
-                .foregroundStyle(Color.appAccent)
+                .foregroundStyle(Color.secondary)
                 .shadow(color: .hudGlow, radius: 8)
                 // Same rule as the toolbar slot this replaces: scale the
                 // wordmark rather than truncate it to "0dteTr…". It is also the
@@ -596,7 +597,7 @@ struct ChartView: View {
                 } label: {
                     Image(systemName: "person.circle")
                         .font(.title3)
-                        .foregroundStyle(Color.appAccent)
+                        .foregroundStyle(Color.secondary)
                         .frame(width: ChartHeader.controlWidth, height: ChartHeader.controlHeight)
                         .contentShape(Rectangle())
                 }
@@ -607,7 +608,7 @@ struct ChartView: View {
                 } label: {
                     Image(systemName: "clock.arrow.circlepath")
                         .font(.subheadline)
-                        .foregroundStyle(Color.appAccent)
+                        .foregroundStyle(Color.secondary)
                         .frame(width: ChartHeader.controlWidth, height: ChartHeader.controlHeight)
                         .contentShape(Rectangle())
                 }

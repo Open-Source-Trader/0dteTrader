@@ -228,7 +228,6 @@ export function IndicatorPane({ height, candles, series, guideLines, yRange }: I
           fontWeight: 600,
           fontFamily: 'var(--font-mono)',
           cursor: 'pointer',
-          opacity: 0.7,
         }}
       >
         A

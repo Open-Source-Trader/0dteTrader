@@ -13,7 +13,7 @@ struct AIAnalysisButton: View {
             } label: {
                 Image(systemName: "brain.head.profile")
                     .font(.subheadline)
-                    .foregroundStyle(Color.appAccent)
+                    .foregroundStyle(Color.secondary)
                     .padding(.horizontal, AppSpacing.md)
                     .frame(minHeight: 34)
                     .background {

@@ -302,10 +302,22 @@ export function ChartView({
         }}
       >
         <div style={{ flex: '1 1 0', display: 'flex', alignItems: 'center', gap: 4 }}>
-          <button className="navbar-icon-button" onClick={onShowProfile} aria-label="Profile">
+          {/* Grey rather than the navbar's accent: this bar is chart chrome
+              now, and its text and glyphs are one colour with the chips below. */}
+          <button
+            className="navbar-icon-button"
+            style={{ color: 'var(--label-secondary)' }}
+            onClick={onShowProfile}
+            aria-label="Profile"
+          >
             <PersonCircleIcon size={20} />
           </button>
-          <button className="navbar-icon-button" onClick={onShowHistory} aria-label="Trade history">
+          <button
+            className="navbar-icon-button"
+            style={{ color: 'var(--label-secondary)' }}
+            onClick={onShowHistory}
+            aria-label="Trade history"
+          >
             <ClockIcon size={18} />
           </button>
         </div>
@@ -323,6 +335,9 @@ export function ChartView({
             fontSize: 'var(--fs-title3)',
             whiteSpace: 'nowrap',
             pointerEvents: 'none',
+            // Chrome text on this screen is one grey; the wordmark keeps its
+            // glow, which is the brand mark's, not a colour on the text.
+            color: 'var(--label-secondary)',
           }}
         >
           0dteTrader
@@ -396,10 +411,7 @@ export function ChartView({
                     aria-haspopup="dialog"
                   >
                     {symbol}
-                    <span
-                      aria-hidden="true"
-                      style={{ display: 'flex', color: 'var(--app-accent)' }}
-                    >
+                    <span aria-hidden="true" style={{ display: 'flex' }}>
                       <ChevronDownIcon size={10} />
                     </span>
                   </button>

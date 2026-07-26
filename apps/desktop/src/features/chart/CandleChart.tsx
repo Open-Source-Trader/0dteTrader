@@ -466,7 +466,6 @@ export function CandleChart({
           fontWeight: 600,
           fontFamily: 'var(--font-mono)',
           cursor: 'pointer',
-          opacity: 0.7,
         }}
       >
         A

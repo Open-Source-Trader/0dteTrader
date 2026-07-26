@@ -20,19 +20,13 @@ struct TradeActionButton: View {
         } label: {
             HStack(spacing: AppSpacing.sm) {
                 if isSell {
-                    Text("❮❮")
-                        .font(.caption2)
-                        .opacity(0.55)
-                        .accessibilityHidden(true)
+                    chevrons(systemImage: "chevron.down")
                 }
                 Text(title)
                     .font(.hudButton)
                     .kerning(1)
                 if !isSell {
-                    Text("❯❯")
-                        .font(.caption2)
-                        .opacity(0.55)
-                        .accessibilityHidden(true)
+                    chevrons(systemImage: "chevron.up")
                 }
             }
             .foregroundStyle(color)
@@ -47,6 +41,23 @@ struct TradeActionButton: View {
         .accessibilityHint(isEnabled
             ? "Arms an order ticket with the current defaults and opens confirmation"
             : "Unavailable. Select a contract first.")
+    }
+
+    /// The pair of decorative arrows flanking the label: down on SELL, up on
+    /// BUY, because the direction the button is betting on is vertical and the
+    /// sideways pair it inherited from the mockup said nothing.
+    ///
+    /// SF Symbols rather than `❮❮`/`❯❯`: the display font has no vertical
+    /// equivalent of those glyphs, and `⌃`/`⌄` fall back to a substituted face
+    /// at this size. Overlapped slightly so the two read as one chevron stack.
+    private func chevrons(systemImage: String) -> some View {
+        HStack(spacing: -1) {
+            Image(systemName: systemImage)
+            Image(systemName: systemImage)
+        }
+        .font(.system(size: 9, weight: .bold))
+        .opacity(0.55)
+        .accessibilityHidden(true)
     }
 }
 
@@ -67,7 +78,7 @@ struct QuickChipButton: View {
         } label: {
             Text(title)
                 .font(.chipLabel)
-                .foregroundStyle(Color.appAccent)
+                .foregroundStyle(Color.secondary)
                 .padding(.horizontal, AppSpacing.md)
                 .frame(minWidth: 44, minHeight: minHeight)
                 .background {

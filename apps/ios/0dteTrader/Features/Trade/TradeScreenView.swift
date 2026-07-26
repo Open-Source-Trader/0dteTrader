@@ -24,7 +24,11 @@ struct TradeScreenView: View {
 
     @State private var layout: TradeLayout
     @State private var tradingLocked: Bool
-    @State private var showIndicatorSettings = false
+    /// The TWC script's own screen. It was a `NavigationLink` inside the
+    /// indicator form; the form is a dropdown now, which has no navigation
+    /// stack, so the gear closes the popup and raises this instead — the same
+    /// arrangement the desktop already used.
+    @State private var showTwcSettings = false
     @State private var showProfile = false
     @State private var showHistory = false
     @State private var showAIAnalysis = false
@@ -123,18 +127,18 @@ struct TradeScreenView: View {
                     + "Nothing was sent to the broker."
             )
         }
-        .sheet(isPresented: $showIndicatorSettings) {
-            IndicatorSettingsView(
-                settings: $chartViewModel.indicatorSettings,
-                twcSettings: $chartViewModel.twcSettings,
-                optionsAnalyticsSettings: $chartViewModel.optionsAnalyticsSettings,
-                chartTradingSettings: Binding(
-                    get: { chartTrading.settings },
-                    set: { chartTrading.updateSettings($0) }
-                )
-            )
-            .presentationDetents([.medium, .large])
-            .presentationDragIndicator(.visible)
+        .sheet(isPresented: $showTwcSettings) {
+            NavigationStack {
+                TwcSettingsView(settings: $chartViewModel.twcSettings)
+                    // Presented rather than pushed now, so it needs a way out
+                    // of its own where the navigation stack used to give it a
+                    // back button.
+                    .toolbar {
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Button("Done") { showTwcSettings = false }
+                        }
+                    }
+            }
         }
         .sheet(isPresented: $showProfile) {
             ProfileView(viewModel: profileViewModel)
@@ -411,7 +415,19 @@ struct TradeScreenView: View {
         ChartView(
             viewModel: chartViewModel,
             onSelectSymbol: { chartViewModel.selectSymbol($0) },
-            onIndicatorSettings: { showIndicatorSettings = true },
+            indicatorPopup: { dismiss in
+                AnyView(
+                    IndicatorSettingsView(
+                        chart: chartViewModel,
+                        chartTrading: chartTrading,
+                        onOpenTwcSettings: {
+                            dismiss()
+                            showTwcSettings = true
+                        },
+                        onDismiss: dismiss
+                    )
+                )
+            },
             onShowProfile: { showProfile = true },
             onShowHistory: { showHistory = true },
             tradingMode: tradingMode,

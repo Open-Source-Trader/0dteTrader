@@ -1,4 +1,5 @@
 import { useEffect, useMemo } from 'react';
+import type { ReactNode } from 'react';
 import type { ChartInterval, TradingMode } from '@0dtetrader/shared-types';
 import type { ApiClient } from '../../core/api/ApiClient';
 import { useStore } from '../../core/observable';
@@ -30,7 +31,9 @@ interface ChartViewProps {
   /** Picks a new symbol. The picker is a dropdown under the ticker chip now,
    *  so the chip owns the popup and the screen only receives the choice. */
   onSelectSymbol: (symbol: string) => void;
-  onIndicatorSettings: () => void;
+  /** Body of the indicator chip's dropdown, built by the screen because the
+   *  settings it edits are not all the chart store's. Handed the closer. */
+  indicatorPopup: (close: () => void) => ReactNode;
   /** The two account destinations; this header replaced the navigation bar. */
   onShowProfile: () => void;
   onShowHistory: () => void;
@@ -79,7 +82,7 @@ export function ChartView({
   drawingsStore,
   apiClient,
   onSelectSymbol,
-  onIndicatorSettings,
+  indicatorPopup,
   onShowProfile,
   onShowHistory,
   tradingMode,
@@ -335,9 +338,9 @@ export function ChartView({
             fontSize: 'var(--fs-title3)',
             whiteSpace: 'nowrap',
             pointerEvents: 'none',
-            // Chrome text on this screen is one grey; the wordmark keeps its
-            // glow, which is the brand mark's, not a colour on the text.
-            color: 'var(--label-secondary)',
+            // No colour override: the chrome text around it went grey, but the
+            // wordmark is the brand mark rather than chrome, so it keeps
+            // `.hud-title`'s accent and the glow drawn with it.
           }}
         >
           0dteTrader
@@ -348,7 +351,6 @@ export function ChartView({
             className={tradingMode === 'live' ? 'hud-badge hud-badge--live' : 'hud-badge'}
             onClick={onToggleMode}
             aria-label={`Trading mode ${tradingMode === 'live' ? 'LIVE' : 'PRACTICE'}. Switch mode`}
-            style={{ background: 'var(--hud-panel)' }}
           >
             {tradingMode === 'live' ? 'LIVE' : 'PRACTICE'}
           </button>
@@ -536,14 +538,21 @@ export function ChartView({
             </div>
 
             <div style={{ display: 'flex', alignItems: 'flex-start', gap: 4 }}>
-              <button
-                className="chart-chip"
-                style={{ pointerEvents: 'auto' }}
-                onClick={onIndicatorSettings}
-                aria-label="Indicator settings"
+              <AnchoredPopup
+                edge="trailing"
+                trigger={
+                  <button
+                    className="chart-chip"
+                    style={{ pointerEvents: 'auto' }}
+                    aria-label="Indicator settings"
+                    aria-haspopup="dialog"
+                  >
+                    <SlidersIcon size={13} />
+                  </button>
+                }
               >
-                <SlidersIcon size={13} />
-              </button>
+                {(close) => indicatorPopup(close)}
+              </AnchoredPopup>
               <span style={{ pointerEvents: 'auto', display: 'flex' }}>
                 <DrawToolsMenu store={drawingsStore} />
               </span>

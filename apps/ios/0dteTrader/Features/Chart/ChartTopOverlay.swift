@@ -259,21 +259,33 @@ struct ChartIntervalMenu: View {
 
 /// Indicator-settings button. It wore a circle in the header; on the chip row
 /// it takes the interval menu's chamfered border like everything else.
+///
+/// Its settings were a sheet and are a dropdown now, opening under this chip
+/// like the tools menu beside it. Not a `HudMenu`, though: the popup is a form
+/// of switches and steppers rather than a list of choices, so it brings its own
+/// body (see `IndicatorSettingsView`) and only the panel and the anchoring are
+/// shared.
 struct ChartIndicatorButton: View {
-    let action: () -> Void
+    /// Handed the closure that puts the popup away, so the TWC gear can close
+    /// this and open its own screen.
+    let content: (@escaping () -> Void) -> AnyView
 
     var body: some View {
-        Button {
-            Haptics.selection()
-            action()
-        } label: {
-            Image(systemName: "slider.horizontal.3")
-                .font(.system(size: ChartChip.iconSize, weight: .semibold))
-                .foregroundStyle(ChartChip.label)
-                .frame(minWidth: ChartChip.iconBox.width, minHeight: ChartChip.iconBox.height)
-                .chartChipChrome()
-                .chartChipTouchTarget()
-        }
+        HudMenuTrigger(
+            // Trailing: this chip lives on the pane's trailing corner, so its
+            // popup comes down that side rather than crossing the chart.
+            id: "chart.indicators",
+            edge: .trailing,
+            content: content,
+            label: {
+                Image(systemName: "slider.horizontal.3")
+                    .font(.system(size: ChartChip.iconSize, weight: .semibold))
+                    .foregroundStyle(ChartChip.label)
+                    .frame(minWidth: ChartChip.iconBox.width, minHeight: ChartChip.iconBox.height)
+                    .chartChipChrome()
+                    .chartChipTouchTarget()
+            }
+        )
         .accessibilityLabel("Indicator settings")
     }
 }

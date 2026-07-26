@@ -359,6 +359,54 @@
   padding: 8px 0 4px;
 }
 
+/* The indicator chip's dropdown. Like the ticker picker it names a width
+   instead of hugging its rows — a column of switches and steppers has no
+   widest row to measure — and it tightens the grouped-list metrics a
+   full-width sheet could afford but a 300px panel cannot. */
+.indicator-dropdown {
+  width: 300px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.indicator-dropdown-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 40px;
+  padding: 0 12px;
+  border-bottom: var(--border-hairline) solid var(--app-border);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--label-secondary);
+  flex: none;
+}
+
+.indicator-dropdown-body {
+  overflow-y: auto;
+  min-height: 0;
+  padding: 8px 8px 12px;
+  gap: var(--space-4);
+}
+
+.indicator-dropdown .section-header {
+  padding: 0 8px 4px;
+}
+
+.indicator-dropdown .section-footer {
+  padding: 4px 8px 0;
+}
+
+.indicator-dropdown .grouped-row {
+  min-height: 34px;
+  padding: 5px 10px;
+  gap: 8px;
+  font-size: var(--fs-footnote);
+}
+
 .menu-item + .menu-item {
   border-top: var(--border-hairline) solid var(--app-border);
 }

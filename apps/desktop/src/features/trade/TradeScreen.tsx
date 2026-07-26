@@ -55,7 +55,6 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
 
   const [layout, setLayout] = useState<TradeLayout>(() => settingsStore.layoutMode);
   const [locked, setLocked] = useState(() => settingsStore.tradingLocked);
-  const [showIndicatorSettings, setShowIndicatorSettings] = useState(false);
   const [showTwcSettings, setShowTwcSettings] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
@@ -311,6 +310,30 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
     onCancelOrder: (order) => setOrderPendingCancel(order),
   };
 
+  // Body of the indicator chip's dropdown. Built here rather than in the chart
+  // because the settings it edits span three stores; the chip only supplies the
+  // anchor and the closer.
+  const indicatorPopup = (close: () => void) => (
+    <IndicatorSettingsView
+      settings={chart.indicatorSettings}
+      onChange={(settings) => chartStore.setIndicatorSettings(settings)}
+      onDismiss={close}
+      twcEnabled={chart.twcSettings.enabled}
+      onToggleTwc={(on) => chartStore.setTwcSettings({ ...chart.twcSettings, enabled: on })}
+      onOpenTwcSettings={() => {
+        close();
+        setShowTwcSettings(true);
+      }}
+      optionsAnalytics={chart.optionsAnalytics}
+      onChangeOptionsAnalytics={(settings) => chartStore.setOptionsAnalytics(settings)}
+      chartTrading={chartTradingSettings}
+      onChangeChartTrading={(settings) => {
+        settingsStore.chartTrading = settings;
+        setChartTradingSettings(settings);
+      }}
+    />
+  );
+
   const positionsStrip = (
     <PositionsStrip
       positions={trade.positions}
@@ -364,7 +387,7 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
               drawingsStore={drawingsStore}
               apiClient={apiClient}
               onSelectSymbol={(symbol) => chartStore.selectSymbol(symbol)}
-              onIndicatorSettings={() => setShowIndicatorSettings(true)}
+              indicatorPopup={indicatorPopup}
               onShowProfile={() => setShowProfile(true)}
               onShowHistory={() => setShowHistory(true)}
               tradingMode={tradingMode}
@@ -421,7 +444,7 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
                 drawingsStore={drawingsStore}
                 apiClient={apiClient}
                 onSelectSymbol={(symbol) => chartStore.selectSymbol(symbol)}
-                onIndicatorSettings={() => setShowIndicatorSettings(true)}
+                indicatorPopup={indicatorPopup}
                 onShowProfile={() => setShowProfile(true)}
                 onShowHistory={() => setShowHistory(true)}
                 tradingMode={tradingMode}
@@ -470,34 +493,11 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
       {trade.armedTicket ? (
         <OrderConfirmSheet tradeStore={tradeStore} ticket={trade.armedTicket} />
       ) : null}
-      {showIndicatorSettings ? (
-        <IndicatorSettingsView
-          settings={chart.indicatorSettings}
-          onChange={(settings) => chartStore.setIndicatorSettings(settings)}
-          onDismiss={() => setShowIndicatorSettings(false)}
-          twcEnabled={chart.twcSettings.enabled}
-          onToggleTwc={(on) => chartStore.setTwcSettings({ ...chart.twcSettings, enabled: on })}
-          onOpenTwcSettings={() => {
-            setShowIndicatorSettings(false);
-            setShowTwcSettings(true);
-          }}
-          optionsAnalytics={chart.optionsAnalytics}
-          onChangeOptionsAnalytics={(settings) => chartStore.setOptionsAnalytics(settings)}
-          chartTrading={chartTradingSettings}
-          onChangeChartTrading={(settings) => {
-            settingsStore.chartTrading = settings;
-            setChartTradingSettings(settings);
-          }}
-        />
-      ) : null}
       {showTwcSettings ? (
         <TwcSettingsView
           settings={chart.twcSettings}
           onChange={(settings) => chartStore.setTwcSettings(settings)}
-          onBack={() => {
-            setShowTwcSettings(false);
-            setShowIndicatorSettings(true);
-          }}
+          onBack={() => setShowTwcSettings(false)}
           onDismiss={() => setShowTwcSettings(false)}
         />
       ) : null}

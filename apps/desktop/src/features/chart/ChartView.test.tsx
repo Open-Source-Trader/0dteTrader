@@ -68,7 +68,7 @@ describe('ChartView options analytics rendering', () => {
         drawingsStore: {} as DrawingsStore,
         apiClient: {} as ApiClient,
         onSelectSymbol: vi.fn(),
-        onIndicatorSettings: vi.fn(),
+        indicatorPopup: () => null,
         onShowProfile: vi.fn(),
         onShowHistory: vi.fn(),
         tradingMode: 'practice',

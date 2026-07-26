@@ -28,7 +28,10 @@ struct ChartView: View {
     /// Picks a new symbol. The picker is a dropdown under the ticker chip now,
     /// so the chip owns the popup and the screen only receives the choice.
     let onSelectSymbol: (String) -> Void
-    let onIndicatorSettings: () -> Void
+    /// Body of the indicator chip's dropdown, built by the screen because the
+    /// settings it edits are not all the chart view model's. Handed the closure
+    /// that puts the popup away.
+    let indicatorPopup: (@escaping () -> Void) -> AnyView
     /// The two account destinations, folded into this header now that the
     /// screen has no navigation bar of its own.
     var onShowProfile: () -> Void = {}
@@ -64,7 +67,7 @@ struct ChartView: View {
     init(
         viewModel: ChartViewModel,
         onSelectSymbol: @escaping (String) -> Void,
-        onIndicatorSettings: @escaping () -> Void,
+        indicatorPopup: @escaping (@escaping () -> Void) -> AnyView,
         onShowProfile: @escaping () -> Void = {},
         onShowHistory: @escaping () -> Void = {},
         tradingMode: TradingMode? = nil,
@@ -80,7 +83,7 @@ struct ChartView: View {
         _viewModel = ObservedObject(wrappedValue: viewModel)
         _drawings = ObservedObject(wrappedValue: viewModel.drawings)
         self.onSelectSymbol = onSelectSymbol
-        self.onIndicatorSettings = onIndicatorSettings
+        self.indicatorPopup = indicatorPopup
         self.onShowProfile = onShowProfile
         self.onShowHistory = onShowHistory
         self.tradingMode = tradingMode
@@ -544,7 +547,7 @@ struct ChartView: View {
                 .measuringChipGroup()
                 Spacer(minLength: AppSpacing.sm)
                 HStack(alignment: .top, spacing: AppSpacing.xs) {
-                    ChartIndicatorButton(action: onIndicatorSettings)
+                    ChartIndicatorButton(content: indicatorPopup)
                     ChartDrawingToolsMenu(drawings: drawings)
                 }
                 .measuringChipGroup()
@@ -581,7 +584,10 @@ struct ChartView: View {
         ZStack {
             Text("0dteTrader")
                 .font(.hudTitle)
-                .foregroundStyle(Color.secondary)
+                // The one accent left in this bar. The chrome text around it
+                // went grey; the wordmark is the brand mark, not chrome, and
+                // the glow is what it is drawn with rather than a colour on it.
+                .foregroundStyle(Color.appAccent)
                 .shadow(color: .hudGlow, radius: 8)
                 // Same rule as the toolbar slot this replaces: scale the
                 // wordmark rather than truncate it to "0dteTr…". It is also the

@@ -4,6 +4,7 @@ import { useStore } from '../../core/observable';
 import type { AuthStore } from './AuthStore';
 import { PasswordField } from './PasswordField';
 import { RegisterView } from './RegisterView';
+import { ServerSettings } from './ServerSettings';
 
 // Reuses the shared toast-in keyframes (base.css) for a staggered entrance;
 // the global prefers-reduced-motion rule collapses it for motion-sensitive users.
@@ -144,6 +145,11 @@ export function LoginView({ store }: { store: AuthStore }) {
           Create an account
         </button>
       </form>
+
+      {/* Outside the <form> so typing in the server URL field can't submit the login form. */}
+      <div style={{ padding: '0 var(--pad-screen)', animation: ENTRANCE, animationDelay: '180ms' }}>
+        <ServerSettings />
+      </div>
 
       {/* Rendered outside the <form>: RegisterView has its own form, and nested forms are invalid HTML. */}
       {showRegister ? (

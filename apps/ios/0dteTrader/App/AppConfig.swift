@@ -2,17 +2,30 @@ import Foundation
 
 /// Environment configuration.
 ///
-/// Values are driven by the build configuration (Debug / Staging / Release)
-/// via `AppEnvironment.current`. Override the base URL at runtime by setting
-/// the `API_BASE_URL` environment variable in the scheme's Run arguments.
+/// The build-time default base URL is driven by the build configuration
+/// (Debug / Staging / Release) via `AppEnvironment.current`. Self-hosters can
+/// override it at runtime through `ServerConfigStore` (#59); the container is
+/// built from whichever base URL is active.
 enum AppConfig {
-    static let apiBaseURL: URL = AppEnvironment.current.apiBaseURL
+    /// The build-time default API base URL. Runtime code should use the base
+    /// URL the `AppContainer` was built with, not this constant.
+    static let defaultAPIBaseURL: URL = AppEnvironment.current.apiBaseURL
 
-    /// WebSocket stream URL derived from `apiBaseURL` (`http→ws`, `https→wss`).
-    static let streamURL: URL = AppEnvironment.current.streamURL
+    /// Base64 SHA-256 SPKI hashes for TLS pinning, applicable to `baseURL`.
+    /// Pins only ever apply to the built-in default host — a user-supplied
+    /// (self-hosted) server is never evaluated against our pins, so adding
+    /// production pins later cannot break self-hosters.
+    static func pinnedPublicKeyHashes(for baseURL: URL) -> [String] {
+        pinnedPublicKeyHashes(
+            for: baseURL,
+            defaultHost: defaultAPIBaseURL.host,
+            pins: AppEnvironment.current.pinnedPublicKeyHashes
+        )
+    }
 
-    /// Base64 SHA-256 hashes of the backend's Subject Public Key Info.
-    /// Empty disables pinning (default for local dev over plain HTTP).
-    /// Populate for staging and production to enable TLS pinning.
-    static let pinnedPublicKeyHashes: [String] = AppEnvironment.current.pinnedPublicKeyHashes
+    /// Testable core of the pinning rule: pins apply iff the host is the
+    /// built-in default host.
+    static func pinnedPublicKeyHashes(for baseURL: URL, defaultHost: String?, pins: [String]) -> [String] {
+        baseURL.host == defaultHost ? pins : []
+    }
 }

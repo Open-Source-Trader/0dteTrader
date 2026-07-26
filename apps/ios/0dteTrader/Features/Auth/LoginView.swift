@@ -82,6 +82,10 @@ struct LoginView: View {
                 .contentShape(Rectangle())
 
                 Spacer()
+
+                // Outside the credential fields' submit path: the server URL
+                // field manages its own focus and never triggers login.
+                ServerSettingsView()
             }
             .padding(AppSpacing.xxl)
             .frame(maxWidth: .infinity)

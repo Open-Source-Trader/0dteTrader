@@ -19,6 +19,9 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          # checkout persists GITHUB_TOKEN as an auth header that overrides
+          # the URL credentials on push; the mirror needs MIRROR_PUSH_TOKEN.
+          persist-credentials: false
       - name: Push main to TradeWithCash2025/0dteTrader
         run: |
           git push "https://TradeWithCash2025:${{ secrets.MIRROR_PUSH_TOKEN }}@github.com/TradeWithCash2025/0dteTrader.git" main:main

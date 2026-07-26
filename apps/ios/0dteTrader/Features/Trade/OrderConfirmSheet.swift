@@ -130,6 +130,10 @@ struct OrderConfirmSheet: View {
             .padding(.bottom, AppSpacing.md)
         }
         .scrollBounceBehavior(.basedOnSize)
+        // The app's own fill rather than the stock sheet grey: this is the last
+        // thing you look at before an order goes out, and it should read as
+        // part of the same instrument as the panel that armed it.
+        .background(Color.appBackground)
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
         .presentationBackground(Color.appBackground)

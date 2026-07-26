@@ -55,7 +55,9 @@ struct TradeActionButton: View {
 /// shrink it (desktop parity: .quick-chip padding shrinks when dense).
 struct QuickChipButton: View {
     let title: String
+    /// The drawn chip's height; the touch target is grown back separately.
     var minHeight: CGFloat = 44
+    var touchHeight: CGFloat = 44
     let action: () -> Void
 
     var body: some View {
@@ -76,6 +78,12 @@ struct QuickChipButton: View {
                                 .strokeBorder(Color.hudStroke.opacity(0.35), lineWidth: 1)
                         }
                 }
+                // The drawn chip is the stepper's height now, which is under
+                // 44pt at every density. The target is grown back around it
+                // rather than by growing the box, exactly as the stepper does —
+                // the slack falls on the row's own padding, which nothing else
+                // claims.
+                .frame(minHeight: touchHeight)
                 .contentShape(Rectangle())
         }
         .buttonStyle(AppPressStyle())

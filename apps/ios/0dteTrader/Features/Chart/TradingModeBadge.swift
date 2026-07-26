@@ -1,16 +1,15 @@
 import SwiftUI
 
 /// Amber PRACTICE / green LIVE chip, hugging the top-trailing corner of the
-/// chart surface. Tapping it asks to switch modes (confirmed upstream).
+/// header strip. Tapping it asks to switch modes (confirmed upstream).
 ///
-/// It used to step inboard of the placement guide's `+` handle band and of the
-/// options-analytics rail. Both are real overlaps, and both were traded away
-/// deliberately: parked ~130pt off the border the chip read as floating in the
-/// middle of the pane rather than labelling it. What it costs is the top of the
-/// right border — a guide summoned to a level within a chip's height of the top
-/// edge puts its handle under this chip, and the rail's topmost readout can run
-/// behind it. Both are recoverable by scrolling the price axis; a badge that
-/// looked misplaced was not.
+/// It sat on the chart's own top-trailing border, at this same 8pt inset, until
+/// the indicator and drawing-tool chips wanted that corner. Which mode you are
+/// trading in is a fact about the account rather than about the chart, so the
+/// header is where it belongs anyway — and off the pane it stops shadowing the
+/// two things that share the chart's right border: the placement guide's `+`,
+/// which can be summoned to any level including the ones nearest the top edge,
+/// and the options-analytics rail's topmost readout.
 ///
 /// PRACTICE is the longer word, so the chip is laid out trailing-aligned: both
 /// labels end on the same pixel.
@@ -31,8 +30,8 @@ struct TradingModeBadge: View {
                 .padding(.vertical, AppSpacing.xs)
                 .background {
                     HudPanelShape(chamfer: 5)
-                        // Opaque behind the chip: it now sits over candles, not
-                        // over the header card's fill.
+                        // Opaque behind the chip, the way it was over candles:
+                        // the header strip has no card of its own to sit on.
                         .fill(Color.hudPanel)
                         .overlay {
                             HudPanelShape(chamfer: 5)

@@ -34,10 +34,11 @@ struct ChartView: View {
     @State private var showOptionsAnalyticsDetails = false
     @State private var chartResetToken = 0
     @State private var paneResetTokens: [String: Int] = [:]
+    /// Width of the wider chip group on the pane's first line; what the centred
+    /// quote readout is held clear of on both sides.
+    @State private var chipGroupWidth: CGFloat = 0
 
     private let paneHeight: CGFloat = 68
-    private static let resetCornerRadius: CGFloat = 4
-    private static let resetInset = ChartMetrics.cornerSeat(cornerRadius: resetCornerRadius)
 
     init(
         viewModel: ChartViewModel,
@@ -463,10 +464,13 @@ struct ChartView: View {
             Text("A")
                 .font(.system(size: 11, weight: .semibold, design: .monospaced))
                 .foregroundStyle(.secondary)
-                .frame(width: 24, height: 24)
-                .background(Color.appSurface, in: RoundedRectangle(cornerRadius: Self.resetCornerRadius))
+                .frame(width: ChartMetrics.cornerControlSize, height: ChartMetrics.cornerControlSize)
+                .background(
+                    Color.appSurface,
+                    in: RoundedRectangle(cornerRadius: ChartMetrics.cornerControlRadius)
+                )
                 .overlay(
-                    RoundedRectangle(cornerRadius: Self.resetCornerRadius)
+                    RoundedRectangle(cornerRadius: ChartMetrics.cornerControlRadius)
                         .strokeBorder(Color.hudStroke.opacity(0.5), lineWidth: 1)
                 )
         }
@@ -474,29 +478,32 @@ struct ChartView: View {
         .accessibilityLabel("Reset chart view")
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
         // Seated in the corner cut rather than parked above the time axis: the
-        // same gap to the bottom border, the right border and the chamfer.
-        .padding(.trailing, Self.resetInset)
-        .padding(.bottom, Self.resetInset)
+        // same gap to the bottom border, the right border and the chamfer. The
+        // trailing inset is also what the placement guide's `+` measures from,
+        // which is what puts the two in one column.
+        .padding(.trailing, ChartMetrics.cornerControlInset)
+        .padding(.bottom, ChartMetrics.cornerControlInset)
     }
 
     // MARK: - On-chart top row
 
-    /// The chart's whole control row: symbol, interval, indicators and drawing
-    /// tools hard left, mode badge hard right, quote readout centred between
-    /// them, all on the pane's first line. The two matching Spacers do the
-    /// centring: it is the midpoint of the gap the two groups leave, not of the
-    /// pane, so the readout stays clear of both however wide they run.
+    /// The chart's whole control row: symbol and interval hard left, indicator
+    /// settings and drawing tools hard right, quote readout centred on the
+    /// pane's midline between them, all on the pane's first line.
+    ///
+    /// The readout is laid out over the row rather than in it. Matching Spacers
+    /// centre a view in the *gap* the two groups leave, which is the pane's
+    /// midline only while the groups are the same width; the mode badge's
+    /// departure left them unequal, and "the middle of the top" is the midline.
+    /// So the readout takes the full width and is held off both groups by the
+    /// wider one's own measured width — it gives ground on a narrow pane
+    /// (scaling, then truncating) instead of running under a chip.
     ///
     /// Only the chips take touches — the row has no shape of its own, so the
     /// candles still answer the single tap and the triple tap everywhere
     /// between them.
     private var chartTopBar: some View {
-        HStack(alignment: .top, spacing: AppSpacing.xs) {
-            ChartSymbolButton(symbol: viewModel.symbol, action: onSymbolSearch)
-            ChartIntervalMenu(interval: viewModel.interval) { viewModel.selectInterval($0) }
-            ChartIndicatorButton(action: onIndicatorSettings)
-            ChartDrawingToolsMenu(drawings: drawings)
-            Spacer(minLength: AppSpacing.sm)
+        ZStack(alignment: .top) {
             VStack(spacing: AppSpacing.xs) {
                 if let quote = viewModel.quote {
                     ChartQuoteReadout(
@@ -516,11 +523,24 @@ struct ChartView: View {
                     }
                 }
             }
-            Spacer(minLength: AppSpacing.sm)
-            if let tradingMode {
-                TradingModeBadge(mode: tradingMode, action: onToggleMode)
+            .frame(maxWidth: .infinity)
+            .padding(.horizontal, chipGroupWidth + AppSpacing.sm)
+
+            HStack(alignment: .top, spacing: AppSpacing.xs) {
+                HStack(alignment: .top, spacing: AppSpacing.xs) {
+                    ChartSymbolButton(symbol: viewModel.symbol, action: onSymbolSearch)
+                    ChartIntervalMenu(interval: viewModel.interval) { viewModel.selectInterval($0) }
+                }
+                .measuringChipGroup()
+                Spacer(minLength: AppSpacing.sm)
+                HStack(alignment: .top, spacing: AppSpacing.xs) {
+                    ChartIndicatorButton(action: onIndicatorSettings)
+                    ChartDrawingToolsMenu(drawings: drawings)
+                }
+                .measuringChipGroup()
             }
         }
+        .onPreferenceChange(ChipGroupWidthKey.self) { chipGroupWidth = $0 }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .padding(.horizontal, AppSpacing.sm)
         .padding(.top, AppSpacing.sm)
@@ -533,14 +553,20 @@ struct ChartView: View {
 
     // MARK: - Header
 
-    /// The title row: the two account destinations on the left, the wordmark
-    /// centred. No card of its own — every chart control has moved onto the
-    /// pane, and a bordered strip around three items read as a second surface
-    /// stacked on the chart's rather than as a title.
+    /// The title row: the two account destinations on the left, the mode badge
+    /// hard right, the wordmark centred. No card of its own — every chart
+    /// control has moved onto the pane, and a bordered strip around these items
+    /// read as a second surface stacked on the chart's rather than as a title.
     ///
-    /// The wordmark is stacked rather than laid out beside the buttons: with
-    /// the chart controls gone the two sides are wildly unequal, and any row
-    /// arrangement centres it between them instead of on the bar's midline.
+    /// The badge is 8pt off the top-trailing corner here, the same inset it kept
+    /// against the chart's border. It gives that border back to the placement
+    /// guide, whose `+` can be summoned to any level including the ones nearest
+    /// the top edge, and to the options-analytics rail's topmost readout —
+    /// both of which the badge used to shadow.
+    ///
+    /// The wordmark is stacked rather than laid out beside the buttons: the two
+    /// sides are unequal, and any row arrangement centres it between them
+    /// instead of on the bar's midline.
     private var header: some View {
         ZStack {
             Text("0dteTrader")
@@ -579,6 +605,10 @@ struct ChartView: View {
                 .accessibilityLabel("Trade history")
 
                 Spacer(minLength: AppSpacing.sm)
+
+                if let tradingMode {
+                    TradingModeBadge(mode: tradingMode, action: onToggleMode)
+                }
             }
         }
         .padding(.horizontal, AppSpacing.sm)

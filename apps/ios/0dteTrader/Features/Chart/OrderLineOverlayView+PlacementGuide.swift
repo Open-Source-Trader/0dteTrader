@@ -69,13 +69,33 @@ extension OrderLineOverlayView {
     /// let the two drift apart silently, and the failure mode is the handle
     /// shadowing ✕ on a live order — the exact collision the band prevents.
     ///
-    /// Flush to the pane's right border, `handleMargin` aside. Deliberately not
-    /// inset by `rightInset`: the rows clear the options-analytics rail because
-    /// they are a column of readable values that the rail would overlap, but the
-    /// handle is a single chip the user reaches for at the edge of the screen,
-    /// and pushing it inboard of the rail put it somewhere nobody aims.
+    /// `handleMargin` off the pane's right border, which is the seat the reset
+    /// button takes in the corner below — so the two share a left and a right
+    /// edge, and they share them because both read `ChartMetrics.cornerControl*`
+    /// rather than because two numbers were tuned to agree.
+    ///
+    /// Deliberately not inset by `rightInset`: the rows clear the
+    /// options-analytics rail because they are a column of readable values that
+    /// the rail would overlap, but the handle is a single chip the user reaches
+    /// for at the edge of the screen, and pushing it inboard of the rail put it
+    /// somewhere nobody aims.
     var handleLeft: CGFloat {
         bounds.width - AppPlacementGuide.handleMargin - AppPlacementGuide.handleSize
+    }
+
+    /// The lowest the handle may be dragged.
+    ///
+    /// Sharing a column with the reset button is what item 5 asked for, and the
+    /// cost is that a handle dragged to the pane's bottom edge lands exactly on
+    /// `A`. That is not merely untidy: `A` is a SwiftUI view laid over this one,
+    /// so it takes every touch inside its own frame, and a handle parked under
+    /// it is a handle that cannot be picked up again — the same failure the
+    /// reserved band keeps ✕ out of. Stopping the drag a pill-gap above `A`
+    /// costs the bottom ~40pt of the visible range, which is still reachable by
+    /// panning the price axis; an unreachable handle was not recoverable at all.
+    var guideDragMaxY: CGFloat {
+        let resetTop = bounds.maxY - ChartMetrics.cornerControlInset - ChartMetrics.cornerControlSize
+        return resetTop - AppOrderLine.pillGap - AppPlacementGuide.handleSize / 2
     }
 
     /// How far the 44pt touch target overhangs the drawn glyph on each side.

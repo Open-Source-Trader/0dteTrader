@@ -369,9 +369,13 @@ struct TradeScreenView: View {
                 VStack(spacing: 0) {
                     chartView
                         .frame(height: chartHeight)
-                    // Static hairline divider
-                    Rectangle()
-                        .fill(Color.hudStroke.opacity(0.35))
+                    // The chart card and the trade panel are each already read
+                    // as a surface — the card by its border, the panel by the
+                    // controls filling it — so a rule between them was drawing
+                    // a seam nobody needed. Kept as an empty 1pt gap rather
+                    // than deleted: `chartHeight` subtracts it, and reclaiming
+                    // it would move the split by a point for no reason.
+                    Color.clear
                         .frame(height: 1)
                     TradePanelView(
                         tradeViewModel: tradeViewModel,

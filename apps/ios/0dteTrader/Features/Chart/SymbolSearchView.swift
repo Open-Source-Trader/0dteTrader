@@ -84,6 +84,7 @@ struct SymbolSearchView: View {
                         } label: {
                             Label("Use \"\(normalizedQuery)\"", systemImage: "arrow.right.circle")
                         }
+                        .listRowBackground(Color.appSurface)
                     }
                 }
                 if !normalizedQuery.isEmpty && !hasCatalogMatch {
@@ -112,6 +113,10 @@ struct SymbolSearchView: View {
                     }
                 }
             }
+            // The HUD treatment the indicator and TWC sheets already wear: the
+            // grouped-list backdrop was the one surface here still reading as
+            // stock iOS.
+            .hudListChrome()
             .searchable(text: queryBinding, prompt: "Search symbols")
             .textInputAutocapitalization(.characters)
             .autocorrectionDisabled()
@@ -142,6 +147,7 @@ struct SymbolSearchView: View {
                 }
             }
         }
+        .listRowBackground(Color.appSurface)
         .accessibilityLabel(symbol)
         .accessibilityHint(symbol == currentSymbol ? "Currently selected" : "Double-tap to switch to \(symbol)")
         .accessibilityAddTraits(symbol == currentSymbol ? .isSelected : [])

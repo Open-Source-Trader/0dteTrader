@@ -373,7 +373,8 @@ final class OrderLineOverlayView: UIView {
                 // next frame, so dragging a little too far would delete the
                 // guide out from under the finger holding it.
                 let content = chart?.viewPortHandler.contentRect ?? bounds
-                let clampedY = Swift.min(content.maxY, Swift.max(content.minY, location.y))
+                let floorY = Swift.min(content.maxY, guideDragMaxY)
+                let clampedY = Swift.min(floorY, Swift.max(content.minY, location.y))
                 guard let price = price(at: clampedY) else { return }
                 let travelled = moved
                     || abs(location.y - startY) >= AppPlacementGuide.dragThreshold

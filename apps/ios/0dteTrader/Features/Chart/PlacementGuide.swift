@@ -6,21 +6,15 @@ import CoreGraphics
 /// same HIG 44pt the order-line pills already use, deliberately not restated
 /// here under a second name.
 enum AppPlacementGuide {
-    /// Drawn size of the `+` handle.
-    static let handleSize: CGFloat = 28
-    /// Gap between the handle and the right edge of the pane.
-    static let handleMargin: CGFloat = 6
+    /// Drawn size of the `+` handle, and its distance from the pane's right
+    /// border. Both come from `ChartMetrics.cornerControl*` — the description
+    /// the reset button reads too — so the handle and the `A` seated in the
+    /// corner below it share a left and a right edge by construction. They are
+    /// restated here only because everything else about the guide is.
+    static let handleSize = ChartMetrics.cornerControlSize
+    static let handleMargin = ChartMetrics.cornerControlInset
     /// Chamfer on the handle, matching `HudPanelShape` at chip scale.
     static let handleChamfer: CGFloat = 6
-    /// Width of the band along the pane's right border that the handle's touch
-    /// target claims — the drawn glyph plus the overhang that grows it to
-    /// `AppOrderLine.minimumTouchTarget`. The order-line rows already back off
-    /// from this band inside the overlay; SwiftUI chrome laid over the same pane
-    /// (the trading-mode badge) clears it here, because the guide can be
-    /// summoned at any level and a badge parked on the border would shadow the
-    /// handle at the levels nearest the top edge.
-    static let handleTouchBand: CGFloat =
-        handleMargin + handleSize + (AppOrderLine.minimumTouchTarget - handleSize) / 2
     /// Dash pattern for the guide line, keeping it visually subordinate to the
     /// solid lines a real resting order draws.
     static let dash: [CGFloat] = [4, 4]

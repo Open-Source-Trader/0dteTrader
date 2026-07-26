@@ -276,12 +276,18 @@ export function ChartView({
 
   return (
     <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-      {/* Title row — the account destinations on the left, wordmark centred.
-          No card of its own: every chart control has moved onto the pane, and
-          a bordered strip around three items read as a second surface stacked
-          on the chart's rather than as a title. The wordmark is absolutely
-          centred rather than laid out between the two sides, which are now
-          wildly unequal. */}
+      {/* Title row — the account destinations on the left, the mode badge hard
+          right, wordmark centred. No card of its own: every chart control has
+          moved onto the pane, and a bordered strip around these items read as a
+          second surface stacked on the chart's rather than as a title. The
+          wordmark is absolutely centred rather than laid out between the two
+          sides, which are unequal.
+
+          The badge left the chart's top-trailing border for this one when the
+          indicator and drawing-tool chips wanted that corner. Which mode you
+          are trading in is a fact about the account rather than about the
+          chart, and off the pane the badge stops shadowing the placement
+          guide's `+` and the analytics rail's topmost readout. */}
       <div
         style={{
           position: 'relative',
@@ -318,6 +324,17 @@ export function ChartView({
         >
           0dteTrader
         </span>
+
+        <div style={{ flex: '1 1 0', display: 'flex', justifyContent: 'flex-end' }}>
+          <button
+            className={tradingMode === 'live' ? 'hud-badge hud-badge--live' : 'hud-badge'}
+            onClick={onToggleMode}
+            aria-label={`Trading mode ${tradingMode === 'live' ? 'LIVE' : 'PRACTICE'}. Switch mode`}
+            style={{ background: 'var(--hud-panel)' }}
+          >
+            {tradingMode === 'live' ? 'LIVE' : 'PRACTICE'}
+          </button>
+        </div>
       </div>
 
       {/* Chart area: HUD card wrapping a chamfer-clipped canvas region. The
@@ -339,10 +356,15 @@ export function ChartView({
             onToggleFullscreen();
           }}
         >
-          {/* Top row over the candles: the chart's whole control set hard
-              against the leading border, mode badge hard against the trailing
-              one, quote readout centred between them by the auto margins. The
-              chips are the badge's height, so the row reads as one line.
+          {/* Top row over the candles: symbol and interval hard against the
+              leading border, indicator settings and drawing tools hard against
+              the trailing one, quote readout centred on the pane between them.
+
+              The readout is absolutely centred rather than pushed around by
+              auto margins. Auto margins centre a thing in the *gap* the two
+              groups leave, which is the pane's midline only while the groups
+              are the same width; the mode badge's departure left them unequal,
+              and "the middle of the top" is the midline.
 
               The row is inert apart from the buttons, so the surface below
               still answers a triple click with the fullscreen toggle. */}
@@ -355,65 +377,58 @@ export function ChartView({
               zIndex: 5,
               display: 'flex',
               alignItems: 'flex-start',
+              justifyContent: 'space-between',
               gap: 4,
               pointerEvents: 'none',
             }}
           >
-            <button
-              className="chart-chip"
-              style={{ pointerEvents: 'auto' }}
-              onClick={onSymbolSearch}
-              aria-label={`Symbol ${symbol}. Change symbol`}
-            >
-              {symbol}
-              <span aria-hidden="true" style={{ display: 'flex', color: 'var(--app-accent)' }}>
-                <ChevronDownIcon size={10} />
-              </span>
-            </button>
-            <Menu
-              trigger={
-                <button
-                  className="chart-chip"
-                  style={{ pointerEvents: 'auto' }}
-                  aria-label={`Chart interval ${interval}`}
-                  aria-haspopup="menu"
-                >
-                  {interval.toUpperCase()}
-                </button>
-              }
-              items={CHART_INTERVALS.map((option) => ({
-                key: option,
-                label: (
-                  <>
-                    {option.toUpperCase()}
-                    {INTERVAL_HINTS[option] ? (
-                      <span
-                        style={{
-                          marginLeft: 12,
-                          fontSize: 'var(--fs-caption)',
-                          color: 'var(--label-secondary)',
-                        }}
-                      >
-                        {INTERVAL_HINTS[option]}
-                      </span>
-                    ) : null}
-                  </>
-                ),
-                checked: option === interval,
-                onSelect: () => store.selectInterval(option),
-              }))}
-            />
-            <button
-              className="chart-chip"
-              style={{ pointerEvents: 'auto' }}
-              onClick={onIndicatorSettings}
-              aria-label="Indicator settings"
-            >
-              <SlidersIcon size={13} />
-            </button>
-            <span style={{ pointerEvents: 'auto', display: 'flex' }}>
-              <DrawToolsMenu store={drawingsStore} />
-            </span>
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 4 }}>
+              <button
+                className="chart-chip"
+                style={{ pointerEvents: 'auto' }}
+                onClick={onSymbolSearch}
+                aria-label={`Symbol ${symbol}. Change symbol`}
+              >
+                {symbol}
+                <span aria-hidden="true" style={{ display: 'flex', color: 'var(--app-accent)' }}>
+                  <ChevronDownIcon size={10} />
+                </span>
+              </button>
+              <Menu
+                trigger={
+                  <button
+                    className="chart-chip"
+                    style={{ pointerEvents: 'auto' }}
+                    aria-label={`Chart interval ${interval}`}
+                    aria-haspopup="menu"
+                  >
+                    {interval.toUpperCase()}
+                  </button>
+                }
+                items={CHART_INTERVALS.map((option) => ({
+                  key: option,
+                  label: (
+                    <>
+                      {option.toUpperCase()}
+                      {INTERVAL_HINTS[option] ? (
+                        <span
+                          style={{
+                            marginLeft: 12,
+                            fontSize: 'var(--fs-caption)',
+                            color: 'var(--label-secondary)',
+                          }}
+                        >
+                          {INTERVAL_HINTS[option]}
+                        </span>
+                      ) : null}
+                    </>
+                  ),
+                  checked: option === interval,
+                  onSelect: () => store.selectInterval(option),
+                }))}
+              />
+            </div>
+
             {/* Last price and percent change only. The bid/ask pair was the
                 width that forced this block onto a plate of its own; without
                 it the numbers are short enough to sit on the candles unbacked,
@@ -421,7 +436,9 @@ export function ChartView({
                 shadow does the legibility work the box used to. */}
             <div
               style={{
-                margin: '0 auto',
+                position: 'absolute',
+                left: 0,
+                right: 0,
                 display: 'flex',
                 flexDirection: 'column',
                 alignItems: 'center',
@@ -485,14 +502,20 @@ export function ChartView({
                 </span>
               ) : null}
             </div>
-            <button
-              className={tradingMode === 'live' ? 'hud-badge hud-badge--live' : 'hud-badge'}
-              onClick={onToggleMode}
-              aria-label={`Trading mode ${tradingMode === 'live' ? 'LIVE' : 'PRACTICE'}. Switch mode`}
-              style={{ pointerEvents: 'auto', background: 'var(--hud-panel)' }}
-            >
-              {tradingMode === 'live' ? 'LIVE' : 'PRACTICE'}
-            </button>
+
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 4 }}>
+              <button
+                className="chart-chip"
+                style={{ pointerEvents: 'auto' }}
+                onClick={onIndicatorSettings}
+                aria-label="Indicator settings"
+              >
+                <SlidersIcon size={13} />
+              </button>
+              <span style={{ pointerEvents: 'auto', display: 'flex' }}>
+                <DrawToolsMenu store={drawingsStore} />
+              </span>
+            </div>
           </div>
           <CandleChart
             candles={candles}

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { resolveGuidePrice } from './placementGuide';
+import { guideDragFloor, PLUS_MARGIN, PLUS_SIZE, resolveGuidePrice } from './placementGuide';
+import { CORNER_CONTROL_INSET, CORNER_CONTROL_SIZE } from './cornerSeat';
 
 const range = { min: 500, max: 520 };
 
@@ -38,5 +39,27 @@ describe('resolveGuidePrice', () => {
     expect(resolveGuidePrice(NaN, range)).toBeNull();
     expect(resolveGuidePrice(Infinity, range)).toBeNull();
     expect(resolveGuidePrice(NaN, { min: NaN, max: 520 })).toBeNull();
+  });
+});
+
+describe('the `+` handle and the reset button', () => {
+  // They stand in one column. They line up because both read `cornerSeat`, and
+  // this is what fails if either is given a number of its own again.
+  it('share a size and a distance from the pane border', () => {
+    expect(PLUS_SIZE).toBe(CORNER_CONTROL_SIZE);
+    expect(PLUS_MARGIN).toBe(CORNER_CONTROL_INSET);
+  });
+
+  // ...and sharing that column is exactly why the drag has to stop short of the
+  // bottom. `A` is a DOM button stacked above the order-line canvas, so it
+  // takes the click from anything it covers.
+  it('never let a drag put the handle under the reset button', () => {
+    for (const paneHeight of [240, 400, 900]) {
+      const resetTop = paneHeight - CORNER_CONTROL_INSET - CORNER_CONTROL_SIZE;
+      expect(guideDragFloor(paneHeight) + PLUS_SIZE / 2).toBeLessThanOrEqual(resetTop);
+      // A clamp, not a ban: what it costs is a fixed strip at the bottom —
+      // the button plus its seat — not a fraction of the range.
+      expect(paneHeight - guideDragFloor(paneHeight)).toBeLessThan(52);
+    }
   });
 });

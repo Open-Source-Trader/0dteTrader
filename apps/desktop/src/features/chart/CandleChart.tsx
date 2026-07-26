@@ -24,6 +24,7 @@ import type {
 import { useStore } from '../../core/observable';
 import { Format } from '../../design/format';
 import { chartPalette } from './chartColors';
+import { CORNER_CONTROL_INSET, CORNER_CONTROL_RADIUS, CORNER_CONTROL_SIZE } from './cornerSeat';
 import type { ChartCandle } from './ChartStore';
 import { intervalSeconds } from './ChartStore';
 import type { ChartOrdersStore } from './chartOrders';
@@ -444,23 +445,21 @@ export function CandleChart({
         onClick={resetView}
         aria-label="Reset chart view"
         // Seated in the card's bottom-right corner cut rather than parked above
-        // the time axis. The chamfer is the line `x + y = W + H - c`; a corner
-        // point `m` in from both borders is `(2m - c) / √2` from it, so equal
-        // spacing on all three edges is `m = c / (2 - √2)`, less the 4px corner
-        // radius, which reaches that much closer to the diagonal.
-        // c = var(--hud-chamfer) = 10px → 10 / (2 - √2) - 4 = 13.07.
+        // the time axis, with the seat derived in `cornerSeat` — the same
+        // module the placement guide's `+` measures from, which is what puts
+        // the two in one column.
         style={{
           position: 'absolute',
-          bottom: 13,
-          right: 13,
+          bottom: CORNER_CONTROL_INSET,
+          right: CORNER_CONTROL_INSET,
           zIndex: 5,
-          width: 24,
-          height: 24,
+          width: CORNER_CONTROL_SIZE,
+          height: CORNER_CONTROL_SIZE,
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
           border: '1px solid var(--hud-stroke-dim)',
-          borderRadius: 4,
+          borderRadius: CORNER_CONTROL_RADIUS,
           background: 'var(--app-surface)',
           color: 'var(--label-secondary)',
           fontSize: 11,

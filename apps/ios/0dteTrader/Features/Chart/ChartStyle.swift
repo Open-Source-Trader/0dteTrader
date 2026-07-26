@@ -86,6 +86,20 @@ enum ChartMetrics {
     static func cornerSeat(cornerRadius: CGFloat, chamfer: CGFloat = paneChamfer) -> CGFloat {
         chamfer / (2 - sqrt(2)) - cornerRadius
     }
+
+    /// The one description of a control parked in the pane's bottom-right
+    /// corner, shared by the reset button and the placement guide's `+` handle.
+    ///
+    /// The two now stand in the same column, so their left and right borders
+    /// have to agree exactly — and two hand-tuned constants that happen to
+    /// match today are two constants that silently stop matching. Both read
+    /// their width and their distance from the right border from here instead.
+    /// The reset button also takes the seat as its *bottom* inset, which is
+    /// what `cornerSeat` is for; the handle's vertical position is the price it
+    /// is sitting at.
+    static let cornerControlSize: CGFloat = 24
+    static let cornerControlRadius: CGFloat = 4
+    static let cornerControlInset = cornerSeat(cornerRadius: cornerControlRadius)
 }
 
 /// Cached date formatters for axis/marker time labels.

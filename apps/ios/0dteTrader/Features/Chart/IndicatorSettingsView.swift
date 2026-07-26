@@ -186,9 +186,7 @@ struct IndicatorSettingsView: View {
                 }
                 .listRowBackground(Color.appSurface)
             }
-            .tint(.appAccent)
-            .scrollContentBackground(.hidden)
-            .background(Color.appBackground)
+            .hudListChrome()
             .animation(AppMotion.standard, value: settings)
             .sensoryFeedback(.selection, trigger: settings)
             .navigationTitle("Indicators")

@@ -152,8 +152,23 @@ export function TradePanel({
       />
 
       <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-        {/* The lock rides this row but stays outside the inert wrapper: a
-            control that disables itself cannot be used to undo the lock. */}
+        {/* The lock leads the row, ahead of the controls it disables, and stays
+            outside the inert wrapper: a control that disables itself cannot be
+            used to undo the lock. */}
+        <button
+          className={
+            locked
+              ? 'hud-toggle-chip hud-toggle-chip--lock on'
+              : 'hud-toggle-chip hud-toggle-chip--lock'
+          }
+          onClick={onToggleLock}
+          aria-label={locked ? 'Unlock trading' : 'Lock trading'}
+          aria-pressed={locked}
+        >
+          {/* Icon only: an open or closed padlock is not ambiguous, and the
+              aria-label above carries the meaning for anyone it is. */}
+          {locked ? <LockIcon size={13} /> : <LockOpenIcon size={13} />}
+        </button>
         <div
           inert={locked}
           style={{ display: 'flex', gap: 8, alignItems: 'center', opacity: locked ? 0.55 : 1 }}
@@ -176,20 +191,6 @@ export function TradePanel({
             AUTO
           </button>
         </div>
-        <button
-          className={
-            locked
-              ? 'hud-toggle-chip hud-toggle-chip--lock on'
-              : 'hud-toggle-chip hud-toggle-chip--lock'
-          }
-          onClick={onToggleLock}
-          aria-label={locked ? 'Unlock trading' : 'Lock trading'}
-          aria-pressed={locked}
-        >
-          {/* Icon only: an open or closed padlock is not ambiguous, and the
-              aria-label above carries the meaning for anyone it is. */}
-          {locked ? <LockIcon size={13} /> : <LockOpenIcon size={13} />}
-        </button>
       </div>
 
       <div
@@ -241,6 +242,7 @@ export function TradePanel({
             </div>
           ) : (
             <Menu
+              className="chip-flex"
               direction="up"
               trigger={
                 <button className="chip-button">

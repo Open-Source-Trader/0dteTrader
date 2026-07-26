@@ -6,10 +6,18 @@
  * armed at, and "it looked right when I dragged it" is not a test.
  */
 
-/** Side of the square `+` handle. */
-export const PLUS_SIZE = 22;
-/** Gap between the handle and the right edge of the pane. */
-export const PLUS_MARGIN = 6;
+import { CORNER_CONTROL_INSET, CORNER_CONTROL_SIZE } from './cornerSeat';
+import { PILL_GAP } from './orderLineGeometry';
+
+/**
+ * Side of the square `+` handle, and its distance from the pane's right edge.
+ *
+ * Both come from `cornerSeat` — the description the reset button reads too — so
+ * the handle and the `A` seated in the corner below it share a left and a right
+ * edge by construction rather than because two numbers were tuned to agree.
+ */
+export const PLUS_SIZE = CORNER_CONTROL_SIZE;
+export const PLUS_MARGIN = CORNER_CONTROL_INSET;
 /** Pointer travel before a press on the handle counts as a drag, not a click. */
 export const GUIDE_DRAG_THRESHOLD = 3;
 /**
@@ -20,6 +28,24 @@ export const GUIDE_DRAG_THRESHOLD = 3;
 export const GUIDE_ADJUST_STEP = 0.01;
 /** Coarse step for PageUp/PageDown, for crossing a range without a hundred presses. */
 export const GUIDE_ADJUST_PAGE = 0.1;
+
+/**
+ * The lowest y the handle may be dragged to, given the pane's height.
+ *
+ * Sharing the reset button's column is what puts the `+` and the `A` on one
+ * line, and the cost is that a handle dragged to the pane's bottom edge lands
+ * exactly on `A`. Not merely untidy: `A` is a DOM button stacked above the
+ * order-line canvas, so it takes the click from anything it covers, and a
+ * handle parked under it cannot be picked up again. Stopping a pill-gap short
+ * costs the bottom ~40px of the visible range, still reachable by dragging the
+ * price axis; an unreachable handle was not recoverable at all.
+ *
+ * Mirrors `OrderLineOverlayView.guideDragMaxY` on iOS.
+ */
+export function guideDragFloor(paneHeight: number): number {
+  const resetTop = paneHeight - CORNER_CONTROL_INSET - CORNER_CONTROL_SIZE;
+  return resetTop - PILL_GAP - PLUS_SIZE / 2;
+}
 
 export interface PriceRange {
   /** Price at the bottom of the pane. */

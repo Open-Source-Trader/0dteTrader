@@ -434,11 +434,13 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
               />
             </div>
 
-            {/* Static hairline between chart and panel */}
-            <div
-              aria-hidden
-              style={{ height: DIVIDER_HEIGHT, flex: 'none', background: 'var(--hud-stroke-dim)' }}
-            />
+            {/* The chart card and the trade panel are each already read as a
+                surface — the card by its border, the panel by the controls
+                filling it — so a rule between them was drawing a seam nobody
+                needed. Kept as an empty 1px gap rather than deleted:
+                `chartHeight` subtracts it, and reclaiming it would move the
+                split by a pixel for no reason. */}
+            <div aria-hidden style={{ height: DIVIDER_HEIGHT, flex: 'none' }} />
 
             <div
               style={{

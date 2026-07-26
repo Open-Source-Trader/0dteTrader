@@ -52,6 +52,12 @@ struct ChartQuoteReadout: View {
         // Candles run under these numbers now that the plate is gone; a tight
         // black shadow separates them from a wick without printing a box.
         .shadow(color: .black.opacity(0.85), radius: 3)
+        // Centred on the pane, the readout is boxed off the chip groups either
+        // side of it rather than allowed to run under one, so on a narrow pane
+        // it has to be able to give ground. Scaling first, truncating only past
+        // the floor: a partly-shrunk price is still a price.
+        .lineLimit(1)
+        .minimumScaleFactor(0.7)
         .allowsHitTesting(false)
     }
 }
@@ -70,7 +76,32 @@ enum ChartChip {
 
 }
 
+/// Width of the widest chip group on the pane's first line.
+///
+/// The quote readout is centred on the pane rather than in the gap the two
+/// groups leave — they are no longer the same width, and the midline is what
+/// "the middle of the top" means. Centring alone would let the readout run
+/// under a chip on a narrow pane, so it is inset by this on *both* sides: the
+/// widest group's width is the smallest symmetric inset that clears both.
+struct ChipGroupWidthKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
 extension View {
+    /// Reports this group's laid-out width up to `ChipGroupWidthKey`, which
+    /// reduces by `max` — so both groups report and the reader gets the wider.
+    func measuringChipGroup() -> some View {
+        background {
+            GeometryReader { proxy in
+                Color.clear.preference(key: ChipGroupWidthKey.self, value: proxy.size.width)
+            }
+        }
+    }
+
     /// The chrome every chip on the pane's first line wears: opaque, because it
     /// sits over candles rather than over a card's fill, and chamfered parallel
     /// to the card's own corner cut.
@@ -142,20 +173,20 @@ struct ChartSymbolButton: View {
     }
 }
 
-/// Interval menu, moved out of the header and onto the chip row.
+/// Interval menu, moved out of the header and onto the chip row. A `HudMenu`
+/// rather than a `Menu`: the timeframe popup is a control the eye lands on
+/// several times a session, and a system-grey card is the one thing on this
+/// screen that does not belong to it.
 struct ChartIntervalMenu: View {
     let interval: AnyChartInterval
     let onSelect: (AnyChartInterval) -> Void
 
     var body: some View {
-        Menu {
-            ForEach(AnyChartInterval.allCases, id: \.self) { option in
-                Button(option.rawValue.uppercased()) {
-                    Haptics.selection()
-                    onSelect(option)
-                }
-            }
-        } label: {
+        HudMenu(
+            options: AnyChartInterval.allCases.map { HudMenuOption($0, $0.rawValue.uppercased()) },
+            selection: interval,
+            onSelect: onSelect
+        ) {
             Text(interval.rawValue.uppercased())
                 .font(ChartChip.font)
                 .foregroundStyle(Color.appAccent)
@@ -198,40 +229,34 @@ struct ChartDrawingToolsMenu: View {
     @State private var showClearConfirm = false
 
     var body: some View {
-        Menu {
-            ForEach(DrawingTool.allCases) { tool in
-                Button {
-                    drawings.tool = tool
-                } label: {
-                    if drawings.tool == tool {
-                        Label(tool.title, systemImage: "checkmark")
-                    } else {
-                        Label(tool.title, systemImage: tool.systemImage)
+        HudMenu(
+            options: DrawingTool.allCases.map {
+                HudMenuOption($0, $0.title, systemImage: $0.systemImage)
+            },
+            selection: drawings.tool,
+            onSelect: { drawings.tool = $0 },
+            destructive: drawings.hasAnnotations
+                ? (
+                    drawings.selectedId != nil ? "Delete Selection" : "Clear All Drawings",
+                    {
+                        if drawings.selectedId != nil {
+                            drawings.removeSelectedOrClear()
+                        } else {
+                            showClearConfirm = true
+                        }
                     }
-                }
+                )
+                : nil,
+            label: {
+                let glyph = drawings.tool == .cursor ? "pencil.and.outline" : drawings.tool.systemImage
+                Image(systemName: glyph)
+                    .font(.system(size: ChartChip.iconSize, weight: .semibold))
+                    .foregroundStyle(drawings.tool == .cursor ? Color.appAccent : Color.hudAmber)
+                    .frame(minWidth: ChartChip.iconBox.width, minHeight: ChartChip.iconBox.height)
+                    .chartChipChrome()
+                    .chartChipTouchTarget()
             }
-            if drawings.hasAnnotations {
-                Button(role: .destructive) {
-                    if drawings.selectedId != nil {
-                        drawings.removeSelectedOrClear()
-                    } else {
-                        showClearConfirm = true
-                    }
-                } label: {
-                    Label(
-                        drawings.selectedId != nil ? "Delete Selection" : "Clear All Drawings",
-                        systemImage: "trash"
-                    )
-                }
-            }
-        } label: {
-            Image(systemName: drawings.tool == .cursor ? "pencil.and.outline" : drawings.tool.systemImage)
-                .font(.system(size: ChartChip.iconSize, weight: .semibold))
-                .foregroundStyle(drawings.tool == .cursor ? Color.appAccent : Color.hudAmber)
-                .frame(minWidth: ChartChip.iconBox.width, minHeight: ChartChip.iconBox.height)
-                .chartChipChrome()
-                .chartChipTouchTarget()
-        }
+        )
         .accessibilityLabel("Drawing tools")
         .confirmationDialog(
             "Clear all drawings and alerts for this symbol?",

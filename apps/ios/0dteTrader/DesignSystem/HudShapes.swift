@@ -140,3 +140,19 @@ struct HudActionButtonStyle: ButtonStyle {
             .animation(reduceMotion ? nil : AppMotion.quick, value: configuration.isPressed)
     }
 }
+
+extension View {
+    /// The HUD treatment a `List`-backed sheet wears: the grouped-list backdrop
+    /// swapped for the app's own, and the accent every control in these sheets
+    /// tints with.
+    ///
+    /// Row fills are deliberately not here. `listRowBackground` is a row trait
+    /// and does not reach down from the `List`, so each `Section` still has to
+    /// take `.listRowBackground(Color.appSurface)` itself — a helper that
+    /// looked like it covered them would be a helper that silently did not.
+    func hudListChrome() -> some View {
+        tint(.appAccent)
+            .scrollContentBackground(.hidden)
+            .background(Color.appBackground)
+    }
+}

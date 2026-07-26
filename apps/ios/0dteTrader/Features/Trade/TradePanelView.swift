@@ -86,15 +86,12 @@ enum TradePanelDensity: Sendable {
         }
     }
 
-    /// +1/+5/+10 quick chips (desktop parity: .quick-chip padding shrinks
-    /// with the tier).
-    var quickChipMinHeight: CGFloat {
-        switch self {
-        case .roomy: return 44
-        case .compact: return 32
-        case .dense: return 30
-        }
-    }
+    /// +1/+5/+10 quick chips. The stepper's *visible* square, not its touch
+    /// frame: the three chips and the − / + buttons read as one run of controls
+    /// across the quantity row, and one run of controls is one height. They
+    /// keep a 44pt target the same way the stepper does — as hit area around
+    /// the drawn box rather than as the box.
+    var quickChipMinHeight: CGFloat { stepperVisualSize }
 }
 
 /// Layout B's bottom trade panel (FR-13..18): option type / expiration /
@@ -171,6 +168,11 @@ struct TradePanelView: View {
             }
 
             HStack(spacing: AppSpacing.sm) {
+                // The lock leads the row, ahead of the controls it disables,
+                // and stays outside the wrapper that disables them: a control
+                // that switched itself off could not be used to switch back.
+                lockChip
+
                 Group {
                     HudSegmentedControl(
                         options: [
@@ -192,7 +194,6 @@ struct TradePanelView: View {
                 .disabled(tradingLocked)
                 .opacity(tradingLocked ? 0.55 : 1)
 
-                lockChip
                 AIAnalysisButton(action: onShowAIAnalysis)
             }
 
@@ -226,26 +227,19 @@ struct TradePanelView: View {
     }
 
     private var expirationMenu: some View {
-        Menu {
-            ForEach(chainViewModel.expirations, id: \.self) { expiration in
-                Button {
-                    chainViewModel.selectExpiration(expiration)
-                } label: {
-                    HStack {
-                        Text(expirationLabel(expiration))
-                        if expiration == chainViewModel.selectedExpiration {
-                            Image(systemName: "checkmark")
-                        }
-                    }
-                }
+        HudMenu(
+            options: chainViewModel.expirations.map { HudMenuOption($0, expirationLabel($0)) },
+            selection: chainViewModel.selectedExpiration,
+            onSelect: { chainViewModel.selectExpiration($0) },
+            label: {
+                chipLabel(
+                    title: chainViewModel.selectedExpiration.map(expirationLabel) ?? "Expiration",
+                    systemImage: "calendar",
+                    isPlaceholder: chainViewModel.selectedExpiration == nil
+                )
             }
-        } label: {
-            chipLabel(
-                title: chainViewModel.selectedExpiration.map(expirationLabel) ?? "Expiration",
-                systemImage: "calendar",
-                isPlaceholder: chainViewModel.selectedExpiration == nil
-            )
-        }
+        )
+        .accessibilityLabel("Expiration")
     }
 
     private func expirationLabel(_ expiration: String) -> String {
@@ -256,20 +250,25 @@ struct TradePanelView: View {
         return expiration
     }
 
+    /// The strike picker. A `HudMenu` rather than a `Menu` for the branding and
+    /// for the bug: a `Menu`'s content is rebuilt on every body pass, this
+    /// panel's body runs on every option-quote tick, and UIKit answers a
+    /// replaced element set by resetting the presented menu — which is why a
+    /// strike list long enough to scroll could not be scrolled.
     private var strikeMenu: some View {
-        Menu {
-            ForEach(chainViewModel.strikes, id: \.self) { strike in
-                Button(Format.strike(strike)) {
-                    chainViewModel.selectStrike(strike)
-                }
+        HudMenu(
+            options: chainViewModel.strikes.map { HudMenuOption($0, Format.strike($0)) },
+            selection: chainViewModel.selectedStrike,
+            onSelect: { chainViewModel.selectStrike($0) },
+            label: {
+                chipLabel(
+                    title: chainViewModel.selectedStrike.map(Format.strike) ?? "Strike",
+                    systemImage: "chart.line.uptrend.xyaxis",
+                    isPlaceholder: chainViewModel.selectedStrike == nil
+                )
             }
-        } label: {
-            chipLabel(
-                title: chainViewModel.selectedStrike.map(Format.strike) ?? "Strike",
-                systemImage: "chart.line.uptrend.xyaxis",
-                isPlaceholder: chainViewModel.selectedStrike == nil
-            )
-        }
+        )
+        .accessibilityLabel("Strike")
     }
 
     private var autoContractLabel: some View {
@@ -365,9 +364,17 @@ struct TradePanelView: View {
 
             Spacer()
 
-            QuickChipButton(title: "+1", minHeight: density.quickChipMinHeight) { tradeViewModel.addQuantity(1) }
-            QuickChipButton(title: "+5", minHeight: density.quickChipMinHeight) { tradeViewModel.addQuantity(5) }
-            QuickChipButton(title: "+10", minHeight: density.quickChipMinHeight) { tradeViewModel.addQuantity(10) }
+            // Drawn at the stepper's size, targeted at the stepper's target:
+            // the five controls on this row are one set and compact together.
+            ForEach([1, 5, 10], id: \.self) { step in
+                QuickChipButton(
+                    title: "+\(step)",
+                    minHeight: density.quickChipMinHeight,
+                    touchHeight: density.stepperTouchSize
+                ) {
+                    tradeViewModel.addQuantity(step)
+                }
+            }
         }
     }
 
@@ -451,6 +458,15 @@ struct TradePanelView: View {
                 .font(.system(.caption, design: .monospaced).weight(.semibold))
                 .foregroundStyle(isPlaceholder ? .secondary : .primary)
                 .lineLimit(1)
+                // Both chips on this row take `maxWidth: .infinity`, which an
+                // HStack divides evenly — but only for as long as neither
+                // child's *minimum* exceeds its half. A single line with no
+                // scale floor has a minimum of its full width, so
+                // "2026-07-26 · 0DTE" (the expiration this app exists for) used
+                // to claim more than half the row and leave the strike chip
+                // visibly narrower. With a floor the minimum is a fraction of
+                // that and the two always come out the same size.
+                .minimumScaleFactor(0.6)
         }
         .foregroundStyle(isPlaceholder ? .secondary : .primary)
         .padding(.horizontal, AppSpacing.md)

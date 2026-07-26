@@ -107,6 +107,45 @@ final class PlacementGuideTests: XCTestCase {
         }
     }
 
+    /// The `+` handle and the reset button share a column: same width, same
+    /// left edge, same right edge, at every pane width. They line up because
+    /// both read `ChartMetrics.cornerControl*`, and this is what fails if
+    /// someone gives either one a number of its own again.
+    @MainActor
+    func testTheHandleAndTheResetButtonShareAColumn() {
+        let overlay = OrderLineOverlayView(frame: .zero)
+        for width in [320.0, 430.0, 1024.0] as [CGFloat] {
+            overlay.frame = CGRect(x: 0, y: 0, width: width, height: 400)
+            let resetLeft = width - ChartMetrics.cornerControlInset - ChartMetrics.cornerControlSize
+            let resetRight = width - ChartMetrics.cornerControlInset
+            XCTAssertEqual(overlay.handleLeft, resetLeft, "left edges differ at width \(width)")
+            XCTAssertEqual(
+                overlay.handleLeft + AppPlacementGuide.handleSize,
+                resetRight,
+                "right edges differ at width \(width)"
+            )
+        }
+    }
+
+    /// …and sharing that column is exactly why the drag has to stop short of
+    /// the bottom. `A` is a SwiftUI view laid over the overlay, so it takes
+    /// every touch inside its own frame; a handle dragged under it could never
+    /// be picked up again.
+    @MainActor
+    func testTheGuideCannotBeDraggedUnderTheResetButton() {
+        let height: CGFloat = 400
+        let overlay = OrderLineOverlayView(frame: CGRect(x: 0, y: 0, width: 430, height: height))
+        let resetTop = height - ChartMetrics.cornerControlInset - ChartMetrics.cornerControlSize
+        // The handle's bottom edge at the clamp, versus the top of `A`.
+        XCTAssertLessThanOrEqual(
+            overlay.guideDragMaxY + AppPlacementGuide.handleSize / 2,
+            resetTop,
+            "the handle's bottom edge reaches into the reset button"
+        )
+        // And it is a clamp, not a ban: most of the pane is still reachable.
+        XCTAssertGreaterThan(overlay.guideDragMaxY, height * 0.85)
+    }
+
     // MARK: - Row line
 
     /// A row's line is drawn in two segments — left edge to `row.left`, and

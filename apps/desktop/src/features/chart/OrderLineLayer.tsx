@@ -15,6 +15,7 @@ import {
   GUIDE_ADJUST_PAGE,
   GUIDE_ADJUST_STEP,
   GUIDE_DRAG_THRESHOLD,
+  guideDragFloor,
   PLUS_MARGIN,
   PLUS_SIZE,
   resolveGuidePrice,
@@ -785,7 +786,15 @@ export function OrderLineLayer({
       // out-of-range level is one resolveGuidePrice dismisses on the next
       // frame, so dragging a little too far would delete the guide out from
       // under the pointer holding it.
-      const price = series.coordinateToPrice(Math.min(chart.paneSize().height, Math.max(0, xy.y)));
+      //
+      // And short of the reset button, which now shares the handle's column.
+      // `A` is a DOM button stacked above this canvas, so it takes the click
+      // from anything it covers — a handle dragged under it could not be
+      // picked up again. It costs the bottom ~40px of the visible range, which
+      // is still reachable by dragging the price axis.
+      const paneHeight = chart.paneSize().height;
+      const floor = Math.min(paneHeight, guideDragFloor(paneHeight));
+      const price = series.coordinateToPrice(Math.min(floor, Math.max(0, xy.y)));
       if (price === null) return;
       guidePriceRef.current = price;
       scheduleRef.current();

@@ -425,11 +425,17 @@
   filter: saturate(0.4);
 }
 
+/* The stepper's height, not a padding of its own: the three chips and the
+   - / + buttons are one run of controls across the quantity row, and one run of
+   controls is one height. */
 .quick-chip {
+  display: inline-flex;
+  align-items: center;
+  height: 36px;
   font-family: var(--font-mono);
   font-size: var(--fs-caption);
   font-weight: 600;
-  padding: 8px 14px;
+  padding: 0 14px;
   color: var(--app-accent-text);
   border: 5px solid transparent;
   border-image: var(--hud-src-flat) 28 fill / 14px / 4px stretch;
@@ -446,6 +452,15 @@
 }
 
 /* --- Chip menus (trade panel) --- */
+
+/* Both chips on the expiration/strike row take exactly half of it. Without
+   this the wrappers sized to their labels, and "2026-07-26 - 0DTE" against a
+   three-digit strike is not a fair split. */
+.chip-flex {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
 .chip-button {
   display: flex;
   align-items: center;
@@ -623,6 +638,11 @@
   width: 84px;
 }
 
+.trade-panel.compact .quick-chip {
+  height: 32px;
+}
+
 .trade-panel.dense .quick-chip {
-  padding: 5px 10px;
+  height: 30px;
+  padding: 0 10px;
 }

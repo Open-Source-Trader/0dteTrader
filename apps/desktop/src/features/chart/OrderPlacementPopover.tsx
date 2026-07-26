@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { OptionContract, OrderSide, OrderType } from '@0dtetrader/shared-types';
+import { SegmentedControl } from '../../design/components/SegmentedControl';
+import { Stepper } from '../../design/components/Stepper';
 import { Format } from '../../design/format';
 
 export interface OrderPlacementInput {
@@ -11,8 +13,9 @@ export interface OrderPlacementInput {
 interface OrderPlacementPopoverProps {
   /** Level the line will sit at, on the underlying. */
   price: number;
-  /** Vertical anchor in pane coordinates. */
-  top: number;
+  /** Editing the price here moves the guide on the chart — the number and the
+   *  line are the same fact, so they must never disagree. */
+  onPriceChange: (price: number) => void;
   rightInset: number;
   contract: OptionContract;
   defaultQuantity: number;
@@ -21,9 +24,13 @@ interface OrderPlacementPopoverProps {
   onCancel: () => void;
 }
 
+/** Trigger price step: one cent, the tick the level is rounded to anyway. */
+const PRICE_STEP = 0.01;
+
 /**
- * The small window behind the price-axis `+`: pick a side, a size, and how the
- * order executes when the level is hit.
+ * The window behind the chart's `+`: pick a level, a side, a size, and how the
+ * order executes when the level is hit. Every field is editable — the `+` puts
+ * you roughly where you meant, and this is where you say exactly.
  *
  * The execution type is offered here (rather than inherited silently) for the
  * same reason it sits on the line itself — `market` into a thin 0DTE spread and
@@ -32,7 +39,7 @@ interface OrderPlacementPopoverProps {
  */
 export function OrderPlacementPopover({
   price,
-  top,
+  onPriceChange,
   rightInset,
   contract,
   defaultQuantity,
@@ -46,8 +53,8 @@ export function OrderPlacementPopover({
   const [submitting, setSubmitting] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
-  // Escape closes, and so does a click anywhere else — the popover must never
-  // be the thing standing between the user and their chart.
+  // Escape closes, and so does a click anywhere else — the window must never be
+  // the thing standing between the user and their chart.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') onCancel();
@@ -56,7 +63,7 @@ export function OrderPlacementPopover({
       if (!ref.current?.contains(event.target as Node)) onCancel();
     };
     window.addEventListener('keydown', onKey);
-    // Deferred: the click that opened this popover is still propagating.
+    // Deferred: the click that opened this window is still propagating.
     const timer = setTimeout(() => window.addEventListener('pointerdown', onPointerDown), 0);
     return () => {
       window.removeEventListener('keydown', onKey);
@@ -78,35 +85,35 @@ export function OrderPlacementPopover({
   return (
     <div
       ref={ref}
+      data-chart-placement=""
+      className="hud-card order-placement"
       role="dialog"
       aria-label="Place a chart order"
-      style={{
-        position: 'absolute',
-        right: 32 + rightInset,
-        top: Math.max(4, top - 60),
-        zIndex: 6,
-        width: 208,
-        padding: 10,
-        borderRadius: 8,
-        border: '1px solid var(--hud-stroke-dim)',
-        background: 'var(--app-surface, #101826)',
-        boxShadow: '0 6px 20px rgba(0, 0, 0, 0.45)',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 8,
-        fontSize: 12,
-      }}
+      style={{ right: 36 + rightInset }}
     >
-      <div style={{ color: 'var(--label-secondary)', fontFamily: 'var(--font-mono)' }}>
-        {contract.underlying} @ {Format.price(price)}
-      </div>
-      <div style={{ color: 'var(--label-secondary)', fontSize: 11 }}>
-        {Format.strike(contract.strike)}
+      <div className="order-placement__title">PLACE ORDER LINE</div>
+
+      <label className="order-placement__row">
+        <span>Level</span>
+        <input
+          type="number"
+          step={PRICE_STEP}
+          value={price}
+          aria-label="Trigger price"
+          onChange={(event) => {
+            const next = Number(event.target.value);
+            if (Number.isFinite(next)) onPriceChange(Math.round(next * 100) / 100);
+          }}
+        />
+        <Stepper value={price} min={0.01} max={100000} step={PRICE_STEP} onChange={onPriceChange} />
+      </label>
+
+      <div className="order-placement__contract">
+        {contract.underlying} {Format.strike(contract.strike)}
         {contract.optionType === 'call' ? 'C' : 'P'} · {contract.expiration}
       </div>
 
-      <Segmented
-        label="Side"
+      <SegmentedControl
         options={[
           { value: 'buy', label: 'BUY' },
           { value: 'sell', label: 'SELL' },
@@ -114,8 +121,7 @@ export function OrderPlacementPopover({
         value={side}
         onChange={(value) => setSide(value as OrderSide)}
       />
-      <Segmented
-        label="Execution"
+      <SegmentedControl
         options={[
           { value: 'mid', label: 'MID' },
           { value: 'market', label: 'MKT' },
@@ -124,97 +130,39 @@ export function OrderPlacementPopover({
         onChange={(value) => setOrderType(value as OrderType)}
       />
 
-      <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <span style={{ color: 'var(--label-secondary)' }}>Qty</span>
+      <label className="order-placement__row">
+        <span>Qty</span>
         <input
           type="number"
           min={1}
           max={1000}
           value={quantity}
+          aria-label="Quantity"
           onChange={(event) =>
             setQuantity(Math.max(1, Math.min(1000, Number(event.target.value) || 1)))
           }
-          style={{
-            flex: 1,
-            background: 'var(--app-background)',
-            border: '1px solid var(--hud-stroke-dim)',
-            borderRadius: 4,
-            color: 'var(--label-primary)',
-            padding: '4px 6px',
-            fontFamily: 'var(--font-mono)',
-          }}
         />
+        <Stepper value={quantity} min={1} max={1000} onChange={setQuantity} />
       </label>
 
-      <div style={{ color: 'var(--label-secondary)', fontSize: 10, lineHeight: 1.35 }}>
+      <p className="order-placement__note">
         Fires an order when {contract.underlying} reaches {Format.price(price)}. Watched by the app
         — not a broker-side resting order.
-      </div>
+      </p>
 
-      <div style={{ display: 'flex', gap: 6 }}>
-        <button type="button" onClick={onCancel} style={buttonStyle(false)}>
-          Cancel
+      <div className="order-placement__actions">
+        <button type="button" className="order-placement__btn" onClick={onCancel}>
+          CANCEL
         </button>
         <button
           type="button"
+          className={`order-placement__btn order-placement__btn--${side}`}
           onClick={() => void submit()}
           disabled={submitting}
-          style={buttonStyle(true)}
         >
-          {submitting ? 'Placing…' : 'Place'}
+          {submitting ? 'PLACING…' : 'PLACE'}
         </button>
       </div>
     </div>
   );
-}
-
-function Segmented({
-  label,
-  options,
-  value,
-  onChange,
-}: {
-  label: string;
-  options: Array<{ value: string; label: string }>;
-  value: string;
-  onChange: (value: string) => void;
-}) {
-  return (
-    <div role="group" aria-label={label} style={{ display: 'flex', gap: 4 }}>
-      {options.map((option) => (
-        <button
-          key={option.value}
-          type="button"
-          aria-pressed={value === option.value}
-          onClick={() => onChange(option.value)}
-          style={{
-            flex: 1,
-            padding: '5px 0',
-            borderRadius: 4,
-            border: '1px solid var(--hud-stroke-dim)',
-            background: value === option.value ? 'var(--app-accent)' : 'transparent',
-            color: value === option.value ? 'var(--app-background)' : 'var(--label-secondary)',
-            fontWeight: 600,
-            fontSize: 11,
-            cursor: 'pointer',
-          }}
-        >
-          {option.label}
-        </button>
-      ))}
-    </div>
-  );
-}
-
-function buttonStyle(primary: boolean): React.CSSProperties {
-  return {
-    flex: 1,
-    padding: '6px 0',
-    borderRadius: 4,
-    border: '1px solid var(--hud-stroke-dim)',
-    background: primary ? 'var(--app-accent)' : 'transparent',
-    color: primary ? 'var(--app-background)' : 'var(--label-secondary)',
-    fontWeight: 600,
-    cursor: 'pointer',
-  };
 }

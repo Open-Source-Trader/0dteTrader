@@ -77,3 +77,134 @@
     transform: none;
   }
 }
+
+/* Permanent placement `+`: chamfered HUD chip. clip-path rather than the
+   .hud-chip border-image, whose 21px slices collapse at this size. */
+.order-guide-plus {
+  position: absolute;
+  z-index: 5;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid var(--hud-stroke);
+  background: var(--hud-panel-fill);
+  color: var(--app-accent);
+  font-family: var(--font-mono);
+  font-size: 15px;
+  line-height: 1;
+  cursor: ns-resize;
+  clip-path: polygon(
+    5px 0,
+    calc(100% - 5px) 0,
+    100% 5px,
+    100% calc(100% - 5px),
+    calc(100% - 5px) 100%,
+    5px 100%,
+    0 calc(100% - 5px),
+    0 5px
+  );
+}
+.order-guide-plus:hover {
+  background: rgba(46, 143, 255, 0.18);
+  box-shadow: var(--shadow-toast);
+}
+
+/* Chart order window. Vertically centred rather than anchored to the `+`: on a
+   short pane a line-anchored card clips against the top edge, and a window that
+   half-disappears is worse than one that is simply always in the same place. */
+.order-placement {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 6;
+  width: 240px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  font-size: var(--fs-caption);
+  color: var(--label-primary);
+}
+.order-placement__title {
+  font-family: var(--font-display);
+  font-size: var(--fs-caption2);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--app-accent);
+}
+.order-placement__row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.order-placement__row > span {
+  color: var(--label-secondary);
+  min-width: 34px;
+}
+.order-placement__row input {
+  flex: 1;
+  min-width: 0;
+  padding: 5px 6px;
+  border: 1px solid var(--hud-stroke-dim);
+  border-radius: 3px;
+  background: var(--app-background);
+  color: var(--label-primary);
+  font-family: var(--font-mono);
+}
+.order-placement__row input:focus {
+  outline: none;
+  border-color: var(--hud-stroke);
+}
+.order-placement__contract {
+  color: var(--label-secondary);
+  font-family: var(--font-mono);
+  font-size: var(--fs-caption2);
+}
+.order-placement__note {
+  margin: 0;
+  color: var(--label-secondary);
+  font-size: 10px;
+  line-height: 1.35;
+}
+.order-placement__actions {
+  display: flex;
+  gap: var(--space-2);
+}
+/* Chamfered via clip-path: the .hud-btn border-image needs ~56px of height and
+   these are 34px. */
+.order-placement__btn {
+  flex: 1;
+  padding: 8px 0;
+  border: 1px solid var(--hud-stroke);
+  background: transparent;
+  color: var(--app-accent-text);
+  font-family: var(--font-display);
+  font-size: var(--fs-caption2);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+  clip-path: polygon(
+    5px 0,
+    calc(100% - 5px) 0,
+    100% 5px,
+    100% calc(100% - 5px),
+    calc(100% - 5px) 100%,
+    5px 100%,
+    0 calc(100% - 5px),
+    0 5px
+  );
+}
+.order-placement__btn--buy {
+  border-color: var(--buy-green);
+  background: rgba(34, 224, 106, 0.16);
+  color: var(--buy-green);
+}
+.order-placement__btn--sell {
+  border-color: var(--sell-red);
+  background: rgba(255, 59, 78, 0.16);
+  color: var(--sell-red);
+}
+.order-placement__btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}

@@ -10,6 +10,7 @@ import type { ChartOrdersStore } from './chartOrders';
 import { isWorking, kindLabel, orderTypeLabel } from './chartOrders';
 import type { ChartTradingSettings } from './chartTradingSettings';
 import { OrderPlacementPopover } from './OrderPlacementPopover';
+import { GUIDE_DRAG_THRESHOLD, PLUS_MARGIN, PLUS_SIZE, resolveGuidePrice } from './placementGuide';
 import {
   hitRows,
   layoutRow,
@@ -102,10 +103,15 @@ export function OrderLineLayer({
    *  they survive with a disposed series behind them. */
   const endDragRef = useRef<() => void>(() => {});
   const hoverRef = useRef<{ id: string; pill: PillKey | null } | null>(null);
-  /** Price row the pointer is on, which is where the `+` affordance appears. */
-  const [plusPrice, setPlusPrice] = useState<number | null>(null);
+  /** The guide's level. A ref, not state: it changes on every drag frame and
+   *  the canvas is already repainting — re-rendering React at 60fps to move an
+   *  absolutely-positioned button is pure waste. */
+  const guidePriceRef = useRef<number | null>(null);
+  const guideDragRef = useRef(false);
+  const plusRef = useRef<HTMLButtonElement>(null);
+  const endGuideDragRef = useRef<() => void>(() => {});
+  /** Level the open window refers to. State, because the window is React. */
   const [placementPrice, setPlacementPrice] = useState<number | null>(null);
-  const [placementY, setPlacementY] = useState(0);
 
   // Latest props for the event handlers, which are bound once.
   const latest = useRef({
@@ -118,6 +124,8 @@ export function OrderLineLayer({
     onFlatten,
     onCancelOrder,
     rightInset,
+    candles,
+    placementPrice,
   });
   latest.current = {
     settings,
@@ -129,6 +137,8 @@ export function OrderLineLayer({
     onFlatten,
     onCancelOrder,
     rightInset,
+    candles,
+    placementPrice,
   };
 
   /** Open positions on this underlying that have an anchor to draw at. */
@@ -332,6 +342,52 @@ export function OrderLineLayer({
       }
 
       rowsRef.current = rows;
+
+      // Placement guide: permanent dashed level with the `+` handle at its right
+      // edge. Suppressed when there is no contract to trade, because arming a
+      // line against nothing is not a state the user can act on.
+      const guideOn = latest.current.settings.enabled && latest.current.selectedContract !== null;
+      const open = latest.current.placementPrice;
+      // While the window is open it owns the level (`open ?? …`), so the guide
+      // does not re-anchor underneath the number the user is editing.
+      const guide = !guideOn
+        ? null
+        : (open ??
+          resolveGuidePrice(guidePriceRef.current, latest.current.candles.at(-1)?.close ?? null, {
+            max: series.coordinateToPrice(0) ?? NaN,
+            min: series.coordinateToPrice(pane.height) ?? NaN,
+          }));
+      guidePriceRef.current = guide;
+      const guideY = guide === null ? null : series.priceToCoordinate(guide);
+
+      if (guide !== null && guideY !== null) {
+        ctx.strokeStyle = colors.guide;
+        ctx.lineWidth = 1;
+        ctx.setLineDash([4, 4]);
+        ctx.beginPath();
+        ctx.moveTo(0, guideY);
+        ctx.lineTo(rightEdge - PLUS_SIZE - PLUS_MARGIN, guideY);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        // The level only needs calling out while it is moving; the rest of the
+        // time the price axis already says where the line is.
+        if (guideDragRef.current) {
+          ctx.fillStyle = colors.guide;
+          ctx.fillText(Format.price(guide), 8, guideY - 6);
+        }
+      }
+
+      const plus = plusRef.current;
+      if (plus) {
+        if (guide === null || guideY === null) {
+          plus.style.display = 'none';
+        } else {
+          plus.style.display = 'flex';
+          plus.style.top = `${guideY - PLUS_SIZE / 2}px`;
+          plus.style.right = `${PLUS_MARGIN + latest.current.rightInset}px`;
+          plus.setAttribute('aria-label', `Place an order at ${Format.price(guide)}`);
+        }
+      }
     };
 
     const schedule = () => {
@@ -373,6 +429,9 @@ export function OrderLineLayer({
     if (!canvas || !containerEl) return;
 
     const onPointerDown = (event: PointerEvent) => {
+      // The `+` and the placement window live inside this container, so a row
+      // at the same y would otherwise eat their press in the capture phase.
+      if ((event.target as Element | null)?.closest('[data-chart-placement]')) return;
       const xy = canvasXY(event);
       if (!xy) return;
       const hit = hitRows(rowsRef.current, xy.x, xy.y);
@@ -468,10 +527,7 @@ export function OrderLineLayer({
 
     const onHover = (event: PointerEvent) => {
       const xy = canvasXY(event);
-      if (!xy) {
-        setPlusPrice(null);
-        return;
-      }
+      if (!xy) return;
       const hit = hitRows(rowsRef.current, xy.x, xy.y);
       const next = hit ? { id: hit.row.id, pill: hit.pill } : null;
       if (next?.id !== hoverRef.current?.id || next?.pill !== hoverRef.current?.pill) {
@@ -480,21 +536,9 @@ export function OrderLineLayer({
       }
       if (!hit) containerEl.style.cursor = '';
       else containerEl.style.cursor = hit.pill ? 'pointer' : 'ns-resize';
-
-      // TradingView's price-axis `+`: hovering an empty row offers to place a
-      // line right there. Suppressed over an existing row so it never covers
-      // the controls the pointer is already aimed at.
-      if (hit || dragRef.current) {
-        setPlusPrice(null);
-        return;
-      }
-      const price = series.coordinateToPrice(xy.y);
-      setPlusPrice(price);
-      setPlacementY(xy.y);
     };
 
     const onLeave = () => {
-      setPlusPrice(null);
       if (hoverRef.current) {
         hoverRef.current = null;
         scheduleRef.current();
@@ -513,6 +557,60 @@ export function OrderLineLayer({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chart, series, store]);
+
+  /**
+   * Press on the handle: a drag moves the guide, a click with no travel opens
+   * the window. Same gesture the order lines use, so the two feel identical.
+   */
+  const onPlusPointerDown = (event: React.PointerEvent<HTMLButtonElement>) => {
+    if (latest.current.placementPrice !== null) return; // window owns the level
+    event.preventDefault();
+    event.stopPropagation();
+    const startY = event.clientY;
+    guideDragRef.current = false;
+
+    const onMove = (moveEvent: PointerEvent) => {
+      if (!guideDragRef.current && Math.abs(moveEvent.clientY - startY) < GUIDE_DRAG_THRESHOLD) {
+        return;
+      }
+      guideDragRef.current = true;
+      const xy = canvasXY(moveEvent);
+      if (!xy) return;
+      const price = series.coordinateToPrice(xy.y);
+      if (price === null) return;
+      guidePriceRef.current = price;
+      scheduleRef.current();
+    };
+
+    const detach = () => {
+      endGuideDragRef.current = () => {};
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+    };
+
+    const onUp = () => {
+      const dragged = guideDragRef.current;
+      guideDragRef.current = false;
+      detach();
+      scheduleRef.current();
+      if (!dragged && guidePriceRef.current !== null) {
+        setPlacementPrice(round2(guidePriceRef.current));
+      }
+    };
+
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    // Unmounting mid-drag abandons the gesture: the series these coordinates
+    // mean is going away.
+    endGuideDragRef.current = () => {
+      guideDragRef.current = false;
+      detach();
+    };
+  };
+
+  // Tears the guide drag down if the component unmounts while the pointer is
+  // still held — the listeners are on `window`, so they would outlive it.
+  useEffect(() => () => endGuideDragRef.current(), []);
 
   /** Commits a bracket leg dragged off an entry line into the position's OCO group. */
   const placeBracket = async (entry: EntryLine, price: number) => {
@@ -547,8 +645,6 @@ export function OrderLineLayer({
     });
   };
 
-  const plusVisible = plusPrice !== null && settings.enabled && selectedContract !== null;
-
   return (
     <>
       <canvas
@@ -563,38 +659,26 @@ export function OrderLineLayer({
           pointerEvents: 'none',
         }}
       />
-      {plusVisible ? (
-        <button
-          type="button"
-          aria-label={`Place an order at ${Format.price(plusPrice)}`}
-          onClick={() => {
-            setPlacementPrice(plusPrice);
-            setPlusPrice(null);
-          }}
-          style={{
-            position: 'absolute',
-            right: 4 + rightInset,
-            top: placementY - 11,
-            zIndex: 5,
-            width: 22,
-            height: 22,
-            borderRadius: 11,
-            border: '1px solid var(--hud-stroke-dim)',
-            background: 'var(--app-surface, #101826)',
-            color: 'var(--label-primary)',
-            fontSize: 14,
-            lineHeight: '18px',
-            cursor: 'pointer',
-            padding: 0,
-          }}
-        >
-          +
-        </button>
-      ) : null}
+      <button
+        ref={plusRef}
+        type="button"
+        data-chart-placement=""
+        className="order-guide-plus"
+        aria-label="Place an order"
+        onPointerDown={onPlusPointerDown}
+        // Positioned imperatively from the draw loop; hidden until it has a level.
+        style={{ display: 'none', width: PLUS_SIZE, height: PLUS_SIZE }}
+      >
+        +
+      </button>
       {placementPrice !== null && selectedContract ? (
         <OrderPlacementPopover
           price={placementPrice}
-          top={placementY}
+          onPriceChange={(next) => {
+            setPlacementPrice(next);
+            guidePriceRef.current = next;
+            scheduleRef.current();
+          }}
           rightInset={rightInset}
           contract={selectedContract}
           defaultQuantity={settings.defaultQuantity}

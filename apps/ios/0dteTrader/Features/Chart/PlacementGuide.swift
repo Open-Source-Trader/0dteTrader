@@ -1,12 +1,13 @@
 import CoreGraphics
 
 /// Placement-guide metrics (pt values).
+///
+/// The handle's minimum touch target is `AppOrderLine.minimumTouchTarget` — the
+/// same HIG 44pt the order-line pills already use, deliberately not restated
+/// here under a second name.
 enum AppPlacementGuide {
     /// Drawn size of the `+` handle.
     static let handleSize: CGFloat = 28
-    /// The minimum touch target around it is `AppOrderLine.minimumTouchTarget`
-    /// — the same HIG 44pt the order-line pills use, deliberately not restated
-    /// here under a second name.
     /// Gap between the handle and the right edge of the pane.
     static let handleMargin: CGFloat = 6
     /// Chamfer on the handle, matching `HudPanelShape` at chip scale.

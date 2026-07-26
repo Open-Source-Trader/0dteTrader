@@ -364,6 +364,12 @@ git add apps/ios/0dteTrader/Features/Chart/PlacementGuide.swift apps/ios/0dteTra
 
 ## Task 3: Desktop — permanent guide and draggable `+`
 
+> **Execute Tasks 3 and 4 together as one unit.** Task 3's render block passes
+> `onPriceChange` to `OrderPlacementPopover` and stops passing `top`; Task 4 is
+> what adds that prop and removes the `top` dependency. Landing Task 3 alone
+> leaves the tree failing `tsc`, so its own Step 8 verification would fail. Do
+> both, verify once, commit once.
+
 Replaces the hover-only `+`. The handle's position is written imperatively from the draw loop rather than through React state, because the old `setPlusPrice`/`setPlacementY` on every `pointermove` re-rendered the component on a canvas that is already repainting itself.
 
 **Files:**
@@ -1030,7 +1036,13 @@ git add apps/desktop/src/features/chart/OrderPlacementPopover.tsx apps/desktop/s
 
 ## Task 5: iOS — delete the 1.5s long-press, feed the last price down
 
-Smallest possible iOS diff first: remove the gesture the user called out, and thread the one new value the overlay needs.
+> **Execute Tasks 5 and 6 together as one unit.** Task 5 assigns
+> `container.orderLineOverlay.lastPrice`, but that property is not declared until Task 6,
+> so Task 5 alone does not compile and its own build step would fail. Do both, verify
+> once, commit once — or commit twice if you prefer the history, but only after the
+> combined tree builds.
+
+Remove the gesture the user called out, and thread the one new value the overlay needs.
 
 **Files:**
 
@@ -1195,7 +1207,11 @@ In `handlePan(_:)`, the `.began` case: put this first, before `guard let hit = h
 
 Note `handlePan` currently opens with `guard let model else { return }`. Move that guard down into the branches that need it, or the handle drag will be dead whenever the model is nil. Replace the first line of `handlePan` with `let location = recognizer.location(in: self)` and add `guard let model else { return }` inside the `.order` / `.entry` branches that dereference it.
 
-In `.changed`, add the case:
+In `.changed`, add the case. Note the clamp — this bit the desktop implementation: an
+unclamped `location.y` extrapolates a price outside the visible range, and on the next
+frame `resolveGuidePrice` sees an out-of-range `current` against an in-range `lastPrice`
+and returns the _last price_, because that branch precedes the clamp branch. The guide
+teleports mid-drag instead of stopping at the edge.
 
 ```swift
             case .guideHandle(let startY, let moved):
@@ -1205,6 +1221,22 @@ In `.changed`, add the case:
                     drag = .guideHandle(startY: startY, moved: true)
                 }
 ```
+
+and clamp the location before converting it, at the top of `.changed`:
+
+```swift
+        case .changed:
+            let content = chart?.viewPortHandler.contentRect ?? bounds
+            let clampedY = Swift.min(content.maxY, Swift.max(content.minY, location.y))
+            guard let current = drag, let price = price(at: clampedY) else { return }
+```
+
+Keep using the unclamped `location` for the order-line and bracket drags if that is the
+existing behaviour; only the guide handle needs pinning to the pane.
+
+**Also confirm** `.cancelled` clears the guide drag. The existing `default:` arm sets
+`drag = nil`, which covers it — verify rather than assume, because a stranded
+`.guideHandle` drag leaves the guide tracking a finger that is no longer down.
 
 In `.ended`, add:
 
@@ -1300,6 +1332,12 @@ Replace `renderPlacementGuide(in:)` (lines 429–439) with:
     }
 ```
 
+**Dim the handle while the card is open.** It is drawn unconditionally but hit-tested only
+when `placementPrice == nil`, so at full opacity it advertises an action it will not
+perform. Render it at `AppOpacity.disabled` while the card is open, and give its
+accessibility element `.notEnabled` traits, so the declared inertness is legible rather
+than a surprise. (The desktop twin had the same gap.)
+
 **Step 6: Add the handle to VoiceOver**
 
 In `rebuildAccessibilityElements()`, after the row loop and before `accessibilityElements = elements`:
@@ -1362,10 +1400,26 @@ git add apps/ios/0dteTrader/Features/Chart/OrderLineOverlayView.swift apps/ios/0
 
 ## Task 7: iOS — HUD order card replacing the Form sheet
 
+> **Execute Tasks 7 and 8 together as one unit.** Task 7 deletes
+> `OrderPlacementSheet.swift` while `TradeScreenView` still references it, so the tree does
+> not build until Task 8 rewires it. Never leave a commit that does not compile. Do both,
+> verify once, commit once.
+
 **Files:**
 
 - Create: `apps/ios/0dteTrader/Features/Chart/OrderPlacementCard.swift`
 - Delete: `apps/ios/0dteTrader/Features/Chart/OrderPlacementSheet.swift`
+
+**Validate the level field.** The desktop twin shipped a defect here: clearing the price
+input yielded `0`, which is finite and so passed every guard, and PLACE would submit a
+chart order with a trigger price of zero. The `rounded(_:)` helper below already floors at
+`0.01` and falls back to the current price on a non-finite value — keep both, and
+additionally disable PLACE whenever the level is not a usable price. An order-entry
+control must not be able to submit a level the user did not mean.
+
+**Note on failure handling:** `placeFromSheet` already checks `create(draft) != nil`
+before clearing `placementRequest`, so a failed placement correctly leaves the card open.
+The desktop side did not, and had to be fixed. Do not "simplify" this away.
 
 **Step 1: Write the card**
 
@@ -1648,7 +1702,7 @@ git rm apps/ios/0dteTrader/Features/Chart/OrderPlacementSheet.swift
 cd apps/ios && xcodegen && xcodebuild build -scheme 0dteTrader -destination 'generic/platform=iOS Simulator'
 ```
 
-Expected: FAIL — `TradeScreenView.swift` still references `OrderPlacementSheet`. Task 8 fixes it; do not commit yet.
+Expected: FAIL — `TradeScreenView.swift` still references `OrderPlacementSheet`. This is why Tasks 7 and 8 are one unit: continue straight into Task 8 and build again there. Do not commit a tree that does not compile.
 
 ---
 

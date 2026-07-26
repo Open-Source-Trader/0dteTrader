@@ -460,18 +460,22 @@ struct TradeScreenView: View {
                 symbol: chartViewModel.symbol
             ),
             hasSelectedContract: chainViewModel.selectedContract != nil,
-            placementRequest: chartTrading.placementRequest,
-            placementDefaultQuantity: chartTrading.settings.defaultQuantity,
-            placementDefaultOrderType: tradeViewModel.orderType,
-            onPlacementPriceChange: { chartTrading.updatePlacementPrice($0) },
-            onPlacementPlace: { side, quantity, orderType in
-                await chartTrading.placeFromSheet(
-                    side: side,
-                    quantity: quantity,
-                    orderType: orderType
+            placement: chartTrading.placementRequest.map { request in
+                PlacementCardBinding(
+                    request: request,
+                    defaultQuantity: chartTrading.settings.defaultQuantity,
+                    defaultOrderType: tradeViewModel.orderType,
+                    onPriceChange: { chartTrading.updatePlacementPrice($0) },
+                    onPlace: { side, quantity, orderType in
+                        await chartTrading.placeFromSheet(
+                            side: side,
+                            quantity: quantity,
+                            orderType: orderType
+                        )
+                    },
+                    onCancel: { chartTrading.dismissPlacement() }
                 )
             },
-            onPlacementCancel: { chartTrading.dismissPlacement() },
             orderLineDelegate: chartTrading
         )
     }

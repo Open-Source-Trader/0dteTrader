@@ -26,6 +26,11 @@ enum AppPlacementGuide {
     /// by. Matches the rounding `ChartTradingCoordinator` applies to any level
     /// it arms, so adjusting never lands between ticks.
     static let adjustmentStep: Double = 0.01
+    /// Smallest level an order can be armed at: one tick.
+    static let levelMinimum: Double = 0.01
+    /// Largest. Mirrors the desktop stepper's `max`, and exists so a pasted or
+    /// fat-fingered twenty-digit level is refused rather than armed.
+    static let levelMaximum: Double = 100_000
 }
 
 /// Resolves the guide's price for this frame.
@@ -109,10 +114,11 @@ func isLevelInputShape(_ text: String) -> Bool {
 /// Nil covers both "still being typed" (`""`, `"."`, `"0"`) and "not a level at
 /// all". The caller cannot submit either, which is the point: a cleared field
 /// used to parse to `0`, which is finite and passed every guard, and PLACE
-/// would arm a chart order at a trigger price of zero.
+/// would arm a chart order at a trigger price of zero. The upper bound is the
+/// other half of that: without it a pasted twenty-digit level is finite too.
 func parseLevelInput(_ text: String) -> Double? {
-    guard isLevelInputShape(text), let value = Double(text), value.isFinite, value > 0 else {
-        return nil
-    }
+    guard isLevelInputShape(text), let value = Double(text), value.isFinite,
+          value >= AppPlacementGuide.levelMinimum, value <= AppPlacementGuide.levelMaximum
+    else { return nil }
     return value
 }

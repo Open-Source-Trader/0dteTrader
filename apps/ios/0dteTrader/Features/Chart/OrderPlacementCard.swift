@@ -10,6 +10,23 @@ struct OrderPlacementRequest: Identifiable, Equatable {
     let contract: OptionContract
 }
 
+/// Everything the chart needs to host an open placement card, as one value.
+///
+/// The request and the five things done with it travel together or not at all —
+/// there is no state where the chart has the level but not the callback that
+/// moves it — so one optional says "a card is open" where six loose parameters
+/// could only imply it.
+struct PlacementCardBinding {
+    let request: OrderPlacementRequest
+    var defaultQuantity: Int = 1
+    var defaultOrderType: OrderType = .mid
+    /// Editing the level moves the guide on the chart — the number and the line
+    /// are the same fact, so they must never disagree.
+    var onPriceChange: (Double) -> Void = { _ in }
+    var onPlace: (OrderSide, Int, OrderType) async -> Void = { _, _, _ in }
+    var onCancel: () -> Void = {}
+}
+
 /// The window behind the chart's `+`: pick a level, a side, a size, and how the
 /// order executes when the level is hit. Every field is editable — the `+` puts
 /// you roughly where you meant, and this is where you say exactly.
@@ -21,14 +38,7 @@ struct OrderPlacementRequest: Identifiable, Equatable {
 /// thin 0DTE spread and `mid` that never fills are both bad in different
 /// situations, and the choice belongs in front of you when you arm the line.
 struct OrderPlacementCard: View {
-    let request: OrderPlacementRequest
-    let defaultQuantity: Int
-    let defaultOrderType: OrderType
-    /// Editing the level here moves the guide on the chart — the number and the
-    /// line are the same fact, so they must never disagree.
-    let onPriceChange: (Double) -> Void
-    let onPlace: (OrderSide, Int, OrderType) async -> Void
-    let onCancel: () -> Void
+    let placement: PlacementCardBinding
 
     @State private var side: OrderSide = .buy
     @State private var quantity: Int
@@ -48,24 +58,13 @@ struct OrderPlacementCard: View {
     /// Trigger price step: one cent, the tick the level is rounded to anyway.
     private let priceStep = 0.01
 
-    init(
-        request: OrderPlacementRequest,
-        defaultQuantity: Int,
-        defaultOrderType: OrderType,
-        onPriceChange: @escaping (Double) -> Void,
-        onPlace: @escaping (OrderSide, Int, OrderType) async -> Void,
-        onCancel: @escaping () -> Void
-    ) {
-        self.request = request
-        self.defaultQuantity = defaultQuantity
-        self.defaultOrderType = defaultOrderType
-        self.onPriceChange = onPriceChange
-        self.onPlace = onPlace
-        self.onCancel = onCancel
-        _quantity = State(initialValue: defaultQuantity)
-        _orderType = State(initialValue: defaultOrderType)
+    init(placement: PlacementCardBinding) {
+        self.placement = placement
+        _quantity = State(initialValue: placement.defaultQuantity)
+        _orderType = State(initialValue: placement.defaultOrderType)
     }
 
+    private var request: OrderPlacementRequest { placement.request }
     private var accent: Color { side == .buy ? .buyGreen : .sellRed }
 
     /// What the field shows: the keystrokes while typing, the settled level
@@ -83,7 +82,7 @@ struct OrderPlacementCard: View {
                     .kerning(1.2)
                     .foregroundStyle(Color.appAccent)
                 Spacer()
-                Button(action: onCancel) {
+                Button(action: placement.onCancel) {
                     Image(systemName: "xmark")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(Color.secondary)
@@ -118,7 +117,7 @@ struct OrderPlacementCard: View {
                 .fixedSize(horizontal: false, vertical: true)
 
             HStack(spacing: AppSpacing.sm) {
-                cardButton("CANCEL", accent: .hudStroke, action: onCancel)
+                cardButton("CANCEL", accent: .hudStroke, action: placement.onCancel)
                 cardButton(isSubmitting ? "PLACING…" : "PLACE", accent: accent) { submit() }
                     .disabled(isSubmitting || !levelValid)
                     .opacity(isSubmitting || !levelValid ? AppOpacity.dimmedAction : 1)
@@ -149,7 +148,7 @@ struct OrderPlacementCard: View {
         guard !isSubmitting, levelValid else { return }
         isSubmitting = true
         Task {
-            await onPlace(side, quantity, orderType)
+            await placement.onPlace(side, quantity, orderType)
             isSubmitting = false
         }
     }
@@ -190,6 +189,19 @@ struct OrderPlacementCard: View {
                 .onChange(of: priceFocused) { _, focused in
                     if !focused { levelDraft = nil }
                 }
+                // `decimalPad` has no return key, and tapping the chart hits the
+                // dismiss scrim — so without this the only ways out of the
+                // keyboard are PLACE, CANCEL, or a stepper, and a keyboard
+                // covering BUY/SELL would force a cancel-and-start-over on the
+                // one field this feature exists to expose. It also settles the
+                // draft to canonical, so the level can be read back before
+                // committing to it.
+                .toolbar {
+                    ToolbarItemGroup(placement: .keyboard) {
+                        Spacer()
+                        Button("Done") { priceFocused = false }
+                    }
+                }
             stepper(
                 decrement: { stepLevel(by: -priceStep) },
                 increment: { stepLevel(by: priceStep) },
@@ -204,15 +216,24 @@ struct OrderPlacementCard: View {
             set: { raw in
                 // `decimalPad` labels its separator key from the locale, so in a
                 // comma-decimal locale the only decimal key on the keyboard
-                // produces `,`. Folding it to `.` is what makes that key work;
-                // `Double(_:)` and `Format.price` are both point-only.
-                let text = raw.replacingOccurrences(of: ",", with: ".")
+                // produces `,`, and without folding it the field would be unable
+                // to hold a decimal at all. `Double(_:)` and `Format.price` are
+                // both point-only.
+                //
+                // Conditional on the locale, not unconditional: in a
+                // period-decimal locale a comma can only be a grouping
+                // separator, and folding `1,234.56` there would silently
+                // reinterpret the user's thousands mark as a decimal point.
+                // Rejecting it — desktop's behaviour — is the honest answer.
+                let text = Self.foldsCommaToPoint
+                    ? raw.replacingOccurrences(of: ",", with: ".")
+                    : raw
                 // Shape-gated before parsing: refusing the keystroke leaves the
                 // field showing what it had, which is the same thing a numeric
                 // keypad would have done by not producing the character.
                 guard isLevelInputShape(text) else { return }
                 levelDraft = text
-                if let value = parseLevelInput(text) { onPriceChange(rounded(value)) }
+                if let value = parseLevelInput(text) { placement.onPriceChange(rounded(value)) }
             }
         )
     }
@@ -221,7 +242,7 @@ struct OrderPlacementCard: View {
     /// "I am done typing" gesture as much as blur is.
     private func stepLevel(by delta: Double) {
         levelDraft = nil
-        onPriceChange(rounded(request.price + delta))
+        placement.onPriceChange(rounded(request.price + delta))
     }
 
     private var contractLine: some View {
@@ -318,9 +339,12 @@ struct OrderPlacementCard: View {
         .buttonStyle(AppPressStyle())
     }
 
+    /// Clamped to the same bounds the level field validates against, so the
+    /// stepper cannot walk the guide past a level the field would refuse.
     private func rounded(_ value: Double) -> Double {
         guard value.isFinite else { return request.price }
-        return max(0.01, (value * 100).rounded() / 100)
+        let tick = (value * 100).rounded() / 100
+        return min(AppPlacementGuide.levelMaximum, max(AppPlacementGuide.levelMinimum, tick))
     }
 
     /// What a settled level prints as. Two places must agree on it — the field
@@ -328,4 +352,7 @@ struct OrderPlacementCard: View {
     private static func canonical(_ price: Double) -> String {
         String(format: "%.2f", price)
     }
+
+    /// Whether the decimal key on this device's `decimalPad` produces a comma.
+    private static let foldsCommaToPoint = Locale.current.decimalSeparator == ","
 }

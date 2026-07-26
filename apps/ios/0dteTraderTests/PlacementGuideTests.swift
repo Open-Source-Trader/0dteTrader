@@ -163,6 +163,15 @@ final class PlacementGuideTests: XCTestCase {
         }
     }
 
+    func testHasNoLevelAboveTheMaximum() {
+        // Desktop caps its stepper at 100000; without the same bound on the way
+        // in, a pasted twenty-digit level is finite, passes every guard, and is
+        // armable.
+        XCTAssertEqual(parseLevelInput("100000"), 100_000)
+        XCTAssertNil(parseLevelInput("100000.01"))
+        XCTAssertNil(parseLevelInput("999999999999999999999999"))
+    }
+
     func testHasNoLevelWhileTheFieldIsEmptyOrZero() {
         // Zero used to pass every guard — it is finite — and PLACE would arm a
         // chart order at a trigger price of zero.

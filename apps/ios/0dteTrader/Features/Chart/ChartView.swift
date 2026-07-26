@@ -19,13 +19,9 @@ struct ChartView: View {
     /// Whether there is a contract for a new line to trade. No contract, no
     /// placement guide: the handle would take the tap and arm nothing.
     var hasSelectedContract: Bool = false
-    /// Open placement request; nil means the guide is idle.
-    var placementRequest: OrderPlacementRequest?
-    var placementDefaultQuantity: Int = 1
-    var placementDefaultOrderType: OrderType = .mid
-    var onPlacementPriceChange: (Double) -> Void = { _ in }
-    var onPlacementPlace: (OrderSide, Int, OrderType) async -> Void = { _, _, _ in }
-    var onPlacementCancel: () -> Void = {}
+    /// The open placement card and everything done with it; nil means the
+    /// guide is idle.
+    var placement: PlacementCardBinding?
     weak var orderLineDelegate: OrderLineOverlayDelegate?
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -46,12 +42,7 @@ struct ChartView: View {
         chartTradingSettings: ChartTradingSettings = .default,
         entryLines: [EntryLineModel] = [],
         hasSelectedContract: Bool = false,
-        placementRequest: OrderPlacementRequest? = nil,
-        placementDefaultQuantity: Int = 1,
-        placementDefaultOrderType: OrderType = .mid,
-        onPlacementPriceChange: @escaping (Double) -> Void = { _ in },
-        onPlacementPlace: @escaping (OrderSide, Int, OrderType) async -> Void = { _, _, _ in },
-        onPlacementCancel: @escaping () -> Void = {},
+        placement: PlacementCardBinding? = nil,
         orderLineDelegate: OrderLineOverlayDelegate? = nil
     ) {
         _viewModel = ObservedObject(wrappedValue: viewModel)
@@ -64,12 +55,7 @@ struct ChartView: View {
         self.chartTradingSettings = chartTradingSettings
         self.entryLines = entryLines
         self.hasSelectedContract = hasSelectedContract
-        self.placementRequest = placementRequest
-        self.placementDefaultQuantity = placementDefaultQuantity
-        self.placementDefaultOrderType = placementDefaultOrderType
-        self.onPlacementPriceChange = onPlacementPriceChange
-        self.onPlacementPlace = onPlacementPlace
-        self.onPlacementCancel = onPlacementCancel
+        self.placement = placement
         self.orderLineDelegate = orderLineDelegate
     }
 
@@ -98,25 +84,18 @@ struct ChartView: View {
                     chartTradingSettings: chartTradingSettings,
                     entryLines: entryLines,
                     hasSelectedContract: hasSelectedContract,
-                    placementPrice: placementRequest?.price,
+                    placementPrice: placement?.request.price,
                     lastPrice: viewModel.candles.last?.close,
                     orderLineDelegate: orderLineDelegate,
                     resetToken: chartResetToken
                 )
-                if let request = placementRequest {
+                if let placement {
                     // Tap-away dismiss, matching the desktop window: this must
                     // never be the thing standing between you and your chart.
                     Color.black.opacity(0.001)
                         .contentShape(Rectangle())
-                        .onTapGesture(perform: onPlacementCancel)
-                    OrderPlacementCard(
-                        request: request,
-                        defaultQuantity: placementDefaultQuantity,
-                        defaultOrderType: placementDefaultOrderType,
-                        onPriceChange: onPlacementPriceChange,
-                        onPlace: onPlacementPlace,
-                        onCancel: onPlacementCancel
-                    )
+                        .onTapGesture(perform: placement.onCancel)
+                    OrderPlacementCard(placement: placement)
                     // Centred vertically rather than anchored to the guide: on a
                     // short pane a line-anchored card clips against the top edge,
                     // and a window that half-disappears is worse than one that is

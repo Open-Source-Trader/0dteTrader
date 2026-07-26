@@ -58,11 +58,58 @@ struct CandleChartRepresentable: UIViewRepresentable {
     /// glyph it draws. Same treatment the quote readout uses over the same
     /// candles, and it costs no opaque plate.
     final class ShadowedYAxisRenderer: YAxisRenderer {
+        /// The x-axis whose labels float along the bottom of the same plot.
+        weak var timeAxis: XAxis?
+
         override func renderAxisLabels(context: CGContext) {
             context.saveGState()
             context.setShadow(offset: .zero, blur: ChartMetrics.axisLabelShadowBlur, color: UIColor.black.cgColor)
             super.renderAxisLabels(context: context)
             context.restoreGState()
+        }
+
+        /// Both scales print inside the plot, so the bottom-left corner is
+        /// claimed twice: the lowest price label and the leftmost time label
+        /// were drawing over each other ("738.0" through "15:20").
+        ///
+        /// The price label yields, because the time strip's position is fixed
+        /// while the price scale's is not — the levels move under every tick,
+        /// so insetting the strip to clear them would mean insetting it by the
+        /// worst case forever. Only the label goes; its grid line stays, so the
+        /// level is still legible from its neighbours.
+        ///
+        /// Conditionally, via the axis's own `drawBottomYLabelEntryEnabled`
+        /// rather than by reimplementing the label loop: the bottom entry can
+        /// sit a long way up the plot, and dropping it unconditionally would
+        /// cost a reading that was never in the way.
+        override func drawYLabels(
+            context: CGContext,
+            fixedPosition: CGFloat,
+            positions: [CGPoint],
+            offset: CGFloat,
+            // Spelled out: DGCharts' `TextAlignment` is an alias for this, and
+            // SwiftUI's same-named enum is also in scope in this file.
+            textAlign: NSTextAlignment
+        ) {
+            let wasEnabled = axis.drawBottomYLabelEntryEnabled
+            defer { axis.drawBottomYLabelEntryEnabled = wasEnabled }
+            // `positions` runs in entry order, and entries ascend in value —
+            // so the first is the lowest price, the one nearest the strip.
+            if let timeAxis, let lowest = positions.first {
+                let stripTop = viewPortHandler.contentBottom
+                    - timeAxis.yOffset
+                    - timeAxis.labelRotatedHeight
+                if lowest.y + offset + axis.labelFont.lineHeight > stripTop {
+                    axis.drawBottomYLabelEntryEnabled = false
+                }
+            }
+            super.drawYLabels(
+                context: context,
+                fixedPosition: fixedPosition,
+                positions: positions,
+                offset: offset,
+                textAlign: textAlign
+            )
         }
     }
 
@@ -261,11 +308,15 @@ extension CandleChartRepresentable {
         // inside edge of an axis strip. `needsOffset` is false for both inside
         // positions, which is what actually gives the space back; what is left
         // is `minOffset`, an even 10pt on all four sides.
-        chart.leftYAxisRenderer = ShadowedYAxisRenderer(
+        let priceAxisRenderer = ShadowedYAxisRenderer(
             viewPortHandler: chart.viewPortHandler,
             axis: chart.leftAxis,
             transformer: chart.getTransformer(forAxis: .left)
         )
+        // So the price scale knows where the time strip starts and can stand
+        // its lowest label down when the two want the same corner.
+        priceAxisRenderer.timeAxis = chart.xAxis
+        chart.leftYAxisRenderer = priceAxisRenderer
         chart.xAxisRenderer = ShadowedXAxisRenderer(
             viewPortHandler: chart.viewPortHandler,
             axis: chart.xAxis,

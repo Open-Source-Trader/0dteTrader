@@ -16,9 +16,14 @@ struct TradeScreenView: View {
     @StateObject private var chartOrdersModel: ChartOrdersModel
     @StateObject private var chartTrading: ChartTradingCoordinator
 
+    /// The screen's one anchored-popup slot. Owned here because every chip
+    /// that opens one — the ticker and interval on the chart, the expiration
+    /// and strike in the panel — sits inside something that clips, and the slot
+    /// has to be declared above all of them.
+    @StateObject private var hudMenus = HudMenuController()
+
     @State private var layout: TradeLayout
     @State private var tradingLocked: Bool
-    @State private var showSymbolSearch = false
     @State private var showIndicatorSettings = false
     @State private var showProfile = false
     @State private var showHistory = false
@@ -73,6 +78,9 @@ struct TradeScreenView: View {
                 // would keep reserving 44pt of the chart's height.
                 .toolbar(.hidden, for: .navigationBar)
         }
+        // Last, so the popups draw over the chart, the panel and the toasts,
+        // and nothing above them clips.
+        .hudMenuHost(hudMenus)
         .modifier(
             OptionsAnalyticsLifecycleModifier(
                 viewModel: chartViewModel,
@@ -114,13 +122,6 @@ struct TradeScreenView: View {
                 "Removes the \(order.kind.shortLabel) line at \(Format.price(order.triggerPrice)). "
                     + "Nothing was sent to the broker."
             )
-        }
-        .sheet(isPresented: $showSymbolSearch) {
-            SymbolSearchView(currentSymbol: chartViewModel.symbol) { symbol in
-                chartViewModel.selectSymbol(symbol)
-            }
-            .presentationDetents([.medium, .large])
-            .presentationDragIndicator(.visible)
         }
         .sheet(isPresented: $showIndicatorSettings) {
             IndicatorSettingsView(
@@ -409,7 +410,7 @@ struct TradeScreenView: View {
     private var chartView: some View {
         ChartView(
             viewModel: chartViewModel,
-            onSymbolSearch: { showSymbolSearch = true },
+            onSelectSymbol: { chartViewModel.selectSymbol($0) },
             onIndicatorSettings: { showIndicatorSettings = true },
             onShowProfile: { showProfile = true },
             onShowHistory: { showHistory = true },

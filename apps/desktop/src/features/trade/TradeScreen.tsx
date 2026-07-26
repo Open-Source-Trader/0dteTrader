@@ -18,7 +18,6 @@ import { ChartView } from '../chart/ChartView';
 import { kindLabel } from '../chart/chartOrders';
 import { IndicatorSettingsView } from '../chart/IndicatorSettingsView';
 import { TwcSettingsView } from '../chart/TwcSettingsView';
-import { SymbolSearchView } from '../chart/SymbolSearchView';
 import { ProfileView } from '../profile/ProfileView';
 import { FloatingTradeButtons } from './FloatingTradeButtons';
 import { HistoryView } from './HistoryView';
@@ -56,7 +55,6 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
 
   const [layout, setLayout] = useState<TradeLayout>(() => settingsStore.layoutMode);
   const [locked, setLocked] = useState(() => settingsStore.tradingLocked);
-  const [showSymbolSearch, setShowSymbolSearch] = useState(false);
   const [showIndicatorSettings, setShowIndicatorSettings] = useState(false);
   const [showTwcSettings, setShowTwcSettings] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
@@ -365,7 +363,7 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
               store={chartStore}
               drawingsStore={drawingsStore}
               apiClient={apiClient}
-              onSymbolSearch={() => setShowSymbolSearch(true)}
+              onSelectSymbol={(symbol) => chartStore.selectSymbol(symbol)}
               onIndicatorSettings={() => setShowIndicatorSettings(true)}
               onShowProfile={() => setShowProfile(true)}
               onShowHistory={() => setShowHistory(true)}
@@ -422,7 +420,7 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
                 store={chartStore}
                 drawingsStore={drawingsStore}
                 apiClient={apiClient}
-                onSymbolSearch={() => setShowSymbolSearch(true)}
+                onSelectSymbol={(symbol) => chartStore.selectSymbol(symbol)}
                 onIndicatorSettings={() => setShowIndicatorSettings(true)}
                 onShowProfile={() => setShowProfile(true)}
                 onShowHistory={() => setShowHistory(true)}
@@ -471,13 +469,6 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
       {/* Sheets */}
       {trade.armedTicket ? (
         <OrderConfirmSheet tradeStore={tradeStore} ticket={trade.armedTicket} />
-      ) : null}
-      {showSymbolSearch ? (
-        <SymbolSearchView
-          currentSymbol={chart.symbol}
-          onSelect={(symbol) => chartStore.selectSymbol(symbol)}
-          onDismiss={() => setShowSymbolSearch(false)}
-        />
       ) : null}
       {showIndicatorSettings ? (
         <IndicatorSettingsView

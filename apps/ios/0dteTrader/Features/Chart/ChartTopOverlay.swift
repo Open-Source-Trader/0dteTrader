@@ -120,6 +120,9 @@ extension View {
                             .strokeBorder(Color.hudStroke.opacity(strokeOpacity), lineWidth: lineWidth)
                     }
             }
+            // This box, not the 44pt target wrapped around it below, is what a
+            // popup opened from this chip hangs from.
+            .hudMenuAnchorSource()
     }
 
     /// Grows a chip's touch target to the 44pt minimum without growing the chip.
@@ -148,26 +151,42 @@ extension View {
 /// of the row match. The 44pt target the old 36pt box gave it is kept as hit
 /// area rather than as height; nothing about the control that changes what you
 /// are trading gets harder to hit.
+///
+/// The picker was a half-height sheet and is a dropdown now, opening under this
+/// chip like the interval menu beside it. It keeps everything the sheet had —
+/// the search field, the curated sections, the recents, arbitrary tickers — so
+/// it is the one popup that does not size to its widest row: a search field a
+/// strike-list wide is a search field you cannot read your own query in.
 struct ChartSymbolButton: View {
     let symbol: String
-    let action: () -> Void
+    let onSelect: (String) -> Void
 
     var body: some View {
-        Button {
-            Haptics.selection()
-            action()
-        } label: {
-            HStack(spacing: AppSpacing.xs) {
-                Text(symbol)
-                    .font(ChartChip.font)
-                Image(systemName: "chevron.down")
-                    .font(.system(size: 8, weight: .bold))
-                    .foregroundStyle(Color.appAccent)
+        HudMenuTrigger(
+            id: "chart.symbol",
+            edge: .leading,
+            content: { dismiss in
+                AnyView(
+                    SymbolSearchView(
+                        currentSymbol: symbol,
+                        onSelect: onSelect,
+                        onDismiss: dismiss
+                    )
+                )
+            },
+            label: {
+                HStack(spacing: AppSpacing.xs) {
+                    Text(symbol)
+                        .font(ChartChip.font)
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 8, weight: .bold))
+                        .foregroundStyle(Color.appAccent)
+                }
+                .foregroundStyle(.primary)
+                .chartChipChrome(strokeOpacity: 0.6, lineWidth: 1.2)
+                .chartChipTouchTarget()
             }
-            .foregroundStyle(.primary)
-            .chartChipChrome(strokeOpacity: 0.6, lineWidth: 1.2)
-            .chartChipTouchTarget()
-        }
+        )
         .accessibilityLabel("Change symbol")
         .accessibilityValue(symbol)
     }
@@ -183,9 +202,13 @@ struct ChartIntervalMenu: View {
 
     var body: some View {
         HudMenu(
+            id: "chart.interval",
             options: AnyChartInterval.allCases.map { HudMenuOption($0, $0.rawValue.uppercased()) },
             selection: interval,
-            onSelect: onSelect
+            onSelect: onSelect,
+            // Leading: the chip is at the pane's leading corner, and the popup
+            // lines up under the column it came out of.
+            edge: .leading
         ) {
             Text(interval.rawValue.uppercased())
                 .font(ChartChip.font)
@@ -230,6 +253,7 @@ struct ChartDrawingToolsMenu: View {
 
     var body: some View {
         HudMenu(
+            id: "chart.drawingTools",
             options: DrawingTool.allCases.map {
                 HudMenuOption($0, $0.title, systemImage: $0.systemImage)
             },
@@ -247,6 +271,9 @@ struct ChartDrawingToolsMenu: View {
                     }
                 )
                 : nil,
+            // Trailing: this chip lives on the pane's trailing corner, so its
+            // popup comes down that side rather than crossing the chart.
+            edge: .trailing,
             label: {
                 let glyph = drawings.tool == .cursor ? "pencil.and.outline" : drawings.tool.systemImage
                 Image(systemName: glyph)

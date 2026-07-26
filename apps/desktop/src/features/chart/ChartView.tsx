@@ -2,7 +2,8 @@ import { useEffect, useMemo } from 'react';
 import type { ChartInterval, TradingMode } from '@0dtetrader/shared-types';
 import type { ApiClient } from '../../core/api/ApiClient';
 import { useStore } from '../../core/observable';
-import { Menu } from '../../design/components/Menu';
+import { AnchoredPopup, Menu } from '../../design/components/Menu';
+import { SymbolSearchView } from './SymbolSearchView';
 import { Spinner } from '../../design/components/Spinner';
 import { Format } from '../../design/format';
 import { ChevronDownIcon, ClockIcon, PersonCircleIcon, SlidersIcon } from '../../design/icons';
@@ -26,7 +27,9 @@ interface ChartViewProps {
   store: ChartStore;
   drawingsStore: DrawingsStore;
   apiClient: ApiClient;
-  onSymbolSearch: () => void;
+  /** Picks a new symbol. The picker is a dropdown under the ticker chip now,
+   *  so the chip owns the popup and the screen only receives the choice. */
+  onSelectSymbol: (symbol: string) => void;
   onIndicatorSettings: () => void;
   /** The two account destinations; this header replaced the navigation bar. */
   onShowProfile: () => void;
@@ -75,7 +78,7 @@ export function ChartView({
   store,
   drawingsStore,
   apiClient,
-  onSymbolSearch,
+  onSelectSymbol,
   onIndicatorSettings,
   onShowProfile,
   onShowHistory,
@@ -383,18 +386,35 @@ export function ChartView({
             }}
           >
             <div style={{ display: 'flex', alignItems: 'flex-start', gap: 4 }}>
-              <button
-                className="chart-chip"
-                style={{ pointerEvents: 'auto' }}
-                onClick={onSymbolSearch}
-                aria-label={`Symbol ${symbol}. Change symbol`}
+              <AnchoredPopup
+                edge="leading"
+                trigger={
+                  <button
+                    className="chart-chip"
+                    style={{ pointerEvents: 'auto' }}
+                    aria-label={`Symbol ${symbol}. Change symbol`}
+                    aria-haspopup="dialog"
+                  >
+                    {symbol}
+                    <span
+                      aria-hidden="true"
+                      style={{ display: 'flex', color: 'var(--app-accent)' }}
+                    >
+                      <ChevronDownIcon size={10} />
+                    </span>
+                  </button>
+                }
               >
-                {symbol}
-                <span aria-hidden="true" style={{ display: 'flex', color: 'var(--app-accent)' }}>
-                  <ChevronDownIcon size={10} />
-                </span>
-              </button>
+                {(close) => (
+                  <SymbolSearchView
+                    currentSymbol={symbol}
+                    onSelect={onSelectSymbol}
+                    onDismiss={close}
+                  />
+                )}
+              </AnchoredPopup>
               <Menu
+                edge="leading"
                 trigger={
                   <button
                     className="chart-chip"

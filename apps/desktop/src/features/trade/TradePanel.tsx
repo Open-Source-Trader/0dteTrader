@@ -37,10 +37,19 @@ interface TradePanelProps {
   onToggleLock?: () => void;
 }
 
+/**
+ * `firstGap` is the space above the panel's first control row, and it is
+ * deliberately not `gap`. Together with the top half of `padding` it is the
+ * whole distance from the chart card's bottom border to the lock chip — a seam
+ * between two surfaces, which was reading as a gulf — while `gap` also sets
+ * every space *between* the panel's own rows and the pad above SELL/BUY, none
+ * of which the chart is anywhere near. Both terms are halved; the bottom pad is
+ * untouched, since it separates the buttons from the home indicator.
+ */
 const DENSITY = {
-  roomy: { gap: 8, padding: '8px 16px 12px', stripMaxHeight: 140 },
-  compact: { gap: 6, padding: '6px 16px 8px', stripMaxHeight: 100 },
-  dense: { gap: 4, padding: '4px 16px 4px', stripMaxHeight: 64 },
+  roomy: { gap: 8, firstGap: 4, padding: '4px 16px 12px', stripMaxHeight: 140 },
+  compact: { gap: 6, firstGap: 3, padding: '3px 16px 8px', stripMaxHeight: 100 },
+  dense: { gap: 4, firstGap: 2, padding: '2px 16px 4px', stripMaxHeight: 64 },
 } as const;
 
 function expirationLabel(expiration: string): string {
@@ -131,7 +140,7 @@ export function TradePanel({
       style={{
         display: 'flex',
         flexDirection: 'column',
-        gap: d.gap,
+        gap: 0,
         padding: d.padding,
         background: 'var(--app-background)',
         height: '100%',
@@ -151,190 +160,214 @@ export function TradePanel({
         locked={locked}
       />
 
-      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-        {/* The lock leads the row, ahead of the controls it disables, and stays
+      {/* Everything below the strip in one stack, so the gap above the first
+          control can differ from the gaps between the rows under it. With no
+          open positions the strip is zero-height, which makes that first gap
+          the last leg of the run down from the chart card's bottom border. */}
+      <div
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          gap: d.gap,
+          marginTop: d.firstGap,
+          flex: 1,
+          minHeight: 0,
+        }}
+      >
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          {/* The lock leads the row, ahead of the controls it disables, and stays
             outside the inert wrapper: a control that disables itself cannot be
             used to undo the lock. */}
-        <button
-          className={
-            locked
-              ? 'hud-toggle-chip hud-toggle-chip--lock on'
-              : 'hud-toggle-chip hud-toggle-chip--lock'
-          }
-          onClick={onToggleLock}
-          aria-label={locked ? 'Unlock trading' : 'Lock trading'}
-          aria-pressed={locked}
-        >
-          {/* Icon only: an open or closed padlock is not ambiguous, and the
+          <button
+            className={
+              locked
+                ? 'hud-toggle-chip hud-toggle-chip--lock on'
+                : 'hud-toggle-chip hud-toggle-chip--lock'
+            }
+            onClick={onToggleLock}
+            aria-label={locked ? 'Unlock trading' : 'Lock trading'}
+            aria-pressed={locked}
+          >
+            {/* Icon only: an open or closed padlock is not ambiguous, and the
               aria-label above carries the meaning for anyone it is. */}
-          {locked ? <LockIcon size={13} /> : <LockOpenIcon size={13} />}
-        </button>
+            {locked ? <LockIcon size={13} /> : <LockOpenIcon size={13} />}
+          </button>
+          <div
+            inert={locked}
+            style={{ display: 'flex', gap: 8, alignItems: 'center', opacity: locked ? 0.55 : 1 }}
+          >
+            <SegmentedControl
+              options={[
+                { value: 'call', label: 'Call' },
+                { value: 'put', label: 'Put' },
+              ]}
+              value={chain.optionType}
+              onChange={(value) => chainStore.setOptionType(value)}
+            />
+            <button
+              className={chain.isAutoMode ? 'hud-toggle-chip on' : 'hud-toggle-chip'}
+              onClick={() => chainStore.setAutoMode(!chain.isAutoMode)}
+              aria-label="Auto +1 OTM selection"
+              aria-pressed={chain.isAutoMode}
+            >
+              {chain.isAutoMode ? <CheckmarkIcon size={11} /> : null}
+              AUTO
+            </button>
+          </div>
+        </div>
+
         <div
           inert={locked}
-          style={{ display: 'flex', gap: 8, alignItems: 'center', opacity: locked ? 0.55 : 1 }}
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            gap: d.gap,
+            opacity: locked ? 0.55 : 1,
+          }}
         >
-          <SegmentedControl
-            options={[
-              { value: 'call', label: 'Call' },
-              { value: 'put', label: 'Put' },
-            ]}
-            value={chain.optionType}
-            onChange={(value) => chainStore.setOptionType(value)}
-          />
-          <button
-            className={chain.isAutoMode ? 'hud-toggle-chip on' : 'hud-toggle-chip'}
-            onClick={() => chainStore.setAutoMode(!chain.isAutoMode)}
-            aria-label="Auto +1 OTM selection"
-            aria-pressed={chain.isAutoMode}
-          >
-            {chain.isAutoMode ? <CheckmarkIcon size={11} /> : null}
-            AUTO
-          </button>
-        </div>
-      </div>
-
-      <div
-        inert={locked}
-        style={{ display: 'flex', flexDirection: 'column', gap: d.gap, opacity: locked ? 0.55 : 1 }}
-      >
-        <div style={{ display: 'flex', gap: 8 }}>
-          <Menu
-            className="chip-flex"
-            direction="up"
-            trigger={
-              <button className="chip-button">
-                <CalendarIcon size={13} />
-                <span className="chip-title">
-                  {chain.selectedExpiration
-                    ? expirationLabel(chain.selectedExpiration)
-                    : 'Expiration'}
-                </span>
-              </button>
-            }
-            items={chainStore.expirations.map((expiration) => ({
-              key: expiration,
-              label: expirationLabel(expiration),
-              checked: expiration === chain.selectedExpiration,
-              onSelect: () => chainStore.selectExpiration(expiration),
-            }))}
-          />
-
-          {chain.isAutoMode ? (
-            <div
-              style={{
-                flex: 1,
-                minWidth: 0,
-                minHeight: 36,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: 8,
-                padding: '0 10px',
-                background: 'var(--app-surface)',
-                border: chain.errorMessage
-                  ? '1px solid var(--sell-red)'
-                  : '1px solid var(--hud-stroke-dim)',
-                boxShadow: chain.errorMessage ? '0 0 8px rgba(255, 59, 78, 0.35)' : undefined,
-                borderRadius: 'var(--radius-chip)',
-              }}
-            >
-              {autoModeContent}
-            </div>
-          ) : (
+          <div style={{ display: 'flex', gap: 8 }}>
             <Menu
               className="chip-flex"
               direction="up"
+              edge="leading"
               trigger={
                 <button className="chip-button">
-                  <ChartLineIcon size={13} />
+                  <CalendarIcon size={13} />
                   <span className="chip-title">
-                    {chain.selectedStrike !== null ? Format.strike(chain.selectedStrike) : 'Strike'}
+                    {chain.selectedExpiration
+                      ? expirationLabel(chain.selectedExpiration)
+                      : 'Expiration'}
                   </span>
                 </button>
               }
-              items={chainStore.strikes.map((strike) => ({
-                key: String(strike),
-                label: Format.strike(strike),
-                checked: strike === chain.selectedStrike,
-                onSelect: () => chainStore.selectStrike(strike),
+              items={chainStore.expirations.map((expiration) => ({
+                key: expiration,
+                label: expirationLabel(expiration),
+                checked: expiration === chain.selectedExpiration,
+                onSelect: () => chainStore.selectExpiration(expiration),
               }))}
             />
-          )}
+
+            {chain.isAutoMode ? (
+              <div
+                style={{
+                  flex: 1,
+                  minWidth: 0,
+                  minHeight: 36,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 8,
+                  padding: '0 10px',
+                  background: 'var(--app-surface)',
+                  border: chain.errorMessage
+                    ? '1px solid var(--sell-red)'
+                    : '1px solid var(--hud-stroke-dim)',
+                  boxShadow: chain.errorMessage ? '0 0 8px rgba(255, 59, 78, 0.35)' : undefined,
+                  borderRadius: 'var(--radius-chip)',
+                }}
+              >
+                {autoModeContent}
+              </div>
+            ) : (
+              <Menu
+                className="chip-flex"
+                direction="up"
+                edge="trailing"
+                trigger={
+                  <button className="chip-button">
+                    <ChartLineIcon size={13} />
+                    <span className="chip-title">
+                      {chain.selectedStrike !== null
+                        ? Format.strike(chain.selectedStrike)
+                        : 'Strike'}
+                    </span>
+                  </button>
+                }
+                items={chainStore.strikes.map((strike) => ({
+                  key: String(strike),
+                  label: Format.strike(strike),
+                  checked: strike === chain.selectedStrike,
+                  onSelect: () => chainStore.selectStrike(strike),
+                }))}
+              />
+            )}
+          </div>
         </div>
-      </div>
 
-      {/* Quantity row */}
-      <div
-        inert={locked}
-        style={{ display: 'flex', alignItems: 'center', gap: 8, opacity: locked ? 0.55 : 1 }}
-      >
-        <span className="text-secondary" style={{ fontSize: 'var(--fs-subheadline)' }}>
-          Qty
-        </span>
-        <Stepper
-          value={trade.quantity}
-          min={1}
-          max={1000}
-          onChange={(value) => tradeStore.setQuantity(value)}
-        />
-        <span
-          style={{
-            fontFamily: 'var(--font-mono)',
-            fontSize: 'var(--fs-body)',
-            fontWeight: 500,
-            minWidth: 40,
-            textAlign: 'center',
-            textShadow: '0 0 8px var(--hud-glow)',
-          }}
+        {/* Quantity row */}
+        <div
+          inert={locked}
+          style={{ display: 'flex', alignItems: 'center', gap: 8, opacity: locked ? 0.55 : 1 }}
         >
-          {trade.quantity}
-        </span>
-        <span style={{ flex: 1 }} />
-        <QuickChip title="+5" onClick={() => tradeStore.addQuantity(5)} />
-        <QuickChip title="+10" onClick={() => tradeStore.addQuantity(10)} />
-      </div>
+          <span className="text-secondary" style={{ fontSize: 'var(--fs-subheadline)' }}>
+            Qty
+          </span>
+          <Stepper
+            value={trade.quantity}
+            min={1}
+            max={1000}
+            onChange={(value) => tradeStore.setQuantity(value)}
+          />
+          <span
+            style={{
+              fontFamily: 'var(--font-mono)',
+              fontSize: 'var(--fs-body)',
+              fontWeight: 500,
+              minWidth: 40,
+              textAlign: 'center',
+              textShadow: '0 0 8px var(--hud-glow)',
+            }}
+          >
+            {trade.quantity}
+          </span>
+          <span style={{ flex: 1 }} />
+          <QuickChip title="+5" onClick={() => tradeStore.addQuantity(5)} />
+          <QuickChip title="+10" onClick={() => tradeStore.addQuantity(10)} />
+        </div>
 
-      {/* Order type row */}
-      <div
-        inert={locked}
-        style={{ display: 'flex', alignItems: 'center', gap: 8, opacity: locked ? 0.55 : 1 }}
-      >
-        <SegmentedControl
-          options={[
-            { value: 'mid', label: 'Mid' },
-            { value: 'market', label: 'Market' },
-          ]}
-          value={trade.orderType}
-          onChange={(value) => tradeStore.setOrderType(value)}
-        />
-        <span
-          className="text-secondary numeric"
-          style={{
-            fontSize: 'var(--fs-caption)',
-            flex: 'none',
-            minWidth: 96,
-            textAlign: 'right',
-            visibility: selectedQuote ? 'visible' : 'hidden',
-          }}
+        {/* Order type row */}
+        <div
+          inert={locked}
+          style={{ display: 'flex', alignItems: 'center', gap: 8, opacity: locked ? 0.55 : 1 }}
         >
-          {orderTypeQuoteLabel}
-        </span>
-      </div>
+          <SegmentedControl
+            options={[
+              { value: 'mid', label: 'Mid' },
+              { value: 'market', label: 'Market' },
+            ]}
+            value={trade.orderType}
+            onChange={(value) => tradeStore.setOrderType(value)}
+          />
+          <span
+            className="text-secondary numeric"
+            style={{
+              fontSize: 'var(--fs-caption)',
+              flex: 'none',
+              minWidth: 96,
+              textAlign: 'right',
+              visibility: selectedQuote ? 'visible' : 'hidden',
+            }}
+          >
+            {orderTypeQuoteLabel}
+          </span>
+        </div>
 
-      {/* Action row — pinned to the panel's bottom edge */}
-      <div style={{ display: 'flex', gap: 8, marginTop: 'auto' }}>
-        <TradeActionButton
-          title="SELL"
-          color="var(--sell-red)"
-          isEnabled={canTrade}
-          onClick={() => onArm('sell')}
-        />
-        <TradeActionButton
-          title="BUY"
-          color="var(--buy-green)"
-          isEnabled={canTrade}
-          onClick={() => onArm('buy')}
-        />
+        {/* Action row — pinned to the panel's bottom edge */}
+        <div style={{ display: 'flex', gap: 8, marginTop: 'auto' }}>
+          <TradeActionButton
+            title="SELL"
+            color="var(--sell-red)"
+            isEnabled={canTrade}
+            onClick={() => onArm('sell')}
+          />
+          <TradeActionButton
+            title="BUY"
+            color="var(--buy-green)"
+            isEnabled={canTrade}
+            onClick={() => onArm('buy')}
+          />
+        </div>
       </div>
     </div>
   );

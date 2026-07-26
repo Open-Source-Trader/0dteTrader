@@ -13,6 +13,17 @@ import SwiftUI
 ///
 /// PRACTICE is the longer word, so the chip is laid out trailing-aligned: both
 /// labels end on the same pixel.
+///
+/// It stands as tall as the two buttons at the other end of the strip. Nothing
+/// about it was ever clipped — the chip measures exactly the 22pt its type and
+/// padding ask for, and its centre already sat on the profile glyph's — but a
+/// 22pt box between two 36pt-framed buttons reads as cramped, and 11pt Orbitron
+/// caps fill 8.3pt of that 22pt. The height goes to internal breathing room;
+/// the type is unchanged.
+///
+/// `minHeight`, not `height`: a hard frame is exactly what *would* sever the
+/// glyphs at the top of the Dynamic Type range. The header caps at XXXL, where
+/// the line box is still under 36pt, so in practice this is 36pt flat.
 struct TradingModeBadge: View {
     let mode: TradingMode
     let action: () -> Void
@@ -27,7 +38,7 @@ struct TradingModeBadge: View {
                 .kerning(1)
                 .foregroundStyle(mode == .live ? Color.buyGreen : Color.hudAmber)
                 .padding(.horizontal, AppSpacing.sm)
-                .padding(.vertical, AppSpacing.xs)
+                .frame(minHeight: ChartHeader.controlHeight)
                 .background {
                     HudPanelShape(chamfer: 5)
                         // Opaque behind the chip, the way it was over candles:

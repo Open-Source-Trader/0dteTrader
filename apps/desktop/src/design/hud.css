@@ -57,14 +57,25 @@
     0 0 18px var(--hud-glow);
 }
 
-/* Mode badge (PRACTICE amber / LIVE green). */
+/* Mode badge (PRACTICE amber / LIVE green).
+
+   As tall as the header's icon buttons rather than shrink-wrapped to its type.
+   Nothing about it was clipped — it measured exactly the 22px its type and
+   padding asked for — but a 22px chip between two 36px controls reads as
+   cramped, and display caps fill most of that 22px. The height is breathing
+   room; the type is unchanged. 36px matches the iOS badge exactly, so the two
+   apps keep the same header. */
 .hud-badge {
   font-family: var(--font-display);
   font-weight: 700;
   font-size: var(--fs-caption2);
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  padding: 3px 8px 2px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 36px;
+  padding: 0 8px;
   color: var(--hud-amber);
   border: 1px solid currentColor;
   background: var(--hud-panel-fill);

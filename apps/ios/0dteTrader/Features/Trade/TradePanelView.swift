@@ -14,13 +14,25 @@ enum TradePanelDensity: Sendable {
         }
     }
 
+    /// The panel's own inset. The top half is deliberately half the bottom: it
+    /// is one of the two terms in the distance from the chart's bottom border
+    /// to the panel's first control, and that distance was reading as a gulf.
+    /// The bottom is unchanged — it sits under SELL/BUY, where the space is
+    /// separating the buttons from the home indicator rather than joining two
+    /// surfaces.
     var verticalPadding: EdgeInsets {
         switch self {
-        case .roomy: return EdgeInsets(top: AppSpacing.sm, leading: 0, bottom: AppSpacing.sm, trailing: 0)
-        case .compact: return EdgeInsets(top: 6, leading: 0, bottom: 8, trailing: 0)
-        case .dense: return EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0)
+        case .roomy: return EdgeInsets(top: AppSpacing.xs, leading: 0, bottom: AppSpacing.sm, trailing: 0)
+        case .compact: return EdgeInsets(top: 3, leading: 0, bottom: 8, trailing: 0)
+        case .dense: return EdgeInsets(top: 2, leading: 0, bottom: 4, trailing: 0)
         }
     }
+
+    /// Gap above the panel's first control row — the other term in that same
+    /// distance, and the reason halving `spacing` outright was the wrong knob:
+    /// `spacing` also sets every gap *between* the panel's rows and the pad
+    /// above SELL/BUY, none of which the chart is anywhere near.
+    var firstRowSpacing: CGFloat { (spacing / 2).rounded() }
 
     var stripMaxHeight: CGFloat {
         switch self {
@@ -118,19 +130,39 @@ struct TradePanelView: View {
     var body: some View {
         VStack(spacing: 0) {
             // Upper content: clips if it exceeds available space (never scrolls).
-            VStack(spacing: density.spacing) {
+            //
+            // Split into two stacks rather than one so the gap above the first
+            // control can differ from the gaps between the rows below it. With
+            // no open positions the strip is zero-height, which makes that first
+            // gap the last leg of the run from the chart's bottom border to the
+            // lock chip — a seam between two surfaces, not a row separator.
+            VStack(spacing: 0) {
                 positionsStrip
                     .frame(maxHeight: density.stripMaxHeight)
-                // `optionsSection` dims itself piecewise: the lock chip rides in
-                // its top row and must stay live, since a control that disables
-                // itself cannot be used to undo the lock.
-                optionsSection
-                Group {
-                    quantityRow
-                    orderTypeRow
+                    // Pinned to its own height, and this is load-bearing. The
+                    // stack above it takes every point the panel has left over
+                    // so SELL/BUY stay on the floor, and SwiftUI hands that
+                    // slack to whichever child can grow — `maxHeight` alone
+                    // says this one can, by up to 140pt. With no open positions
+                    // the strip is empty, so it was quietly inflating to
+                    // whatever was going spare and pushing the first control
+                    // row down by that much. Every point trimmed from the two
+                    // paddings above went straight back into the strip, which
+                    // is why the gap would not close.
+                    .fixedSize(horizontal: false, vertical: true)
+                VStack(spacing: density.spacing) {
+                    // `optionsSection` dims itself piecewise: the lock chip rides
+                    // in its top row and must stay live, since a control that
+                    // disables itself cannot be used to undo the lock.
+                    optionsSection
+                    Group {
+                        quantityRow
+                        orderTypeRow
+                    }
+                    .disabled(tradingLocked)
+                    .opacity(tradingLocked ? 0.55 : 1)
                 }
-                .disabled(tradingLocked)
-                .opacity(tradingLocked ? 0.55 : 1)
+                .padding(.top, density.firstRowSpacing)
             }
             .frame(maxHeight: .infinity, alignment: .top)
             .clipped()
@@ -228,9 +260,13 @@ struct TradePanelView: View {
 
     private var expirationMenu: some View {
         HudMenu(
+            id: "panel.expiration",
             options: chainViewModel.expirations.map { HudMenuOption($0, expirationLabel($0)) },
             selection: chainViewModel.selectedExpiration,
             onSelect: { chainViewModel.selectExpiration($0) },
+            // The two chips split this row, and each popup comes down the side
+            // of the screen its chip sits on.
+            edge: .leading,
             label: {
                 chipLabel(
                     title: chainViewModel.selectedExpiration.map(expirationLabel) ?? "Expiration",
@@ -257,9 +293,11 @@ struct TradePanelView: View {
     /// strike list long enough to scroll could not be scrolled.
     private var strikeMenu: some View {
         HudMenu(
+            id: "panel.strike",
             options: chainViewModel.strikes.map { HudMenuOption($0, Format.strike($0)) },
             selection: chainViewModel.selectedStrike,
             onSelect: { chainViewModel.selectStrike($0) },
+            edge: .trailing,
             label: {
                 chipLabel(
                     title: chainViewModel.selectedStrike.map(Format.strike) ?? "Strike",
@@ -480,5 +518,7 @@ struct TradePanelView: View {
                         .strokeBorder(Color.hudStroke.opacity(0.35), lineWidth: 1)
                 }
         }
+        // The box a popup opened from this chip hangs from.
+        .hudMenuAnchorSource()
     }
 }

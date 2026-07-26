@@ -16,6 +16,13 @@ const PRICE_TICKS = 6;
 const TIME_TICKS = 6;
 /** Gap between a label and the border it sits against. */
 const LABEL_INSET = 6;
+/** Cap height of a label, at the 11px face both scales are drawn in. */
+const LABEL_HEIGHT = 11;
+/**
+ * Baseline offset that lifts a price label clear of its own grid line, so the
+ * digits sit on the line rather than through it.
+ */
+const PRICE_LABEL_LIFT = 4;
 
 /**
  * The price and time scales, drawn over the candles instead of in gutters of
@@ -63,6 +70,14 @@ export function FloatingAxes({ chart, series, candles, interval }: FloatingAxesP
       // ── Price levels ──
       const top = series.coordinateToPrice(0);
       const bottom = series.coordinateToPrice(pane.height);
+      // Both scales print inside the plot, so the bottom-left corner is claimed
+      // twice and the lowest price label was drawing over the leftmost time one
+      // ("738.0" through "15:20"). The price label yields: the time strip's
+      // position is fixed, while the price scale's moves under every tick, so
+      // insetting the strip to clear it would mean insetting by the worst case
+      // forever. Only the label goes — its grid line stays, so the level is
+      // still readable off its neighbours.
+      const timeStripTop = pane.height - LABEL_INSET - LABEL_HEIGHT;
       if (top !== null && bottom !== null) {
         const { values, decimals } = priceTicks(bottom, top, PRICE_TICKS);
         for (const value of values) {
@@ -75,7 +90,9 @@ export function FloatingAxes({ chart, series, candles, interval }: FloatingAxesP
           ctx.moveTo(0, Math.round(y) + 0.5);
           ctx.lineTo(pane.width, Math.round(y) + 0.5);
           ctx.stroke();
-          drawLabel(ctx, value.toFixed(decimals), LABEL_INSET, y - 4, colors.axisLabel);
+          const baseline = y - PRICE_LABEL_LIFT;
+          if (baseline > timeStripTop) continue;
+          drawLabel(ctx, value.toFixed(decimals), LABEL_INSET, baseline, colors.axisLabel);
         }
       }
 

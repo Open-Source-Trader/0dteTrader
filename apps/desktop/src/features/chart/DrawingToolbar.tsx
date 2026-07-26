@@ -28,6 +28,7 @@ export function DrawToolsMenu({ store }: { store: DrawingsStore }) {
 
   return (
     <Menu
+      edge="trailing"
       trigger={
         <button
           className={`chart-chip${tool !== 'cursor' ? ' active' : ''}`}

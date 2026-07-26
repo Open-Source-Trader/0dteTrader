@@ -1,12 +1,21 @@
 import SwiftUI
 import UIKit
 
+/// Metrics the title strip's controls share. The profile and history buttons
+/// and the mode badge are one row of three, and one row of three is one height.
+enum ChartHeader {
+    static let controlWidth: CGFloat = 34
+    static let controlHeight: CGFloat = 36
+}
+
 /// Chart surface: header (symbol, last price, interval, indicator settings),
 /// candle chart with overlays, and optional RSI / MACD sub-panes.
 struct ChartView: View {
     @ObservedObject var viewModel: ChartViewModel
     @ObservedObject var drawings: ChartDrawingsModel
-    let onSymbolSearch: () -> Void
+    /// Picks a new symbol. The picker is a dropdown under the ticker chip now,
+    /// so the chip owns the popup and the screen only receives the choice.
+    let onSelectSymbol: (String) -> Void
     let onIndicatorSettings: () -> Void
     /// The two account destinations, folded into this header now that the
     /// screen has no navigation bar of its own.
@@ -42,7 +51,7 @@ struct ChartView: View {
 
     init(
         viewModel: ChartViewModel,
-        onSymbolSearch: @escaping () -> Void,
+        onSelectSymbol: @escaping (String) -> Void,
         onIndicatorSettings: @escaping () -> Void,
         onShowProfile: @escaping () -> Void = {},
         onShowHistory: @escaping () -> Void = {},
@@ -58,7 +67,7 @@ struct ChartView: View {
     ) {
         _viewModel = ObservedObject(wrappedValue: viewModel)
         _drawings = ObservedObject(wrappedValue: viewModel.drawings)
-        self.onSymbolSearch = onSymbolSearch
+        self.onSelectSymbol = onSelectSymbol
         self.onIndicatorSettings = onIndicatorSettings
         self.onShowProfile = onShowProfile
         self.onShowHistory = onShowHistory
@@ -528,7 +537,7 @@ struct ChartView: View {
 
             HStack(alignment: .top, spacing: AppSpacing.xs) {
                 HStack(alignment: .top, spacing: AppSpacing.xs) {
-                    ChartSymbolButton(symbol: viewModel.symbol, action: onSymbolSearch)
+                    ChartSymbolButton(symbol: viewModel.symbol, onSelect: onSelectSymbol)
                     ChartIntervalMenu(interval: viewModel.interval) { viewModel.selectInterval($0) }
                 }
                 .measuringChipGroup()
@@ -588,7 +597,7 @@ struct ChartView: View {
                     Image(systemName: "person.circle")
                         .font(.title3)
                         .foregroundStyle(Color.appAccent)
-                        .frame(width: 34, height: 36)
+                        .frame(width: ChartHeader.controlWidth, height: ChartHeader.controlHeight)
                         .contentShape(Rectangle())
                 }
                 .accessibilityLabel("Profile")
@@ -599,7 +608,7 @@ struct ChartView: View {
                     Image(systemName: "clock.arrow.circlepath")
                         .font(.subheadline)
                         .foregroundStyle(Color.appAccent)
-                        .frame(width: 34, height: 36)
+                        .frame(width: ChartHeader.controlWidth, height: ChartHeader.controlHeight)
                         .contentShape(Rectangle())
                 }
                 .accessibilityLabel("Trade history")

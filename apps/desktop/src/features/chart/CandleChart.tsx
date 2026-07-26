@@ -29,6 +29,7 @@ import { intervalSeconds } from './ChartStore';
 import type { ChartOrdersStore } from './chartOrders';
 import type { ChartTradingSettings } from './chartTradingSettings';
 import { DrawingLayer } from './DrawingLayer';
+import { FloatingAxes } from './FloatingAxes';
 import type { DrawingsStore } from './drawings';
 import { OrderLineLayer } from './OrderLineLayer';
 import { sameColorsExceptLast } from './candleRepaint';
@@ -83,21 +84,11 @@ export interface ChartTradingProps {
 
 const VISIBLE_CANDLES = 120;
 
-function formatTick(timeSeconds: number, interval: ChartInterval): string {
-  const date = new Date(timeSeconds * 1000);
-  if (interval === '1d') {
-    return `${date.getMonth() + 1}/${date.getDate()}`;
-  }
-  const h = String(date.getHours()).padStart(2, '0');
-  const m = String(date.getMinutes()).padStart(2, '0');
-  return `${h}:${m}`;
-}
-
 /**
  * Candlestick chart with indicator overlays (CandleChartRepresentable analog).
- * Left price axis like the iOS chart; pan/zoom enabled. On data-length change
- * the view snaps to the last 120 bars; in-place tick updates leave the user's
- * pan/zoom alone.
+ * Both scales float over the plot like the iOS chart; pan/zoom enabled. On a
+ * data-length change the view snaps to the last 120 bars; in-place tick updates
+ * leave the user's pan/zoom alone.
  */
 export function CandleChart({
   candles,
@@ -127,8 +118,6 @@ export function CandleChart({
   const lastFirstTimeRef = useRef<number | null>(null);
   const lastBarRef = useRef<ChartCandle | null>(null);
   const prevSymbolRef = useRef(symbol);
-  const intervalRef = useRef(interval);
-  intervalRef.current = interval;
   const [apis, setApis] = useState<{
     chart: IChartApi;
     series: ISeriesApi<'Candlestick'>;
@@ -148,31 +137,36 @@ export function CandleChart({
         fontFamily:
           "'JetBrains Mono', ui-monospace, 'SF Mono', 'Cascadia Mono', 'DejaVu Sans Mono', Menlo, monospace",
       },
-      leftPriceScale: { visible: true, borderColor: colors.border },
+      // Both scales are hidden and `FloatingAxes` draws them over the candles
+      // instead: lightweight-charts has no inside-label mode, and a visible
+      // scale reserves a strip of the card no matter how it is styled. The
+      // grid goes with them, because the library only exposes its tick marks
+      // by drawing them — the labels and the lines have to come from one place
+      // or they disagree.
+      leftPriceScale: { visible: false },
       rightPriceScale: { visible: false },
       timeScale: {
-        borderColor: colors.border,
-        timeVisible: true,
-        secondsVisible: false,
-        tickMarkFormatter: (time: UTCTimestamp) => formatTick(time, intervalRef.current),
+        visible: false,
         rightOffset: 12,
         shiftVisibleRangeOnNewBar: true,
       },
       grid: {
-        vertLines: { color: colors.grid },
-        horzLines: { color: colors.grid },
+        vertLines: { visible: false },
+        horzLines: { visible: false },
       },
       crosshair: {
         vertLine: {
           visible: true,
-          labelVisible: true,
+          // Same reason as the last-price tag: crosshair labels print on the
+          // scales, and there are no scales to print on.
+          labelVisible: false,
           color: colors.crosshair,
           style: 3,
           width: 1,
         },
         horzLine: {
           visible: true,
-          labelVisible: true,
+          labelVisible: false,
           color: colors.crosshair,
           style: 3,
           width: 1,
@@ -188,13 +182,14 @@ export function CandleChart({
       borderUpColor: colors.candleUp,
       borderDownColor: colors.candleDown,
       priceScaleId: 'left',
-      // Dashed accent line at the last price + axis tag (mockup's glowing
-      // price tag; canvas-drawn, so a bright tag stands in for true glow).
+      // Dashed accent line at the last price, matching the iOS limit line.
+      // The tag that used to ride it is off: a scale-drawn label has nowhere
+      // to print now that the scales are hidden, so it would just vanish.
       priceLineVisible: true,
       priceLineColor: colors.accent,
       priceLineStyle: 2,
       priceLineWidth: 1,
-      lastValueVisible: true,
+      lastValueVisible: false,
     });
     chartRef.current = chart;
     candleSeriesRef.current = candleSeries;
@@ -477,6 +472,14 @@ export function CandleChart({
       >
         A
       </button>
+      {apis && candles.length > 0 ? (
+        <FloatingAxes
+          chart={apis.chart}
+          series={apis.series}
+          candles={candles}
+          interval={interval}
+        />
+      ) : null}
       {apis && candles.length > 0 && twcModel ? (
         <TwcOverlay chart={apis.chart} series={apis.series} model={twcModel} candles={candles} />
       ) : null}

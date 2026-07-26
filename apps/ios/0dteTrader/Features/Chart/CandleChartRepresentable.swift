@@ -49,6 +49,33 @@ struct CandleChartRepresentable: UIViewRepresentable {
         }
     }
 
+    /// Axis renderers that lay a tight drop shadow under their labels.
+    ///
+    /// The scales float over the candles now instead of sitting in gutters of
+    /// their own, so a label can land on a wick. DGCharts draws axis text with
+    /// a font and a color and nothing else — there is no shadow attribute to
+    /// pass — but a `CGContext` shadow set before the super call covers every
+    /// glyph it draws. Same treatment the quote readout uses over the same
+    /// candles, and it costs no opaque plate.
+    final class ShadowedYAxisRenderer: YAxisRenderer {
+        override func renderAxisLabels(context: CGContext) {
+            context.saveGState()
+            context.setShadow(offset: .zero, blur: ChartMetrics.axisLabelShadowBlur, color: UIColor.black.cgColor)
+            super.renderAxisLabels(context: context)
+            context.restoreGState()
+        }
+    }
+
+    /// The x-axis twin of `ShadowedYAxisRenderer`; see its note.
+    final class ShadowedXAxisRenderer: XAxisRenderer {
+        override func renderAxisLabels(context: CGContext) {
+            context.saveGState()
+            context.setShadow(offset: .zero, blur: ChartMetrics.axisLabelShadowBlur, color: UIColor.black.cgColor)
+            super.renderAxisLabels(context: context)
+            context.restoreGState()
+        }
+    }
+
     /// Hosts the chart plus the annotation overlay at identical frames so the
     /// overlay can reuse the chart's pixel coordinate space directly.
     final class ContainerView: UIView {
@@ -80,7 +107,6 @@ struct CandleChartRepresentable: UIViewRepresentable {
                 self.optionsAnalyticsOverlay.setNeedsDisplay()
                 self.overlay.setNeedsDisplay()
                 self.orderLineOverlay.setNeedsDisplay()
-                self.syncPriceAxisGutter()
             }
 
             // A tap on empty chart space summons the placement guide at that
@@ -120,30 +146,6 @@ struct CandleChartRepresentable: UIViewRepresentable {
         @available(*, unavailable)
         required init?(coder: NSCoder) {
             fatalError("init(coder:) is not supported")
-        }
-
-        /// Keeps the price-axis gutter wide enough for the labels on screen.
-        ///
-        /// DGCharts sizes that gutter from the labels of the *whole data
-        /// range* — round numbers like `682` — and then `autoScale()` draws the
-        /// visible window's, which carry an extra decimal and are wider. The
-        /// difference is printed straight over the card's left border, which is
-        /// what makes the first digit look cut off. The drawn labels are only
-        /// known after the draw, so the floor is taken here and the offset pass
-        /// re-run — on the next runloop turn, because it invalidates the view
-        /// it is being called from. It settles in one extra frame: the width
-        /// stops changing and the guard stops re-running it.
-        private func syncPriceAxisGutter() {
-            let axis = chart.leftAxis
-            let label = axis.getLongestLabel() as NSString
-            let width = label.size(withAttributes: [.font: axis.labelFont]).width
-            guard width > 0 else { return }
-            let floorWidth = (width + axis.xOffset * 2 + ChartMetrics.priceAxisLeftInset).rounded()
-            guard abs(axis.minWidth - floorWidth) > 0.5 else { return }
-            axis.minWidth = floorWidth
-            DispatchQueue.main.async { [weak self] in
-                self?.chart.notifyDataSetChanged()
-            }
         }
 
         @objc private func handlePlacementTap(_ recognizer: UITapGestureRecognizer) {
@@ -253,8 +255,28 @@ extension CandleChartRepresentable {
         context.coordinator.gestures.onTransform = redrawOverlays
         context.coordinator.gestures.attach(to: chart)
 
+        // Both scales print inside the plot rather than in reserved gutters, so
+        // the candles run the full width and height of the card and the chrome
+        // seated in its corners lines up with a real border instead of with the
+        // inside edge of an axis strip. `needsOffset` is false for both inside
+        // positions, which is what actually gives the space back; what is left
+        // is `minOffset`, an even 10pt on all four sides.
+        chart.leftYAxisRenderer = ShadowedYAxisRenderer(
+            viewPortHandler: chart.viewPortHandler,
+            axis: chart.leftAxis,
+            transformer: chart.getTransformer(forAxis: .left)
+        )
+        chart.xAxisRenderer = ShadowedXAxisRenderer(
+            viewPortHandler: chart.viewPortHandler,
+            axis: chart.xAxis,
+            transformer: chart.getTransformer(forAxis: .left)
+        )
+
         let xAxis = chart.xAxis
-        xAxis.labelPosition = .bottom
+        xAxis.labelPosition = .bottomInside
+        // The axis line would now be drawn 10pt inboard of the card's bottom
+        // border, where it reads as a stray rule rather than as the axis.
+        xAxis.drawAxisLineEnabled = false
         xAxis.labelTextColor = .hudAxisLabel
         xAxis.labelFont = UIFont(name: "JetBrainsMono-Regular", size: 10) ?? .monospacedDigitSystemFont(ofSize: 10, weight: .regular)
         xAxis.gridColor = UIColor.hudStroke.withAlphaComponent(0.1)
@@ -272,6 +294,7 @@ extension CandleChartRepresentable {
         rightAxis.axisMinimum = 0
 
         let leftAxis = chart.leftAxis
+        leftAxis.labelPosition = .insideChart
         leftAxis.labelTextColor = .hudAxisLabel
         leftAxis.labelFont = UIFont(name: "JetBrainsMono-Regular", size: 10) ?? .monospacedDigitSystemFont(ofSize: 10, weight: .regular)
         leftAxis.gridColor = UIColor.hudStroke.withAlphaComponent(0.1)

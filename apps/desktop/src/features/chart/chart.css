@@ -2,7 +2,53 @@
    (feature-local, like profile.css). Reduced-motion is handled globally by
    base.css (all animation durations collapse to 1ms). */
 
-/* Circular header icon buttons (drawing tools, indicator settings):
+/* The chips on the chart's first line — symbol, interval, indicators, drawing
+   tools. One chamfered outline for all four, sized to the mode badge next to
+   them, so the row reads as a set rather than as four separate controls.
+   Opaque, because they sit over candles rather than over a card's fill. */
+.chart-chip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 22px;
+  padding: 3px 8px 2px;
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: var(--fs-caption2);
+  letter-spacing: 0.04em;
+  color: var(--app-accent-text);
+  background: var(--hud-panel);
+  border: 1px solid var(--hud-stroke-dim);
+  clip-path: polygon(
+    6px 0,
+    calc(100% - 6px) 0,
+    100% 6px,
+    100% calc(100% - 6px),
+    calc(100% - 6px) 100%,
+    6px 100%,
+    0 calc(100% - 6px),
+    0 6px
+  );
+  transition: border-color var(--dur-fast) var(--ease-out);
+}
+
+.chart-chip:hover {
+  border-color: var(--hud-stroke);
+}
+
+.chart-chip:active {
+  transform: scale(var(--press-scale));
+}
+
+/* An armed drawing tool. The chip keeps its outline and changes color rather
+   than filling in: on this row a solid accent block was the one control that
+   stopped reading as part of the set. */
+.chart-chip.active {
+  color: var(--hud-amber);
+  border-color: var(--hud-amber);
+}
+
+/* Circular header icon buttons (indicator settings):
    compact HUD rings with hover/press feedback. */
 .chart-icon-button {
   width: 32px;

@@ -31,7 +31,6 @@ struct ChartView: View {
     var onTripleTap: () -> Void = {}
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var showClearConfirm = false
     @State private var showOptionsAnalyticsDetails = false
     @State private var chartResetToken = 0
     @State private var paneResetTokens: [String: Int] = [:]
@@ -114,7 +113,9 @@ struct ChartView: View {
                         .foregroundStyle(Color.appWarning)
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
                         .padding(.leading, ChartMetrics.overlayLeading)
-                        .padding(.bottom, AppSpacing.sm)
+                        // Clear of the time labels, which float along the
+                        // bottom of the plot rather than under it.
+                        .padding(.bottom, ChartMetrics.overlayBottom)
                         .allowsHitTesting(false)
                 }
                 chartTopBar
@@ -480,17 +481,21 @@ struct ChartView: View {
 
     // MARK: - On-chart top row
 
-    /// Symbol menu hard left, mode badge hard right, quote readout centred
-    /// between them, all on the pane's first line. The two matching Spacers do
-    /// the centring: it is the midpoint of the gap the two chips leave, not of
-    /// the pane, so the readout stays clear of both however wide they run.
+    /// The chart's whole control row: symbol, interval, indicators and drawing
+    /// tools hard left, mode badge hard right, quote readout centred between
+    /// them, all on the pane's first line. The two matching Spacers do the
+    /// centring: it is the midpoint of the gap the two groups leave, not of the
+    /// pane, so the readout stays clear of both however wide they run.
     ///
     /// Only the chips take touches — the row has no shape of its own, so the
     /// candles still answer the single tap and the triple tap everywhere
     /// between them.
     private var chartTopBar: some View {
-        HStack(alignment: .top, spacing: AppSpacing.sm) {
+        HStack(alignment: .top, spacing: AppSpacing.xs) {
             ChartSymbolButton(symbol: viewModel.symbol, action: onSymbolSearch)
+            ChartIntervalMenu(interval: viewModel.interval) { viewModel.selectInterval($0) }
+            ChartIndicatorButton(action: onIndicatorSettings)
+            ChartDrawingToolsMenu(drawings: drawings)
             Spacer(minLength: AppSpacing.sm)
             VStack(spacing: AppSpacing.xs) {
                 if let quote = viewModel.quote {
@@ -528,15 +533,28 @@ struct ChartView: View {
 
     // MARK: - Header
 
-    /// One bar for the whole top of the screen: the two account destinations on
-    /// the left, chart controls on the right, wordmark centred between them.
+    /// The title row: the two account destinations on the left, the wordmark
+    /// centred. No card of its own — every chart control has moved onto the
+    /// pane, and a bordered strip around three items read as a second surface
+    /// stacked on the chart's rather than as a title.
     ///
-    /// Both side groups take `maxWidth: .infinity`, so they split the slack
-    /// evenly and the wordmark lands on the bar's midline rather than on the
-    /// midpoint of two unequal groups — the symbol menu leaving for the chart
-    /// made the right group much the wider of the two.
+    /// The wordmark is stacked rather than laid out beside the buttons: with
+    /// the chart controls gone the two sides are wildly unequal, and any row
+    /// arrangement centres it between them instead of on the bar's midline.
     private var header: some View {
-        HStack(spacing: AppSpacing.xs) {
+        ZStack {
+            Text("0dteTrader")
+                .font(.hudTitle)
+                .foregroundStyle(Color.appAccent)
+                .shadow(color: .hudGlow, radius: 8)
+                // Same rule as the toolbar slot this replaces: scale the
+                // wordmark rather than truncate it to "0dteTr…". It is also the
+                // one item here with no touch target to protect, so it is the
+                // one that gives ground first at large Dynamic Type sizes.
+                .lineLimit(1)
+                .minimumScaleFactor(0.45)
+                .allowsTightening(true)
+
             HStack(spacing: AppSpacing.xs) {
                 Button {
                     onShowProfile()
@@ -559,130 +577,16 @@ struct ChartView: View {
                         .contentShape(Rectangle())
                 }
                 .accessibilityLabel("Trade history")
+
+                Spacer(minLength: AppSpacing.sm)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-            Text("0dteTrader")
-                .font(.hudButton)
-                .foregroundStyle(Color.appAccent)
-                .shadow(color: .hudGlow, radius: 8)
-                // Same rule as the toolbar slot this replaces: scale the
-                // wordmark rather than truncate it to "0dteTr…". It is also the
-                // one item here with no touch target to protect, so it is the
-                // one that gives ground first at large Dynamic Type sizes.
-                .lineLimit(1)
-                .minimumScaleFactor(0.45)
-                .allowsTightening(true)
-
-            HStack(spacing: AppSpacing.xs) {
-                intervalMenu
-
-                drawingToolsMenu
-
-                Button {
-                    Haptics.selection()
-                    onIndicatorSettings()
-                } label: {
-                    Image(systemName: "slider.horizontal.3")
-                        .font(.subheadline)
-                        .foregroundStyle(Color.appAccent)
-                        .frame(width: 36, height: 36)
-                        .background {
-                            Circle()
-                                .fill(Color.hudPanel)
-                                .overlay { Circle().strokeBorder(Color.hudStroke.opacity(0.35), lineWidth: 1) }
-                        }
-                        .contentShape(Circle())
-                }
-                .accessibilityLabel("Indicator settings")
-            }
-            .frame(maxWidth: .infinity, alignment: .trailing)
         }
         .padding(.horizontal, AppSpacing.sm)
-        .padding(.vertical, AppSpacing.xs)
-        .hudCard(accent: .hudStrokeDim, chamfer: 8, glow: false, ticks: false)
-        .padding(.horizontal, AppSpacing.sm)
-        .padding(.top, AppSpacing.xxs)
-        // Five controls and the wordmark on one line: at the accessibility sizes the glyphs
-        // outgrow their 36pt targets and start overlapping each other, which is
-        // worse than not scaling. Capped at XXXL, where it still fits with room
-        // to spare; every button keeps its VoiceOver label and its touch target.
+        .padding(.top, AppSpacing.xs)
+        .padding(.bottom, AppSpacing.xxs)
+        // Capped for the same reason the chip row is: past XXXL the glyphs
+        // outgrow their 36pt targets. Both buttons keep their VoiceOver label
+        // and their touch target.
         .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
-    }
-
-    private var intervalMenu: some View {
-        Menu {
-            ForEach(AnyChartInterval.allCases, id: \.self) { interval in
-                Button(interval.rawValue.uppercased()) {
-                    Haptics.selection()
-                    viewModel.selectInterval(interval)
-                }
-            }
-        } label: {
-            Text(viewModel.interval.rawValue.uppercased())
-                .font(.chipLabel)
-                .foregroundStyle(Color.appAccent)
-                .padding(.horizontal, AppSpacing.md)
-                .frame(minHeight: 36)
-                .background {
-                    HudPanelShape(chamfer: 6)
-                        .fill(Color.hudPanel)
-                        .overlay {
-                            HudPanelShape(chamfer: 6)
-                                .strokeBorder(Color.hudStroke.opacity(0.35), lineWidth: 1)
-                        }
-                }
-                .contentShape(Rectangle())
-        }
-        .accessibilityLabel("Chart interval")
-        .accessibilityValue(viewModel.interval.rawValue)
-    }
-
-    /// Drawing tools dropdown (TradingView-style annotations).
-    private var drawingToolsMenu: some View {
-        Menu {
-            ForEach(DrawingTool.allCases) { tool in
-                Button {
-                    drawings.tool = tool
-                } label: {
-                    if drawings.tool == tool {
-                        Label(tool.title, systemImage: "checkmark")
-                    } else {
-                        Label(tool.title, systemImage: tool.systemImage)
-                    }
-                }
-            }
-            if drawings.hasAnnotations {
-                Button(role: .destructive) {
-                    if drawings.selectedId != nil {
-                        drawings.removeSelectedOrClear()
-                    } else {
-                        showClearConfirm = true
-                    }
-                } label: {
-                    Label(
-                        drawings.selectedId != nil ? "Delete Selection" : "Clear All Drawings",
-                        systemImage: "trash"
-                    )
-                }
-            }
-        } label: {
-            Image(systemName: drawings.tool == .cursor ? "pencil.and.outline" : drawings.tool.systemImage)
-                .font(.subheadline)
-                .foregroundStyle(drawings.tool == .cursor ? AnyShapeStyle(.primary) : AnyShapeStyle(.white))
-                .frame(width: 44, height: 44)
-                .background(drawings.tool == .cursor ? Color.appSurfaceElevated : Color.appAccentFill)
-                .clipShape(Circle())
-                .contentShape(Circle())
-        }
-        .accessibilityLabel("Drawing tools")
-        .confirmationDialog(
-            "Clear all drawings and alerts for this symbol?",
-            isPresented: $showClearConfirm,
-            titleVisibility: .visible
-        ) {
-            Button("Clear All", role: .destructive) { drawings.removeSelectedOrClear() }
-            Button("Cancel", role: .cancel) {}
-        }
     }
 }

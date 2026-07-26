@@ -276,20 +276,19 @@ export function ChartView({
 
   return (
     <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-      {/* Header — one bar for the whole top of the screen: the account
-          destinations on the left, chart controls on the right, wordmark
-          centred between them. Both side groups are `flex: 1 1 0`, so they
-          split the slack evenly and the wordmark lands on the bar's midline
-          rather than on the midpoint of two unequal groups — the symbol menu
-          leaving for the chart made the right group much the wider. */}
+      {/* Title row — the account destinations on the left, wordmark centred.
+          No card of its own: every chart control has moved onto the pane, and
+          a bordered strip around three items read as a second surface stacked
+          on the chart's rather than as a title. The wordmark is absolutely
+          centred rather than laid out between the two sides, which are now
+          wildly unequal. */}
       <div
-        className="hud-chip hud-card--flat"
         style={{
+          position: 'relative',
           display: 'flex',
           alignItems: 'center',
           gap: 4,
-          margin: '3px 8px 0',
-          padding: '4px 6px',
+          margin: '4px 8px 2px',
           flex: 'none',
         }}
       >
@@ -307,62 +306,18 @@ export function ChartView({
             as plain body text. */}
         <span
           className="hud-title"
-          style={{ fontSize: 'var(--fs-headline)', whiteSpace: 'nowrap' }}
+          style={{
+            position: 'absolute',
+            left: 0,
+            right: 0,
+            textAlign: 'center',
+            fontSize: 'var(--fs-title3)',
+            whiteSpace: 'nowrap',
+            pointerEvents: 'none',
+          }}
         >
           0dteTrader
         </span>
-
-        <div
-          style={{
-            flex: '1 1 0',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'flex-end',
-            gap: 6,
-          }}
-        >
-          <Menu
-            trigger={
-              <button
-                className="quick-chip"
-                style={{ minHeight: 32, padding: '6px 10px' }}
-                aria-label={`Chart interval ${interval}`}
-                aria-haspopup="menu"
-              >
-                {interval}
-              </button>
-            }
-            items={CHART_INTERVALS.map((option) => ({
-              key: option,
-              label: (
-                <>
-                  {option.toUpperCase()}
-                  {INTERVAL_HINTS[option] ? (
-                    <span
-                      style={{
-                        marginLeft: 12,
-                        fontSize: 'var(--fs-caption)',
-                        color: 'var(--label-secondary)',
-                      }}
-                    >
-                      {INTERVAL_HINTS[option]}
-                    </span>
-                  ) : null}
-                </>
-              ),
-              checked: option === interval,
-              onSelect: () => store.selectInterval(option),
-            }))}
-          />
-          <DrawToolsMenu store={drawingsStore} />
-          <button
-            className="chart-icon-button"
-            onClick={onIndicatorSettings}
-            aria-label="Indicator settings"
-          >
-            <SlidersIcon size={16} />
-          </button>
-        </div>
       </div>
 
       {/* Chart area: HUD card wrapping a chamfer-clipped canvas region. The
@@ -384,12 +339,12 @@ export function ChartView({
             onToggleFullscreen();
           }}
         >
-          {/* Top row over the candles: symbol menu hard against the leading
-              border, mode badge hard against the trailing one, quote readout
-              centred between them by the auto margins. Both chips sit 8px off
-              their two borders, which reads as a matched pair.
+          {/* Top row over the candles: the chart's whole control set hard
+              against the leading border, mode badge hard against the trailing
+              one, quote readout centred between them by the auto margins. The
+              chips are the badge's height, so the row reads as one line.
 
-              The row is inert apart from the two buttons, so the surface below
+              The row is inert apart from the buttons, so the surface below
               still answers a triple click with the fullscreen toggle. */}
           <div
             style={{
@@ -400,39 +355,65 @@ export function ChartView({
               zIndex: 5,
               display: 'flex',
               alignItems: 'flex-start',
-              gap: 8,
+              gap: 4,
               pointerEvents: 'none',
             }}
           >
             <button
-              className="hud-chip"
-              style={{
-                pointerEvents: 'auto',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 4,
-                padding: '5px 6px',
-                // Opaque, like the mode badge: it sits over candles now, not
-                // over the header card's fill.
-                background: 'var(--hud-panel)',
-              }}
+              className="chart-chip"
+              style={{ pointerEvents: 'auto' }}
               onClick={onSymbolSearch}
               aria-label={`Symbol ${symbol}. Change symbol`}
             >
-              <span
-                style={{
-                  fontFamily: 'var(--font-display)',
-                  fontSize: 'var(--fs-subheadline)',
-                  fontWeight: 700,
-                  letterSpacing: '0.03em',
-                }}
-              >
-                {symbol}
-              </span>
+              {symbol}
               <span aria-hidden="true" style={{ display: 'flex', color: 'var(--app-accent)' }}>
-                <ChevronDownIcon size={12} />
+                <ChevronDownIcon size={10} />
               </span>
             </button>
+            <Menu
+              trigger={
+                <button
+                  className="chart-chip"
+                  style={{ pointerEvents: 'auto' }}
+                  aria-label={`Chart interval ${interval}`}
+                  aria-haspopup="menu"
+                >
+                  {interval.toUpperCase()}
+                </button>
+              }
+              items={CHART_INTERVALS.map((option) => ({
+                key: option,
+                label: (
+                  <>
+                    {option.toUpperCase()}
+                    {INTERVAL_HINTS[option] ? (
+                      <span
+                        style={{
+                          marginLeft: 12,
+                          fontSize: 'var(--fs-caption)',
+                          color: 'var(--label-secondary)',
+                        }}
+                      >
+                        {INTERVAL_HINTS[option]}
+                      </span>
+                    ) : null}
+                  </>
+                ),
+                checked: option === interval,
+                onSelect: () => store.selectInterval(option),
+              }))}
+            />
+            <button
+              className="chart-chip"
+              style={{ pointerEvents: 'auto' }}
+              onClick={onIndicatorSettings}
+              aria-label="Indicator settings"
+            >
+              <SlidersIcon size={13} />
+            </button>
+            <span style={{ pointerEvents: 'auto', display: 'flex' }}>
+              <DrawToolsMenu store={drawingsStore} />
+            </span>
             {/* Last price and percent change only. The bid/ask pair was the
                 width that forced this block onto a plate of its own; without
                 it the numbers are short enough to sit on the candles unbacked,
@@ -531,10 +512,11 @@ export function ChartView({
           {optionsAnalytics.enabled && optionsAnalyticsState.errorMessage ? (
             <div
               // Bottom-leading, matching iOS: the quote readout owns the top
-              // of this corner now.
+              // of this corner now. Clear of the time labels, which float
+              // along the bottom of the plot rather than under it.
               style={{
                 position: 'absolute',
-                bottom: 8,
+                bottom: 26,
                 left: 65,
                 fontSize: 'var(--fs-caption2)',
                 color: 'var(--warning-orange)',

@@ -2,7 +2,7 @@
 
 Run your own private 0dteTrader backend in one click, then point the apps at it. No terminal, no config files.
 
-[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/hqwdS8)
+[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/0dtetrader-template)
 
 ## What gets created
 

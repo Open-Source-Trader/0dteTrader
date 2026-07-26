@@ -4,10 +4,13 @@ import {
   BrokerCredentialsInput,
   BrokerProvider,
   BrokerSecrets,
+  CredentialProvider,
+  TradierCredentialsInput,
   TradingMode,
   WebullCredentialsInput,
   WebullSecrets,
 } from '@0dtetrader/shared-types';
+import { errors } from '../common/api-exception';
 import { PrismaService } from '../prisma/prisma.service';
 import { CryptoService } from './crypto.service';
 
@@ -17,7 +20,8 @@ const WEBULL_PROVIDER: BrokerProvider = 'webull';
  * Persists broker credentials encrypted at rest in the provider-agnostic
  * `broker_credentials` table. `encSecrets` is one AES-256-GCM blob of the
  * provider-specific secret JSON (Webull: {appKey, appSecret, accountId};
- * Alpaca: {apiKey, apiSecret}). Plaintext only exists in memory for the
+ * Alpaca: {apiKey, apiSecret}; Tradier: {apiKey} — a market-data key, not a
+ * trading provider). Plaintext only exists in memory for the
  * duration of the request and is never logged. One set per (user, provider,
  * environment) (live / practice).
  *
@@ -93,7 +97,7 @@ export class CredentialsService {
 
   async remove(
     userId: string,
-    provider: BrokerProvider = WEBULL_PROVIDER,
+    provider: CredentialProvider = WEBULL_PROVIDER,
     environment: TradingMode = 'live',
   ): Promise<void> {
     try {
@@ -115,7 +119,7 @@ export class CredentialsService {
    */
   async getDecrypted(
     userId: string,
-    provider: BrokerProvider = WEBULL_PROVIDER,
+    provider: CredentialProvider = WEBULL_PROVIDER,
     environment: TradingMode = 'live',
   ): Promise<BrokerSecrets | null> {
     await this.ensureMigrated(userId, environment);
@@ -134,18 +138,37 @@ export class CredentialsService {
     }
   }
 
-  private toSecrets(input: BrokerCredentialsInput, provider: BrokerProvider): BrokerSecrets {
+  private toSecrets(input: BrokerCredentialsInput, provider: CredentialProvider): BrokerSecrets {
     if (provider === 'alpaca') {
       const a = input as AlpacaCredentialsInput;
+      this.requireSecret(a.apiKey, 'apiKey');
+      this.requireSecret(a.apiSecret, 'apiSecret');
       return { provider: 'alpaca', apiKey: a.apiKey, apiSecret: a.apiSecret };
     }
+    if (provider === 'tradier') {
+      const t = input as TradierCredentialsInput;
+      this.requireSecret(t.apiKey, 'apiKey');
+      return { provider: 'tradier', apiKey: t.apiKey };
+    }
     const w = input as WebullCredentialsInput;
+    this.requireSecret(w.appKey, 'appKey');
+    this.requireSecret(w.appSecret, 'appSecret');
     return { provider: 'webull', appKey: w.appKey, appSecret: w.appSecret, accountId: w.accountId };
+  }
+
+  /** The generic broker-credentials body is a TS union, not a class-validator
+   *  DTO, so nothing upstream guarantees the provider's secret fields exist.
+   *  Without this, `{provider}` alone would store a garbage blob and flip the
+   *  /me configured flag to true. */
+  private requireSecret(value: unknown, field: string): void {
+    if (typeof value !== 'string' || value.trim() === '') {
+      throw errors.badRequest('INVALID_CREDENTIALS', `${field} is required`);
+    }
   }
 
   private async upsertSecrets(
     userId: string,
-    provider: BrokerProvider,
+    provider: CredentialProvider,
     environment: TradingMode,
     secrets: BrokerSecrets,
   ): Promise<void> {

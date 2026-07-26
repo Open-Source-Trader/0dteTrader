@@ -5,6 +5,7 @@ struct ProfileView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var showWebullDeleteConfirmation: TradingMode? = nil
     @State private var showAlpacaDeleteConfirmation: TradingMode? = nil
+    @State private var showTradierDeleteConfirmation: TradingMode? = nil
     @State private var showLogoutConfirmation = false
 
     var body: some View {
@@ -17,6 +18,9 @@ struct ProfileView: View {
                         alpacaCard
                     } else {
                         webullCard
+                        // Tradier market-data key rides along with Webull only —
+                        // Alpaca supplies its own data, so no key is needed there.
+                        tradierCard
                     }
                     securityCard
                     tradingCard
@@ -93,6 +97,23 @@ struct ProfileView: View {
                 Text(showAlpacaDeleteConfirmation == .live
                      ? "Trading with Alpaca will stop working until new credentials are saved."
                      : "Paper trading with Alpaca will stop working until new credentials are saved.")
+            }
+            .confirmationDialog(
+                "Remove Tradier API key?",
+                isPresented: Binding(
+                    get: { showTradierDeleteConfirmation != nil },
+                    set: { if !$0 { showTradierDeleteConfirmation = nil } }
+                ),
+                titleVisibility: .visible
+            ) {
+                Button("Delete API Key", role: .destructive) {
+                    if let env = showTradierDeleteConfirmation {
+                        Task { await viewModel.deleteTradier(environment: env) }
+                    }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Index and options market data will fall back to the server's shared Tradier key.")
             }
         }
     }
@@ -334,7 +355,7 @@ struct ProfileView: View {
                 }
             }
 
-            messageView(environment)
+            messageView(.webull, environment)
 
             Text(environment == .live
                  ? "Your app key, app secret, and account ID come from the Webull OpenAPI developer portal."
@@ -344,9 +365,14 @@ struct ProfileView: View {
         }
     }
 
-    private func messageView(_ environment: TradingMode) -> some View {
+    /// Keyed by provider AND environment — the Tradier sections render
+    /// alongside the Webull ones, so the environment alone no longer
+    /// identifies a section.
+    private func messageView(_ provider: BrokerProvider, _ environment: TradingMode) -> some View {
         Group {
-            if viewModel.messageEnv == environment, let successMessage = viewModel.successMessage {
+            if viewModel.messageProvider == provider,
+               viewModel.messageEnv == environment,
+               let successMessage = viewModel.successMessage {
                 HStack(spacing: AppSpacing.sm) {
                     Image(systemName: "checkmark.circle.fill")
                     Text(successMessage)
@@ -354,7 +380,9 @@ struct ProfileView: View {
                 }
                 .foregroundStyle(Color.pnlPositive)
                 .accessibilityAddTraits(.isStaticText)
-            } else if viewModel.messageEnv == environment, let errorMessage = viewModel.errorMessage {
+            } else if viewModel.messageProvider == provider,
+                      viewModel.messageEnv == environment,
+                      let errorMessage = viewModel.errorMessage {
                 HStack(spacing: AppSpacing.sm) {
                     Image(systemName: "exclamationmark.triangle.fill")
                     Text(errorMessage)
@@ -518,11 +546,116 @@ struct ProfileView: View {
                 }
             }
 
-            messageView(environment)
+            messageView(.alpaca, environment)
 
             Text(environment == .live
                  ? "Your API key and secret come from the Alpaca dashboard (use the matching live key)."
                  : "Optional Alpaca paper key/secret for simulated trading.")
+                .font(.chipLabel)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    // MARK: - Tradier card (market-data key, shown with Webull only)
+
+    private var tradierCard: some View {
+        VStack(alignment: .leading, spacing: AppSpacing.lg) {
+            if viewModel.isLoading && viewModel.me == nil {
+                sectionHeader("Tradier API", icon: "key.fill")
+                VStack(spacing: AppSpacing.sm) {
+                    ForEach(0..<2, id: \.self) { _ in
+                        SkeletonView()
+                            .frame(height: 20)
+                            .padding(.vertical, AppSpacing.xs)
+                    }
+                }
+            } else {
+                tradierSection(.live)
+                Divider()
+                    .background(Color.hudStrokeDim.opacity(0.4))
+                tradierSection(.practice)
+            }
+        }
+        .padding(AppSpacing.lg)
+        .hudCard(glow: false)
+        .animation(AppMotion.standard, value: viewModel.isLoading)
+        .animation(AppMotion.standard, value: viewModel.me?.tradierConfigured)
+        .animation(AppMotion.standard, value: viewModel.me?.tradierPracticeConfigured)
+        .animation(AppMotion.standard, value: viewModel.editingTradier)
+    }
+
+    private func tradierSection(_ environment: TradingMode) -> some View {
+        let me = viewModel.me
+        let configured = environment == .live
+            ? (me?.tradierConfigured ?? false)
+            : (me?.tradierPracticeConfigured ?? false)
+        let title = environment == .live ? "Tradier API — Live" : "Tradier API — Practice (sandbox)"
+        let editing = viewModel.editingTradier.contains(environment)
+        let isDeleting = viewModel.deletingTradier.contains(environment)
+
+        return VStack(alignment: .leading, spacing: AppSpacing.md) {
+            sectionHeader(title, icon: "key.fill")
+
+            if configured && !editing {
+                HStack(spacing: AppSpacing.sm) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(Color.pnlPositive)
+                    Text("Configured")
+                        .font(.panelLabel)
+                        .foregroundStyle(Color.pnlPositive)
+                }
+                .padding(AppSpacing.md)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.pnlPositive.opacity(0.08), in: HudPanelShape(chamfer: 6))
+                .overlay(HudPanelShape(chamfer: 6).strokeBorder(Color.pnlPositive.opacity(0.35), lineWidth: 1))
+
+                Text("The key is stored encrypted on the server and is never displayed here.")
+                    .font(.chipLabel)
+                    .foregroundStyle(.secondary)
+
+                VStack(spacing: AppSpacing.sm) {
+                    Button {
+                        viewModel.setEditingTradier(environment, true)
+                    } label: {
+                        Text("Update API Key")
+                            .font(.panelLabel)
+                            .foregroundStyle(Color.appAccent)
+                            .frame(maxWidth: .infinity, minHeight: 40)
+                    }
+                    .buttonStyle(HudActionButtonStyle(accent: .appAccent, chamfer: 6))
+
+                    Button {
+                        showTradierDeleteConfirmation = environment
+                    } label: {
+                        Text("Delete API Key")
+                            .font(.panelLabel)
+                            .foregroundStyle(Color.pnlNegative)
+                            .frame(maxWidth: .infinity, minHeight: 40)
+                    }
+                    .buttonStyle(HudActionButtonStyle(accent: .pnlNegative.opacity(0.6), chamfer: 6))
+                    .disabled(isDeleting)
+                    .sensoryFeedback(.warning, trigger: showTradierDeleteConfirmation)
+                }
+            } else {
+                TradierCredentialsForm(viewModel: viewModel, environment: environment)
+                if configured {
+                    Button {
+                        viewModel.setEditingTradier(environment, false)
+                    } label: {
+                        Text("Cancel Update")
+                            .font(.panelLabel)
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, minHeight: 40)
+                    }
+                    .buttonStyle(AppPressStyle())
+                }
+            }
+
+            messageView(.tradier, environment)
+
+            Text(environment == .live
+                 ? "Optional. Tradier supplies index and options market data alongside Webull."
+                 : "Optional sandbox access token for practice mode.")
                 .font(.chipLabel)
                 .foregroundStyle(.secondary)
         }

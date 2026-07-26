@@ -13,6 +13,10 @@ export type TradingMode = 'live' | 'practice';
 /** Broker a user trades through. Webull is the only active provider in P1;
  *  Alpaca is added behind the same BrokerGateway seam. */
 export type BrokerProvider = 'webull' | 'alpaca';
+/** Providers a credential row can be stored for. Tradier is a market-data
+ *  API key (needed alongside Webull, which has no index data), not a trading
+ *  provider — it is storable but never selectable as `tradingProvider`. */
+export type CredentialProvider = BrokerProvider | 'tradier';
 export type OrderSide = 'buy' | 'sell';
 /**
  * Execution types a resting chart-order line may carry.
@@ -232,6 +236,10 @@ export interface Me {
   alpacaAccountId?: string | null;
   /** Practice Alpaca account id; null until known. */
   alpacaPracticeAccountId?: string | null;
+  /** Live Tradier API key is stored (market data alongside Webull). */
+  tradierConfigured?: boolean;
+  /** Sandbox (practice) Tradier API key is stored. */
+  tradierPracticeConfigured?: boolean;
 }
 
 export interface WebullAccount {
@@ -267,7 +275,12 @@ export interface AlpacaSecrets {
   apiKey: string;
   apiSecret: string;
 }
-export type BrokerSecrets = WebullSecrets | AlpacaSecrets;
+/** Tradier auth is a single bearer token — no secret pair, no account id. */
+export interface TradierSecrets {
+  provider: 'tradier';
+  apiKey: string;
+}
+export type BrokerSecrets = WebullSecrets | AlpacaSecrets | TradierSecrets;
 
 /** Provider-scoped credential input from the client. */
 export interface AlpacaCredentialsInput {
@@ -276,7 +289,13 @@ export interface AlpacaCredentialsInput {
   apiSecret: string;
   environment?: TradingMode;
 }
-export type BrokerCredentialsInput = WebullCredentialsInput | AlpacaCredentialsInput;
+export interface TradierCredentialsInput {
+  provider: 'tradier';
+  apiKey: string;
+  environment?: TradingMode;
+}
+export type BrokerCredentialsInput =
+  WebullCredentialsInput | AlpacaCredentialsInput | TradierCredentialsInput;
 
 export interface WebullCredentialsSaved {
   webullConfigured: true;
@@ -290,7 +309,7 @@ export interface WebullSessionRefreshed {
 }
 
 export interface BrokerCredentialsSaved {
-  provider: BrokerProvider;
+  provider: CredentialProvider;
   configured: true;
   environment: TradingMode;
 }

@@ -76,4 +76,37 @@ describe('CredentialsService', () => {
       apiSecret: 'as',
     });
   });
+
+  it('round-trips the Tradier API key through the encrypted blob', async () => {
+    await service.save('u1', { provider: 'tradier', apiKey: 'tk' });
+    await service.save('u1', { provider: 'tradier', apiKey: 'tks' }, 'practice');
+    expect(prisma.brokerCredentials).toHaveLength(2);
+    expect(prisma.brokerCredentials[0].provider).toBe('tradier');
+    expect(await service.getDecrypted('u1', 'tradier')).toEqual({
+      provider: 'tradier',
+      apiKey: 'tk',
+    });
+    expect(await service.getDecrypted('u1', 'tradier', 'practice')).toEqual({
+      provider: 'tradier',
+      apiKey: 'tks',
+    });
+  });
+
+  it('rejects a save whose provider secret fields are missing or blank', async () => {
+    // The generic PUT body is a TS union with no class-validator DTO, so the
+    // service is the last line of defense against storing a garbage blob.
+    await expect(service.save('u1', { provider: 'tradier' } as never)).rejects.toMatchObject({
+      code: 'INVALID_CREDENTIALS',
+    });
+    await expect(service.save('u1', { provider: 'tradier', apiKey: '  ' })).rejects.toMatchObject({
+      code: 'INVALID_CREDENTIALS',
+    });
+    await expect(
+      service.save('u1', { provider: 'alpaca', apiKey: 'ak' } as never),
+    ).rejects.toMatchObject({ code: 'INVALID_CREDENTIALS' });
+    await expect(
+      service.save('u1', { provider: 'webull', appKey: 'k' } as never),
+    ).rejects.toMatchObject({ code: 'INVALID_CREDENTIALS' });
+    expect(prisma.brokerCredentials).toHaveLength(0);
+  });
 });

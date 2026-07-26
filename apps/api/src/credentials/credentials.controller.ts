@@ -18,8 +18,8 @@ import { WebullCredentialsDto } from './dto/webull-credentials.dto';
  *    mobile apps (Phase 3) keep calling it until they move to the generic
  *    endpoint.
  *  - `me/broker-credentials` — generic, provider taken from the body
- *    (PUT) or query (DELETE). Accepts both Webull and Alpaca inputs via
- *    the discriminated `BrokerCredentialsInput` union.
+ *    (PUT) or query (DELETE). Accepts Webull, Alpaca and Tradier inputs
+ *    via the discriminated `BrokerCredentialsInput` union.
  */
 @Controller('me/webull-credentials')
 export class CredentialsController {

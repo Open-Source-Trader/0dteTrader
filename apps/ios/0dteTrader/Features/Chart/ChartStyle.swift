@@ -59,6 +59,14 @@ enum ChartMetrics {
     static let shadowWidth: CGFloat = 0.7
     static let barSpace: CGFloat = 0.2
     static let overlayLineWidth: CGFloat = 1.2
+    /// Extra left offset on the price pane. DGCharts sizes the axis gutter to
+    /// exactly the widest label, which parks the first digit on the card's
+    /// stroke and reads as a clipped number; this is the gap that fixes it.
+    static let priceAxisLeftInset: CGFloat = 6
+    /// Leading pad for SwiftUI chrome laid over the pane (the price readout,
+    /// the STRUCT chip, the analytics error): past the axis gutter, so a label
+    /// and an overlay never print over one another.
+    static let overlayLeading: CGFloat = 52 + priceAxisLeftInset
 }
 
 /// Cached date formatters for axis/marker time labels.

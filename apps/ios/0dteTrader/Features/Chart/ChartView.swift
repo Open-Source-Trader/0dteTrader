@@ -8,6 +8,10 @@ struct ChartView: View {
     @ObservedObject var drawings: ChartDrawingsModel
     let onSymbolSearch: () -> Void
     let onIndicatorSettings: () -> Void
+    /// The two account destinations, folded into this header now that the
+    /// screen has no navigation bar of its own.
+    var onShowProfile: () -> Void = {}
+    var onShowHistory: () -> Void = {}
     /// Practice/live badge state; nil hides the badge (pre-fetch).
     let tradingMode: TradingMode?
     let onToggleMode: () -> Void
@@ -38,6 +42,8 @@ struct ChartView: View {
         viewModel: ChartViewModel,
         onSymbolSearch: @escaping () -> Void,
         onIndicatorSettings: @escaping () -> Void,
+        onShowProfile: @escaping () -> Void = {},
+        onShowHistory: @escaping () -> Void = {},
         tradingMode: TradingMode? = nil,
         onToggleMode: @escaping () -> Void = {},
         chartOrders: ChartOrdersModel? = nil,
@@ -52,6 +58,8 @@ struct ChartView: View {
         _drawings = ObservedObject(wrappedValue: viewModel.drawings)
         self.onSymbolSearch = onSymbolSearch
         self.onIndicatorSettings = onIndicatorSettings
+        self.onShowProfile = onShowProfile
+        self.onShowHistory = onShowHistory
         self.tradingMode = tradingMode
         self.onToggleMode = onToggleMode
         self.chartOrders = chartOrders
@@ -103,47 +111,11 @@ struct ChartView: View {
                         .font(.caption2)
                         .foregroundStyle(Color.appWarning)
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
-                        .padding(.leading, 52)
+                        .padding(.leading, ChartMetrics.overlayLeading)
                         .padding(.bottom, AppSpacing.sm)
                         .allowsHitTesting(false)
                 }
-                if let snapshot = viewModel.optionsAnalyticsSnapshot,
-                   viewModel.optionsAnalyticsSettings.enabled {
-                    Button {
-                        showOptionsAnalyticsDetails = true
-                    } label: {
-                        HStack(spacing: 4) {
-                            Text("STRUCT")
-                            Text(snapshot.quality.status.rawValue.uppercased())
-                            if viewModel.optionsAnalyticsDisplayState == .retained {
-                                Text("RETAINED")
-                            }
-                            if viewModel.optionsAnalyticsSettings.showDiagnostics && !snapshot.quality.warnings.isEmpty {
-                                Image(systemName: "exclamationmark.triangle.fill")
-                            }
-                        }
-                        .font(.system(size: 8, weight: .bold, design: .monospaced))
-                        .foregroundStyle(
-                            snapshot.quality.warnings.isEmpty
-                                || !viewModel.optionsAnalyticsSettings.showDiagnostics
-                                ? Color.appAccent
-                                : Color.appWarning
-                        )
-                        .padding(.horizontal, 6)
-                        .frame(minHeight: 28)
-                        .background(Color.black.opacity(0.72))
-                        .clipShape(Capsule())
-                    }
-                    .padding(.leading, 52)
-                    .padding(.top, AppSpacing.sm)
-                    .accessibilityLabel(
-                        OptionsAnalyticsPresentation.accessibilitySummary(
-                            snapshot: snapshot,
-                            settings: viewModel.optionsAnalyticsSettings
-                        )
-                    )
-                    .accessibilityHint("Shows options structure details")
-                }
+                chartTopBar
                 if viewModel.isLoading, viewModel.candles.isEmpty {
                     loadingState
                 }
@@ -155,14 +127,6 @@ struct ChartView: View {
                 }
                 if drawings.selectedId != nil {
                     selectionBar
-                }
-                if let tradingMode {
-                    TradingModeBadge(
-                        mode: tradingMode,
-                        analyticsRailShowing: viewModel.optionsAnalyticsSnapshot != nil
-                            && viewModel.optionsAnalyticsSettings.enabled,
-                        action: onToggleMode
-                    )
                 }
                 // Last in the ZStack, and it must stay last: the reset button,
                 // the TWC banner and the STRUCT chip are all corner-anchored
@@ -507,10 +471,93 @@ struct ChartView: View {
         .padding(.bottom, 28)
     }
 
+    // MARK: - On-chart top row
+
+    /// Quote readout hard left, mode badge hard right, both on the pane's first
+    /// line. Only the two chips inside take touches — the row has no shape of
+    /// its own, so the candles still answer everywhere between them.
+    private var chartTopBar: some View {
+        HStack(alignment: .top, spacing: AppSpacing.sm) {
+            VStack(alignment: .leading, spacing: AppSpacing.xs) {
+                if let quote = viewModel.quote {
+                    ChartQuoteReadout(
+                        quote: quote,
+                        dayChange: viewModel.dayChange,
+                        tickProgress: viewModel.tickProgress
+                    )
+                }
+                if let snapshot = viewModel.optionsAnalyticsSnapshot,
+                   viewModel.optionsAnalyticsSettings.enabled {
+                    ChartStructChip(
+                        snapshot: snapshot,
+                        displayState: viewModel.optionsAnalyticsDisplayState,
+                        settings: viewModel.optionsAnalyticsSettings
+                    ) {
+                        showOptionsAnalyticsDetails = true
+                    }
+                }
+            }
+            Spacer(minLength: AppSpacing.sm)
+            if let tradingMode {
+                TradingModeBadge(mode: tradingMode, action: onToggleMode)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .padding(.leading, ChartMetrics.overlayLeading)
+        .padding(.trailing, AppSpacing.sm)
+        .padding(.top, AppSpacing.sm)
+        // Capped for the same reason the header is: past XXXL the readout wraps
+        // and starts covering the candles it is supposed to be labelling. The
+        // numbers are still read in full by VoiceOver, and the trade panel —
+        // where the sizes that matter are confirmed — scales without a ceiling.
+        .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
+    }
+
     // MARK: - Header
 
+    /// One bar for the whole top of the screen: wordmark and the two account
+    /// destinations on the left, chart controls on the right. The quote block
+    /// that used to sit between them now labels the candles instead, which is
+    /// what made room for the navigation bar to be folded in here.
     private var header: some View {
-        HStack(spacing: AppSpacing.sm) {
+        HStack(spacing: AppSpacing.xs) {
+            Text("0dteTrader")
+                .font(.hudButton)
+                .foregroundStyle(Color.appAccent)
+                .shadow(color: .hudGlow, radius: 8)
+                // Same rule as the toolbar slot this replaces: scale the
+                // wordmark rather than truncate it to "0dteTr…". It is also the
+                // one item here with no touch target to protect, so it is the
+                // one that gives ground first at large Dynamic Type sizes.
+                .lineLimit(1)
+                .minimumScaleFactor(0.45)
+                .allowsTightening(true)
+                .layoutPriority(-1)
+
+            Button {
+                onShowProfile()
+            } label: {
+                Image(systemName: "person.circle")
+                    .font(.title3)
+                    .foregroundStyle(Color.appAccent)
+                    .frame(width: 34, height: 36)
+                    .contentShape(Rectangle())
+            }
+            .accessibilityLabel("Profile")
+
+            Button {
+                onShowHistory()
+            } label: {
+                Image(systemName: "clock.arrow.circlepath")
+                    .font(.subheadline)
+                    .foregroundStyle(Color.appAccent)
+                    .frame(width: 34, height: 36)
+                    .contentShape(Rectangle())
+            }
+            .accessibilityLabel("Trade history")
+
+            Spacer(minLength: AppSpacing.xs)
+
             Button {
                 Haptics.selection()
                 onSymbolSearch()
@@ -536,42 +583,6 @@ struct ChartView: View {
                 .contentShape(Rectangle())
             }
             .accessibilityLabel("Change symbol")
-
-            if let quote = viewModel.quote {
-                VStack(alignment: .leading, spacing: 1) {
-                    HStack(spacing: AppSpacing.xs) {
-                        Text(Format.price(quote.last))
-                            .font(.priceMedium.weight(.semibold))
-                            .shadow(color: .hudGlow, radius: 6)
-                        if let dayChange = viewModel.dayChange {
-                            Text("\(Format.signedPrice(dayChange.change)) (\(String(format: "%+.2f", dayChange.percent))%)")
-                                .font(.priceSmall.weight(.medium))
-                                .foregroundStyle(dayChange.change >= 0 ? Color.pnlPositive : Color.pnlNegative)
-                                .accessibilityLabel(dayChange.change >= 0
-                                    ? "Up \(Format.price(dayChange.change)) today"
-                                    : "Down \(Format.price(abs(dayChange.change))) today")
-                        }
-                    }
-                    HStack(spacing: AppSpacing.sm) {
-                        Text("BID \(Format.price(quote.bid))")
-                            .foregroundStyle(Color.buyGreen)
-                        Text("ASK \(Format.price(quote.ask))")
-                            .foregroundStyle(Color.sellRed)
-                    }
-                    .font(.caption2.monospacedDigit())
-                }
-            }
-
-            Spacer()
-
-            if let progress = viewModel.tickProgress {
-                Text("\(progress.count)/\(progress.size) ticks")
-                    .font(.caption2.monospacedDigit())
-                    .foregroundStyle(Color.secondary)
-                    .accessibilityLabel(
-                        "Building candle: \(progress.count) of \(progress.size) ticks"
-                    )
-            }
 
             intervalMenu
 
@@ -599,6 +610,11 @@ struct ChartView: View {
         .hudCard(accent: .hudStrokeDim, chamfer: 8, glow: false, ticks: false)
         .padding(.horizontal, AppSpacing.sm)
         .padding(.top, AppSpacing.xxs)
+        // Seven controls on one line: at the accessibility sizes the glyphs
+        // outgrow their 36pt targets and start overlapping each other, which is
+        // worse than not scaling. Capped at XXXL, where it still fits with room
+        // to spare; every button keeps its VoiceOver label and its touch target.
+        .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
     }
 
     private var intervalMenu: some View {

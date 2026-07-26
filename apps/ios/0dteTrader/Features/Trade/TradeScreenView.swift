@@ -67,37 +67,11 @@ struct TradeScreenView: View {
                     .padding(.top, AppSpacing.sm)
                 }
                 .animation(AppMotion.standard, value: tradeViewModel.toast)
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .principal) {
-                        Text("0dteTrader")
-                            .font(.hudTitle)
-                            .foregroundStyle(Color.appAccent)
-                            .shadow(color: .hudGlow, radius: 8)
-                            // The principal slot still shares the bar with the
-                            // leading buttons; scale the wordmark down instead
-                            // of truncating it to "0dteTr…".
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.45)
-                            .allowsTightening(true)
-                    }
-                    ToolbarItem(placement: .topBarLeading) {
-                        Button {
-                            showProfile = true
-                        } label: {
-                            Image(systemName: "person.circle")
-                        }
-                        .accessibilityLabel("Profile")
-                    }
-                    ToolbarItem(placement: .topBarLeading) {
-                        Button {
-                            showHistory = true
-                        } label: {
-                            Image(systemName: "clock.arrow.circlepath")
-                        }
-                        .accessibilityLabel("Trade history")
-                    }
-                }
+                // The wordmark, the profile button and the history button all
+                // live in the chart header now, so there is nothing left for a
+                // navigation bar to carry — hidden rather than emptied, or it
+                // would keep reserving 44pt of the chart's height.
+                .toolbar(.hidden, for: .navigationBar)
         }
         .modifier(
             OptionsAnalyticsLifecycleModifier(
@@ -433,6 +407,8 @@ struct TradeScreenView: View {
             viewModel: chartViewModel,
             onSymbolSearch: { showSymbolSearch = true },
             onIndicatorSettings: { showIndicatorSettings = true },
+            onShowProfile: { showProfile = true },
+            onShowHistory: { showHistory = true },
             tradingMode: tradingMode,
             onToggleMode: { showModeConfirmation = true },
             chartOrders: chartOrdersModel,

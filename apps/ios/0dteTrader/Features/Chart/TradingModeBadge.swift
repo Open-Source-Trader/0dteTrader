@@ -1,43 +1,24 @@
 import SwiftUI
 
-/// Amber PRACTICE / green LIVE chip, parked in the top-trailing corner of the
+/// Amber PRACTICE / green LIVE chip, hugging the top-trailing corner of the
 /// chart surface. Tapping it asks to switch modes (confirmed upstream).
 ///
-/// Two things already own that border, and the badge yields to both. The
-/// placement guide's `+` handle sits flush against it at whatever level the
-/// guide was summoned to, so the badge gives up the same touch band the order
-/// rows do — a badge on the border would shadow the handle at the levels
-/// nearest the top edge. And when the options-analytics rail is on it runs the
-/// full height of the right edge, so the badge steps inboard of the rail
-/// instead of sitting on its readouts.
+/// It used to step inboard of the placement guide's `+` handle band and of the
+/// options-analytics rail. Both are real overlaps, and both were traded away
+/// deliberately: parked ~130pt off the border the chip read as floating in the
+/// middle of the pane rather than labelling it. What it costs is the top of the
+/// right border — a guide summoned to a level within a chip's height of the top
+/// edge puts its handle under this chip, and the rail's topmost readout can run
+/// behind it. Both are recoverable by scrolling the price axis; a badge that
+/// looked misplaced was not.
+///
+/// PRACTICE is the longer word, so the chip is laid out trailing-aligned: both
+/// labels end on the same pixel.
 struct TradingModeBadge: View {
     let mode: TradingMode
-    /// Whether the options-analytics rail is drawn on this pane right now.
-    let analyticsRailShowing: Bool
     let action: () -> Void
 
     var body: some View {
-        // Only the chip itself takes touches: the reader has no content shape,
-        // so a tap anywhere else in the pane still reaches the chart.
-        GeometryReader { geometry in
-            badge
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
-                .padding(.trailing, trailingInset(paneWidth: geometry.size.width))
-                .padding(.top, AppSpacing.sm)
-        }
-    }
-
-    /// The rail sizes itself from the chart's *content* rect; the pane width
-    /// read here is that plus the axis gutter, so this over-estimates the rail
-    /// slightly. Over-estimating is the safe direction — it clears the rail
-    /// rather than grazing it.
-    private func trailingInset(paneWidth: CGFloat) -> CGFloat {
-        guard analyticsRailShowing else { return AppPlacementGuide.handleTouchBand }
-        let rail = CGFloat(OptionsAnalyticsPresentation.railWidth(for: Double(paneWidth)))
-        return max(AppPlacementGuide.handleTouchBand, rail + AppSpacing.xs)
-    }
-
-    private var badge: some View {
         Button {
             Haptics.selection()
             action()

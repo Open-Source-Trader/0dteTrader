@@ -69,6 +69,8 @@ describe('ChartView options analytics rendering', () => {
         apiClient: {} as ApiClient,
         onSymbolSearch: vi.fn(),
         onIndicatorSettings: vi.fn(),
+        onShowProfile: vi.fn(),
+        onShowHistory: vi.fn(),
         tradingMode: 'practice',
         onToggleMode: vi.fn(),
         onToggleFullscreen: vi.fn(),

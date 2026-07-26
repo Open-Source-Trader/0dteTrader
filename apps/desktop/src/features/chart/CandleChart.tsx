@@ -434,8 +434,10 @@ export function CandleChart({
   return (
     <div
       ref={containerRef}
-      // 4px top inset keeps the topmost price label clear of the card edge.
-      style={{ position: 'absolute', inset: '4px 0 0 0' }}
+      // 4px top inset keeps the topmost price label clear of the card edge;
+      // 6px on the left does the same for the first digit of every price
+      // label, which lightweight-charts otherwise draws hard against it.
+      style={{ position: 'absolute', inset: '4px 0 0 6px' }}
       role="img"
       aria-label={
         lastBar

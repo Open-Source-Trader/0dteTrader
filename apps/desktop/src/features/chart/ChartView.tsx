@@ -5,7 +5,7 @@ import { useStore } from '../../core/observable';
 import { Menu } from '../../design/components/Menu';
 import { Spinner } from '../../design/components/Spinner';
 import { Format } from '../../design/format';
-import { ChevronDownIcon, SlidersIcon } from '../../design/icons';
+import { ChevronDownIcon, ClockIcon, PersonCircleIcon, SlidersIcon } from '../../design/icons';
 import type { ChartStore } from './ChartStore';
 import { CHART_INTERVALS } from './ChartStore';
 import { CandleChart, type ChartTradingProps, type OverlaySeries } from './CandleChart';
@@ -28,6 +28,9 @@ interface ChartViewProps {
   apiClient: ApiClient;
   onSymbolSearch: () => void;
   onIndicatorSettings: () => void;
+  /** The two account destinations; this header replaced the navigation bar. */
+  onShowProfile: () => void;
+  onShowHistory: () => void;
   tradingMode: TradingMode;
   onToggleMode: () => void;
   /** Three clicks on the chart surface toggle the fullscreen/split layout. */
@@ -74,6 +77,8 @@ export function ChartView({
   apiClient,
   onSymbolSearch,
   onIndicatorSettings,
+  onShowProfile,
+  onShowHistory,
   tradingMode,
   onToggleMode,
   onToggleFullscreen,
@@ -259,96 +264,55 @@ export function ChartView({
 
   return (
     <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-      {/* Header */}
+      {/* Header — one bar for the whole top of the screen: wordmark and the
+          account destinations on the left, chart controls on the right. The
+          quote block that used to sit between them labels the candles now,
+          which is what made room to fold the navigation bar in here. */}
       <div
         className="hud-chip hud-card--flat"
         style={{
           display: 'flex',
           alignItems: 'center',
-          gap: 8,
+          gap: 4,
           margin: '3px 8px 0',
           padding: '4px 6px',
           flex: 'none',
         }}
       >
-        <button
-          className="hud-chip"
-          style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '5px 6px' }}
-          onClick={onSymbolSearch}
-          aria-label={`Symbol ${symbol}. Change symbol`}
+        <span
+          className="navbar-title"
+          style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'clip', whiteSpace: 'nowrap' }}
         >
-          <span
-            style={{
-              fontFamily: 'var(--font-display)',
-              fontSize: 'var(--fs-subheadline)',
-              fontWeight: 700,
-              letterSpacing: '0.03em',
-            }}
-          >
-            {symbol}
-          </span>
-          <span aria-hidden="true" style={{ display: 'flex', color: 'var(--app-accent)' }}>
-            <ChevronDownIcon size={12} />
-          </span>
+          0dteTrader
+        </span>
+        <button className="navbar-icon-button" onClick={onShowProfile} aria-label="Profile">
+          <PersonCircleIcon size={20} />
+        </button>
+        <button className="navbar-icon-button" onClick={onShowHistory} aria-label="Trade history">
+          <ClockIcon size={18} />
         </button>
 
-        {quote ? (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-            <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <span
-                style={{
-                  fontFamily: 'var(--font-mono)',
-                  fontSize: 18,
-                  fontWeight: 600,
-                  fontVariantNumeric: 'tabular-nums',
-                  textShadow: '0 0 8px var(--hud-glow)',
-                }}
-              >
-                {Format.price(quote.last)}
-              </span>
-              {isStale ? (
-                <span
-                  style={{
-                    fontSize: 'var(--fs-caption2)',
-                    color: 'var(--warning-orange)',
-                    fontWeight: 600,
-                  }}
-                >
-                  ● STALE
-                </span>
-              ) : null}
-            </span>
+        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
+          <button
+            className="hud-chip"
+            style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '5px 6px' }}
+            onClick={onSymbolSearch}
+            aria-label={`Symbol ${symbol}. Change symbol`}
+          >
             <span
               style={{
-                fontFamily: 'var(--font-mono)',
-                fontSize: 'var(--fs-caption2)',
-                fontVariantNumeric: 'tabular-nums',
-                display: 'flex',
-                gap: 10,
+                fontFamily: 'var(--font-display)',
+                fontSize: 'var(--fs-subheadline)',
+                fontWeight: 700,
+                letterSpacing: '0.03em',
               }}
             >
-              <span>
-                <span style={{ color: 'var(--buy-green)', fontWeight: 600 }}>BID </span>
-                <span style={{ color: 'var(--buy-green)' }}>{Format.price(quote.bid)}</span>
-              </span>
-              <span>
-                <span style={{ color: 'var(--sell-red)', fontWeight: 600 }}>ASK </span>
-                <span style={{ color: 'var(--sell-red)' }}>{Format.price(quote.ask)}</span>
-              </span>
+              {symbol}
             </span>
-          </div>
-        ) : null}
-
-        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
-          {tickProgress ? (
-            <span
-              className="quick-chip"
-              style={{ fontSize: 'var(--fs-caption)', color: 'var(--label-secondary)' }}
-              aria-label={`Building candle: ${tickProgress.count} of ${tickProgress.size} ticks`}
-            >
-              {tickProgress.count}/{tickProgress.size} ticks
+            <span aria-hidden="true" style={{ display: 'flex', color: 'var(--app-accent)' }}>
+              <ChevronDownIcon size={12} />
             </span>
-          ) : null}
+          </button>
           <Menu
             trigger={
               <button
@@ -412,11 +376,85 @@ export function ChartView({
             onToggleFullscreen();
           }}
         >
-          {/* Top-trailing on the chart surface. The guide's `+` handle is flush
-              to the same border, so the badge gives up that band; and when the
-              options-analytics rail is on it steps inboard of the rail rather
-              than sitting on its readouts. `clamp(56px, 28%, 112px)` is
-              `optionsAnalyticsRailWidth` expressed against the pane. */}
+          {/* The quote readout labels the candles it belongs to (TradingView's
+              arrangement) rather than sitting in a bar above them. Inert: the
+              surface under it answers a triple click with the fullscreen
+              toggle, and a label must not eat that. */}
+          {quote ? (
+            <div
+              style={{
+                position: 'absolute',
+                top: 8,
+                left: 65,
+                zIndex: 4,
+                pointerEvents: 'none',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 1,
+                padding: '2px 6px',
+                borderRadius: 4,
+                // Candles run under this corner; the numbers carry their own
+                // backing rather than relying on what happens to be behind.
+                background: 'rgba(0, 0, 0, 0.55)',
+              }}
+            >
+              <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span
+                  style={{
+                    fontFamily: 'var(--font-mono)',
+                    fontSize: 18,
+                    fontWeight: 600,
+                    fontVariantNumeric: 'tabular-nums',
+                    textShadow: '0 0 8px var(--hud-glow)',
+                  }}
+                >
+                  {Format.price(quote.last)}
+                </span>
+                {isStale ? (
+                  <span
+                    style={{
+                      fontSize: 'var(--fs-caption2)',
+                      color: 'var(--warning-orange)',
+                      fontWeight: 600,
+                    }}
+                  >
+                    ● STALE
+                  </span>
+                ) : null}
+              </span>
+              <span
+                style={{
+                  fontFamily: 'var(--font-mono)',
+                  fontSize: 'var(--fs-caption2)',
+                  fontVariantNumeric: 'tabular-nums',
+                  display: 'flex',
+                  gap: 10,
+                }}
+              >
+                <span>
+                  <span style={{ color: 'var(--buy-green)', fontWeight: 600 }}>BID </span>
+                  <span style={{ color: 'var(--buy-green)' }}>{Format.price(quote.bid)}</span>
+                </span>
+                <span>
+                  <span style={{ color: 'var(--sell-red)', fontWeight: 600 }}>ASK </span>
+                  <span style={{ color: 'var(--sell-red)' }}>{Format.price(quote.ask)}</span>
+                </span>
+                {tickProgress ? (
+                  <span
+                    style={{ color: 'var(--label-secondary)' }}
+                    aria-label={`Building candle: ${tickProgress.count} of ${tickProgress.size} ticks`}
+                  >
+                    {tickProgress.count}/{tickProgress.size} ticks
+                  </span>
+                ) : null}
+              </span>
+            </div>
+          ) : null}
+          {/* Hard against the top-trailing border, on the readout's line. It
+              used to step inboard of the guide's `+` handle band and of the
+              analytics rail; parked ~130px off the edge it read as floating in
+              the pane rather than labelling it, so both overlaps were traded
+              away for the corner. */}
           <button
             className={tradingMode === 'live' ? 'hud-badge hud-badge--live' : 'hud-badge'}
             onClick={onToggleMode}
@@ -424,7 +462,7 @@ export function ChartView({
             style={{
               position: 'absolute',
               top: 8,
-              right: optionsAnalyticsSnapshot ? 'calc(clamp(56px, 28%, 112px) + 4px)' : 28,
+              right: 8,
               zIndex: 5,
               background: 'var(--hud-panel)',
             }}
@@ -448,9 +486,11 @@ export function ChartView({
           {twcModel?.banner ? <TwcBiasBanner banner={twcModel.banner} /> : null}
           {optionsAnalytics.enabled && optionsAnalyticsState.errorMessage ? (
             <div
+              // Bottom-leading, matching iOS: the quote readout owns the top
+              // of this corner now.
               style={{
                 position: 'absolute',
-                top: 8,
+                bottom: 8,
                 left: 65,
                 fontSize: 'var(--fs-caption2)',
                 color: 'var(--warning-orange)',

@@ -80,6 +80,7 @@ struct CandleChartRepresentable: UIViewRepresentable {
                 self.optionsAnalyticsOverlay.setNeedsDisplay()
                 self.overlay.setNeedsDisplay()
                 self.orderLineOverlay.setNeedsDisplay()
+                self.syncPriceAxisGutter()
             }
 
             // A tap on empty chart space summons the placement guide at that
@@ -119,6 +120,30 @@ struct CandleChartRepresentable: UIViewRepresentable {
         @available(*, unavailable)
         required init?(coder: NSCoder) {
             fatalError("init(coder:) is not supported")
+        }
+
+        /// Keeps the price-axis gutter wide enough for the labels on screen.
+        ///
+        /// DGCharts sizes that gutter from the labels of the *whole data
+        /// range* — round numbers like `682` — and then `autoScale()` draws the
+        /// visible window's, which carry an extra decimal and are wider. The
+        /// difference is printed straight over the card's left border, which is
+        /// what makes the first digit look cut off. The drawn labels are only
+        /// known after the draw, so the floor is taken here and the offset pass
+        /// re-run — on the next runloop turn, because it invalidates the view
+        /// it is being called from. It settles in one extra frame: the width
+        /// stops changing and the guard stops re-running it.
+        private func syncPriceAxisGutter() {
+            let axis = chart.leftAxis
+            let label = axis.getLongestLabel() as NSString
+            let width = label.size(withAttributes: [.font: axis.labelFont]).width
+            guard width > 0 else { return }
+            let floorWidth = (width + axis.xOffset * 2 + ChartMetrics.priceAxisLeftInset).rounded()
+            guard abs(axis.minWidth - floorWidth) > 0.5 else { return }
+            axis.minWidth = floorWidth
+            DispatchQueue.main.async { [weak self] in
+                self?.chart.notifyDataSetChanged()
+            }
         }
 
         @objc private func handlePlacementTap(_ recognizer: UITapGestureRecognizer) {

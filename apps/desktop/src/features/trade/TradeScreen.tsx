@@ -10,9 +10,7 @@ import type {
 import { useContainer } from '../../app/container';
 import { useStore } from '../../core/observable';
 import { AlertDialog } from '../../design/components/AlertDialog';
-import { NavBar } from '../../design/components/NavBar';
 import { Format } from '../../design/format';
-import { ClockIcon, PersonCircleIcon } from '../../design/icons';
 import type { TradeLayout } from '../../core/storage/SettingsStore';
 import { enabledSubPanes } from '../chart/indicatorSettings';
 import type { ChartTradingProps } from '../chart/CandleChart';
@@ -336,28 +334,8 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
         position: 'relative',
       }}
     >
-      <NavBar
-        title="0dteTrader"
-        leading={
-          <>
-            <button
-              className="navbar-icon-button"
-              onClick={() => setShowProfile(true)}
-              aria-label="Profile"
-            >
-              <PersonCircleIcon size={22} />
-            </button>
-            <button
-              className="navbar-icon-button"
-              onClick={() => setShowHistory(true)}
-              aria-label="Trade history"
-            >
-              <ClockIcon size={22} />
-            </button>
-          </>
-        }
-      />
-
+      {/* No navigation bar: the wordmark and both account destinations moved
+          into the chart header, which gives that height back to the chart. */}
       {needsProviderConfig ? (
         <button
           type="button"
@@ -389,6 +367,8 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
               apiClient={apiClient}
               onSymbolSearch={() => setShowSymbolSearch(true)}
               onIndicatorSettings={() => setShowIndicatorSettings(true)}
+              onShowProfile={() => setShowProfile(true)}
+              onShowHistory={() => setShowHistory(true)}
               tradingMode={tradingMode}
               onToggleMode={() => setShowModeConfirmation(true)}
               onToggleFullscreen={toggleLayout}
@@ -444,6 +424,8 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
                 apiClient={apiClient}
                 onSymbolSearch={() => setShowSymbolSearch(true)}
                 onIndicatorSettings={() => setShowIndicatorSettings(true)}
+                onShowProfile={() => setShowProfile(true)}
+                onShowHistory={() => setShowHistory(true)}
                 tradingMode={tradingMode}
                 onToggleMode={() => setShowModeConfirmation(true)}
                 onToggleFullscreen={toggleLayout}

@@ -303,6 +303,13 @@ struct TradeScreenView: View {
         .onChange(of: chainViewModel.selectedExpiration) { _, expiration in
             chartViewModel.optionsAnalyticsExpiration = expiration
         }
+        // The chain stays live below the chart in the split layout, so the
+        // contract an open placement card names can be changed out from under
+        // it. Close the card rather than let it arm a contract it is not
+        // showing.
+        .onChange(of: chainViewModel.selectedContract?.symbol) { _, _ in
+            chartTrading.dismissPlacementIfContractChanged()
+        }
         .onChange(of: container.quoteSocket.lastOrderUpdate) { _, update in
             if let update {
                 tradeViewModel.handleOrderUpdate(update)
@@ -404,6 +411,15 @@ struct TradeScreenView: View {
                                        startPoint: .top, endPoint: .bottom)
                             .ignoresSafeArea(edges: .bottom)
                     )
+                    // These are siblings of the chart in this ZStack, so they
+                    // sit *above* the placement card living inside it. Left
+                    // visible they would leave BUY/SELL tappable through a
+                    // supposedly modal order card — the worst version of the
+                    // z-order bug. Hidden rather than merely inert, so nothing
+                    // paints over the card either.
+                    .opacity(chartTrading.placementRequest == nil ? 1 : 0)
+                    .allowsHitTesting(chartTrading.placementRequest == nil)
+                    .accessibilityHidden(chartTrading.placementRequest != nil)
                 }
 
             case .split:

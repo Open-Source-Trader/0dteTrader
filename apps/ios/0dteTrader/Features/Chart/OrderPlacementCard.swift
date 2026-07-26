@@ -133,12 +133,27 @@ struct OrderPlacementCard: View {
     }
 
     /// The level is the field most likely to be adjusted the moment this opens,
-    /// so it says why it is refusing rather than only that PLACE is dim.
+    /// so it says why it is refusing rather than only that PLACE is dim. This
+    /// doubles as the field's `accessibilityHint`, so naming the actual cause is
+    /// the difference between a useful hint and a misleading one — telling
+    /// someone to "enter a level above 0" when they typed 250000 is worse than
+    /// saying nothing.
     private var note: String {
-        guard levelValid else { return "Enter a level above 0 to place this line." }
+        guard levelValid else { return invalidLevelReason }
         return "Fires an order when \(request.contract.underlying) reaches "
             + "\(Format.price(request.price)). Watched by the app — not a "
             + "broker-side resting order."
+    }
+
+    private var invalidLevelReason: String {
+        let maximum = Format.price(AppPlacementGuide.levelMaximum)
+        guard let value = Double(levelText), value.isFinite else {
+            // Empty, or bare `.` — nothing has been typed that names a price.
+            return "Enter a level to place this line."
+        }
+        return value > AppPlacementGuide.levelMaximum
+            ? "Enter a level at or below \(maximum) to place this line."
+            : "Enter a level above 0 to place this line."
     }
 
     private func submit() {
@@ -183,7 +198,7 @@ struct OrderPlacementCard: View {
                         }
                 }
                 .accessibilityLabel("Trigger price")
-                .accessibilityHint(levelValid ? "" : "Enter a level above 0 to place this line.")
+                .accessibilityHint(levelValid ? "" : invalidLevelReason)
                 // Typing is over, so the field can stop showing the keystrokes
                 // and show the level they added up to.
                 .onChange(of: priceFocused) { _, focused in
@@ -214,24 +229,13 @@ struct OrderPlacementCard: View {
         Binding(
             get: { levelText },
             set: { raw in
-                // `decimalPad` labels its separator key from the locale, so in a
-                // comma-decimal locale the only decimal key on the keyboard
-                // produces `,`, and without folding it the field would be unable
-                // to hold a decimal at all. `Double(_:)` and `Format.price` are
-                // both point-only.
-                //
-                // Conditional on the locale, not unconditional: in a
-                // period-decimal locale a comma can only be a grouping
-                // separator, and folding `1,234.56` there would silently
-                // reinterpret the user's thousands mark as a decimal point.
-                // Rejecting it — desktop's behaviour — is the honest answer.
-                let text = Self.foldsCommaToPoint
-                    ? raw.replacingOccurrences(of: ",", with: ".")
-                    : raw
-                // Shape-gated before parsing: refusing the keystroke leaves the
-                // field showing what it had, which is the same thing a numeric
-                // keypad would have done by not producing the character.
-                guard isLevelInputShape(text) else { return }
+                // Sanitised and then *always* assigned, never rejected: a
+                // setter that returns early leaves SwiftUI's `get` handing back
+                // the unchanged value, which does not reliably revert the text
+                // field — so the field could read `4300..` while the model held
+                // `4300.`, and the number on screen would stop being the number
+                // that gets armed.
+                let text = sanitiseLevelInput(raw, foldingComma: Self.foldsCommaToPoint)
                 levelDraft = text
                 if let value = parseLevelInput(text) { placement.onPriceChange(rounded(value)) }
             }

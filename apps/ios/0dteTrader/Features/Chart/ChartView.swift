@@ -89,21 +89,6 @@ struct ChartView: View {
                     orderLineDelegate: orderLineDelegate,
                     resetToken: chartResetToken
                 )
-                if let placement {
-                    // Tap-away dismiss, matching the desktop window: this must
-                    // never be the thing standing between you and your chart.
-                    Color.black.opacity(0.001)
-                        .contentShape(Rectangle())
-                        .onTapGesture(perform: placement.onCancel)
-                    OrderPlacementCard(placement: placement)
-                    // Centred vertically rather than anchored to the guide: on a
-                    // short pane a line-anchored card clips against the top edge,
-                    // and a window that half-disappears is worse than one that is
-                    // always in the same place.
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
-                    .padding(.trailing, AppSpacing.sm)
-                    .transition(.opacity)
-                }
                 resetButton { chartResetToken += 1 }
                 if let banner = viewModel.twcRenderModel?.banner {
                     TwcBiasBannerView(banner: banner)
@@ -166,6 +151,29 @@ struct ChartView: View {
                 }
                 if drawings.selectedId != nil {
                     selectionBar
+                }
+                // Last in the ZStack, and it must stay last: the reset button,
+                // the TWC banner and the STRUCT chip are all corner-anchored
+                // over the same pane, and anything declared after this draws
+                // over the card and takes the taps meant for it.
+                if let placement {
+                    // Tap-away dismiss, matching the desktop window: this must
+                    // never be the thing standing between you and your chart.
+                    Color.black.opacity(0.001)
+                        .contentShape(Rectangle())
+                        .onTapGesture(perform: placement.onCancel)
+                        // VoiceOver reaches the card through the modal trait
+                        // below, not by landing on the scrim.
+                        .accessibilityHidden(true)
+                    // Centred vertically rather than anchored to the guide: on a
+                    // short pane a line-anchored card clips against the top edge.
+                    // `.isModal` so VoiceOver cannot walk past it to the `+`
+                    // handle and the chain — the audible version of the z-order
+                    // bug this block's position fixes.
+                    OrderPlacementCard(placement: placement)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
+                        .padding(.trailing, AppSpacing.sm)
+                        .accessibilityAddTraits(.isModal)
                 }
             }
             .clipShape(HudPanelShape(chamfer: 10))

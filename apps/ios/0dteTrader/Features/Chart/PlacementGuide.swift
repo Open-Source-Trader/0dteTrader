@@ -28,8 +28,10 @@ enum AppPlacementGuide {
     static let adjustmentStep: Double = 0.01
     /// Smallest level an order can be armed at: one tick.
     static let levelMinimum: Double = 0.01
-    /// Largest. Mirrors the desktop stepper's `max`, and exists so a pasted or
-    /// fat-fingered twenty-digit level is refused rather than armed.
+    /// Largest, so a pasted or fat-fingered twenty-digit level is refused
+    /// rather than armed. Paired with desktop's `LEVEL_MAX`, which bounds its
+    /// `levelValid` as well as its stepper — the stepper alone never was the
+    /// guard, since nothing stops the level being typed straight in.
     static let levelMaximum: Double = 100_000
 }
 
@@ -121,4 +123,37 @@ func parseLevelInput(_ text: String) -> Double? {
           value >= AppPlacementGuide.levelMinimum, value <= AppPlacementGuide.levelMaximum
     else { return nil }
     return value
+}
+
+/// Reduces arbitrary field text to something `isLevelInputShape` accepts.
+///
+/// The level field cannot reject a keystroke by returning early from its
+/// `Binding` setter: SwiftUI then sees `get` hand back the unchanged value and
+/// does not reliably push a text update to the `UITextField`, so the field can
+/// end up reading `4300..` while the model holds `4300.` — valid, submittable,
+/// and disagreeing with what is on screen. Reachable by pasting, or by the
+/// second separator on `decimalPad`. Sanitising and *always* assigning removes
+/// the ambiguity: what the field shows is what the model holds, keystroke by
+/// keystroke.
+///
+/// `foldingComma` is for locales whose `decimalPad` decimal key emits `,`.
+/// Elsewhere a comma can only be a grouping mark, and silently promoting it to
+/// a decimal point would turn `1,234.56` into a different number than the one
+/// the user typed, so it is dropped like any other stray character.
+func sanitiseLevelInput(_ text: String, foldingComma: Bool) -> String {
+    var result = ""
+    var seenPoint = false
+    for character in text {
+        let isSeparator = character == "." || (foldingComma && character == ",")
+        if isSeparator {
+            // Second and later separators are dropped, not kept: `4300..` is
+            // not a price, and the first point is the one the user meant.
+            guard !seenPoint else { continue }
+            seenPoint = true
+            result.append(".")
+        } else if character.isASCII, character.isNumber {
+            result.append(character)
+        }
+    }
+    return result
 }

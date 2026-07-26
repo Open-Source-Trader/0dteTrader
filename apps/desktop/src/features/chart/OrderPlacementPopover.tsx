@@ -26,6 +26,13 @@ interface OrderPlacementPopoverProps {
 
 /** Trigger price step: one cent, the tick the level is rounded to anyway. */
 const PRICE_STEP = 0.01;
+/** Bounds a level has to fall inside to be armable. The stepper clamps to the
+ *  same range, but the validation is what stops a *typed or pasted* level from
+ *  getting through — without the ceiling a twenty-digit level is finite, passes
+ *  every guard, and arms. Mirrored by `AppPlacementGuide.levelMinimum/Maximum`
+ *  on iOS. */
+const LEVEL_MIN = 0.01;
+const LEVEL_MAX = 100000;
 /** Digits, optionally one decimal point. Also matches the part-typed forms a
  *  level passes through on the way in (`''`, `'.'`, `'4300.'`). */
 const LEVEL_SHAPE = /^\d*\.?\d*$/;
@@ -69,7 +76,8 @@ export function OrderPlacementPopover({
 
   const levelText = levelDraft ?? String(price);
   const levelNumber = Number(levelText);
-  const levelValid = Number.isFinite(levelNumber) && levelNumber > 0;
+  const levelValid =
+    Number.isFinite(levelNumber) && levelNumber >= LEVEL_MIN && levelNumber <= LEVEL_MAX;
 
   // The level is the field most likely to be adjusted the moment this opens —
   // the `+` only gets you approximately where you meant.
@@ -145,7 +153,9 @@ export function OrderPlacementPopover({
             if (!LEVEL_SHAPE.test(raw)) return;
             setLevelDraft(raw);
             const next = Number(raw);
-            if (Number.isFinite(next) && next > 0) onPriceChange(Math.round(next * 100) / 100);
+            if (Number.isFinite(next) && next >= LEVEL_MIN && next <= LEVEL_MAX) {
+              onPriceChange(Math.round(next * 100) / 100);
+            }
           }}
           // Typing is over, so the field can stop showing the keystrokes and
           // show the level they added up to.
@@ -153,8 +163,8 @@ export function OrderPlacementPopover({
         />
         <Stepper
           value={price}
-          min={0.01}
-          max={100000}
+          min={LEVEL_MIN}
+          max={LEVEL_MAX}
           step={PRICE_STEP}
           onChange={(next) => {
             setLevelDraft(null);
@@ -207,7 +217,7 @@ export function OrderPlacementPopover({
             app — not a broker-side resting order.
           </>
         ) : (
-          'Enter a level above 0 to place this line.'
+          `Enter a level between ${LEVEL_MIN} and ${LEVEL_MAX} to place this line.`
         )}
       </p>
 

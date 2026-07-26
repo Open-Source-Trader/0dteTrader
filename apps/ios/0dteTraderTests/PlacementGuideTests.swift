@@ -163,6 +163,38 @@ final class PlacementGuideTests: XCTestCase {
         }
     }
 
+    /// A `Binding` setter that rejects a keystroke by returning early does not
+    /// reliably revert the text field, so the field could show `4300..` while
+    /// the model held `4300.` — valid, submittable, and not what is on screen.
+    /// Sanitising means every input maps to something the model can hold.
+    func testSanitisingLeavesOnlyAShapeTheFieldCanHold() {
+        let cases = [
+            ("4300..", "4300."),
+            ("4300.5.0", "4300.50"),
+            ("1e5", "15"),
+            ("0x1f", "01"),
+            ("-3", "3"),
+            (" 42 ", "42"),
+            ("$4,300.50", "4300.50"),
+            ("٤٣", ""),
+        ]
+        for (raw, expected) in cases {
+            let clean = sanitiseLevelInput(raw, foldingComma: false)
+            XCTAssertEqual(clean, expected, "sanitising \(raw)")
+            // Whatever comes out must be something the field can hold, always.
+            XCTAssertTrue(isLevelInputShape(clean), "unholdable shape from \(raw)")
+        }
+    }
+
+    func testFoldsTheCommaOnlyForCommaDecimalLocales() {
+        // The `decimalPad` decimal key emits `,` in these locales, so it has to
+        // mean "decimal point" there.
+        XCTAssertEqual(sanitiseLevelInput("4300,50", foldingComma: true), "4300.50")
+        // Elsewhere a comma can only be a grouping mark; promoting it would turn
+        // 1,234.56 into 1.234.
+        XCTAssertEqual(sanitiseLevelInput("1,234.56", foldingComma: false), "1234.56")
+    }
+
     func testHasNoLevelAboveTheMaximum() {
         // Desktop caps its stepper at 100000; without the same bound on the way
         // in, a pasted twenty-digit level is finite, passes every guard, and is

@@ -113,10 +113,6 @@ final class OrderLineOverlayView: UIView {
     var guidePrice: Double?
     /// The handle as last drawn, for hit-testing.
     var handleFrame: CGRect = .zero
-    /// One long-lived element for the handle, so VoiceOver focus survives the
-    /// repaints that rebuild everything else.
-    lazy var guideHandleElement = GuideHandleElement(accessibilityContainer: self)
-
     var entryLines: [EntryLineModel] = [] {
         didSet {
             guard entryLines != oldValue else { return }
@@ -196,8 +192,19 @@ final class OrderLineOverlayView: UIView {
     private let negativeColor: UIColor = .appPnlNegative
     private let pillTextColor = UIColor.black
 
+    /// One long-lived element for the handle, so VoiceOver focus survives the
+    /// repaints that rebuild everything else. `let`, not `var`: reassigning it
+    /// would hand VoiceOver a fresh element and drop the focus identity that is
+    /// the whole reason it is held rather than rebuilt.
+    let guideHandleElement: GuideHandleElement
+
     override init(frame: CGRect) {
+        // The real container is patched in below — `self` does not exist yet —
+        // but the element itself is created exactly once, which is the part
+        // that matters.
+        guideHandleElement = GuideHandleElement(accessibilityContainer: NSNull())
         super.init(frame: frame)
+        guideHandleElement.accessibilityContainer = self
         backgroundColor = .clear
         isOpaque = false
 
@@ -500,6 +507,9 @@ final class OrderLineOverlayView: UIView {
         )
     }
 
+    /// Only valid inside `draw(_:)` — it paints into the passed context, which
+    /// is the one UIKit made current for the paint pass. Called anywhere else it
+    /// silently draws nothing.
     func strokeLine(
         to x: CGFloat,
         y: CGFloat,
@@ -607,6 +617,8 @@ final class OrderLineOverlayView: UIView {
         )
     }
 
+    /// Like `strokeLine`, only valid inside `draw(_:)`: `NSString.draw(at:)`
+    /// paints into the current context and no-ops without one.
     func draw(text: String, at point: CGPoint, color: UIColor) {
         (text as NSString).draw(
             at: point,

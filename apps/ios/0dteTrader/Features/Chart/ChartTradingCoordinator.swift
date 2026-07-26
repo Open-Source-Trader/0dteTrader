@@ -111,6 +111,20 @@ final class ChartTradingCoordinator: ObservableObject, OrderLineOverlayDelegate 
         placementRequest = OrderPlacementRequest(price: rounded(price), contract: contract)
     }
 
+    /// Closes an open card whose contract is no longer the one a new line would
+    /// trade.
+    ///
+    /// The card names a contract, and that contract is frozen when the card
+    /// opens — but the option chain underneath it stays live in the split
+    /// layout, so selecting a different strike would otherwise leave the card
+    /// showing the 6000C while PLACE armed... the 6000C, against a chain that
+    /// now says 6010P. Dismissing on the change is what the desktop twin gets
+    /// for free from its window-level outside-press listener.
+    func dismissPlacementIfContractChanged() {
+        guard let request = placementRequest else { return }
+        if selectedContract()?.symbol != request.contract.symbol { placementRequest = nil }
+    }
+
     /// The window's own price field moved the level; the guide follows it.
     func updatePlacementPrice(_ price: Double) {
         guard let request = placementRequest else { return }
@@ -133,6 +147,16 @@ final class ChartTradingCoordinator: ObservableObject, OrderLineOverlayDelegate 
 
     func placeFromSheet(side: OrderSide, quantity: Int, orderType: OrderType) async {
         guard let request = placementRequest else { return }
+        // Re-checked at the moment of arming, not just when the selection
+        // changes: the dismissal above should make this unreachable, but the
+        // card's displayed contract and the armed contract have to be the same
+        // thing by construction, not by two views agreeing to stay in sync.
+        // Closing rather than substituting — the user aimed at what the card
+        // said, and silently arming something else is the failure this guards.
+        guard selectedContract()?.symbol == request.contract.symbol else {
+            placementRequest = nil
+            return
+        }
         let draft = ChartOrderDraftDTO(
             underlying: request.contract.underlying,
             triggerPrice: request.price,

@@ -252,3 +252,13 @@ model ScheduledJobLease {
   @@index([expiresAt])
   @@map("scheduled_job_leases")
 }
+
+/// Server-generated fallback secrets for zero-config self-hosted deploys.
+/// Only consulted when the corresponding env var is absent.
+model RuntimeSecret {
+  name      String   @id
+  value     String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("runtime_secrets")
+}

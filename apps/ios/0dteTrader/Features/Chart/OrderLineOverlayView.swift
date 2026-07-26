@@ -79,6 +79,28 @@ protocol OrderLineOverlayDelegate: AnyObject {
     func orderLineOverlayDidRequestPlacement(at price: Double)
 }
 
+/// The `+` handle as assistive tech sees it.
+///
+/// A bare `UIAccessibilityElement` has no direct-manipulation path, and a swipe
+/// on one drives the rotor rather than dragging anything — so without increment
+/// and decrement a VoiceOver user is stuck at whatever level `resolveGuidePrice`
+/// anchored to and can only ever arm an order there.
+private final class GuideHandleElement: UIAccessibilityElement {
+    override func accessibilityIncrement() {
+        overlay?.stepGuidePrice(by: AppPlacementGuide.adjustmentStep)
+    }
+
+    override func accessibilityDecrement() {
+        overlay?.stepGuidePrice(by: -AppPlacementGuide.adjustmentStep)
+    }
+
+    /// Reached through the container UIKit already holds weakly, so the view's
+    /// `accessibilityElements` array does not retain the view back.
+    private var overlay: OrderLineOverlayView? {
+        accessibilityContainer as? OrderLineOverlayView
+    }
+}
+
 /// TradingView-style order lines above the candles: a live entry line per open
 /// position (quantity, P/L, and a one-tap close), and every working order line
 /// with its quantity, kind, execution type, and cancel.
@@ -96,13 +118,38 @@ final class OrderLineOverlayView: UIView {
     var rightInset: CGFloat = 0 { didSet { setNeedsDisplay() } }
 
     /// Last traded price — where the guide parks when it has nowhere else to be.
-    var lastPrice: Double? { didSet { setNeedsDisplay() } }
+    var lastPrice: Double? {
+        didSet {
+            guard lastPrice != oldValue else { return }
+            setNeedsDisplay()
+        }
+    }
 
     /// The guide's level. Owned here because dragging it is a UIKit gesture;
     /// SwiftUI only hears about it when the `+` is tapped.
+    ///
+    /// Advanced by `draw(_:)` as well as by the gesture handlers — the paint
+    /// pass is what re-anchors it through `resolveGuidePrice` — so the ordering
+    /// of drag and paint is load-bearing. Safe because it has no `didSet` and
+    /// nothing in the paint path can re-enter drawing.
     private var guidePrice: Double?
     /// The handle as last drawn, for hit-testing.
     private var handleFrame: CGRect = .zero
+    /// One long-lived element for the handle, so VoiceOver focus survives the
+    /// repaints that rebuild everything else.
+    private lazy var guideHandleElement = GuideHandleElement(accessibilityContainer: self)
+
+    /// Nudges the guide by one tick. VoiceOver's increment/decrement path, and
+    /// the only way to move the guide without a pointer.
+    fileprivate func stepGuidePrice(by delta: Double) {
+        // The card owns the level while it is open; the handle is inert then,
+        // and adjusting it would fight the price the card is armed at.
+        guard !isPlacementOpen, let current = effectiveGuidePrice else { return }
+        // Re-rounded rather than accumulated, so repeated steps cannot drift off
+        // the tick through floating-point error.
+        guidePrice = ((current + delta) * 100).rounded() / 100
+        setNeedsDisplay()
+    }
 
     var entryLines: [EntryLineModel] = [] {
         didSet {
@@ -140,7 +187,8 @@ final class OrderLineOverlayView: UIView {
     /// Driven from SwiftUI state, so while the card is open it — not the
     /// handle — owns the guide's level, and there is one source of truth at any
     /// moment. Closing it hands the level back to `guidePrice`, which has been
-    /// tracking it; the guide itself is permanent either way.
+    /// tracking it, so the guide keeps the tick-rounded level the card was
+    /// armed at rather than reverting. The guide itself is permanent either way.
     var placementPrice: Double? {
         didSet {
             guard placementPrice != oldValue else { return }
@@ -198,11 +246,28 @@ final class OrderLineOverlayView: UIView {
         return hitTest(at: point) != nil
     }
 
+    /// Left edge of the drawn handle, and the single source for where the
+    /// handle sits horizontally: `renderPlacementGuide` places the glyph at it,
+    /// `handleTouchLeft` grows leftward from it, and `rowRightEdge` backs off
+    /// from that. Deriving the same quantity twice from the raw constants would
+    /// let the two drift apart silently, and the failure mode is the handle
+    /// shadowing ✕ on a live order — the exact collision the band prevents.
+    var handleLeft: CGFloat {
+        bounds.width - rightInset - AppPlacementGuide.handleMargin - AppPlacementGuide.handleSize
+    }
+
+    /// How far the 44pt touch target overhangs the drawn glyph on each side.
+    private var handleTouchInset: CGFloat {
+        (AppOrderLine.minimumTouchTarget - AppPlacementGuide.handleSize) / 2
+    }
+
+    /// Left edge of the handle's touch target — what the rows must clear.
+    var handleTouchLeft: CGFloat { handleLeft - handleTouchInset }
+
     /// Enlarged to the 44pt minimum without moving the drawn glyph.
     private var handleTouchFrame: CGRect {
         guard !handleFrame.isEmpty else { return .zero }
-        let inset = (AppOrderLine.minimumTouchTarget - AppPlacementGuide.handleSize) / 2
-        return handleFrame.insetBy(dx: -inset, dy: -inset)
+        return handleFrame.insetBy(dx: -handleTouchInset, dy: -handleTouchInset)
     }
 
     // MARK: - Coordinate mapping
@@ -490,8 +555,8 @@ final class OrderLineOverlayView: UIView {
     private func renderPlacementGuide(in context: CGContext) {
         let visibleRect = chart?.viewPortHandler.contentRect ?? bounds
         let resolved = isPlacementOpen
-            // While the window is open it owns the level, so the guide does not
-            // re-anchor underneath the number the user is editing.
+            // While the card is open it owns the level, so the guide does not
+            // re-anchor away from the price the card is armed at.
             ? placementPrice
             : resolveGuidePrice(
                 current: guidePrice,
@@ -499,10 +564,12 @@ final class OrderLineOverlayView: UIView {
                 min: price(at: visibleRect.maxY) ?? .nan,
                 max: price(at: visibleRect.minY) ?? .nan
             )
-        // Tracked in both states, not just when the card is closed: the card
-        // owns the level while it is open, and if the guide did not follow it
-        // there, dismissing would snap back to wherever the handle sat before
-        // the card opened and silently discard the level the user typed.
+        // Tracked in both states, not just when the card is closed. Today the
+        // card's level is the handle's rounded to a tick by the coordinator, so
+        // without this the guide would un-round itself on dismiss and sit a
+        // fraction off the level the order was actually armed at. Once the card
+        // gains an editable level field it will also be what keeps a typed
+        // price from being discarded when the card closes.
         guidePrice = resolved
 
         guard let resolved, let y = yPixel(for: resolved) else {
@@ -511,16 +578,13 @@ final class OrderLineOverlayView: UIView {
         }
 
         let size = AppPlacementGuide.handleSize
-        let frame = CGRect(
-            x: bounds.width - rightInset - AppPlacementGuide.handleMargin - size,
-            y: y - size / 2,
-            width: size,
-            height: size
-        )
+        let frame = CGRect(x: handleLeft, y: y - size / 2, width: size, height: size)
         handleFrame = frame
 
+        // Stroked up to the handle rather than stopping short of it, matching
+        // the desktop twin: the dash and the chip read as one control.
         strokeLine(
-            to: frame.minX - AppPlacementGuide.handleMargin,
+            to: handleLeft,
             y: y,
             color: .hudAxisLabel,
             width: 1,
@@ -603,25 +667,21 @@ final class OrderLineOverlayView: UIView {
 
     /// Right edge the pill rows lay out from.
     ///
-    /// Rows must stop short of the placement handle's *touch* rect, not merely
-    /// its drawn glyph: `point(inside:)` and both gesture handlers check
+    /// Rows must stop short of the placement handle's *touch* target, not
+    /// merely its drawn glyph: `point(inside:)` and both gesture handlers check
     /// `handleTouchFrame` before `hitTest`, so any pill whose enlarged target
     /// reaches into that band loses the touch to the handle — and the rightmost
     /// pill is ✕, which cancels a live order. Resolving it the other way round
     /// is not an option: a row sitting at the guide's level would then make the
     /// handle unreachable, and the handle is the only way to move the guide.
     ///
-    /// Reserved unconditionally rather than only when the guide resolves.
-    /// `draw(_:)` runs only when chart trading is on, which is exactly when the
-    /// guide is drawn, and the rows are laid out before the guide is — keying
-    /// this off the previous frame's `handleFrame` would lag by a frame and let
-    /// the rows slide under the handle for exactly the frame that matters.
-    private var rowRightEdge: CGFloat {
-        let handleTouchLeft = bounds.width - rightInset
-            - AppPlacementGuide.handleMargin
-            - AppPlacementGuide.handleSize
-            - (AppOrderLine.minimumTouchTarget - AppPlacementGuide.handleSize) / 2
-        return Swift.min(
+    /// Every row gives up the band, not just one that happens to share the
+    /// guide's level, so the rows stay aligned with each other and the
+    /// collision cannot occur at any y. Reserving it per-row would buy back a
+    /// few points for rows far from the guide at the cost of a layout that
+    /// shifts as the guide is dragged past them.
+    var rowRightEdge: CGFloat {
+        Swift.min(
             bounds.width - AppOrderLine.rowRightMargin - rightInset,
             handleTouchLeft - AppOrderLine.pillGap / 2
         )
@@ -733,12 +793,21 @@ final class OrderLineOverlayView: UIView {
             }
         }
         if !handleFrame.isEmpty, let price = effectiveGuidePrice {
-            let handle = UIAccessibilityElement(accessibilityContainer: self)
-            handle.accessibilityLabel = "Place an order at \(Format.price(price))"
+            // Reused rather than rebuilt so the element keeps its identity
+            // across repaints: `draw(_:)` runs on every pan frame, and handing
+            // VoiceOver a fresh element each time would drop focus out from
+            // under someone in the middle of adjusting the level.
+            let handle = guideHandleElement
+            handle.accessibilityLabel = "Place an order"
+            handle.accessibilityValue = Format.price(price)
             handle.accessibilityHint = "Swipe up or down to change the level"
-            // While the window owns the level the handle refuses touches, so it
-            // must not advertise a button it will not honour.
-            handle.accessibilityTraits = isPlacementOpen ? [.button, .notEnabled] : .button
+            // Adjustable, not merely a button: the handle is the only way to
+            // move the guide, and dragging it is not a gesture VoiceOver can
+            // make. While the card owns the level the handle refuses touches,
+            // so it must not advertise controls it will not honour.
+            handle.accessibilityTraits = isPlacementOpen
+                ? [.button, .adjustable, .notEnabled]
+                : [.button, .adjustable]
             handle.accessibilityFrameInContainerSpace = handleTouchFrame
             elements.append(handle)
         }

@@ -15,8 +15,17 @@ enum AppPlacementGuide {
     /// Dash pattern for the guide line, keeping it visually subordinate to the
     /// solid lines a real resting order draws.
     static let dash: [CGFloat] = [4, 4]
-    /// Finger travel before a press on the handle counts as a drag, not a tap.
+    /// Floor beneath `UIPanGestureRecognizer`'s own slop, mirroring the desktop
+    /// constant. It does not decide tap versus drag here — the recognizer does
+    /// not reach `.began` until roughly 10pt of travel, so this is already
+    /// satisfied by the first `.changed`. Desktop drives its guide from raw
+    /// pointer events, which have no slop of their own, so there the same
+    /// number is what actually makes the call.
     static let dragThreshold: CGFloat = 4
+    /// One tick, and the step VoiceOver's increment/decrement moves the guide
+    /// by. Matches the rounding `ChartTradingCoordinator` applies to any level
+    /// it arms, so adjusting never lands between ticks.
+    static let adjustmentStep: Double = 0.01
 }
 
 /// Resolves the guide's price for this frame.

@@ -112,4 +112,27 @@ final class PlacementGuideTests: XCTestCase {
             resolveGuidePrice(current: .nan, lastPrice: lastPrice, min: .nan, max: 520)
         )
     }
+
+    /// The order-line rows must never reach into the placement handle's touch
+    /// target. Both hit paths check the handle before the rows, so a pill that
+    /// overlapped it would lose the touch — and the rightmost pill is ✕, which
+    /// cancels a working order. This asserts the geometry directly rather than
+    /// the constants that feed it, so any future change to either derivation
+    /// fails here instead of silently covering a live-money control.
+    @MainActor
+    func testRowsNeverReachIntoTheHandlesTouchTarget() {
+        let overlay = OrderLineOverlayView(frame: .zero)
+        // Narrow and wide panes, with the options-analytics rail off and on.
+        for width in [320.0, 430.0, 1024.0] as [CGFloat] {
+            for inset in [0.0, 64.0, 180.0] as [CGFloat] {
+                overlay.frame = CGRect(x: 0, y: 0, width: width, height: 400)
+                overlay.rightInset = inset
+                XCTAssertLessThanOrEqual(
+                    overlay.rowRightEdge + AppOrderLine.pillGap / 2,
+                    overlay.handleTouchLeft,
+                    "rows overlap the handle at width \(width), inset \(inset)"
+                )
+            }
+        }
+    }
 }

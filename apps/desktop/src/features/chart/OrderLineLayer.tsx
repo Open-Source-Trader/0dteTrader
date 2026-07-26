@@ -10,7 +10,14 @@ import type { ChartOrdersStore } from './chartOrders';
 import { isWorking, kindLabel, orderTypeLabel } from './chartOrders';
 import type { ChartTradingSettings } from './chartTradingSettings';
 import { OrderPlacementPopover } from './OrderPlacementPopover';
-import { GUIDE_DRAG_THRESHOLD, PLUS_MARGIN, PLUS_SIZE, resolveGuidePrice } from './placementGuide';
+import {
+  GUIDE_ADJUST_PAGE,
+  GUIDE_ADJUST_STEP,
+  GUIDE_DRAG_THRESHOLD,
+  PLUS_MARGIN,
+  PLUS_SIZE,
+  resolveGuidePrice,
+} from './placementGuide';
 import {
   hitRows,
   layoutRow,
@@ -603,6 +610,25 @@ export function OrderLineLayer({
   };
 
   /**
+   * Keyboard adjustment of the guide's level. Dragging the handle is the only
+   * pointer route to a different level and a keyboard user has no drag, so
+   * without this they could only ever arm an order at whatever level
+   * `resolveGuidePrice` anchored to. Mirrors VoiceOver's increment/decrement on
+   * iOS, at the same one-tick step.
+   */
+  const onPlusKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>) => {
+    if (latest.current.placementPrice !== null) return; // the window owns the level
+    const up = event.key === 'ArrowUp' || event.key === 'PageUp';
+    const down = event.key === 'ArrowDown' || event.key === 'PageDown';
+    if ((!up && !down) || guidePriceRef.current === null) return;
+    const step = event.key.startsWith('Page') ? GUIDE_ADJUST_PAGE : GUIDE_ADJUST_STEP;
+    // Otherwise the arrows scroll the page out from under the chart.
+    event.preventDefault();
+    guidePriceRef.current = round2(guidePriceRef.current + (up ? step : -step));
+    scheduleRef.current();
+  };
+
+  /**
    * Press on the handle: a drag moves the guide, a click with no travel opens
    * the window. Same gesture the order lines use, so the two feel identical.
    */
@@ -731,6 +757,8 @@ export function OrderLineLayer({
         data-chart-placement=""
         className="order-guide-plus hud-clip"
         onPointerDown={onPlusPointerDown}
+        onKeyDown={onPlusKeyDown}
+        aria-keyshortcuts="ArrowUp ArrowDown"
         // Enter and Space synthesise a click with no click count, which is what
         // separates them from the mouse release the press handler already
         // served — without this the handle is unreachable from the keyboard.

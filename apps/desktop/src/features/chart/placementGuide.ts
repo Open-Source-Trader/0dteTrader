@@ -12,6 +12,14 @@ export const PLUS_SIZE = 22;
 export const PLUS_MARGIN = 6;
 /** Pointer travel before a press on the handle counts as a drag, not a click. */
 export const GUIDE_DRAG_THRESHOLD = 3;
+/**
+ * One tick, and the step the arrow keys move the guide by. Matches the rounding
+ * applied to any level that gets armed, so adjusting never lands between ticks.
+ * Mirrored by `AppPlacementGuide.adjustmentStep` on iOS.
+ */
+export const GUIDE_ADJUST_STEP = 0.01;
+/** Coarse step for PageUp/PageDown, for crossing a range without a hundred presses. */
+export const GUIDE_ADJUST_PAGE = 0.1;
 
 export interface PriceRange {
   /** Price at the bottom of the pane. */

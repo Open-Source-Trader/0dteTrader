@@ -32,5 +32,15 @@ describe('resolveGuidePrice', () => {
 
   it('ignores a non-finite guide or last price', () => {
     expect(resolveGuidePrice(NaN, 510, range)).toBe(510);
+    expect(resolveGuidePrice(null, NaN, range)).toBe(510);
+  });
+
+  it('counts the visible edges as in view', () => {
+    expect(resolveGuidePrice(500, 510, range)).toBe(500);
+    expect(resolveGuidePrice(520, 510, range)).toBe(520);
+  });
+
+  it('never hands back a non-finite level', () => {
+    expect(resolveGuidePrice(NaN, 510, { min: NaN, max: 520 })).toBeNull();
   });
 });

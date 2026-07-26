@@ -41,8 +41,13 @@ export function resolveGuidePrice(
 ): number | null {
   const { min, max } = range;
   // A degenerate range means the chart has no usable price transform yet; hold
-  // whatever we had rather than inventing a level from garbage.
-  if (!Number.isFinite(min) || !Number.isFinite(max) || max <= min) return current;
+  // whatever we had rather than inventing a level from garbage. `current` is
+  // still filtered on the way out — a non-finite level escaping here would
+  // become a non-finite y-coordinate and silently erase the guide, which is the
+  // exact failure this module exists to prevent.
+  if (!Number.isFinite(min) || !Number.isFinite(max) || max <= min) {
+    return isUsablePrice(current) ? current : null;
+  }
 
   const inRange = (price: number | null): price is number =>
     isUsablePrice(price) && price >= min && price <= max;

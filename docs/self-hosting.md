@@ -8,11 +8,11 @@ Run your own private 0dteTrader backend in one click, then point the apps at it.
 
 Pressing the button deploys three services into **your own Railway account** (your project, your billing — the 0dteTrader maintainers never see or control your instance):
 
-| Service    | What it is                                                  | Storage     |
-| ---------- | ----------------------------------------------------------- | ----------- |
-| `api`      | The NestJS backend, built from this repo                    | —           |
-| `Postgres` | Your database (users, encrypted broker credentials, orders) | 5 GB volume |
-| `Redis`    | Cache / stream infrastructure                               | volume      |
+| Service    | What it is                                                  | Storage           |
+| ---------- | ----------------------------------------------------------- | ----------------- |
+| `api`      | The NestJS backend, built from this repo                    | —                 |
+| `Postgres` | Your database (users, encrypted broker credentials, orders) | persistent volume |
+| `Redis`    | Cache / stream infrastructure                               | persistent volume |
 
 Typical cost is a few dollars per month on Railway's usage-based pricing (their Hobby plan includes a monthly usage credit).
 

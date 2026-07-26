@@ -36,6 +36,12 @@ With a Webull-connected account the chart adds the live options-structure overla
 
 The screenshots are reproducible: the `0dteTraderScreenshots` scheme drives the real app from login through to the chart screen and captures each frame (`apps/ios/0dteTraderUITests`).
 
+## Host your own backend
+
+[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/hqwdS8)
+
+One click deploys the API + Postgres + Redis into your own Railway account — zero configuration, no secrets to fill in. Then open the app, tap **Server** on the login screen, and paste your Railway URL. Full walkthrough: [docs/self-hosting.md](docs/self-hosting.md).
+
 ## Data sources and broker support
 
 Today the app uses a **hybrid broker/data model**:

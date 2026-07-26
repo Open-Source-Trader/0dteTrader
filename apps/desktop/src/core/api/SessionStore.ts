@@ -1,7 +1,7 @@
 import type { AuthTokens } from '@0dtetrader/shared-types';
 import { ApiError, parseErrorEnvelope } from './ApiError';
 
-const REFRESH_TOKEN_KEY = '0dte.refreshToken';
+const REFRESH_TOKEN_KEY_PREFIX = '0dte.refreshToken';
 
 /**
  * Token lifecycle (SessionStore.swift analog): access token in memory only,
@@ -12,8 +12,13 @@ export class SessionStore {
   private accessToken: string | null = null;
   private refreshPromise: Promise<AuthTokens> | null = null;
   private unauthenticatedListeners = new Set<() => void>();
+  // Scoped per server host so switching servers (runtime server selection)
+  // can never send one server's refresh token to another.
+  private readonly refreshTokenKey: string;
 
-  constructor(private readonly baseUrl: string) {}
+  constructor(private readonly baseUrl: string) {
+    this.refreshTokenKey = `${REFRESH_TOKEN_KEY_PREFIX}:${new URL(baseUrl).host}`;
+  }
 
   onUnauthenticated(listener: () => void): () => void {
     this.unauthenticatedListeners.add(listener);
@@ -25,13 +30,13 @@ export class SessionStore {
   }
 
   hasStoredRefreshToken(): boolean {
-    return localStorage.getItem(REFRESH_TOKEN_KEY) !== null;
+    return localStorage.getItem(this.refreshTokenKey) !== null;
   }
 
   /** Stores freshly issued tokens after register/login. */
   signIn(tokens: AuthTokens): void {
     this.accessToken = tokens.accessToken;
-    localStorage.setItem(REFRESH_TOKEN_KEY, tokens.refreshToken);
+    localStorage.setItem(this.refreshTokenKey, tokens.refreshToken);
   }
 
   /** Attempts to restore a session from the stored refresh token (app launch). */
@@ -62,7 +67,7 @@ export class SessionStore {
       const tokens = await promise;
       this.accessToken = tokens.accessToken;
       // Rotation: the server issues a new refresh token every time.
-      localStorage.setItem(REFRESH_TOKEN_KEY, tokens.refreshToken);
+      localStorage.setItem(this.refreshTokenKey, tokens.refreshToken);
       return tokens.accessToken;
     } catch (error) {
       if (ApiError.isUnauthorized(error)) {
@@ -77,7 +82,7 @@ export class SessionStore {
 
   /** Logs out server-side (best effort) and wipes local tokens. */
   async signOut(): Promise<void> {
-    const refreshToken = localStorage.getItem(REFRESH_TOKEN_KEY);
+    const refreshToken = localStorage.getItem(this.refreshTokenKey);
     this.clearLocalSession();
     if (!refreshToken) return;
     try {
@@ -93,12 +98,12 @@ export class SessionStore {
 
   private clearLocalSession(): void {
     this.accessToken = null;
-    localStorage.removeItem(REFRESH_TOKEN_KEY);
+    localStorage.removeItem(this.refreshTokenKey);
   }
 
   // Raw fetch (not ApiClient) to avoid recursion through the 401-retry path.
   private async performRefresh(): Promise<AuthTokens> {
-    const refreshToken = localStorage.getItem(REFRESH_TOKEN_KEY);
+    const refreshToken = localStorage.getItem(this.refreshTokenKey);
     if (!refreshToken) throw new ApiError({ kind: 'unauthorized' });
 
     let response: Response;

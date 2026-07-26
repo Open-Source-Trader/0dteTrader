@@ -165,7 +165,8 @@ async function createWindow() {
   // External links (e.g. the "Deploy on Railway" link on the login screen)
   // belong in the OS browser, not a new Electron window.
   win.webContents.setWindowOpenHandler(({ url }) => {
-    void shell.openExternal(url);
+    // Only web URLs — never hand file:, app protocols, etc. to the OS.
+    if (/^https?:/i.test(url)) void shell.openExternal(url);
     return { action: 'deny' };
   });
 

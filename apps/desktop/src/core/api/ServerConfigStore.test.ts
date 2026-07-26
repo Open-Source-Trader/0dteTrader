@@ -51,6 +51,27 @@ describe('ServerConfigStore', () => {
     expect(store.load()).toBe('https://my-api.up.railway.app');
   });
 
+  it('strips a pasted /v1/health suffix and treats /v1 case-insensitively', () => {
+    const store = new ServerConfigStore();
+    store.save('https://my-api.up.railway.app/v1/health');
+    expect(store.load()).toBe('https://my-api.up.railway.app');
+    store.save('https://my-api.up.railway.app/V1/');
+    expect(store.load()).toBe('https://my-api.up.railway.app');
+  });
+
+  it('rejects a path-bearing base URL (the stream URL would silently break)', () => {
+    expect(() => new ServerConfigStore().save('https://my-api.up.railway.app/api')).toThrow(
+      /origin/,
+    );
+  });
+
+  it('rejects URLs with a query, fragment, or embedded credentials', () => {
+    const store = new ServerConfigStore();
+    expect(() => store.save('https://my-api.up.railway.app/?token=x')).toThrow(/origin/);
+    expect(() => store.save('https://my-api.up.railway.app/#section')).toThrow(/origin/);
+    expect(() => store.save('https://user:pass@my-api.up.railway.app')).toThrow(/origin/);
+  });
+
   it('rejects junk that is not a URL', () => {
     const store = new ServerConfigStore();
     expect(() => store.save('not a url')).toThrow(/http/);

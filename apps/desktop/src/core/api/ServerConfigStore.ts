@@ -35,14 +35,32 @@ function loadStoredBaseUrl(): string {
   return stored !== null && isHttpUrl(stored) ? stored : DEFAULT_API_BASE_URL;
 }
 
-/** Trims, strips trailing `/` and a pasted `/v1` suffix, validates http(s). */
+/**
+ * Trims, strips a pasted `/v1` or `/v1/health` suffix, and validates that the
+ * result is a bare http(s) origin. Path-bearing bases are rejected outright:
+ * `deriveStreamUrl` replaces the path, so REST would work while the WebSocket
+ * silently broke.
+ */
 function normalizeServerUrl(input: string): string {
-  let url = input.trim().replace(/\/+$/, '');
-  if (url.endsWith('/v1')) url = url.slice(0, -'/v1'.length);
-  if (!isHttpUrl(url)) {
+  const trimmed = input
+    .trim()
+    .replace(/\/+$/, '')
+    .replace(/\/v1(\/health)?$/i, '');
+  let url: URL;
+  try {
+    url = new URL(trimmed);
+  } catch {
     throw new Error('Enter a valid http(s) URL, e.g. https://your-api.up.railway.app');
   }
-  return url;
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    throw new Error('Enter a valid http(s) URL, e.g. https://your-api.up.railway.app');
+  }
+  if (url.username || url.password || url.search || url.hash || url.pathname !== '/') {
+    throw new Error(
+      'Use just the server origin — no path, query, or credentials (e.g. https://your-api.up.railway.app)',
+    );
+  }
+  return url.origin;
 }
 
 function isHttpUrl(value: string): boolean {

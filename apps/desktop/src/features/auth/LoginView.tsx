@@ -3,9 +3,9 @@ import { useContainer } from '../../app/container';
 import { Spinner } from '../../design/components/Spinner';
 import { useStore } from '../../core/observable';
 import type { AuthStore } from './AuthStore';
+import { BackendStatus } from './BackendStatus';
 import { PasswordField } from './PasswordField';
 import { RegisterView } from './RegisterView';
-import { hostLabel } from './serverSelect';
 import { ServerSelectView } from './ServerSelectView';
 
 // Reuses the shared toast-in keyframes (base.css) for a staggered entrance;
@@ -179,8 +179,8 @@ export function LoginView({ store }: { store: AuthStore }) {
         </button>
       </form>
 
-      {/* Quiet footer link for self-hosters: opens the same server picker
-          without entering the create-account flow. */}
+      {/* Footer backend indicator: status light + Change, opening the same
+          server picker without entering the create-account flow. */}
       <div
         style={{
           display: 'flex',
@@ -191,14 +191,7 @@ export function LoginView({ store }: { store: AuthStore }) {
           animationDelay: '180ms',
         }}
       >
-        <button
-          type="button"
-          className="text-secondary"
-          style={{ fontSize: 'var(--fs-footnote)', minHeight: 32, padding: '0 var(--space-3)' }}
-          onClick={() => setServerSelectIntent('change')}
-        >
-          Server: {hostLabel(baseUrl)} · <span style={{ color: 'var(--app-accent)' }}>Change</span>
-        </button>
+        <BackendStatus baseUrl={baseUrl} onChange={() => setServerSelectIntent('change')} />
       </div>
 
       {/* Rendered outside the <form>: these have their own forms, and nested

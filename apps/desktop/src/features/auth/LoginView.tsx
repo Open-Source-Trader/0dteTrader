@@ -1,26 +1,59 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useContainer } from '../../app/container';
 import { Spinner } from '../../design/components/Spinner';
 import { useStore } from '../../core/observable';
 import type { AuthStore } from './AuthStore';
 import { PasswordField } from './PasswordField';
 import { RegisterView } from './RegisterView';
-import { ServerSettings } from './ServerSettings';
+import { hostLabel } from './serverSelect';
+import { ServerSelectView } from './ServerSelectView';
 
 // Reuses the shared toast-in keyframes (base.css) for a staggered entrance;
 // the global prefers-reduced-motion rule collapses it for motion-sensitive users.
 const ENTRANCE = 'toast-in 250ms cubic-bezier(0.32, 0.72, 0, 1) both';
 
+// Saving a new server URL rebuilds the app container, which cycles the auth
+// state through 'checking' and remounts this screen (RootView keys its fade on
+// that state) — wiping local state. This module-level flag carries the
+// "continue to Register after picking a server" intent across that remount.
+let resumeRegisterAfterRebuild = false;
+
+/** Why the server picker is open: creating an account, or the footer link. */
+type ServerSelectIntent = 'register' | 'change';
+
 export function LoginView({ store }: { store: AuthStore }) {
+  const { serverConfigStore } = useContainer();
+  const { baseUrl } = useStore(serverConfigStore);
   const { isLoading, errorMessage } = useStore(store);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showRegister, setShowRegister] = useState(false);
+  const [serverSelectIntent, setServerSelectIntent] = useState<ServerSelectIntent | null>(null);
+
+  useEffect(() => {
+    if (resumeRegisterAfterRebuild) {
+      resumeRegisterAfterRebuild = false;
+      setShowRegister(true);
+    }
+  }, []);
 
   const isFormValid = email.includes('@') && password !== '';
 
   const submit = () => {
     if (!isFormValid || isLoading) return;
     void store.login(email.trim(), password);
+  };
+
+  const finishServerSelect = (serverChanged: boolean) => {
+    const intent = serverSelectIntent;
+    setServerSelectIntent(null);
+    if (intent !== 'register') return;
+    if (serverChanged) {
+      // The container rebuild is about to remount this screen; resume there.
+      resumeRegisterAfterRebuild = true;
+    } else {
+      setShowRegister(true);
+    }
   };
 
   return (
@@ -115,7 +148,7 @@ export function LoginView({ store }: { store: AuthStore }) {
             visibility: errorMessage ? 'visible' : 'hidden',
           }}
         >
-          {errorMessage ?? ' '}
+          {errorMessage ?? ' '}
         </div>
 
         <button
@@ -139,19 +172,43 @@ export function LoginView({ store }: { store: AuthStore }) {
           }}
           onClick={() => {
             store.clearError();
-            setShowRegister(true);
+            setServerSelectIntent('register');
           }}
         >
           Create an account
         </button>
       </form>
 
-      {/* Outside the <form> so typing in the server URL field can't submit the login form. */}
-      <div style={{ padding: '0 var(--pad-screen)', animation: ENTRANCE, animationDelay: '180ms' }}>
-        <ServerSettings />
+      {/* Quiet footer link for self-hosters: opens the same server picker
+          without entering the create-account flow. */}
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'center',
+          padding: '0 var(--pad-screen)',
+          paddingBottom: 'var(--space-2)',
+          animation: ENTRANCE,
+          animationDelay: '180ms',
+        }}
+      >
+        <button
+          type="button"
+          className="text-secondary"
+          style={{ fontSize: 'var(--fs-footnote)', minHeight: 32, padding: '0 var(--space-3)' }}
+          onClick={() => setServerSelectIntent('change')}
+        >
+          Server: {hostLabel(baseUrl)} · <span style={{ color: 'var(--app-accent)' }}>Change</span>
+        </button>
       </div>
 
-      {/* Rendered outside the <form>: RegisterView has its own form, and nested forms are invalid HTML. */}
+      {/* Rendered outside the <form>: these have their own forms, and nested
+          forms are invalid HTML. */}
+      {serverSelectIntent !== null ? (
+        <ServerSelectView
+          onDismiss={() => setServerSelectIntent(null)}
+          onContinue={finishServerSelect}
+        />
+      ) : null}
       {showRegister ? (
         <RegisterView store={store} onDismiss={() => setShowRegister(false)} />
       ) : null}

@@ -64,7 +64,7 @@ describe('DispatchingBrokerGateway', () => {
       selection: { mode: 'auto_otm', optionType: 'call' },
     } as never;
     await gw.placeOrder('u1', order, 'key');
-    expect(alpaca.placeOrder).toHaveBeenCalledWith('u1', order, 'key');
+    expect(alpaca.placeOrder).toHaveBeenCalledWith('u1', order, 'key', undefined);
     expect(webull.placeOrder).not.toHaveBeenCalled();
   });
 

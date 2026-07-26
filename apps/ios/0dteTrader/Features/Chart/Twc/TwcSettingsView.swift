@@ -219,11 +219,14 @@ struct TwcSettingsView: View {
                 }
             }
         }
+        // The label fields sit in a sheet, outside the root window's tree —
+        // the tap/swipe dismissal comes from the
+        // `dismissKeyboardOnInteraction()` at this sheet's presentation site;
+        // dragging the form is the other way out.
+        .scrollDismissesKeyboard(.interactively)
         .navigationTitle("TWC Heatmap V5")
         .navigationBarTitleDisplayMode(.inline)
-        .scrollContentBackground(.hidden)
-        .background(Color.appBackground)
-        .tint(.appAccent)
+        .hudListChrome()
     }
 
     private func picker(_ title: String, _ binding: Binding<String>, _ options: [String]) -> some View {

@@ -86,6 +86,14 @@ export function ChevronDownIcon({ size = 12, style }: IconProps) {
   );
 }
 
+export function ChevronUpIcon({ size = 12, style }: IconProps) {
+  return (
+    <svg {...svgProps(size, style)} strokeWidth={3}>
+      <polyline points="6 15 12 9 18 15" />
+    </svg>
+  );
+}
+
 export function CalendarIcon({ size = 13, style }: IconProps) {
   return (
     <svg {...svgProps(size, style)}>

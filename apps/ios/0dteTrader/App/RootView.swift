@@ -32,6 +32,15 @@ struct RootView: View {
             }
         }
         .animation(.easeInOut(duration: 0.2), value: lockManager.isLocked)
+        // The app's way out of a `decimalPad`, which has no return key: while
+        // the keyboard is up, a tap or a downward swipe anywhere puts it away.
+        // There used to be a keyboard-toolbar `Done` here instead, but on
+        // iOS 26 it rendered as a small floating pill over the app's own
+        // chrome, and nobody read it as the way out. Declared here, above the
+        // `content` switch, so one copy covers every screen in the root
+        // window; the sheets carry their own, because a modifier on this view
+        // does not reach presented content.
+        .dismissKeyboardOnInteraction()
         .task {
             await authViewModel.start()
         }

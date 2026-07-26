@@ -1,14 +1,16 @@
 import { useEffect, useMemo } from 'react';
+import type { ReactNode } from 'react';
 import type { ChartInterval, TradingMode } from '@0dtetrader/shared-types';
 import type { ApiClient } from '../../core/api/ApiClient';
 import { useStore } from '../../core/observable';
-import { Menu } from '../../design/components/Menu';
+import { AnchoredPopup, Menu } from '../../design/components/Menu';
+import { SymbolSearchView } from './SymbolSearchView';
 import { Spinner } from '../../design/components/Spinner';
 import { Format } from '../../design/format';
-import { ChevronDownIcon, SlidersIcon } from '../../design/icons';
+import { ChevronDownIcon, ClockIcon, PersonCircleIcon, SlidersIcon } from '../../design/icons';
 import type { ChartStore } from './ChartStore';
 import { CHART_INTERVALS } from './ChartStore';
-import { CandleChart, type OverlaySeries } from './CandleChart';
+import { CandleChart, type ChartTradingProps, type OverlaySeries } from './CandleChart';
 import { overlayPalette, panePalette } from './chartColors';
 import { DrawToolsMenu } from './DrawingToolbar';
 import type { DrawingsStore } from './drawings';
@@ -26,12 +28,23 @@ interface ChartViewProps {
   store: ChartStore;
   drawingsStore: DrawingsStore;
   apiClient: ApiClient;
-  onSymbolSearch: () => void;
-  onIndicatorSettings: () => void;
+  /** Picks a new symbol. The picker is a dropdown under the ticker chip now,
+   *  so the chip owns the popup and the screen only receives the choice. */
+  onSelectSymbol: (symbol: string) => void;
+  /** Body of the indicator chip's dropdown, built by the screen because the
+   *  settings it edits are not all the chart store's. Handed the closer. */
+  indicatorPopup: (close: () => void) => ReactNode;
+  /** The two account destinations; this header replaced the navigation bar. */
+  onShowProfile: () => void;
+  onShowHistory: () => void;
   tradingMode: TradingMode;
   onToggleMode: () => void;
+  /** Three clicks on the chart surface toggle the fullscreen/split layout. */
+  onToggleFullscreen: () => void;
   /** Trade-ticket expiration for the exact options snapshot; null pauses shadow capture. */
   optionsAnalyticsExpiration: string | null;
+  /** Order-line overlay inputs; null when chart trading is off. */
+  chartTrading: ChartTradingProps | null;
 }
 
 // Interval hotkeys. 'H'/'D' are uppercase (shift held) so they don't collide
@@ -68,11 +81,15 @@ export function ChartView({
   store,
   drawingsStore,
   apiClient,
-  onSymbolSearch,
-  onIndicatorSettings,
+  onSelectSymbol,
+  indicatorPopup,
+  onShowProfile,
+  onShowHistory,
   tradingMode,
   onToggleMode,
+  onToggleFullscreen,
   optionsAnalyticsExpiration,
+  chartTrading,
 }: ChartViewProps) {
   const {
     symbol,
@@ -103,6 +120,18 @@ export function ChartView({
       : null;
 
   const closes = useMemo(() => candles.map((c) => c.close), [candles]);
+
+  // Percent change vs the open of the current session's first candle — the
+  // same client-side prev-close proxy the iOS view model uses, since Quote
+  // carries no previous close.
+  const dayChangePercent = useMemo<number | null>(() => {
+    const lastBar = candles[candles.length - 1];
+    if (!lastBar) return null;
+    const day = new Date(lastBar.time * 1000).toDateString();
+    const open = candles.find((c) => new Date(c.time * 1000).toDateString() === day)?.open;
+    if (!open) return null;
+    return (((quote?.last ?? lastBar.close) - open) / open) * 100;
+  }, [candles, quote]);
 
   const overlays = useMemo<OverlaySeries[]>(() => {
     const colors = overlayPalette();
@@ -253,143 +282,77 @@ export function ChartView({
 
   return (
     <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-      {/* Header */}
+      {/* Title row — the account destinations on the left, the mode badge hard
+          right, wordmark centred. No card of its own: every chart control has
+          moved onto the pane, and a bordered strip around these items read as a
+          second surface stacked on the chart's rather than as a title. The
+          wordmark is absolutely centred rather than laid out between the two
+          sides, which are unequal.
+
+          The badge left the chart's top-trailing border for this one when the
+          indicator and drawing-tool chips wanted that corner. Which mode you
+          are trading in is a fact about the account rather than about the
+          chart, and off the pane the badge stops shadowing the placement
+          guide's `+` and the analytics rail's topmost readout. */}
       <div
-        className="hud-chip hud-card--flat"
         style={{
+          position: 'relative',
           display: 'flex',
           alignItems: 'center',
-          gap: 8,
-          margin: '3px 8px 0',
-          padding: '4px 6px',
+          gap: 4,
+          margin: '4px 8px 2px',
           flex: 'none',
         }}
       >
-        <button
-          className="hud-chip"
-          style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '5px 6px' }}
-          onClick={onSymbolSearch}
-          aria-label={`Symbol ${symbol}. Change symbol`}
+        <div style={{ flex: '1 1 0', display: 'flex', alignItems: 'center', gap: 4 }}>
+          {/* Bare glyphs, no outline: these sit in the title strip rather than
+              on the pane, and an outline here drew a chip around the profile
+              circle the mode badge's border is measured against. White rather
+              than the chips' grey, which is what makes two unlabelled icons
+              legible without one.
+
+              The glyph box is still shared — the two icons do not measure
+              alike, and unframed they render at two visibly different sizes. */}
+          <button className="navbar-icon-button" onClick={onShowProfile} aria-label="Profile">
+            <span className="header-glyph">
+              <PersonCircleIcon size={20} />
+            </span>
+          </button>
+          <button className="navbar-icon-button" onClick={onShowHistory} aria-label="Trade history">
+            <span className="header-glyph">
+              <ClockIcon size={18} />
+            </span>
+          </button>
+        </div>
+
+        {/* `hud-title`, not `navbar-title`: the latter's styles are scoped to
+            `.navbar`, which this bar replaced, so the wordmark was rendering
+            as plain body text. */}
+        <span
+          className="hud-title"
+          style={{
+            position: 'absolute',
+            left: 0,
+            right: 0,
+            textAlign: 'center',
+            fontSize: 'var(--fs-title3)',
+            whiteSpace: 'nowrap',
+            pointerEvents: 'none',
+            // No colour override: the chrome text around it went grey, but the
+            // wordmark is the brand mark rather than chrome, so it keeps
+            // `.hud-title`'s accent and the glow drawn with it.
+          }}
         >
-          <span
-            style={{
-              fontFamily: 'var(--font-display)',
-              fontSize: 'var(--fs-subheadline)',
-              fontWeight: 700,
-              letterSpacing: '0.03em',
-            }}
-          >
-            {symbol}
-          </span>
-          <span aria-hidden="true" style={{ display: 'flex', color: 'var(--app-accent)' }}>
-            <ChevronDownIcon size={12} />
-          </span>
-        </button>
+          0dteTrader
+        </span>
 
-        {quote ? (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-            <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <span
-                style={{
-                  fontFamily: 'var(--font-mono)',
-                  fontSize: 18,
-                  fontWeight: 600,
-                  fontVariantNumeric: 'tabular-nums',
-                  textShadow: '0 0 8px var(--hud-glow)',
-                }}
-              >
-                {Format.price(quote.last)}
-              </span>
-              {isStale ? (
-                <span
-                  style={{
-                    fontSize: 'var(--fs-caption2)',
-                    color: 'var(--warning-orange)',
-                    fontWeight: 600,
-                  }}
-                >
-                  ● STALE
-                </span>
-              ) : null}
-            </span>
-            <span
-              style={{
-                fontFamily: 'var(--font-mono)',
-                fontSize: 'var(--fs-caption2)',
-                fontVariantNumeric: 'tabular-nums',
-                display: 'flex',
-                gap: 10,
-              }}
-            >
-              <span>
-                <span style={{ color: 'var(--buy-green)', fontWeight: 600 }}>BID </span>
-                <span style={{ color: 'var(--buy-green)' }}>{Format.price(quote.bid)}</span>
-              </span>
-              <span>
-                <span style={{ color: 'var(--sell-red)', fontWeight: 600 }}>ASK </span>
-                <span style={{ color: 'var(--sell-red)' }}>{Format.price(quote.ask)}</span>
-              </span>
-            </span>
-          </div>
-        ) : null}
-
-        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
-          {tickProgress ? (
-            <span
-              className="quick-chip"
-              style={{ fontSize: 'var(--fs-caption)', color: 'var(--label-secondary)' }}
-              aria-label={`Building candle: ${tickProgress.count} of ${tickProgress.size} ticks`}
-            >
-              {tickProgress.count}/{tickProgress.size} ticks
-            </span>
-          ) : null}
+        <div style={{ flex: '1 1 0', display: 'flex', justifyContent: 'flex-end' }}>
           <button
             className={tradingMode === 'live' ? 'hud-badge hud-badge--live' : 'hud-badge'}
             onClick={onToggleMode}
             aria-label={`Trading mode ${tradingMode === 'live' ? 'LIVE' : 'PRACTICE'}. Switch mode`}
           >
             {tradingMode === 'live' ? 'LIVE' : 'PRACTICE'}
-          </button>
-          <Menu
-            trigger={
-              <button
-                className="quick-chip"
-                style={{ minHeight: 32, padding: '6px 10px' }}
-                aria-label={`Chart interval ${interval}`}
-                aria-haspopup="menu"
-              >
-                {interval}
-              </button>
-            }
-            items={CHART_INTERVALS.map((option) => ({
-              key: option,
-              label: (
-                <>
-                  {option.toUpperCase()}
-                  {INTERVAL_HINTS[option] ? (
-                    <span
-                      style={{
-                        marginLeft: 12,
-                        fontSize: 'var(--fs-caption)',
-                        color: 'var(--label-secondary)',
-                      }}
-                    >
-                      {INTERVAL_HINTS[option]}
-                    </span>
-                  ) : null}
-                </>
-              ),
-              checked: option === interval,
-              onSelect: () => store.selectInterval(option),
-            }))}
-          />
-          <DrawToolsMenu store={drawingsStore} />
-          <button
-            className="chart-icon-button"
-            onClick={onIndicatorSettings}
-            aria-label="Indicator settings"
-          >
-            <SlidersIcon size={16} />
           </button>
         </div>
       </div>
@@ -400,7 +363,204 @@ export function ChartView({
         className="hud-card hud-card--flat"
         style={{ flex: 1, minHeight: 100, margin: '3px 8px', padding: 0, display: 'flex' }}
       >
-        <div className="hud-clip" style={{ flex: 1, minHeight: 0, position: 'relative' }}>
+        <div
+          className="hud-clip"
+          style={{ flex: 1, minHeight: 0, position: 'relative' }}
+          onClick={(event) => {
+            // Three clicks toggle fullscreen — the only way in and out of it
+            // now that the navbar button is gone. Chrome that lives on this
+            // same surface (the reset button, the placement window, the mode
+            // badge) answers for its own clicks and is excluded here.
+            if (event.detail !== 3) return;
+            if ((event.target as Element).closest('button, [data-chart-placement]')) return;
+            onToggleFullscreen();
+          }}
+        >
+          {/* Top row over the candles: symbol and interval hard against the
+              leading border, indicator settings and drawing tools hard against
+              the trailing one, quote readout centred on the pane between them.
+
+              The readout is absolutely centred rather than pushed around by
+              auto margins. Auto margins centre a thing in the *gap* the two
+              groups leave, which is the pane's midline only while the groups
+              are the same width; the mode badge's departure left them unequal,
+              and "the middle of the top" is the midline.
+
+              The row is inert apart from the buttons, so the surface below
+              still answers a triple click with the fullscreen toggle. */}
+          <div
+            style={{
+              position: 'absolute',
+              top: 8,
+              left: 8,
+              right: 8,
+              zIndex: 5,
+              display: 'flex',
+              alignItems: 'flex-start',
+              justifyContent: 'space-between',
+              gap: 4,
+              pointerEvents: 'none',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 4 }}>
+              <AnchoredPopup
+                edge="leading"
+                trigger={
+                  <button
+                    className="chart-chip"
+                    style={{ pointerEvents: 'auto' }}
+                    aria-label={`Symbol ${symbol}. Change symbol`}
+                    aria-haspopup="dialog"
+                  >
+                    {symbol}
+                    <span aria-hidden="true" style={{ display: 'flex' }}>
+                      <ChevronDownIcon size={10} />
+                    </span>
+                  </button>
+                }
+              >
+                {(close) => (
+                  <SymbolSearchView
+                    currentSymbol={symbol}
+                    onSelect={onSelectSymbol}
+                    onDismiss={close}
+                  />
+                )}
+              </AnchoredPopup>
+              <Menu
+                edge="leading"
+                trigger={
+                  <button
+                    className="chart-chip"
+                    style={{ pointerEvents: 'auto' }}
+                    aria-label={`Chart interval ${interval}`}
+                    aria-haspopup="menu"
+                  >
+                    {interval.toUpperCase()}
+                  </button>
+                }
+                items={CHART_INTERVALS.map((option) => ({
+                  key: option,
+                  label: (
+                    <>
+                      {option.toUpperCase()}
+                      {INTERVAL_HINTS[option] ? (
+                        <span
+                          style={{
+                            marginLeft: 12,
+                            fontSize: 'var(--fs-caption)',
+                            color: 'var(--label-secondary)',
+                          }}
+                        >
+                          {INTERVAL_HINTS[option]}
+                        </span>
+                      ) : null}
+                    </>
+                  ),
+                  checked: option === interval,
+                  onSelect: () => store.selectInterval(option),
+                }))}
+              />
+            </div>
+
+            {/* Last price and percent change only. The bid/ask pair was the
+                width that forced this block onto a plate of its own; without
+                it the numbers are short enough to sit on the candles unbacked,
+                which keeps the chart reading as one surface. A tight black
+                shadow does the legibility work the box used to. */}
+            <div
+              style={{
+                position: 'absolute',
+                left: 0,
+                right: 0,
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                gap: 1,
+                textShadow: '0 1px 3px rgba(0, 0, 0, 0.85)',
+              }}
+            >
+              {quote ? (
+                // The two numbers are one readout, but they are not the same
+                // reading: at 6px the percent's opening bracket ran into the
+                // last digit of the price.
+                <span style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
+                  <span
+                    style={{
+                      fontFamily: 'var(--font-mono)',
+                      fontSize: 18,
+                      fontWeight: 600,
+                      fontVariantNumeric: 'tabular-nums',
+                      textShadow: '0 0 8px var(--hud-glow), 0 1px 3px rgba(0, 0, 0, 0.85)',
+                    }}
+                  >
+                    {Format.price(quote.last)}
+                  </span>
+                  {dayChangePercent !== null ? (
+                    <span
+                      style={{
+                        fontFamily: 'var(--font-mono)',
+                        fontSize: 'var(--fs-footnote)',
+                        fontWeight: 500,
+                        fontVariantNumeric: 'tabular-nums',
+                        color:
+                          dayChangePercent >= 0 ? 'var(--pnl-positive)' : 'var(--pnl-negative)',
+                      }}
+                      aria-label={`${dayChangePercent >= 0 ? 'Up' : 'Down'} ${Math.abs(dayChangePercent).toFixed(2)} percent today`}
+                    >
+                      ({dayChangePercent >= 0 ? '+' : '−'}
+                      {Math.abs(dayChangePercent).toFixed(2)}%)
+                    </span>
+                  ) : null}
+                  {isStale ? (
+                    <span
+                      style={{
+                        fontSize: 'var(--fs-caption2)',
+                        color: 'var(--warning-orange)',
+                        fontWeight: 600,
+                      }}
+                    >
+                      ● STALE
+                    </span>
+                  ) : null}
+                </span>
+              ) : null}
+              {tickProgress ? (
+                <span
+                  style={{
+                    fontFamily: 'var(--font-mono)',
+                    fontSize: 'var(--fs-caption2)',
+                    fontVariantNumeric: 'tabular-nums',
+                    color: 'var(--label-secondary)',
+                  }}
+                  aria-label={`Building candle: ${tickProgress.count} of ${tickProgress.size} ticks`}
+                >
+                  {tickProgress.count}/{tickProgress.size} ticks
+                </span>
+              ) : null}
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 4 }}>
+              <AnchoredPopup
+                edge="trailing"
+                trigger={
+                  <button
+                    className="chart-chip"
+                    style={{ pointerEvents: 'auto' }}
+                    aria-label="Indicator settings"
+                    aria-haspopup="dialog"
+                  >
+                    <SlidersIcon size={13} />
+                  </button>
+                }
+              >
+                {(close) => indicatorPopup(close)}
+              </AnchoredPopup>
+              <span style={{ pointerEvents: 'auto', display: 'flex' }}>
+                <DrawToolsMenu store={drawingsStore} />
+              </span>
+            </div>
+          </div>
           <CandleChart
             candles={candles}
             overlays={twcLineOverlays.length > 0 ? [...overlays, ...twcLineOverlays] : overlays}
@@ -413,13 +573,17 @@ export function ChartView({
             optionsAnalyticsSnapshot={optionsAnalyticsSnapshot}
             optionsAnalyticsSettings={optionsAnalytics.enabled ? optionsAnalytics : null}
             optionsAnalyticsRetained={optionsAnalyticsState.retained}
+            chartTrading={chartTrading}
           />
           {twcModel?.banner ? <TwcBiasBanner banner={twcModel.banner} /> : null}
           {optionsAnalytics.enabled && optionsAnalyticsState.errorMessage ? (
             <div
+              // Bottom-leading, matching iOS: the quote readout owns the top
+              // of this corner now. Clear of the time labels, which float
+              // along the bottom of the plot rather than under it.
               style={{
                 position: 'absolute',
-                top: 8,
+                bottom: 26,
                 left: 65,
                 fontSize: 'var(--fs-caption2)',
                 color: 'var(--warning-orange)',

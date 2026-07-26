@@ -3,7 +3,7 @@ import Foundation
 
 /// URLSession delegate implementing SPKI (public key) SHA-256 pinning per docs/SECURITY.md §5.
 ///
-/// Pinning is configuration-gated: when `AppConfig.pinnedPublicKeyHashes` is empty
+/// Pinning is configuration-gated: when `AppConfig.pinnedPublicKeyHashes(for:)` is empty
 /// (local development over http://localhost), all challenges get default handling.
 /// Populate the hashes of the backend's SPKI when deploying behind TLS.
 final class CertificatePinningDelegate: NSObject, URLSessionDelegate, @unchecked Sendable {

@@ -23,7 +23,7 @@ struct HistoryView: View {
                     skeletonList
                 }
             }
-            .background(Color.appBackground)
+            .hudListChrome()
             .navigationTitle("History")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -61,6 +61,7 @@ struct HistoryView: View {
                         .frame(width: 220, height: 12)
                 }
                 .padding(.vertical, AppSpacing.xs)
+                .listRowBackground(Color.appSurface)
             }
         }
         .listStyle(.insetGrouped)
@@ -87,12 +88,14 @@ struct HistoryView: View {
                                              : history.totalRealizedPnl < 0 ? Color.pnlNegative : .secondary)
                     }
                 }
+                .listRowBackground(Color.appSurface)
 
                 Section {
                     ForEach(history.entries, id: \.orderId) { entry in
                         row(entry)
                     }
                 }
+                .listRowBackground(Color.appSurface)
             }
             .refreshable { await load() }
         }

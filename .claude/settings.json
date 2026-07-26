@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(gh repo *)",
+      "Bash(echo \"---exit $?\")",
+      "Bash(gh pr *)",
+      "Bash(git fetch *)",
+      "Bash(git worktree *)",
+      "Bash(npx jest *)",
+      "Bash(npx eslint *)"
+    ]
+  }
+}

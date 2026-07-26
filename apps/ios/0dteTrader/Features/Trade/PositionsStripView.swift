@@ -89,6 +89,7 @@ struct PositionsStripView: View {
                 HStack(spacing: 6) {
                     Text(position.symbol)
                         .font(.chipLabel)
+                        .foregroundStyle(Color.secondary)
                     if isWorking {
                         ProgressView()
                             .controlSize(.mini)

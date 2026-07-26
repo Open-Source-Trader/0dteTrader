@@ -3,6 +3,7 @@ import type { IChartApi, ISeriesApi, Logical } from 'lightweight-charts';
 import { useStore } from '../../core/observable';
 import { Format } from '../../design/format';
 import { chartPalette } from './chartColors';
+import { claimPointer } from './chartPointerClaim';
 import type { ChartCandle } from './ChartStore';
 import type { Drawing, DrawingPoint, DrawingsStore, DrawingTool } from './drawings';
 
@@ -364,6 +365,11 @@ export function DrawingLayer({ chart, series, store, candles, intervalSec }: Dra
     if (!canvas || !containerEl) return;
 
     const onPointerDown = (event: PointerEvent) => {
+      // The order layer's `+` and placement window are children of this same
+      // container, and this listener is in the capture phase — a drawing within
+      // HIT_DISTANCE of them would eat the press before the button ever sees
+      // it. OrderLineLayer's own capture listener carries the same guard.
+      if ((event.target as Element | null)?.closest('[data-chart-placement]')) return;
       if (store.getState().tool !== 'cursor') return;
       const xy = canvasXY(event);
       if (!xy) return;
@@ -374,6 +380,9 @@ export function DrawingLayer({ chart, series, store, candles, intervalSec }: Dra
       }
       event.preventDefault();
       event.stopPropagation();
+      // Tells OrderLineLayer this press was spent on a drawing, so its release
+      // does not also read as a click on empty space and toggle the guide.
+      claimPointer(event);
       store.select(hit.id);
       const pointer = toPoint(xy.x, xy.y);
       if (!pointer) return;
@@ -493,6 +502,10 @@ export function DrawingLayer({ chart, series, store, candles, intervalSec }: Dra
     if (!xy) return;
     const point = toPoint(xy.x, xy.y);
     if (!point) return;
+    // An armed tool spends the press on the shape it is drawing. This runs in
+    // the bubble phase, after OrderLineLayer's capture listener has already
+    // armed its click check but well before the release that resolves it.
+    claimPointer(event.nativeEvent);
     if (activeTool === 'alert') {
       store.addAlert(point.price);
       return;

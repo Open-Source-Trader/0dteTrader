@@ -21,12 +21,8 @@ import { errors } from '../../common/api-exception';
 import { aggregateCandles } from '../../market-data/candle-aggregation';
 import { CredentialsService } from '../../credentials/credentials.service';
 import { PrismaService } from '../../prisma/prisma.service';
-import {
-  computeMid,
-  estimateBuyingPower,
-  parseOccSymbol,
-  resolveAutoOtm,
-} from '../contract-resolution';
+import { estimateBuyingPower, parseOccSymbol, resolveAutoOtm } from '../contract-resolution';
+import { customPriceWarning, resolveLimitPrice } from '../order-pricing';
 import { BrokerGateway } from '../broker-gateway.interface';
 import { OrderEventsService } from '../order-events.service';
 import { optionExpirations } from '../expiration-calendar';
@@ -223,8 +219,10 @@ export class AlpacaBrokerGateway implements BrokerGateway, OnModuleDestroy {
 
   async previewOrder(userId: string, order: OrderRequest): Promise<OrderPreview> {
     const resolved = await this.resolveContract(userId, order);
-    const price =
-      order.orderType === 'market' ? resolved.last : computeMid(resolved.bid, resolved.ask);
+    // The limit the order would rest at, or the last for a market order — the
+    // same resolution `placeOrder` uses, so the preview cannot quote one price
+    // and the placement send another.
+    const price = resolveLimitPrice(order.orderType, resolved, order.limitPrice) ?? resolved.last;
     const warnings: string[] = [];
     if (resolved.optionTerms && resolved.optionTerms.expiration === tradingDay()) {
       warnings.push('0DTE contract — expires today');
@@ -232,12 +230,16 @@ export class AlpacaBrokerGateway implements BrokerGateway, OnModuleDestroy {
     if (order.assetClass === 'option' && order.orderType === 'market') {
       warnings.push('Market order on an option contract — fills at last price');
     }
+    const priceWarning = customPriceWarning(order.orderType, resolved, order.limitPrice);
+    if (priceWarning) warnings.push(priceWarning);
     const estBuyingPower = estimateBuyingPower(order.quantity, price);
     return {
       resolved: {
         contractSymbol: resolved.contractSymbol,
         price,
         estBuyingPower: Math.round(estBuyingPower * 100) / 100,
+        bid: resolved.bid,
+        ask: resolved.ask,
       },
       warnings,
     };
@@ -247,11 +249,19 @@ export class AlpacaBrokerGateway implements BrokerGateway, OnModuleDestroy {
     userId: string,
     order: OrderRequest,
     idempotencyKey: string,
+    expectedMode?: TradingMode,
   ): Promise<OrderResult> {
+    // See the Webull gateway: the mode read here selects paper vs live, so it
+    // must agree with the one the caller validated against.
+    const mode = await this.tradingModeFor(userId);
+    if (expectedMode && mode !== expectedMode) {
+      throw brokerErrors.orderRejected(
+        `Account switched to ${mode} while this ${expectedMode} order was being placed — nothing was sent`,
+      );
+    }
     const client = await this.clientFor(userId);
     const resolved = await this.resolveContract(userId, order);
-    const limitPrice =
-      order.orderType === 'market' ? undefined : computeMid(resolved.bid, resolved.ask);
+    const limitPrice = resolveLimitPrice(order.orderType, resolved, order.limitPrice);
     const clientOrderId = alpacaClientOrderId(userId, idempotencyKey);
     const input: SdkOrderInput = {
       type: order.orderType === 'market' ? 'market' : 'limit',

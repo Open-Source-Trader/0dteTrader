@@ -66,6 +66,17 @@ final class OptionsChainViewModel: ObservableObject {
         }
     }
 
+    #if DEBUG
+    /// Seeds a chain and selection without a network round trip (tests only).
+    func setChainForTesting(_ chain: OptionsChain, expiration: String, strike: Double) {
+        self.chain = chain
+        self.underlying = chain.underlying
+        self.selectedExpiration = expiration
+        self.selectedStrike = strike
+        self.isAutoMode = false
+    }
+    #endif
+
     // MARK: - Loading
 
     func load(underlying: String) async {

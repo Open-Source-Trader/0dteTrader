@@ -1,6 +1,6 @@
 import Foundation
 
-/// A REST endpoint description. Paths are relative to `AppConfig.apiBaseURL`
+/// A REST endpoint description. Paths are relative to the container's base URL
 /// and carry no leading slash (e.g. "v1/market/quote").
 struct Endpoint: Sendable {
     enum Method: String, Sendable {

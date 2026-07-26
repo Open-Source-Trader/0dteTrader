@@ -20,7 +20,7 @@ const TOOLS: { tool: DrawingTool; label: string; shortcut: string; Icon: typeof 
   { tool: 'alert', label: 'Price alert', shortcut: 'A', Icon: BellIcon },
 ];
 
-/** Drawing-tool dropdown for the chart header (TradingView-style tools). */
+/** Drawing-tool dropdown on the chart's chip row (TradingView-style tools). */
 export function DrawToolsMenu({ store }: { store: DrawingsStore }) {
   const { tool, selectedId, drawings, alerts } = useStore(store);
   const hasAnnotations = drawings.length > 0 || alerts.length > 0;
@@ -28,13 +28,14 @@ export function DrawToolsMenu({ store }: { store: DrawingsStore }) {
 
   return (
     <Menu
+      edge="trailing"
       trigger={
         <button
-          className={`chart-icon-button${tool !== 'cursor' ? ' active' : ''}`}
+          className={`chart-chip${tool !== 'cursor' ? ' active' : ''}`}
           aria-label="Drawing tools"
           title="Drawing tools"
         >
-          <ActiveIcon size={16} />
+          <ActiveIcon size={13} />
         </button>
       }
       items={[

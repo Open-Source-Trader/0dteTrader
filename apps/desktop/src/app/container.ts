@@ -1,17 +1,21 @@
 import { createContext, useContext } from 'react';
-import { API_BASE_URL, STREAM_URL } from './config';
+import { deriveStreamUrl } from './config';
 import { ApiClient } from '../core/api/ApiClient';
 import { QuoteSocket } from '../core/api/QuoteSocket';
+import { ServerConfigStore } from '../core/api/ServerConfigStore';
 import { SessionStore } from '../core/api/SessionStore';
 import { SettingsStore } from '../core/storage/SettingsStore';
 import { AuthStore } from '../features/auth/AuthStore';
+import { ChartOrdersStore } from '../features/chart/chartOrders';
 import { ChartStore } from '../features/chart/ChartStore';
 import { DrawingsStore } from '../features/chart/drawings';
 import { ChainStore } from '../features/trade/ChainStore';
 import { TradeStore } from '../features/trade/TradeStore';
 
-/** Dependency container (AppContainer.swift analog). Created once at launch. */
+/** Dependency container (AppContainer.swift analog). Recreated by main.tsx
+    whenever ServerConfigStore changes the base URL. */
 export class AppContainer {
+  readonly serverConfigStore: ServerConfigStore;
   readonly settingsStore: SettingsStore;
   readonly sessionStore: SessionStore;
   readonly apiClient: ApiClient;
@@ -21,12 +25,16 @@ export class AppContainer {
   readonly chainStore: ChainStore;
   readonly tradeStore: TradeStore;
   readonly drawingsStore: DrawingsStore;
+  readonly chartOrdersStore: ChartOrdersStore;
 
-  constructor() {
+  constructor(serverConfigStore: ServerConfigStore, baseUrl: string) {
+    this.serverConfigStore = serverConfigStore;
     this.settingsStore = new SettingsStore();
-    this.sessionStore = new SessionStore(API_BASE_URL);
-    this.apiClient = new ApiClient(API_BASE_URL, this.sessionStore);
-    this.quoteSocket = new QuoteSocket(STREAM_URL, () => this.sessionStore.accessTokenOrRefresh());
+    this.sessionStore = new SessionStore(baseUrl);
+    this.apiClient = new ApiClient(baseUrl, this.sessionStore);
+    this.quoteSocket = new QuoteSocket(deriveStreamUrl(baseUrl), () =>
+      this.sessionStore.accessTokenOrRefresh(),
+    );
     this.authStore = new AuthStore(
       this.apiClient,
       this.sessionStore,
@@ -37,6 +45,7 @@ export class AppContainer {
     this.chainStore = new ChainStore(this.apiClient);
     this.tradeStore = new TradeStore(this.apiClient);
     this.drawingsStore = new DrawingsStore();
+    this.chartOrdersStore = new ChartOrdersStore(this.apiClient);
   }
 }
 

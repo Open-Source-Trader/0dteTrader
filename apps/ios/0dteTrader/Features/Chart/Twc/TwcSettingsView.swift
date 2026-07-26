@@ -219,6 +219,11 @@ struct TwcSettingsView: View {
                 }
             }
         }
+        // The label fields sit in a sheet, outside the root window's tree —
+        // the tap/swipe dismissal comes from the
+        // `dismissKeyboardOnInteraction()` at this sheet's presentation site;
+        // dragging the form is the other way out.
+        .scrollDismissesKeyboard(.interactively)
         .navigationTitle("TWC Heatmap V5")
         .navigationBarTitleDisplayMode(.inline)
         .hudListChrome()

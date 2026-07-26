@@ -27,6 +27,11 @@ struct ProfileView: View {
                 .padding(.bottom, AppSpacing.xxxl)
             }
             .background(Color.appBackground)
+            // The credential fields sit in a sheet, outside the root window's
+            // tree — the tap/swipe dismissal comes from the
+            // `dismissKeyboardOnInteraction()` at this sheet's presentation
+            // site; dragging the form is the other way out.
+            .scrollDismissesKeyboard(.interactively)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .principal) {

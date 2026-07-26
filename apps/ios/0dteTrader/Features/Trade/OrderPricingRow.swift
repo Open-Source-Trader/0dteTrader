@@ -84,10 +84,10 @@ struct OrderPricingRow: View {
             // half-way through `2.45`. Same rule, same helpers, as the
             // placement guide's level field — see PlacementGuide.swift.
             //
-            // No keyboard toolbar on it, either: `decimalPad` has no return key
-            // and this field does need a `Done`, but one declared this deep in
-            // the tree is never installed. The app's single one lives on
-            // `RootView`, which explains why.
+            // No keyboard toolbar on it, either: `decimalPad` has no return
+            // key, and the way out is a tap or swipe-down anywhere —
+            // `RootView.dismissKeyboardOnInteraction()`, which explains why it
+            // lives there and not here.
             TextField("0.00", text: customPriceBinding)
                 .keyboardType(.decimalPad)
                 .focused($customPriceFocused)

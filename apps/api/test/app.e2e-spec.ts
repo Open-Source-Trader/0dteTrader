@@ -6,7 +6,12 @@ import { AppModule } from '../src/app.module';
 import { BROKER_GATEWAY } from '../src/broker/broker-gateway.interface';
 import { optionExpirations, optionSettlementAt } from '../src/broker/expiration-calendar';
 import { blackForwardKernel } from '../src/options-analytics/options-analytics.engine';
+import { ConfigService } from '@nestjs/config';
+import { CredentialsService } from '../src/credentials/credentials.service';
+import { IndexDataService } from '../src/market-data/index-data.service';
+import { OptionsAnalyticsService } from '../src/options-analytics/options-analytics.service';
 import { TradierClient } from '../src/options-analytics/tradier.client';
+import { TradierClientResolver } from '../src/options-analytics/tradier-client.resolver';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { InMemoryPrismaService } from './in-memory-prisma.service';
 import { StubBrokerGateway, STUB_WEBULL_ACCOUNTS } from './stub-broker.gateway';
@@ -31,6 +36,77 @@ describe('0dteTrader API (e2e)', () => {
   let refreshToken = '';
   let userId = '';
 
+  /** Tokens the per-user Tradier factory was invoked with (resolver override). */
+  const userTradierTokens: string[] = [];
+
+  /** Deterministic Tradier stub. Used both as the shared env-token client and
+   *  as the product of the resolver's factory, so no e2e path can ever build
+   *  a real TradierClient and hit the network. */
+  const makeTradierStub = () => ({
+    availableRequests: 100,
+    getExpirations: async () => {
+      const base = new Date(`${E2E_OPTION_EXPIRATION}T00:00:00Z`);
+      const iso = (dt: Date): string => dt.toISOString().slice(0, 10);
+      return [
+        iso(base),
+        iso(new Date(base.getTime() + 86_400_000)),
+        iso(new Date(base.getTime() + 2 * 86_400_000)),
+      ];
+    },
+    getQuote: async (symbol: string) => ({
+      symbol,
+      spot: 100,
+      quoteAsOf: new Date().toISOString(),
+      feedMode: 'sandbox' as const,
+      warnings: [],
+    }),
+    getChain: async (symbol: string, expiration: string) => {
+      const observedAt = new Date();
+      const settlementAt = optionSettlementAt(expiration, symbol, symbol);
+      const timeYears = (settlementAt.getTime() - observedAt.getTime()) / (365 * 86_400_000);
+      const discount = Math.exp(-0.043 * timeYears);
+      const base = {
+        strike: 100,
+        openInterest: 100,
+        volume: 50,
+        bidSize: 10,
+        askSize: 10,
+        multiplier: 100,
+        quoteAsOf: observedAt.toISOString(),
+        last: null,
+        lastTradeAsOf: null,
+        providerDelta: null,
+        providerGamma: null,
+        providerImpliedVolatility: null,
+        providerGreeksAsOf: null,
+        oiEffectiveDate: '2026-07-17',
+        rootSymbol: symbol,
+      };
+      return {
+        contractsTotal: 2,
+        warnings: [],
+        contracts: (['call', 'put'] as const).map((optionType) => {
+          const price = blackForwardKernel(
+            optionType,
+            100,
+            100,
+            100,
+            timeYears,
+            0.2,
+            discount,
+          ).price;
+          return {
+            ...base,
+            symbol: `${symbol}-${expiration}-${optionType}`,
+            optionType,
+            bid: Math.max(0.01, price - 0.01),
+            ask: price + 0.01,
+          };
+        }),
+      };
+    },
+  });
+
   beforeAll(async () => {
     prisma = new InMemoryPrismaService();
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
@@ -39,69 +115,20 @@ describe('0dteTrader API (e2e)', () => {
       .overrideProvider(BROKER_GATEWAY)
       .useValue(new StubBrokerGateway())
       .overrideProvider(TradierClient)
-      .useValue({
-        availableRequests: 100,
-        getExpirations: async () => {
-          const base = new Date(`${E2E_OPTION_EXPIRATION}T00:00:00Z`);
-          const iso = (dt: Date): string => dt.toISOString().slice(0, 10);
-          return [
-            iso(base),
-            iso(new Date(base.getTime() + 86_400_000)),
-            iso(new Date(base.getTime() + 2 * 86_400_000)),
-          ];
-        },
-        getQuote: async (symbol: string) => ({
-          symbol,
-          spot: 100,
-          quoteAsOf: new Date().toISOString(),
-          feedMode: 'sandbox' as const,
-          warnings: [],
-        }),
-        getChain: async (symbol: string, expiration: string) => {
-          const observedAt = new Date();
-          const settlementAt = optionSettlementAt(expiration, symbol, symbol);
-          const timeYears = (settlementAt.getTime() - observedAt.getTime()) / (365 * 86_400_000);
-          const discount = Math.exp(-0.043 * timeYears);
-          const base = {
-            strike: 100,
-            openInterest: 100,
-            volume: 50,
-            bidSize: 10,
-            askSize: 10,
-            multiplier: 100,
-            quoteAsOf: observedAt.toISOString(),
-            last: null,
-            lastTradeAsOf: null,
-            providerDelta: null,
-            providerGamma: null,
-            providerImpliedVolatility: null,
-            providerGreeksAsOf: null,
-            oiEffectiveDate: '2026-07-17',
-            rootSymbol: symbol,
-          };
-          return {
-            contractsTotal: 2,
-            warnings: [],
-            contracts: (['call', 'put'] as const).map((optionType) => {
-              const price = blackForwardKernel(
-                optionType,
-                100,
-                100,
-                100,
-                timeYears,
-                0.2,
-                discount,
-              ).price;
-              return {
-                ...base,
-                symbol: `${symbol}-${expiration}-${optionType}`,
-                optionType,
-                bid: Math.max(0.01, price - 0.01),
-                ask: price + 0.01,
-              };
-            }),
-          };
-        },
+      .useValue(makeTradierStub())
+      .overrideProvider(TradierClientResolver)
+      .useFactory({
+        inject: [ConfigService, CredentialsService, PrismaService, TradierClient],
+        factory: (
+          config: ConfigService,
+          credentials: CredentialsService,
+          prismaSvc: PrismaService,
+          shared: TradierClient,
+        ) =>
+          new TradierClientResolver(config, credentials, prismaSvc, shared, (token) => {
+            userTradierTokens.push(token);
+            return makeTradierStub() as unknown as TradierClient;
+          }),
       })
       .overrideProvider(WebullBrokerGateway)
       .useValue({
@@ -237,6 +264,52 @@ describe('0dteTrader API (e2e)', () => {
       .expect(404);
   });
 
+  it('injects the per-user Tradier resolver into its consumers (@Optional would hide a wiring break)', () => {
+    const analytics = app.get(OptionsAnalyticsService) as unknown as {
+      tradierResolver?: unknown;
+    };
+    const index = app.get(IndexDataService) as unknown as { tradierResolver?: unknown };
+    expect(analytics.tradierResolver).toBeInstanceOf(TradierClientResolver);
+    expect(index.tradierResolver).toBeInstanceOf(TradierClientResolver);
+  });
+
+  it('routes options data through a client built from the caller’s stored Tradier key', async () => {
+    // A dedicated user: the resolver memoizes per-user resolutions, so the
+    // main test user may already be cached as "no key" by earlier requests.
+    const second = { email: 'tradier-key@example.com', password: 'e2e-password-2' };
+    const registered = await request(server).post('/v1/auth/register').send(second).expect(200);
+    const token = registered.body.accessToken as string;
+
+    await request(server)
+      .put('/v1/me/broker-credentials')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ provider: 'tradier', apiKey: 'user-tradier-key' })
+      .expect(200);
+    expect(userTradierTokens).toHaveLength(0);
+
+    const chain = await request(server)
+      .get('/v1/market/options-chain')
+      .query({ symbol: 'SPY' })
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    expect(chain.body.underlying).toBe('SPY');
+    // The per-user factory was invoked with the stored key — the shared
+    // env-token client did not serve this request.
+    expect(userTradierTokens).toEqual(['user-tradier-key']);
+
+    const me = await request(server)
+      .get('/v1/me')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    expect(me.body.tradierConfigured).toBe(true);
+
+    await request(server)
+      .delete('/v1/me/broker-credentials')
+      .query({ provider: 'tradier' })
+      .set('Authorization', `Bearer ${token}`)
+      .expect(204);
+  });
+
   it('GET /v1/me returns the profile with webullConfigured=false', async () => {
     const res = await request(server)
       .get('/v1/me')
@@ -256,6 +329,8 @@ describe('0dteTrader API (e2e)', () => {
       alpacaPracticeConfigured: false,
       alpacaAccountId: null,
       alpacaPracticeAccountId: null,
+      tradierConfigured: false,
+      tradierPracticeConfigured: false,
     });
   });
 

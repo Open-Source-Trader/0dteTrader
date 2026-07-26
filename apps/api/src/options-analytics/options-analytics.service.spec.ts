@@ -414,4 +414,32 @@ describe('OptionsAnalyticsService exact cache', () => {
       ServiceUnavailableException,
     );
   });
+
+  it('routes user-scoped calls through the resolved per-user client with isolated caches', async () => {
+    const sharedProvider = client();
+    const userProvider = client();
+    const resolver = {
+      resolve: jest.fn(async () => ({ client: userProvider, scope: 'user-scope' })),
+    };
+    const service = new OptionsAnalyticsService(
+      config(),
+      sharedProvider as never,
+      resolver as never,
+    );
+
+    await service.getSnapshotResult('SPY', EXPIRATION_A, 'user-1');
+    expect(resolver.resolve).toHaveBeenCalledWith('user-1');
+    expect(userProvider.calls.chain).toBe(1);
+    expect(sharedProvider.calls.chain).toBe(0);
+
+    // A user-scoped snapshot must not serve an anonymous (shared-scope) call.
+    await service.getSnapshotResult('SPY', EXPIRATION_A);
+    expect(sharedProvider.calls.chain).toBe(1);
+    expect(service.metrics.cacheHits).toBe(0);
+
+    // ...but the same user hits their own cache.
+    await service.getSnapshotResult('SPY', EXPIRATION_A, 'user-1');
+    expect(userProvider.calls.chain).toBe(1);
+    expect(service.metrics.cacheHits).toBe(1);
+  });
 });

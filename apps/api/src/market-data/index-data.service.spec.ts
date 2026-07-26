@@ -103,4 +103,30 @@ describe('IndexDataService', () => {
     expect(rateLimited).toBeInstanceOf(BrokerError);
     expect((rateLimited as BrokerError).message).toContain('rate limit');
   });
+
+  it('uses the resolved per-user client and scopes the quote cache by it', async () => {
+    const userTradier = {
+      getChartQuote: jest.fn(async (symbol: string) => quoteFor(symbol)),
+    };
+    const resolver = {
+      resolve: jest.fn(async () => ({ client: userTradier, scope: 'user-scope' })),
+    };
+    const scoped = new IndexDataService(
+      tradier as unknown as TradierClient,
+      resolver as unknown as ConstructorParameters<typeof IndexDataService>[1],
+    );
+
+    await scoped.getQuote('SPX', 'user-1');
+    expect(resolver.resolve).toHaveBeenCalledWith('user-1');
+    expect(userTradier.getChartQuote).toHaveBeenCalledTimes(1);
+    expect(tradier.getChartQuote).not.toHaveBeenCalled();
+
+    // The per-user quote must not satisfy a shared-scope (no user) request…
+    await scoped.getQuote('SPX');
+    expect(tradier.getChartQuote).toHaveBeenCalledTimes(1);
+
+    // …but repeats within the same scope hit the cache.
+    await scoped.getQuote('SPX', 'user-1');
+    expect(userTradier.getChartQuote).toHaveBeenCalledTimes(1);
+  });
 });

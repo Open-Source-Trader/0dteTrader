@@ -18,7 +18,7 @@ describe('OptionsAnalyticsController', () => {
 
     let responseSettled = false;
     const response = controller
-      .getSnapshot({ symbol: 'spy', expiration: '2026-07-20' })
+      .getSnapshot({ userId: 'user-1' } as never, { symbol: 'spy', expiration: '2026-07-20' })
       .then((value) => {
         responseSettled = true;
         return value;
@@ -28,7 +28,7 @@ describe('OptionsAnalyticsController', () => {
     expect(responseSettled).toBe(true);
     await expect(response).resolves.toBe(result.snapshot);
     releasePersistence();
-    expect(analytics.getSnapshotResult).toHaveBeenCalledWith('spy', '2026-07-20');
+    expect(analytics.getSnapshotResult).toHaveBeenCalledWith('spy', '2026-07-20', 'user-1');
     expect(capture.persist).toHaveBeenCalledWith(result, 'viewed');
   });
 });

@@ -112,25 +112,11 @@ struct LoginView: View {
 
                 Spacer()
 
-                // Quiet footer link for self-hosters: opens the same server
-                // picker without entering the create-account flow.
-                Button {
+                // Footer backend indicator: status light + Change, opening the
+                // same server picker without entering the create-account flow.
+                BackendStatusView(baseURL: serverConfig.baseURL) {
                     activeSheet = .serverSelect(.change)
-                } label: {
-                    // One concatenated Text so a long host wraps as a single
-                    // line of prose instead of splitting around "Change".
-                    (Text("Server: \(ServerSelect.hostLabel(serverConfig.baseURL)) · ")
-                        .foregroundStyle(.secondary)
-                        + Text("Change").foregroundStyle(Color.appAccent))
-                        .font(.footnote)
-                        .multilineTextAlignment(.center)
-                        .frame(minHeight: 32)
-                        .padding(.horizontal, AppSpacing.md)
-                        .contentShape(Rectangle())
                 }
-                .buttonStyle(AppPressStyle())
-                .accessibilityLabel("Server: \(ServerSelect.hostLabel(serverConfig.baseURL))")
-                .accessibilityHint("Opens the server picker")
             }
             .padding(AppSpacing.xxl)
             .frame(maxWidth: .infinity)

@@ -305,23 +305,25 @@ export function ChartView({
         }}
       >
         <div style={{ flex: '1 1 0', display: 'flex', alignItems: 'center', gap: 4 }}>
-          {/* Grey rather than the navbar's accent: this bar is chart chrome
-              now, and its text and glyphs are one colour with the chips below. */}
-          <button
-            className="navbar-icon-button"
-            style={{ color: 'var(--label-secondary)' }}
-            onClick={onShowProfile}
-            aria-label="Profile"
-          >
-            <PersonCircleIcon size={20} />
+          {/* Each glyph sits in a `chart-chip` — the same chamfered outline the
+              symbol, interval, indicator and drawing chips wear on the pane
+              below, so the header's two account buttons read as part of the
+              same set. The chip is on an inner span rather than on the button
+              itself: `navbar-icon-button` is a 44px touch target, and painting
+              the border on that box would draw a 44px chip.
+
+              Grey glyph, blue border. The chip class already sets
+              `--label-secondary`; the outline is the only colour here, as it is
+              on the chips below. */}
+          <button className="navbar-icon-button" onClick={onShowProfile} aria-label="Profile">
+            <span className="chart-chip header-chip">
+              <PersonCircleIcon size={20} />
+            </span>
           </button>
-          <button
-            className="navbar-icon-button"
-            style={{ color: 'var(--label-secondary)' }}
-            onClick={onShowHistory}
-            aria-label="Trade history"
-          >
-            <ClockIcon size={18} />
+          <button className="navbar-icon-button" onClick={onShowHistory} aria-label="Trade history">
+            <span className="chart-chip header-chip">
+              <ClockIcon size={18} />
+            </span>
           </button>
         </div>
 

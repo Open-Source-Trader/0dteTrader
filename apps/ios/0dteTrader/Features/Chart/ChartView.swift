@@ -4,7 +4,6 @@ import UIKit
 /// Metrics the title strip's controls share. The profile and history buttons
 /// and the mode badge are one row of three, and one row of three is one height.
 enum ChartHeader {
-    static let controlWidth: CGFloat = 34
     static let controlHeight: CGFloat = 36
 
     /// The mode badge's drawn box — the *glyph's* circle, not the button's
@@ -18,6 +17,16 @@ enum ChartHeader {
     /// row height from the buttons beside it, so shrinking the box costs it no
     /// touch area.
     static let badgeHeight: CGFloat = 20
+
+    /// The glyph box inside the two account buttons' chips.
+    ///
+    /// Deliberately `badgeHeight` and not a number of its own: the badge's
+    /// border is the profile circle's diameter, and the chip the button now
+    /// wears is drawn *around* that circle rather than in place of it. Framing
+    /// both glyphs to the same box also evens the two chips out — `person.circle`
+    /// and `clock.arrow.circlepath` have different intrinsic widths, and
+    /// unframed they would wear chips of two different sizes.
+    static let glyphBox: CGFloat = badgeHeight
 }
 
 /// Chart surface: header (symbol, last price, interval, indicator settings),
@@ -603,9 +612,7 @@ struct ChartView: View {
                 } label: {
                     Image(systemName: "person.circle")
                         .font(.title3)
-                        .foregroundStyle(Color.secondary)
-                        .frame(width: ChartHeader.controlWidth, height: ChartHeader.controlHeight)
-                        .contentShape(Rectangle())
+                        .headerChipChrome()
                 }
                 .accessibilityLabel("Profile")
 
@@ -614,9 +621,7 @@ struct ChartView: View {
                 } label: {
                     Image(systemName: "clock.arrow.circlepath")
                         .font(.subheadline)
-                        .foregroundStyle(Color.secondary)
-                        .frame(width: ChartHeader.controlWidth, height: ChartHeader.controlHeight)
-                        .contentShape(Rectangle())
+                        .headerChipChrome()
                 }
                 .accessibilityLabel("Trade history")
 

@@ -40,6 +40,21 @@
   transform: scale(var(--press-scale));
 }
 
+/* The header's two account buttons wear the chip around a glyph rather than
+   around text. A fixed square box, because `person.circle` and the history
+   clock do not measure alike and unframed they would come out as two chips of
+   different widths — 20px, the profile circle's diameter, which is also what
+   the mode badge's border at the other end of this row is pinned to. */
+.chart-chip.header-chip {
+  box-sizing: content-box;
+  justify-content: center;
+  gap: 0;
+  width: 20px;
+  height: 20px;
+  min-height: 0;
+  padding: 3px 8px;
+}
+
 /* An armed drawing tool. The chip keeps its outline and changes color rather
    than filling in: on this row a solid accent block was the one control that
    stopped reading as part of the set. */

@@ -162,6 +162,28 @@ extension View {
             )
     }
 
+    /// The chips' chrome on the header's two account buttons — profile and
+    /// trade history.
+    ///
+    /// `chartChipChrome` verbatim, so the border here cannot drift from the
+    /// one on the pane below: same fill, same chamfer, same stroke. What this
+    /// adds is the header's own geometry — a fixed glyph box, because the two
+    /// SF Symbols do not measure alike and unframed they would wear chips of
+    /// two different widths, and the row's 36pt touch height around the chip
+    /// the way the mode badge wears it.
+    ///
+    /// The glyph keeps `ChartChip.label`, the same grey the chips' own labels
+    /// use, and the blue is left to the border it draws.
+    func headerChipChrome() -> some View {
+        foregroundStyle(ChartChip.label)
+            .frame(width: ChartHeader.glyphBox, height: ChartHeader.glyphBox)
+            .chartChipChrome()
+            // Drawn at the chip's height, targeted at the row's — the badge at
+            // the other end of this row does exactly the same.
+            .frame(height: ChartHeader.controlHeight)
+            .contentShape(Rectangle())
+    }
+
     /// Grows a chip's touch target to the 44pt minimum without growing the chip.
     ///
     /// The chips are the mode badge's height now — about 22pt drawn — so each

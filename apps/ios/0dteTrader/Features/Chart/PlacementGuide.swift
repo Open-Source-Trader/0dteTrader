@@ -26,8 +26,15 @@ enum AppPlacementGuide {
 /// `+` to a border with no relationship to the price it arms, which is the one
 /// way this control can lie about what it is going to do.
 ///
+/// `min` is the price at the *bottom* of the pane and `max` the price at the
+/// top. Callers derive them from a content rect, where the y axis runs the other
+/// way — `min` comes from `maxY` and `max` from `minY`. Swapping them yields a
+/// range that always looks degenerate, so the guide silently stops re-anchoring
+/// instead of failing loudly.
+///
 /// Mirrors `apps/desktop/src/features/chart/placementGuide.ts`; the two test
-/// suites are what keep the platforms from drifting apart.
+/// suites are what keep the platforms from drifting apart. Change one and you
+/// change both.
 func resolveGuidePrice(
     current: Double?,
     lastPrice: Double?,

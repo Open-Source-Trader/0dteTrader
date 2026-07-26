@@ -33,6 +33,10 @@ function isUsablePrice(value: number | null): value is number {
  * too it clamps to the nearest edge. A guide left outside the pane would pin the
  * `+` to a border with no relationship to the price it arms, which is the one
  * way this control can lie about what it is going to do.
+ *
+ * Mirrored by `apps/ios/0dteTrader/Features/Chart/PlacementGuide.swift`; the two
+ * test suites are what keep the platforms from drifting apart. Change one and
+ * you change both.
  */
 export function resolveGuidePrice(
   current: number | null,

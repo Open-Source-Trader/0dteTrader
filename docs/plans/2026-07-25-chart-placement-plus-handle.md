@@ -1088,6 +1088,8 @@ git add apps/ios/0dteTrader/Features/Chart/CandleChartRepresentable.swift apps/i
 - Modify: `apps/ios/0dteTrader/Features/Chart/OrderLineOverlayView.swift`
 - Modify: `apps/ios/0dteTrader/Features/Chart/ChartTradingCoordinator.swift`
 
+**Decide first:** `AppPlacementGuide.handleTouchSize` (44) and `AppOrderLine.minimumTouchTarget` (44) are the same HIG minimum under two names, and this task makes one file import both namespaces. Either fold the guide's metrics into `AppOrderLine` — the sibling pattern is that the metrics enum lives in the view file that consumes it — or keep them separate and rename `handleTouchSize` to match `minimumTouchTarget`. Do not leave the file disagreeing with itself about what 44pt is called.
+
 **Step 1: Change the delegate protocol**
 
 In `OrderLineOverlayView.swift`, replace the last delegate method (lines 78–79):

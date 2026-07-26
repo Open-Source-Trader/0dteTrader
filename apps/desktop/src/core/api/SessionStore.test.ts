@@ -40,6 +40,11 @@ describe('SessionStore refresh token scoping', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it('does not share a token between http and https on the same host', () => {
+    new SessionStore('https://server-a.test').signIn(TOKENS);
+    expect(new SessionStore('http://server-a.test').hasStoredRefreshToken()).toBe(false);
+  });
+
   it('still restores a session for the same server host', () => {
     new SessionStore('http://server-a.test:3000').signIn(TOKENS);
     expect(new SessionStore('http://server-a.test:3000').hasStoredRefreshToken()).toBe(true);

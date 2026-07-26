@@ -32,7 +32,14 @@ export class ServerConfigStore extends Store<{ baseUrl: string }> {
 
 function loadStoredBaseUrl(): string {
   const stored = localStorage.getItem(SERVER_BASE_URL_KEY);
-  return stored !== null && isHttpUrl(stored) ? stored : DEFAULT_API_BASE_URL;
+  if (stored === null) return DEFAULT_API_BASE_URL;
+  // Same origin-only check as save(), so the invariant holds even for values
+  // persisted before it was enforced.
+  try {
+    return normalizeServerUrl(stored);
+  } catch {
+    return DEFAULT_API_BASE_URL;
+  }
 }
 
 /**
@@ -62,16 +69,6 @@ function normalizeServerUrl(input: string): string {
   }
   return url.origin;
 }
-
-function isHttpUrl(value: string): boolean {
-  try {
-    const url = new URL(value);
-    return url.protocol === 'http:' || url.protocol === 'https:';
-  } catch {
-    return false;
-  }
-}
-
 export interface HealthCheckResult {
   ok: boolean;
   message: string;

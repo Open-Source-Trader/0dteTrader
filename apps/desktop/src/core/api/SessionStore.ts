@@ -12,12 +12,15 @@ export class SessionStore {
   private accessToken: string | null = null;
   private refreshPromise: Promise<AuthTokens> | null = null;
   private unauthenticatedListeners = new Set<() => void>();
-  // Scoped per server host so switching servers (runtime server selection)
+  // Scoped per server origin (scheme included: an http:// typo must never
+  // transmit an https session's token in cleartext) so switching servers
   // can never send one server's refresh token to another.
   private readonly refreshTokenKey: string;
 
   constructor(private readonly baseUrl: string) {
-    this.refreshTokenKey = `${REFRESH_TOKEN_KEY_PREFIX}:${new URL(baseUrl).host}`;
+    this.refreshTokenKey = `${REFRESH_TOKEN_KEY_PREFIX}:${new URL(baseUrl).origin}`;
+    // One-time migration: drop any token stored under the pre-scoping key.
+    localStorage.removeItem(REFRESH_TOKEN_KEY_PREFIX);
   }
 
   onUnauthenticated(listener: () => void): () => void {

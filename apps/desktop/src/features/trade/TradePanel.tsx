@@ -186,8 +186,9 @@ export function TradePanel({
           aria-label={locked ? 'Unlock trading' : 'Lock trading'}
           aria-pressed={locked}
         >
-          {locked ? <LockIcon size={11} /> : <LockOpenIcon size={11} />}
-          LOCK
+          {/* Icon only: an open or closed padlock is not ambiguous, and the
+              aria-label above carries the meaning for anyone it is. */}
+          {locked ? <LockIcon size={13} /> : <LockOpenIcon size={13} />}
         </button>
       </div>
 

@@ -182,7 +182,13 @@
   text-shadow: 0 0 6px var(--hud-glow);
 }
 /* Trading lock: the same chip in the refusal color, because locked is the
-   state that turns orders away rather than a setting that is merely on. */
+   state that turns orders away rather than a setting that is merely on. The
+   padlock carries the label on its own, so the chip goes square instead of
+   collapsing to the glyph's width once the text is gone. */
+.hud-toggle-chip--lock {
+  min-width: 36px;
+  padding: 0;
+}
 .hud-toggle-chip--lock.on {
   color: var(--sell-red);
   border-image-source: var(--hud-src-sell);

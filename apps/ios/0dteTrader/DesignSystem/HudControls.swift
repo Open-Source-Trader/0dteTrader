@@ -70,7 +70,9 @@ struct HudSegmentedControl<Value: Hashable>: View {
 
 /// Chamfered on/off chip (the AUTO toggle). Amber outline + glow when on.
 struct HudToggleChip: View {
-    let title: String
+    /// Nil for a chip whose glyph already says everything — a padlock does not
+    /// need the word LOCK beside it. Square-ish then, so it keeps a real target.
+    var title: String?
     @Binding var isOn: Bool
     var accent: Color = .hudAmber
     var icon: String = "checkmark.circle"
@@ -87,12 +89,16 @@ struct HudToggleChip: View {
             HStack(spacing: AppSpacing.xs) {
                 Image(systemName: isOn ? onIcon : icon)
                     .font(.caption)
-                Text(title)
-                    .font(.hudButton)
+                if let title {
+                    Text(title)
+                        .font(.hudButton)
+                }
             }
             .foregroundStyle(isOn ? accent : Color.secondary)
             .padding(.horizontal, AppSpacing.md)
-            .frame(minHeight: 34)
+            // A glyph on its own would shrink to the icon's width, so hold the
+            // chip square rather than letting the target collapse with the label.
+            .frame(minWidth: title == nil ? 34 : 0, minHeight: 34)
             .background {
                 HudPanelShape(chamfer: 6)
                     .fill(isOn ? accent.opacity(0.14) : Color.hudPanel)

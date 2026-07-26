@@ -214,7 +214,9 @@ struct TradePanelView: View {
     /// locked is the state that refuses orders.
     private var lockChip: some View {
         HudToggleChip(
-            title: "LOCK",
+            // Icon only: an open or closed padlock is not ambiguous, and the
+            // accessibility label below carries the meaning for anyone it is.
+            title: nil,
             isOn: Binding(get: { tradingLocked }, set: { _ in onToggleLock() }),
             accent: .sellRed,
             icon: "lock.open.fill",

@@ -5,7 +5,6 @@ import { WsAdapter } from '@nestjs/platform-ws';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { PrismaClient } from '@prisma/client';
 import helmet from 'helmet';
-import { AppModule } from './app.module';
 import { AppLogger } from './common/app-logger';
 import { bootstrapSecrets } from './config/secret-bootstrap';
 import { setupOpenApi } from './openapi';
@@ -35,6 +34,10 @@ async function bootstrap(): Promise<void> {
   const logger = new AppLogger();
   await bootstrapSecretsFromDb(logger);
 
+  // app.module calls ConfigModule.forRoot() — and its fail-fast validateEnv —
+  // at module-evaluation time, so it must not be imported until the secret
+  // bootstrap has filled process.env.
+  const { AppModule } = await import('./app.module.js');
   const app = await NestFactory.create(AppModule, {
     logger,
   });

@@ -187,6 +187,8 @@ struct TradePanelView: View {
             }
             .padding(.top, density.spacing)
             .layoutPriority(1)
+            // The box the order confirmation opens out of.
+            .tradeActionsAnchorSource()
         }
         .padding(.horizontal, AppSpacing.md)
         .padding(density.verticalPadding)

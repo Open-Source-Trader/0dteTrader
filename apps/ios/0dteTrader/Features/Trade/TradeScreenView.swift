@@ -91,9 +91,9 @@ struct TradeScreenView: View {
                 scenePhase: scenePhase
             )
         )
-        .sheet(item: $tradeViewModel.armedTicket) { ticket in
-            OrderConfirmSheet(tradeViewModel: tradeViewModel, ticket: ticket)
-        }
+        .modifier(
+            OrderConfirmPresentation(tradeViewModel: tradeViewModel, hudMenus: hudMenus)
+        )
         // Closing a position and cancelling a working line both confirm first:
         // the first sends a real market order, and the second cannot be undone.
         .alert(
@@ -571,6 +571,54 @@ struct TradeScreenView: View {
         Haptics.selection()
         tradingLocked.toggle()
         settingsStore.tradingLocked = tradingLocked
+    }
+}
+
+/// Keeps the screen's popup slot in step with the armed ticket.
+///
+/// The confirmation is an anchored popup like the chart's pickers, but nothing
+/// taps it open: it belongs to `armedTicket`, so it is pushed into the slot on
+/// the ticket's identity and taken back out when the ticket goes away. That
+/// makes Cancel, the scrim and a successful submit all the same path — clear
+/// the ticket — and leaves no way to end up with an armed order and no surface
+/// showing it, or a popup with no order behind it.
+///
+/// A modifier rather than three more lines on `TradeScreenView.body`, which is
+/// long enough that the type checker gives up on it.
+private struct OrderConfirmPresentation: ViewModifier {
+    @ObservedObject var tradeViewModel: TradeViewModel
+    let hudMenus: HudMenuController
+
+    /// The SELL/BUY row's box in window coordinates, reported by whichever
+    /// layout is on screen.
+    @State private var anchor: CGRect = .zero
+
+    func body(content: Content) -> some View {
+        content
+            .onPreferenceChange(TradeActionsAnchorKey.self) { rect in
+                if let rect { anchor = rect }
+            }
+            .onChange(of: tradeViewModel.armedTicket?.id) { _, _ in sync() }
+    }
+
+    /// `.trailing` is nominal — the panel is full width, so the edge it aligns
+    /// to never shows. What matters is the anchor: the SELL/BUY row, which has
+    /// the rest of the screen above it, so `HudMenuLayer` opens the popup
+    /// upward and gives it the whole chart's worth of height.
+    private func sync() {
+        guard let ticket = tradeViewModel.armedTicket else {
+            if hudMenus.presentation?.id == OrderConfirmPopup.popupID { hudMenus.dismiss() }
+            return
+        }
+        hudMenus.present(
+            id: OrderConfirmPopup.popupID,
+            anchor: anchor,
+            edge: .trailing,
+            onUserDismiss: { OrderConfirmPopup.handleUserDismiss(tradeViewModel) },
+            content: { _ in
+                AnyView(OrderConfirmPopup(tradeViewModel: tradeViewModel, ticket: ticket))
+            }
+        )
     }
 }
 

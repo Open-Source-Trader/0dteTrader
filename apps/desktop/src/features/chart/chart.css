@@ -40,19 +40,19 @@
   transform: scale(var(--press-scale));
 }
 
-/* The header's two account buttons wear the chip around a glyph rather than
-   around text. A fixed square box, because `person.circle` and the history
-   clock do not measure alike and unframed they would come out as two chips of
-   different widths — 20px, the profile circle's diameter, which is also what
-   the mode badge's border at the other end of this row is pinned to. */
-.chart-chip.header-chip {
-  box-sizing: content-box;
+/* The header's two account buttons. A fixed square box, because the profile
+   circle and the history clock do not measure alike and unframed they render
+   at two visibly different sizes — 20px, the profile circle's diameter, which
+   is also what the mode badge's border at the other end of this row is pinned
+   to. White, not the chips' grey: an unlabelled glyph with no outline needs
+   the contrast. */
+.header-glyph {
+  display: flex;
+  align-items: center;
   justify-content: center;
-  gap: 0;
   width: 20px;
   height: 20px;
-  min-height: 0;
-  padding: 3px 8px;
+  color: var(--label-primary);
 }
 
 /* An armed drawing tool. The chip keeps its outline and changes color rather

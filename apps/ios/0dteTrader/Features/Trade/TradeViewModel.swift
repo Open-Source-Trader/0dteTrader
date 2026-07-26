@@ -76,6 +76,13 @@ final class TradeViewModel: ObservableObject {
     func setPositionsForTesting(_ positions: [Position]) {
         self.positions = positions
     }
+
+    /// Seeds a resolved preview without a network round trip (tests only), so
+    /// the confirm popup can be measured in the state it actually ships in —
+    /// spread, warnings and all.
+    func setPreviewForTesting(_ preview: OrderPreview) {
+        self.preview = preview
+    }
     #endif
 
     // MARK: - Quantity (FR-18)

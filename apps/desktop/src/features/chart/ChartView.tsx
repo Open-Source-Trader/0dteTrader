@@ -305,23 +305,21 @@ export function ChartView({
         }}
       >
         <div style={{ flex: '1 1 0', display: 'flex', alignItems: 'center', gap: 4 }}>
-          {/* Each glyph sits in a `chart-chip` — the same chamfered outline the
-              symbol, interval, indicator and drawing chips wear on the pane
-              below, so the header's two account buttons read as part of the
-              same set. The chip is on an inner span rather than on the button
-              itself: `navbar-icon-button` is a 44px touch target, and painting
-              the border on that box would draw a 44px chip.
+          {/* Bare glyphs, no outline: these sit in the title strip rather than
+              on the pane, and an outline here drew a chip around the profile
+              circle the mode badge's border is measured against. White rather
+              than the chips' grey, which is what makes two unlabelled icons
+              legible without one.
 
-              Grey glyph, blue border. The chip class already sets
-              `--label-secondary`; the outline is the only colour here, as it is
-              on the chips below. */}
+              The glyph box is still shared — the two icons do not measure
+              alike, and unframed they render at two visibly different sizes. */}
           <button className="navbar-icon-button" onClick={onShowProfile} aria-label="Profile">
-            <span className="chart-chip header-chip">
+            <span className="header-glyph">
               <PersonCircleIcon size={20} />
             </span>
           </button>
           <button className="navbar-icon-button" onClick={onShowHistory} aria-label="Trade history">
-            <span className="chart-chip header-chip">
+            <span className="header-glyph">
               <ClockIcon size={18} />
             </span>
           </button>
@@ -483,7 +481,10 @@ export function ChartView({
               }}
             >
               {quote ? (
-                <span style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
+                // The two numbers are one readout, but they are not the same
+                // reading: at 6px the percent's opening bracket ran into the
+                // last digit of the price.
+                <span style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
                   <span
                     style={{
                       fontFamily: 'var(--font-mono)',

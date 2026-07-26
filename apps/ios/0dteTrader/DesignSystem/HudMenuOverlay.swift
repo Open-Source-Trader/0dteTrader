@@ -30,6 +30,10 @@ final class HudMenuController: ObservableObject {
         /// lives on, so the popup reads as having come out of the chip.
         let edge: HorizontalEdge
         let content: AnyView
+        /// What a tap on the scrim means for *this* popup. Nil is the pickers'
+        /// answer — nothing, just close. A popup whose state lives outside the
+        /// controller sets it, and owns the close itself; see `userDismiss`.
+        let onUserDismiss: (() -> Void)?
 
         static func == (lhs: Presentation, rhs: Presentation) -> Bool {
             lhs.id == rhs.id && lhs.anchor == rhs.anchor && lhs.edge == rhs.edge
@@ -44,6 +48,7 @@ final class HudMenuController: ObservableObject {
         id: String,
         anchor: CGRect,
         edge: HorizontalEdge,
+        onUserDismiss: (() -> Void)? = nil,
         content: (@escaping () -> Void) -> AnyView
     ) {
         guard presentation?.id != id else {
@@ -51,7 +56,29 @@ final class HudMenuController: ObservableObject {
             return
         }
         let body = content { [weak self] in self?.dismiss() }
-        presentation = Presentation(id: id, anchor: anchor, edge: edge, content: body)
+        presentation = Presentation(
+            id: id,
+            anchor: anchor,
+            edge: edge,
+            content: body,
+            onUserDismiss: onUserDismiss
+        )
+    }
+
+    /// Closes the popup the way the *user* closes it: the scrim, or VoiceOver's
+    /// escape action. Distinct from `dismiss()`, which is the popup's own
+    /// content deciding it is finished.
+    ///
+    /// A popup that supplied `onUserDismiss` is not closed here. It is closed by
+    /// whatever that closure does to the state driving the presentation, which
+    /// is the only way a popup can refuse to go away — the order confirmation
+    /// mid-submission being the case that needs it.
+    func userDismiss() {
+        guard let onUserDismiss = presentation?.onUserDismiss else {
+            dismiss()
+            return
+        }
+        onUserDismiss()
     }
 
     func dismiss() {
@@ -172,7 +199,7 @@ private struct HudMenuLayer: View {
                     // standing between you and your chart.
                     Color.black.opacity(0.001)
                         .contentShape(Rectangle())
-                        .onTapGesture { controller.dismiss() }
+                        .onTapGesture { controller.userDismiss() }
                         .accessibilityHidden(true)
 
                     presentation.content
@@ -194,7 +221,7 @@ private struct HudMenuLayer: View {
                         // action is how it gets back out, since the scrim it
                         // would otherwise tap is hidden from it.
                         .accessibilityAddTraits(.isModal)
-                        .accessibilityAction(.escape) { controller.dismiss() }
+                        .accessibilityAction(.escape) { controller.userDismiss() }
                         .transition(
                             reduceMotion
                                 ? .opacity

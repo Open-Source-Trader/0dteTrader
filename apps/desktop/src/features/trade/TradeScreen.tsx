@@ -22,7 +22,7 @@ import { TwcSettingsView } from '../chart/TwcSettingsView';
 import { ProfileView } from '../profile/ProfileView';
 import { FloatingTradeButtons } from './FloatingTradeButtons';
 import { HistoryView } from './HistoryView';
-import { OrderConfirmSheet } from './OrderConfirmSheet';
+import { OrderConfirmPopup } from './OrderConfirmPopup';
 import { PositionsStrip } from './PositionsStrip';
 import { ToastView } from './ToastView';
 import { TradePanel } from './TradePanel';
@@ -493,10 +493,14 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
         <ToastView toast={trade.toast} onDismiss={() => tradeStore.dismissToast()} />
       ) : null}
 
-      {/* Sheets */}
+      {/* The order confirmation is an anchored popup over the SELL/BUY row,
+          not a sheet — but it is still driven by the armed ticket, which is
+          what makes Cancel, the scrim and a successful submit one path. */}
       {trade.armedTicket ? (
-        <OrderConfirmSheet tradeStore={tradeStore} ticket={trade.armedTicket} />
+        <OrderConfirmPopup tradeStore={tradeStore} ticket={trade.armedTicket} />
       ) : null}
+
+      {/* Sheets */}
       {showTwcSettings ? (
         <TwcSettingsView
           settings={chart.twcSettings}

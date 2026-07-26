@@ -192,6 +192,27 @@ describe('TradeStore.arm confirmation bypass', () => {
   });
 });
 
+describe('TradeStore.cancelArmedOrder — the confirm popup dismissed', () => {
+  it('cancels rather than confirms, and submits nothing', () => {
+    const placeOrder = vi.fn(async () => placedOrder);
+    const apiClient = {
+      placeOrder,
+      previewOrder: async () => {
+        throw new Error('preview unavailable in test');
+      },
+    } as unknown as ApiClient;
+    const store = new TradeStore(apiClient);
+    store.arm('buy', 'SPY', autoModeChainStore(), false);
+    expect(store.getState().armedTicket).not.toBeNull();
+
+    // What the popup's scrim, its Escape key and its Cancel button all call.
+    store.cancelArmedOrder();
+
+    expect(store.getState().armedTicket).toBeNull();
+    expect(placeOrder).not.toHaveBeenCalled();
+  });
+});
+
 describe('TradeStore — order pricing', () => {
   it('rounds a custom limit to the contract tick', () => {
     const store = makeStore();

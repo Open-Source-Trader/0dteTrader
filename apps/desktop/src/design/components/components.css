@@ -254,6 +254,19 @@
   animation: hud-popup-drop 200ms cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
+/* The order confirmation wears the popups' chrome and animation, and none of
+   their sizing: a picker is as wide as its widest row, a decision surface is as
+   wide as the SELL/BUY row it is deciding about. The taller ceiling is what
+   keeps the warning row and the bid/ask rows out of a scroll — see
+   PANEL_MAX_HEIGHT in OrderConfirmPopup. It also sits one layer above the scrim
+   that blocks the buttons underneath it. */
+.menu-dropdown.order-confirm-panel {
+  width: calc(100% - 16px);
+  max-height: 640px;
+  z-index: calc(var(--z-menu) + 1);
+  padding: 0;
+}
+
 .menu-dropdown.up {
   top: auto;
   bottom: calc(100% + 6px);

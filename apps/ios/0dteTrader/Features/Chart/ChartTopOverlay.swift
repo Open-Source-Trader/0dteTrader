@@ -24,7 +24,11 @@ struct ChartQuoteReadout: View {
 
     var body: some View {
         VStack(spacing: 1) {
-            HStack(spacing: AppSpacing.xs) {
+            // The two numbers are one readout, but they are not the same
+            // reading: `xs` ran the percent's opening bracket into the last
+            // digit of the price. `sm` separates them and still groups them
+            // against everything else on the line.
+            HStack(spacing: AppSpacing.sm) {
                 Text(Format.price(quote.last))
                     .font(.priceMedium.weight(.semibold))
                     .shadow(color: .hudGlow, radius: 6)
@@ -162,25 +166,21 @@ extension View {
             )
     }
 
-    /// The chips' chrome on the header's two account buttons — profile and
-    /// trade history.
+    /// The header's two account buttons — profile and trade history.
     ///
-    /// `chartChipChrome` verbatim, so the border here cannot drift from the
-    /// one on the pane below: same fill, same chamfer, same stroke. What this
-    /// adds is the header's own geometry — a fixed glyph box, because the two
-    /// SF Symbols do not measure alike and unframed they would wear chips of
-    /// two different widths, and the row's 36pt touch height around the chip
-    /// the way the mode badge wears it.
+    /// Bare glyphs, no outline: they sit in the title strip rather than on the
+    /// pane, and an outline here put a chip around the profile circle the mode
+    /// badge's border is measured against. White rather than the chips' grey,
+    /// which is what makes two unlabelled SF Symbols legible without one.
     ///
-    /// The glyph keeps `ChartChip.label`, the same grey the chips' own labels
-    /// use, and the blue is left to the border it draws.
-    func headerChipChrome() -> some View {
-        foregroundStyle(ChartChip.label)
+    /// The glyph box is still shared. `person.circle` and
+    /// `clock.arrow.circlepath` do not measure alike, and unframed they draw at
+    /// two visibly different sizes; framed, both are the badge's 20pt circle.
+    /// The touch frame around it is the row's, as it was before the outline.
+    func headerGlyphChrome() -> some View {
+        foregroundStyle(Color.primary)
             .frame(width: ChartHeader.glyphBox, height: ChartHeader.glyphBox)
-            .chartChipChrome()
-            // Drawn at the chip's height, targeted at the row's — the badge at
-            // the other end of this row does exactly the same.
-            .frame(height: ChartHeader.controlHeight)
+            .frame(width: ChartHeader.controlWidth, height: ChartHeader.controlHeight)
             .contentShape(Rectangle())
     }
 

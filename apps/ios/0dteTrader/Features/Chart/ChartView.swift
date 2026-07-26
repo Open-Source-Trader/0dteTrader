@@ -4,6 +4,7 @@ import UIKit
 /// Metrics the title strip's controls share. The profile and history buttons
 /// and the mode badge are one row of three, and one row of three is one height.
 enum ChartHeader {
+    static let controlWidth: CGFloat = 34
     static let controlHeight: CGFloat = 36
 
     /// The mode badge's drawn box — the *glyph's* circle, not the button's
@@ -18,14 +19,13 @@ enum ChartHeader {
     /// touch area.
     static let badgeHeight: CGFloat = 20
 
-    /// The glyph box inside the two account buttons' chips.
+    /// The drawn box the two account buttons' glyphs are framed to.
     ///
     /// Deliberately `badgeHeight` and not a number of its own: the badge's
-    /// border is the profile circle's diameter, and the chip the button now
-    /// wears is drawn *around* that circle rather than in place of it. Framing
-    /// both glyphs to the same box also evens the two chips out — `person.circle`
-    /// and `clock.arrow.circlepath` have different intrinsic widths, and
-    /// unframed they would wear chips of two different sizes.
+    /// border is the profile circle's diameter, and the glyph box is that same
+    /// circle. Framing both glyphs to it also evens the two buttons out —
+    /// `person.circle` and `clock.arrow.circlepath` have different intrinsic
+    /// widths, and unframed they draw at two visibly different sizes.
     static let glyphBox: CGFloat = badgeHeight
 }
 
@@ -612,7 +612,7 @@ struct ChartView: View {
                 } label: {
                     Image(systemName: "person.circle")
                         .font(.title3)
-                        .headerChipChrome()
+                        .headerGlyphChrome()
                 }
                 .accessibilityLabel("Profile")
 
@@ -621,7 +621,7 @@ struct ChartView: View {
                 } label: {
                     Image(systemName: "clock.arrow.circlepath")
                         .font(.subheadline)
-                        .headerChipChrome()
+                        .headerGlyphChrome()
                 }
                 .accessibilityLabel("Trade history")
 

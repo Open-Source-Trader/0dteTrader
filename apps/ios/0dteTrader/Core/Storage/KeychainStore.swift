@@ -17,6 +17,18 @@ struct KeychainStore: Sendable {
         self.account = account
     }
 
+    /// One-time migration: delete any token stored under the pre-scoping
+    /// account ("refresh-token") so no orphaned live credential lingers.
+    /// Mirrors the desktop `localStorage.removeItem` migration.
+    static func removeLegacyRefreshToken(service: String = "com.0dtetrader.app") {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: "refresh-token",
+        ]
+        SecItemDelete(query as CFDictionary)
+    }
+
     /// Keychain account for a server's refresh token, scoped by origin
     /// (scheme+host+port) so a token issued by one server is never sent to
     /// another after a runtime server change (#59).

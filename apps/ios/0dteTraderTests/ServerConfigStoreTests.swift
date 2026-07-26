@@ -76,6 +76,11 @@ final class ServerConfigStoreTests: XCTestCase {
         XCTAssertEqual(saved.absoluteString, "https://my-api.up.railway.app")
     }
 
+    func testSaveLowercasesHost() throws {
+        let saved = try makeStore().save("HTTPS://My-API.up.Railway.app")
+        XCTAssertEqual(saved.absoluteString, "https://my-api.up.railway.app")
+    }
+
     func testSaveDropsExplicitDefaultPorts() throws {
         XCTAssertEqual(
             try makeStore().save("https://my-api.up.railway.app:443").absoluteString,

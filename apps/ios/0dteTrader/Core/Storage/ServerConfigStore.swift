@@ -81,7 +81,9 @@ final class ServerConfigStore: ObservableObject {
 
         var origin = URLComponents()
         origin.scheme = scheme
-        origin.host = host
+        // Lowercased to match WHATWG URL.origin on desktop — also keeps the
+        // Keychain token account identical for both spellings of a host.
+        origin.host = host.lowercased()
         origin.port = port
         guard let url = origin.url else {
             throw ServerConfigError.invalidURL

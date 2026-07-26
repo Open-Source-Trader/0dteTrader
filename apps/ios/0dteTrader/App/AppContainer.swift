@@ -12,17 +12,20 @@ final class AppContainer: ObservableObject {
     let apiClient: APIClient
     let quoteSocket: QuoteSocketClient
     let appLockManager: AppLockManager
+    private let urlSession: URLSession
 
     init(baseURL: URL) {
         let settings = SettingsStore()
         // Scoped per server origin so a refresh token issued by one server is
         // never sent to another after a runtime server change.
+        KeychainStore.removeLegacyRefreshToken()
         let keychain = KeychainStore(account: KeychainStore.refreshTokenAccount(for: baseURL))
         // Pins apply only when this is the built-in default host.
         let pinningDelegate = CertificatePinningDelegate(pinnedHashes: AppConfig.pinnedPublicKeyHashes(for: baseURL))
         let urlSession = URLSession(configuration: .default, delegate: pinningDelegate, delegateQueue: nil)
         let sessionStore = SessionStore(keychainStore: keychain, baseURL: baseURL, urlSession: urlSession)
 
+        self.urlSession = urlSession
         self.baseURL = baseURL
         self.settingsStore = settings
         self.keychainStore = keychain
@@ -32,6 +35,13 @@ final class AppContainer: ObservableObject {
             try await sessionStore.accessTokenOrRefresh()
         }
         self.appLockManager = AppLockManager(settingsStore: settings)
+    }
+
+    deinit {
+        // URLSession retains its delegate until invalidated; without this,
+        // every server switch would leak the replaced container's session,
+        // pinning delegate, and connection pool.
+        urlSession.finishTasksAndInvalidate()
     }
 
     // MARK: - View model factories

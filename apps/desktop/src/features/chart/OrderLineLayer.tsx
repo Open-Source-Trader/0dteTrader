@@ -598,11 +598,14 @@ export function OrderLineLayer({
     event.preventDefault();
     event.stopPropagation();
     const startY = event.clientY;
-    guidePressRef.current = true;
     guideDragRef.current = false;
     // Capture so a release outside the browser window still ends the gesture,
-    // rather than leaving the guide following an unheld cursor.
+    // rather than leaving the guide following an unheld cursor. Claim the press
+    // only once this has succeeded: a throw before the listeners are attached
+    // would otherwise leave the flag set with nothing able to clear it, and the
+    // guard above would refuse every press for the life of the component.
     event.currentTarget.setPointerCapture(event.pointerId);
+    guidePressRef.current = true;
 
     const onMove = (moveEvent: PointerEvent) => {
       if (!guideDragRef.current && Math.abs(moveEvent.clientY - startY) < GUIDE_DRAG_THRESHOLD) {
@@ -620,6 +623,9 @@ export function OrderLineLayer({
       scheduleRef.current();
     };
 
+    // No releasePointerCapture: capture is released implicitly once
+    // `pointerup`/`pointercancel` has been dispatched, and on removal of the
+    // capturing element.
     const detach = () => {
       endGuideDragRef.current = () => {};
       window.removeEventListener('pointermove', onMove);

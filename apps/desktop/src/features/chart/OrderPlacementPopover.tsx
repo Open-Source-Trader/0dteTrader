@@ -26,6 +26,12 @@ interface OrderPlacementPopoverProps {
 
 /** Trigger price step: one cent, the tick the level is rounded to anyway. */
 const PRICE_STEP = 0.01;
+/** Digits, optionally one decimal point. Also matches the part-typed forms a
+ *  level passes through on the way in (`''`, `'.'`, `'4300.'`). */
+const LEVEL_SHAPE = /^\d*\.?\d*$/;
+/** Ties the note to the level input, so a screen reader reads *why* it is
+ *  invalid rather than only that it is. */
+const NOTE_ID = 'order-placement-note';
 
 /**
  * The window behind the chart's `+`: pick a level, a side, a size, and how the
@@ -51,15 +57,19 @@ export function OrderPlacementPopover({
   const [quantity, setQuantity] = useState(defaultQuantity);
   const [orderType, setOrderType] = useState<OrderType>(defaultOrderType);
   const [submitting, setSubmitting] = useState(false);
-  /** Raw text, held only while it is *not* a usable level. A number input
-   *  cannot be cleared or half-typed without passing through states like `''`,
-   *  and `Number('')` is a perfectly finite 0 — which is an order trigger this
-   *  field must never hand onwards. */
+  /** Raw text, held for as long as the user is typing. A level cannot be
+   *  reached keystroke by keystroke without passing through text that is not
+   *  what a number would print as — `''`, `'.'`, `'4300.'`, `'00.5'` — so the
+   *  field shows exactly what was typed and only *reports* a level when the
+   *  text parses to one. Snapping back to `String(price)` mid-word is what
+   *  eats the decimal point. */
   const [levelDraft, setLevelDraft] = useState<string | null>(null);
   const ref = useRef<HTMLDivElement>(null);
   const levelRef = useRef<HTMLInputElement>(null);
 
-  const levelValid = levelDraft === null;
+  const levelText = levelDraft ?? String(price);
+  const levelNumber = Number(levelText);
+  const levelValid = Number.isFinite(levelNumber) && levelNumber > 0;
 
   // The level is the field most likely to be adjusted the moment this opens —
   // the `+` only gets you approximately where you meant.
@@ -75,7 +85,12 @@ export function OrderPlacementPopover({
       if (event.key === 'Escape') onCancel();
     };
     const onPointerDown = (event: PointerEvent) => {
-      if (!ref.current?.contains(event.target as Node)) onCancel();
+      const target = event.target as Element | null;
+      // The chart's `+` is outside this card but is not "elsewhere": it is
+      // inert while the window is open and says so, and dismissing on a press
+      // there would contradict the disabled affordance it shows.
+      if (target?.closest('[data-chart-placement]')) return;
+      if (!ref.current?.contains(target)) onCancel();
     };
     window.addEventListener('keydown', onKey);
     // Deferred: the click that opened this window is still propagating.
@@ -118,19 +133,23 @@ export function OrderPlacementPopover({
           // covers what the native spinner would have.
           type="text"
           inputMode="decimal"
-          value={levelDraft ?? String(price)}
+          value={levelText}
           aria-label="Trigger price"
           aria-invalid={!levelValid}
+          aria-describedby={NOTE_ID}
           onChange={(event) => {
             const raw = event.target.value;
+            // Digits and at most one point, nothing else: `Number` is happy to
+            // read `0x1f`, `1e5` and `' 42 '` as prices, and none of those are
+            // things anyone means to type into a dollar level.
+            if (!LEVEL_SHAPE.test(raw)) return;
+            setLevelDraft(raw);
             const next = Number(raw);
-            if (raw.trim() === '' || !Number.isFinite(next) || next <= 0) {
-              setLevelDraft(raw);
-              return;
-            }
-            setLevelDraft(null);
-            onPriceChange(Math.round(next * 100) / 100);
+            if (Number.isFinite(next) && next > 0) onPriceChange(Math.round(next * 100) / 100);
           }}
+          // Typing is over, so the field can stop showing the keystrokes and
+          // show the level they added up to.
+          onBlur={() => setLevelDraft(null)}
         />
         <Stepper
           value={price}
@@ -181,7 +200,7 @@ export function OrderPlacementPopover({
         <Stepper value={quantity} min={1} max={1000} onChange={setQuantity} />
       </label>
 
-      <p className="order-placement__note">
+      <p className="order-placement__note" id={NOTE_ID}>
         {levelValid ? (
           <>
             Fires an order when {contract.underlying} reaches {Format.price(price)}. Watched by the

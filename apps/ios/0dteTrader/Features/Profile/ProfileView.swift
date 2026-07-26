@@ -27,6 +27,9 @@ struct ProfileView: View {
                 .padding(.bottom, AppSpacing.xxxl)
             }
             .background(Color.appBackground)
+            // The credential fields sit in a sheet, which `RootView`'s keyboard
+            // `Done` does not reach. Dragging the form is the way out here.
+            .scrollDismissesKeyboard(.interactively)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .principal) {

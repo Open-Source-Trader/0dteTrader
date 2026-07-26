@@ -144,9 +144,14 @@ struct TradeScreenView: View {
                         }
                     }
             }
+            // Sheets sit outside the root window's tree, so `RootView`'s
+            // tap/swipe keyboard dismissal does not reach them — each sheet
+            // with a field carries its own.
+            .dismissKeyboardOnInteraction()
         }
         .sheet(isPresented: $showProfile) {
             ProfileView(viewModel: profileViewModel)
+                .dismissKeyboardOnInteraction()
         }
         .sheet(isPresented: $showHistory) {
             HistoryView(apiClient: container.apiClient)
@@ -447,6 +452,9 @@ struct TradeScreenView: View {
         // is the reader's height in both directions. The panel clears the keys
         // by moving itself instead; see `keyboardLift` above.
         .ignoresSafeArea(.keyboard, edges: .bottom)
+        // Tap or swipe-down to put the custom-price keyboard away comes from
+        // `RootView.dismissKeyboardOnInteraction()` — this screen lives in the
+        // root window, so it needs no copy of its own.
     }
 
     private var chartView: some View {

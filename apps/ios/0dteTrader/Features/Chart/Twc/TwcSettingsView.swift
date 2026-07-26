@@ -219,6 +219,9 @@ struct TwcSettingsView: View {
                 }
             }
         }
+        // The label fields sit in a sheet, which `RootView`'s keyboard `Done`
+        // does not reach. Dragging the form is the way out here.
+        .scrollDismissesKeyboard(.interactively)
         .navigationTitle("TWC Heatmap V5")
         .navigationBarTitleDisplayMode(.inline)
         .hudListChrome()

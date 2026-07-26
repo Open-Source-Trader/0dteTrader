@@ -96,6 +96,10 @@ struct LoginView: View {
         }
         .sheet(isPresented: $showRegister) {
             RegisterView(viewModel: viewModel)
+                // Sheets sit outside the root window's tree, so `RootView`'s
+                // tap/swipe keyboard dismissal does not reach them — each
+                // sheet with a field carries its own.
+                .dismissKeyboardOnInteraction()
         }
     }
 

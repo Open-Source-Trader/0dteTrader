@@ -130,6 +130,11 @@ struct OrderPlacementCard: View {
         .hudCard(accent: .hudStroke, glow: false)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Place a chart order")
+        // Tap or swipe-down to put the level keyboard away comes from
+        // `RootView.dismissKeyboardOnInteraction()`. While typing, the first
+        // tap anywhere — card or chart — is spent on the dismissal; with the
+        // keyboard down, a tap outside hits the chart's scrim and cancels the
+        // card as it always did.
     }
 
     /// The level is the field most likely to be adjusted the moment this opens,
@@ -176,12 +181,10 @@ struct OrderPlacementCard: View {
             // Text, not a numeric `FormatStyle` binding: a formatted binding
             // re-renders the canonical string on every keystroke, which is what
             // swallows the decimal point half-way through `4300.50`.
-            // `decimalPad` has no return key, and tapping the chart hits the
-            // dismiss scrim, so this field needs a `Done` — but not one
-            // declared here. A keyboard toolbar this deep in the tree is never
-            // installed; the app's single one lives on `RootView`, which
-            // explains why. Blurring from there runs the `onChange` below, so
-            // the draft still settles to canonical.
+            // `decimalPad` has no return key; the way out is a tap or
+            // swipe-down anywhere — `RootView.dismissKeyboardOnInteraction()`.
+            // Blurring from there runs the `onChange` below, so the draft
+            // still settles to canonical.
             TextField("Level", text: levelBinding)
                 .keyboardType(.decimalPad)
                 .focused($priceFocused)

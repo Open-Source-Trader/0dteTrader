@@ -1,5 +1,4 @@
 import CoreGraphics
-import Foundation
 
 /// Placement-guide metrics (pt values).
 enum AppPlacementGuide {
@@ -11,6 +10,8 @@ enum AppPlacementGuide {
     static let handleMargin: CGFloat = 6
     /// Chamfer on the handle, matching `HudPanelShape` at chip scale.
     static let handleChamfer: CGFloat = 6
+    /// Dash pattern for the guide line, keeping it visually subordinate to the
+    /// solid lines a real resting order draws.
     static let dash: [CGFloat] = [4, 4]
     /// Finger travel before a press on the handle counts as a drag, not a tap.
     static let dragThreshold: CGFloat = 4

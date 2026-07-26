@@ -10,7 +10,7 @@ import Foundation
 /// without the user having asked for it on this screen.
 @MainActor
 final class ChartTradingCoordinator: ObservableObject, OrderLineOverlayDelegate {
-    /// Long-press armed a placement at this level.
+    /// The `+` handle armed a placement at this level.
     @Published var placementRequest: OrderPlacementRequest?
     /// Position the entry line's ✕ is asking to close.
     @Published var positionPendingFlatten: Position?

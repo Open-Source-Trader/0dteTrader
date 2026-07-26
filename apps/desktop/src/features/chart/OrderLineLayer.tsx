@@ -17,6 +17,7 @@ import {
   LINE_HIT_DISTANCE,
   type LineRow,
   type PillKey,
+  PILL_GAP,
   ROW_HEIGHT,
   ROW_RIGHT_MARGIN,
 } from './orderLineGeometry';
@@ -220,7 +221,22 @@ export function OrderLineLayer({
       ctx.font = FONT;
 
       const rows: LineRow[] = [];
-      const rightEdge = pane.width - ROW_RIGHT_MARGIN - latest.current.rightInset;
+      // Resolved before the rows are laid out, because it decides how much room
+      // they get: the guide is suppressed when there is no contract to trade,
+      // and only a drawn handle needs a band reserved for it.
+      const guideOn = latest.current.settings.enabled && latest.current.selectedContract !== null;
+      /** Left edge of the `+` handle. */
+      const plusLeft = pane.width - latest.current.rightInset - PLUS_MARGIN - PLUS_SIZE;
+      // Rows stop short of the handle rather than running under it. The handle
+      // is a DOM button stacked above this canvas, so it takes the click from
+      // any control it covers — and the rightmost control is ✕, which cancels a
+      // live order. Resolving it the other way is not an option: a row at the
+      // guide's level would make the handle unreachable, and the handle is the
+      // only way to move the guide.
+      const rightEdge = Math.min(
+        pane.width - ROW_RIGHT_MARGIN - latest.current.rightInset,
+        guideOn ? plusLeft - PILL_GAP / 2 : Infinity,
+      );
       const measure = (label: string) => ctx.measureText(label).width;
       const hovered = hoverRef.current;
 
@@ -349,7 +365,6 @@ export function OrderLineLayer({
       // Placement guide: permanent dashed level with the `+` handle at its right
       // edge. Suppressed when there is no contract to trade, because arming a
       // line against nothing is not a state the user can act on.
-      const guideOn = latest.current.settings.enabled && latest.current.selectedContract !== null;
       const open = latest.current.placementPrice;
       // While the window is open it owns the level (`open ?? …`), so the guide
       // does not re-anchor underneath the number the user is editing.
@@ -369,7 +384,7 @@ export function OrderLineLayer({
         ctx.setLineDash([4, 4]);
         ctx.beginPath();
         ctx.moveTo(0, guideY);
-        ctx.lineTo(rightEdge - PLUS_SIZE - PLUS_MARGIN, guideY);
+        ctx.lineTo(plusLeft, guideY);
         ctx.stroke();
         ctx.setLineDash([]);
         // The level only needs calling out while it is moving; the rest of the

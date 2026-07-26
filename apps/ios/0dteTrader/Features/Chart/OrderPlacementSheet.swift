@@ -10,7 +10,7 @@ struct OrderPlacementRequest: Identifiable, Equatable {
     let contract: OptionContract
 }
 
-/// The small window behind the long-press `+`: pick a side, a size, and how the
+/// The small window behind the `+` handle: pick a side, a size, and how the
 /// order executes when the level is hit.
 ///
 /// The execution type is offered here rather than inherited silently, for the

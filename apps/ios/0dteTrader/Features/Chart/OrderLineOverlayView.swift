@@ -136,9 +136,11 @@ final class OrderLineOverlayView: UIView {
     private var cancellables: Set<AnyCancellable> = []
     private var rows: [OrderLineRow] = []
 
-    /// Price the placement sheet is open at, drawn as a dashed guide. Driven
-    /// from SwiftUI state so the guide's lifetime is exactly the sheet's —
-    /// owning it internally left the line stranded on the chart after dismiss.
+    /// Level the open placement card is armed at, or nil when it is closed.
+    /// Driven from SwiftUI state, so while the card is open it — not the
+    /// handle — owns the guide's level, and there is one source of truth at any
+    /// moment. Closing it hands the level back to `guidePrice`, which has been
+    /// tracking it; the guide itself is permanent either way.
     var placementPrice: Double? {
         didSet {
             guard placementPrice != oldValue else { return }
@@ -478,8 +480,13 @@ final class OrderLineOverlayView: UIView {
     }
 
     /// Permanent placement guide: a dashed level with the `+` handle at its
-    /// right edge. Suppressed when chart trading is off; the SwiftUI layer
-    /// additionally gates it on there being a contract to trade.
+    /// right edge. Suppressed only when chart trading is off.
+    ///
+    /// There is deliberately no gate on there being a contract to trade yet, so
+    /// with no chain contract selected the handle still draws and still takes
+    /// the tap — and `ChartTradingCoordinator` then drops it, spending a haptic
+    /// on nothing. That gate lands with the placement card, which is what gives
+    /// this layer the selected contract to test.
     private func renderPlacementGuide(in context: CGContext) {
         let visibleRect = chart?.viewPortHandler.contentRect ?? bounds
         let resolved = isPlacementOpen
@@ -492,7 +499,11 @@ final class OrderLineOverlayView: UIView {
                 min: price(at: visibleRect.maxY) ?? .nan,
                 max: price(at: visibleRect.minY) ?? .nan
             )
-        if !isPlacementOpen { guidePrice = resolved }
+        // Tracked in both states, not just when the card is closed: the card
+        // owns the level while it is open, and if the guide did not follow it
+        // there, dismissing would snap back to wherever the handle sat before
+        // the card opened and silently discard the level the user typed.
+        guidePrice = resolved
 
         guard let resolved, let y = yPixel(for: resolved) else {
             handleFrame = .zero
@@ -590,6 +601,32 @@ final class OrderLineOverlayView: UIView {
             .scaledFont(for: .monospacedDigitSystemFont(ofSize: 11, weight: .semibold))
     }
 
+    /// Right edge the pill rows lay out from.
+    ///
+    /// Rows must stop short of the placement handle's *touch* rect, not merely
+    /// its drawn glyph: `point(inside:)` and both gesture handlers check
+    /// `handleTouchFrame` before `hitTest`, so any pill whose enlarged target
+    /// reaches into that band loses the touch to the handle — and the rightmost
+    /// pill is ✕, which cancels a live order. Resolving it the other way round
+    /// is not an option: a row sitting at the guide's level would then make the
+    /// handle unreachable, and the handle is the only way to move the guide.
+    ///
+    /// Reserved unconditionally rather than only when the guide resolves.
+    /// `draw(_:)` runs only when chart trading is on, which is exactly when the
+    /// guide is drawn, and the rows are laid out before the guide is — keying
+    /// this off the previous frame's `handleFrame` would lag by a frame and let
+    /// the rows slide under the handle for exactly the frame that matters.
+    private var rowRightEdge: CGFloat {
+        let handleTouchLeft = bounds.width - rightInset
+            - AppPlacementGuide.handleMargin
+            - AppPlacementGuide.handleSize
+            - (AppOrderLine.minimumTouchTarget - AppPlacementGuide.handleSize) / 2
+        return Swift.min(
+            bounds.width - AppOrderLine.rowRightMargin - rightInset,
+            handleTouchLeft - AppOrderLine.pillGap / 2
+        )
+    }
+
     /// Lays a row out right-to-left from the pane's right edge.
     ///
     /// Touch rects are taller than the pills they cover but never overlap
@@ -606,7 +643,7 @@ final class OrderLineOverlayView: UIView {
                 + AppOrderLine.pillPaddingH * 2
         }
         let total = widths.reduce(0, +) + AppOrderLine.pillGap * CGFloat(labels.count - 1)
-        let left = bounds.width - AppOrderLine.rowRightMargin - rightInset - total
+        let left = rowRightEdge - total
         let touchHeight = max(AppOrderLine.minimumTouchTarget, AppOrderLine.rowHeight)
 
         var x = left

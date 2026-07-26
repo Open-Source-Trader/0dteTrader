@@ -24,7 +24,8 @@ struct CandleChartRepresentable: UIViewRepresentable {
     var chartOrdersModel: ChartOrdersModel?
     var chartTradingSettings: ChartTradingSettings = .default
     var entryLines: [EntryLineModel] = []
-    /// Level the open placement sheet refers to; nil clears the dashed guide.
+    /// Level the open placement card refers to; nil when it is closed. The
+    /// guide itself is permanent — this only says who owns its level.
     var placementPrice: Double?
     /// Last traded price — where the placement guide parks when it has nowhere
     /// else to be.

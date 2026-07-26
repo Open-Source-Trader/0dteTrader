@@ -48,6 +48,8 @@ COPY --from=builder /app/package.json ./
 RUN addgroup -S appgroup && adduser -S appuser -G appgroup
 USER appuser
 
+ENV NODE_ENV=production
+
 EXPOSE 3000
 
 ENTRYPOINT ["tini", "--"]

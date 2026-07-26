@@ -135,4 +135,39 @@ final class PlacementGuideTests: XCTestCase {
             }
         }
     }
+
+    // MARK: - Level input
+
+    /// The defect the desktop twin shipped: holding the raw text only while it
+    /// was *unparseable* snapped `"4300."` back to its canonical form mid-word,
+    /// so typing `4300.50` produced `430050`. The draft has to survive every
+    /// keystroke, which means the shape check has to accept the trailing point.
+    func testAcceptsALevelBeingTypedOneKeystrokeAtATime() {
+        var draft = ""
+        for key in "4300.50" {
+            let next = draft + String(key)
+            XCTAssertTrue(isLevelInputShape(next), "rejected \(next)")
+            draft = next
+        }
+        XCTAssertEqual(draft, "4300.50")
+        XCTAssertEqual(parseLevelInput(draft), 4300.5)
+        XCTAssertEqual(parseLevelInput("4300."), 4300)
+    }
+
+    func testRejectsShapesThatAreNotDecimalPrices() {
+        // Every one of these is something `Double(_:)` reads happily and nobody
+        // means to type into a dollar level.
+        for text in ["1e5", "0x1f", "-3", " 42 ", "4.3.0", "inf", "nan", "4,300", "٤٣"] {
+            XCTAssertFalse(isLevelInputShape(text), "accepted \(text)")
+            XCTAssertNil(parseLevelInput(text), "parsed \(text)")
+        }
+    }
+
+    func testHasNoLevelWhileTheFieldIsEmptyOrZero() {
+        // Zero used to pass every guard — it is finite — and PLACE would arm a
+        // chart order at a trigger price of zero.
+        for text in ["", ".", "0", "0.00", "00.0"] {
+            XCTAssertNil(parseLevelInput(text), "parsed \(text) as a level")
+        }
+    }
 }

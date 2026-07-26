@@ -24,6 +24,9 @@ struct CandleChartRepresentable: UIViewRepresentable {
     var chartOrdersModel: ChartOrdersModel?
     var chartTradingSettings: ChartTradingSettings = .default
     var entryLines: [EntryLineModel] = []
+    /// Whether a contract is selected for a new line to trade; the placement
+    /// guide is suppressed entirely without one.
+    var hasSelectedContract: Bool = false
     /// Level the open placement card refers to; nil when it is closed. The
     /// guide itself is permanent — this only says who owns its level.
     var placementPrice: Double?
@@ -207,6 +210,7 @@ struct CandleChartRepresentable: UIViewRepresentable {
         container.orderLineOverlay.model = chartOrdersModel
         container.orderLineOverlay.settings = chartTradingSettings
         container.orderLineOverlay.entryLines = entryLines
+        container.orderLineOverlay.hasSelectedContract = hasSelectedContract
         container.orderLineOverlay.placementPrice = placementPrice
         container.orderLineOverlay.lastPrice = lastPrice
         container.orderLineOverlay.delegate = orderLineDelegate

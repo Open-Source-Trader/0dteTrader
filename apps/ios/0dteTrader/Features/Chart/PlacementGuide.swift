@@ -78,3 +78,41 @@ private func usablePrice(_ value: Double?) -> Double? {
     guard let value, value.isFinite else { return nil }
     return value
 }
+
+/// Whether `text` is a shape the level field is allowed to hold.
+///
+/// Digits and at most one decimal point, and nothing else. It deliberately
+/// accepts the part-typed forms a level passes through on the way in — `""`,
+/// `"."`, `"4300."` — because rejecting those is what eats the decimal point
+/// mid-word. It rejects everything `Double(_:)` is otherwise happy to read as a
+/// price: `"1e5"`, `"0x1f"`, `"inf"`, `"-3"`, `" 42 "`. None of those are things
+/// anyone means to type into a dollar level.
+///
+/// Mirrors `LEVEL_SHAPE` in `apps/desktop/src/features/chart/OrderPlacementPopover.tsx`.
+func isLevelInputShape(_ text: String) -> Bool {
+    var seenPoint = false
+    for character in text {
+        if character == "." {
+            if seenPoint { return false }
+            seenPoint = true
+            continue
+        }
+        // `isNumber` alone would admit non-ASCII digits, which `Double(_:)`
+        // does not parse — the field would look valid and never resolve.
+        guard character.isASCII, character.isNumber else { return false }
+    }
+    return true
+}
+
+/// The level `text` names, or nil while it does not name one yet.
+///
+/// Nil covers both "still being typed" (`""`, `"."`, `"0"`) and "not a level at
+/// all". The caller cannot submit either, which is the point: a cleared field
+/// used to parse to `0`, which is finite and passed every guard, and PLACE
+/// would arm a chart order at a trigger price of zero.
+func parseLevelInput(_ text: String) -> Double? {
+    guard isLevelInputShape(text), let value = Double(text), value.isFinite, value > 0 else {
+        return nil
+    }
+    return value
+}

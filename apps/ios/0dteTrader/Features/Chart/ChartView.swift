@@ -16,7 +16,16 @@ struct ChartView: View {
     var chartOrders: ChartOrdersModel?
     var chartTradingSettings: ChartTradingSettings = .default
     var entryLines: [EntryLineModel] = []
-    var placementPrice: Double?
+    /// Whether there is a contract for a new line to trade. No contract, no
+    /// placement guide: the handle would take the tap and arm nothing.
+    var hasSelectedContract: Bool = false
+    /// Open placement request; nil means the guide is idle.
+    var placementRequest: OrderPlacementRequest?
+    var placementDefaultQuantity: Int = 1
+    var placementDefaultOrderType: OrderType = .mid
+    var onPlacementPriceChange: (Double) -> Void = { _ in }
+    var onPlacementPlace: (OrderSide, Int, OrderType) async -> Void = { _, _, _ in }
+    var onPlacementCancel: () -> Void = {}
     weak var orderLineDelegate: OrderLineOverlayDelegate?
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -36,7 +45,13 @@ struct ChartView: View {
         chartOrders: ChartOrdersModel? = nil,
         chartTradingSettings: ChartTradingSettings = .default,
         entryLines: [EntryLineModel] = [],
-        placementPrice: Double? = nil,
+        hasSelectedContract: Bool = false,
+        placementRequest: OrderPlacementRequest? = nil,
+        placementDefaultQuantity: Int = 1,
+        placementDefaultOrderType: OrderType = .mid,
+        onPlacementPriceChange: @escaping (Double) -> Void = { _ in },
+        onPlacementPlace: @escaping (OrderSide, Int, OrderType) async -> Void = { _, _, _ in },
+        onPlacementCancel: @escaping () -> Void = {},
         orderLineDelegate: OrderLineOverlayDelegate? = nil
     ) {
         _viewModel = ObservedObject(wrappedValue: viewModel)
@@ -48,7 +63,13 @@ struct ChartView: View {
         self.chartOrders = chartOrders
         self.chartTradingSettings = chartTradingSettings
         self.entryLines = entryLines
-        self.placementPrice = placementPrice
+        self.hasSelectedContract = hasSelectedContract
+        self.placementRequest = placementRequest
+        self.placementDefaultQuantity = placementDefaultQuantity
+        self.placementDefaultOrderType = placementDefaultOrderType
+        self.onPlacementPriceChange = onPlacementPriceChange
+        self.onPlacementPlace = onPlacementPlace
+        self.onPlacementCancel = onPlacementCancel
         self.orderLineDelegate = orderLineDelegate
     }
 
@@ -76,11 +97,34 @@ struct ChartView: View {
                     chartOrdersModel: chartOrders,
                     chartTradingSettings: chartTradingSettings,
                     entryLines: entryLines,
-                    placementPrice: placementPrice,
+                    hasSelectedContract: hasSelectedContract,
+                    placementPrice: placementRequest?.price,
                     lastPrice: viewModel.candles.last?.close,
                     orderLineDelegate: orderLineDelegate,
                     resetToken: chartResetToken
                 )
+                if let request = placementRequest {
+                    // Tap-away dismiss, matching the desktop window: this must
+                    // never be the thing standing between you and your chart.
+                    Color.black.opacity(0.001)
+                        .contentShape(Rectangle())
+                        .onTapGesture(perform: onPlacementCancel)
+                    OrderPlacementCard(
+                        request: request,
+                        defaultQuantity: placementDefaultQuantity,
+                        defaultOrderType: placementDefaultOrderType,
+                        onPriceChange: onPlacementPriceChange,
+                        onPlace: onPlacementPlace,
+                        onCancel: onPlacementCancel
+                    )
+                    // Centred vertically rather than anchored to the guide: on a
+                    // short pane a line-anchored card clips against the top edge,
+                    // and a window that half-disappears is worse than one that is
+                    // always in the same place.
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
+                    .padding(.trailing, AppSpacing.sm)
+                    .transition(.opacity)
+                }
                 resetButton { chartResetToken += 1 }
                 if let banner = viewModel.twcRenderModel?.banner {
                     TwcBiasBannerView(banner: banner)

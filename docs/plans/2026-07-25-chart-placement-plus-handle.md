@@ -1713,6 +1713,15 @@ Expected: FAIL — `TradeScreenView.swift` still references `OrderPlacementSheet
 - Modify: `apps/ios/0dteTrader/Features/Chart/ChartView.swift`
 - Modify: `apps/ios/0dteTrader/Features/Trade/TradeScreenView.swift`
 
+**Gate the guide on there being a contract to trade.** Right now the iOS overlay draws
+the handle unconditionally, so with no chain contract selected it hit-tests, fires a
+haptic, and then silently does nothing — `ChartTradingCoordinator.orderLineOverlayDidRequestPlacement`
+bails on `guard let contract`. The desktop twin suppresses the guide entirely in that
+state (`settings.enabled && selectedContract !== null`); iOS must match. Add a
+`hasSelectedContract: Bool` through `ChartView` → `CandleChartRepresentable` → the
+overlay, and fold it into the same condition that gates drawing. Fix the
+`renderPlacementGuide` doc comment to describe whatever you actually implement.
+
 **Step 1: Give ChartView the card's inputs**
 
 In `ChartView.swift`, replace `var placementPrice: Double?` (line 19) with:

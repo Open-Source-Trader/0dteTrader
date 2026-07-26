@@ -165,6 +165,17 @@ final class OrderLineOverlayView: UIView {
         }
     }
 
+    /// Whether there is a contract for a new line to trade. Without one
+    /// `ChartTradingCoordinator` drops the placement request on the floor, so
+    /// the guide is suppressed rather than drawn as an affordance that does
+    /// nothing. Desktop gates its guide on the same condition.
+    var hasSelectedContract: Bool = false {
+        didSet {
+            guard hasSelectedContract != oldValue else { return }
+            setNeedsDisplay()
+        }
+    }
+
     var model: ChartOrdersModel? {
         didSet {
             cancellables = []
@@ -545,14 +556,19 @@ final class OrderLineOverlayView: UIView {
     }
 
     /// Permanent placement guide: a dashed level with the `+` handle at its
-    /// right edge. Suppressed only when chart trading is off.
+    /// right edge. Suppressed when chart trading is off, and when there is no
+    /// chain contract for a new line to trade — `ChartTradingCoordinator`
+    /// discards a placement raised in that state, and a control that takes the
+    /// tap, spends a haptic and arms nothing is worse than no control.
     ///
-    /// There is deliberately no gate on there being a contract to trade yet, so
-    /// with no chain contract selected the handle still draws and still takes
-    /// the tap — and `ChartTradingCoordinator` then drops it, spending a haptic
-    /// on nothing. That gate lands with the placement card, which is what gives
-    /// this layer the selected contract to test.
+    /// Clearing `handleFrame` is what makes the suppression total: hit-testing,
+    /// both gesture handlers and the accessibility element all read it, so none
+    /// of them can find a handle that was not drawn.
     private func renderPlacementGuide(in context: CGContext) {
+        guard hasSelectedContract else {
+            handleFrame = .zero
+            return
+        }
         let visibleRect = chart?.viewPortHandler.contentRect ?? bounds
         let resolved = isPlacementOpen
             // While the card is open it owns the level, so the guide does not
@@ -564,12 +580,12 @@ final class OrderLineOverlayView: UIView {
                 min: price(at: visibleRect.maxY) ?? .nan,
                 max: price(at: visibleRect.minY) ?? .nan
             )
-        // Tracked in both states, not just when the card is closed. Today the
-        // card's level is the handle's rounded to a tick by the coordinator, so
+        // Tracked in both states, not just when the card is closed. The card's
+        // level is the handle's rounded to a tick by the coordinator, so
         // without this the guide would un-round itself on dismiss and sit a
-        // fraction off the level the order was actually armed at. Once the card
-        // gains an editable level field it will also be what keeps a typed
-        // price from being discarded when the card closes.
+        // fraction off the level the order was actually armed at — and now that
+        // the card's Level field can move the guide, it is also what keeps a
+        // typed price from being discarded the moment the card closes.
         guidePrice = resolved
 
         guard let resolved, let y = yPixel(for: resolved) else {

@@ -144,21 +144,6 @@ struct TradeScreenView: View {
         .sheet(item: $capturedScreenshot) { screenshot in
             ShareSheet(image: screenshot.image)
         }
-        .sheet(item: $chartTrading.placementRequest) { request in
-            OrderPlacementSheet(
-                request: request,
-                defaultQuantity: chartTrading.settings.defaultQuantity,
-                defaultOrderType: tradeViewModel.orderType,
-                onPlace: { side, quantity, orderType in
-                    await chartTrading.placeFromSheet(
-                        side: side,
-                        quantity: quantity,
-                        orderType: orderType
-                    )
-                },
-                onCancel: { chartTrading.dismissPlacement() }
-            )
-        }
         // Closing a position and cancelling a working line both confirm first:
         // the first sends a real market order, and the second cannot be undone.
         .alert(
@@ -474,7 +459,19 @@ struct TradeScreenView: View {
                 positions: tradeViewModel.positions,
                 symbol: chartViewModel.symbol
             ),
-            placementPrice: chartTrading.placementRequest?.price,
+            hasSelectedContract: chainViewModel.selectedContract != nil,
+            placementRequest: chartTrading.placementRequest,
+            placementDefaultQuantity: chartTrading.settings.defaultQuantity,
+            placementDefaultOrderType: tradeViewModel.orderType,
+            onPlacementPriceChange: { chartTrading.updatePlacementPrice($0) },
+            onPlacementPlace: { side, quantity, orderType in
+                await chartTrading.placeFromSheet(
+                    side: side,
+                    quantity: quantity,
+                    orderType: orderType
+                )
+            },
+            onPlacementCancel: { chartTrading.dismissPlacement() },
             orderLineDelegate: chartTrading
         )
     }

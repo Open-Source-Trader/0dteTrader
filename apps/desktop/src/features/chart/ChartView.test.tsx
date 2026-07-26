@@ -71,6 +71,7 @@ describe('ChartView options analytics rendering', () => {
         onIndicatorSettings: vi.fn(),
         tradingMode: 'practice',
         onToggleMode: vi.fn(),
+        onToggleFullscreen: vi.fn(),
         chartTrading: null,
         optionsAnalyticsExpiration: '2026-07-19',
       }),

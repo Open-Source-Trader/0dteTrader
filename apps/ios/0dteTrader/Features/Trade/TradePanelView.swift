@@ -111,6 +111,10 @@ struct TradePanelView: View {
     /// positions strip handles its own lock (passed in pre-built).
     var tradingLocked: Bool = false
     let onArm: (OrderSide) -> Void
+    /// Flips the trading lock. A closure rather than a binding: the lock is
+    /// persisted upstream, and the panel only ever asks for the flip.
+    var onToggleLock: () -> Void = {}
+    var onShowAIAnalysis: () -> Void = {}
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -120,8 +124,11 @@ struct TradePanelView: View {
             VStack(spacing: density.spacing) {
                 positionsStrip
                     .frame(maxHeight: density.stripMaxHeight)
+                // `optionsSection` dims itself piecewise: the lock chip rides in
+                // its top row and must stay live, since a control that disables
+                // itself cannot be used to undo the lock.
+                optionsSection
                 Group {
-                    optionsSection
                     quantityRow
                     orderTypeRow
                 }
@@ -164,22 +171,29 @@ struct TradePanelView: View {
             }
 
             HStack(spacing: AppSpacing.sm) {
-                HudSegmentedControl(
-                    options: [
-                        .init(OptionType.call, "Call", accent: .buyGreen),
-                        .init(OptionType.put, "Put", accent: .sellRed),
-                    ],
-                    selection: $chainViewModel.optionType,
-                    minHeight: density.segmentedMinHeight
-                )
-                .accessibilityLabel("Option type")
+                Group {
+                    HudSegmentedControl(
+                        options: [
+                            .init(OptionType.call, "Call", accent: .buyGreen),
+                            .init(OptionType.put, "Put", accent: .sellRed),
+                        ],
+                        selection: $chainViewModel.optionType,
+                        minHeight: density.segmentedMinHeight
+                    )
+                    .accessibilityLabel("Option type")
 
-                HudToggleChip(
-                    title: "AUTO",
-                    isOn: $chainViewModel.isAutoMode,
-                    accent: .appAccent
-                )
-                .accessibilityLabel("Auto +1 OTM selection")
+                    HudToggleChip(
+                        title: "AUTO",
+                        isOn: $chainViewModel.isAutoMode,
+                        accent: .appAccent
+                    )
+                    .accessibilityLabel("Auto +1 OTM selection")
+                }
+                .disabled(tradingLocked)
+                .opacity(tradingLocked ? 0.55 : 1)
+
+                lockChip
+                AIAnalysisButton(action: onShowAIAnalysis)
             }
 
             HStack(spacing: AppSpacing.sm) {
@@ -191,7 +205,22 @@ struct TradePanelView: View {
                     strikeMenu
                 }
             }
+            .disabled(tradingLocked)
+            .opacity(tradingLocked ? 0.55 : 1)
         }
+    }
+
+    /// Trading lock, styled as the on/off chip it is. Red rather than amber:
+    /// locked is the state that refuses orders.
+    private var lockChip: some View {
+        HudToggleChip(
+            title: "LOCK",
+            isOn: Binding(get: { tradingLocked }, set: { _ in onToggleLock() }),
+            accent: .sellRed,
+            icon: "lock.open.fill",
+            onIcon: "lock.fill"
+        )
+        .accessibilityLabel(tradingLocked ? "Unlock trading" : "Lock trading")
     }
 
     private var expirationMenu: some View {

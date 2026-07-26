@@ -36,7 +36,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Armed-side crossing predicate (no instant fires on placement, gap-safe across restarts), stale-quote refusal, settled-contract expiry, orphaned-bracket sweep with an opening grace window
   - New API surface: `GET/POST/PATCH/DELETE /v1/chart-orders`, `POST /v1/chart-orders/:id/trigger`, `chartOrder` WebSocket message, `ChartOrder` Prisma model, `CHART_ORDER_WATCHER_*` env vars
 - Sell with a held contract selected now closes (part of) that position instead of opening a short — ticket quantity honored but capped at the position size, with a `CLOSE n of m` confirm summary (iOS + desktop)
-- Quick screenshot button (iOS) — capture the current view with one tap, system share sheet for save/share
 
 ### Changed
 

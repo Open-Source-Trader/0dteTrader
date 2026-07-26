@@ -12,6 +12,15 @@ enum AppPlacementGuide {
     static let handleMargin: CGFloat = 6
     /// Chamfer on the handle, matching `HudPanelShape` at chip scale.
     static let handleChamfer: CGFloat = 6
+    /// Width of the band along the pane's right border that the handle's touch
+    /// target claims — the drawn glyph plus the overhang that grows it to
+    /// `AppOrderLine.minimumTouchTarget`. The order-line rows already back off
+    /// from this band inside the overlay; SwiftUI chrome laid over the same pane
+    /// (the trading-mode badge) clears it here, because the guide can be
+    /// summoned at any level and a badge parked on the border would shadow the
+    /// handle at the levels nearest the top edge.
+    static let handleTouchBand: CGFloat =
+        handleMargin + handleSize + (AppOrderLine.minimumTouchTarget - handleSize) / 2
     /// Dash pattern for the guide line, keeping it visually subordinate to the
     /// solid lines a real resting order draws.
     static let dash: [CGFloat] = [4, 4]

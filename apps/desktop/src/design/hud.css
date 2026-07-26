@@ -181,6 +181,13 @@
   border-image-source: var(--hud-src-accent);
   text-shadow: 0 0 6px var(--hud-glow);
 }
+/* Trading lock: the same chip in the refusal color, because locked is the
+   state that turns orders away rather than a setting that is merely on. */
+.hud-toggle-chip--lock.on {
+  color: var(--sell-red);
+  border-image-source: var(--hud-src-sell);
+  text-shadow: 0 0 6px rgba(255, 59, 78, 0.5);
+}
 
 /* ── Accent variants (generated data-URIs) ─────────────────────────────── */
 :root {

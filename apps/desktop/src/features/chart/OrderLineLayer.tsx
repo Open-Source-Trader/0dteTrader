@@ -539,6 +539,12 @@ export function OrderLineLayer({
         if (upEvent.pointerId !== downEvent.pointerId) return;
         detach();
         if (isPointerClaimed(downEvent)) return;
+        // Clicks two and three of a triple-click are on their way to toggling
+        // fullscreen. Summoning and dismissing the guide underneath that would
+        // leave a level showing that nobody asked for; only the first click of
+        // a run gets to move it. (`detail` is 0 for touch, which leaves the
+        // touch route exactly as it was.)
+        if (downEvent.detail >= 2) return;
         const travel = Math.hypot(upEvent.clientX - startX, upEvent.clientY - startY);
         if (travel > GUIDE_DRAG_THRESHOLD) return;
         toggleGuide(y);

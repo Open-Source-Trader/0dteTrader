@@ -74,6 +74,10 @@ struct HudToggleChip: View {
     @Binding var isOn: Bool
     var accent: Color = .hudAmber
     var icon: String = "checkmark.circle"
+    /// Glyph for the on state. Defaults to the confirmation check AUTO uses;
+    /// a chip whose two states are a thing and its opposite (the trading lock)
+    /// says so with its own pair.
+    var onIcon: String = "checkmark.circle.fill"
 
     var body: some View {
         Button {
@@ -81,7 +85,7 @@ struct HudToggleChip: View {
             isOn.toggle()
         } label: {
             HStack(spacing: AppSpacing.xs) {
-                Image(systemName: isOn ? "checkmark.circle.fill" : icon)
+                Image(systemName: isOn ? onIcon : icon)
                     .font(.caption)
                 Text(title)
                     .font(.hudButton)

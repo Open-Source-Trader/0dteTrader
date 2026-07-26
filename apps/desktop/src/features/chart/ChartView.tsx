@@ -30,6 +30,8 @@ interface ChartViewProps {
   onIndicatorSettings: () => void;
   tradingMode: TradingMode;
   onToggleMode: () => void;
+  /** Three clicks on the chart surface toggle the fullscreen/split layout. */
+  onToggleFullscreen: () => void;
   /** Trade-ticket expiration for the exact options snapshot; null pauses shadow capture. */
   optionsAnalyticsExpiration: string | null;
   /** Order-line overlay inputs; null when chart trading is off. */
@@ -74,6 +76,7 @@ export function ChartView({
   onIndicatorSettings,
   tradingMode,
   onToggleMode,
+  onToggleFullscreen,
   optionsAnalyticsExpiration,
   chartTrading,
 }: ChartViewProps) {
@@ -346,13 +349,6 @@ export function ChartView({
               {tickProgress.count}/{tickProgress.size} ticks
             </span>
           ) : null}
-          <button
-            className={tradingMode === 'live' ? 'hud-badge hud-badge--live' : 'hud-badge'}
-            onClick={onToggleMode}
-            aria-label={`Trading mode ${tradingMode === 'live' ? 'LIVE' : 'PRACTICE'}. Switch mode`}
-          >
-            {tradingMode === 'live' ? 'LIVE' : 'PRACTICE'}
-          </button>
           <Menu
             trigger={
               <button
@@ -403,7 +399,38 @@ export function ChartView({
         className="hud-card hud-card--flat"
         style={{ flex: 1, minHeight: 100, margin: '3px 8px', padding: 0, display: 'flex' }}
       >
-        <div className="hud-clip" style={{ flex: 1, minHeight: 0, position: 'relative' }}>
+        <div
+          className="hud-clip"
+          style={{ flex: 1, minHeight: 0, position: 'relative' }}
+          onClick={(event) => {
+            // Three clicks toggle fullscreen — the only way in and out of it
+            // now that the navbar button is gone. Chrome that lives on this
+            // same surface (the reset button, the placement window, the mode
+            // badge) answers for its own clicks and is excluded here.
+            if (event.detail !== 3) return;
+            if ((event.target as Element).closest('button, [data-chart-placement]')) return;
+            onToggleFullscreen();
+          }}
+        >
+          {/* Top-trailing on the chart surface. The guide's `+` handle is flush
+              to the same border, so the badge gives up that band; and when the
+              options-analytics rail is on it steps inboard of the rail rather
+              than sitting on its readouts. `clamp(56px, 28%, 112px)` is
+              `optionsAnalyticsRailWidth` expressed against the pane. */}
+          <button
+            className={tradingMode === 'live' ? 'hud-badge hud-badge--live' : 'hud-badge'}
+            onClick={onToggleMode}
+            aria-label={`Trading mode ${tradingMode === 'live' ? 'LIVE' : 'PRACTICE'}. Switch mode`}
+            style={{
+              position: 'absolute',
+              top: 8,
+              right: optionsAnalyticsSnapshot ? 'calc(clamp(56px, 28%, 112px) + 4px)' : 28,
+              zIndex: 5,
+              background: 'var(--hud-panel)',
+            }}
+          >
+            {tradingMode === 'live' ? 'LIVE' : 'PRACTICE'}
+          </button>
           <CandleChart
             candles={candles}
             overlays={twcLineOverlays.length > 0 ? [...overlays, ...twcLineOverlays] : overlays}

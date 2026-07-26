@@ -23,7 +23,6 @@ struct TradeScreenView: View {
     @State private var showProfile = false
     @State private var showHistory = false
     @State private var showAIAnalysis = false
-    @State private var capturedScreenshot: CapturedScreenshot?
     // 'nil' until /v1/me answers; the server value wins (desktop parity).
     @State private var tradingMode: TradingMode?
     @State private var me: MeDTO?
@@ -75,9 +74,9 @@ struct TradeScreenView: View {
                             .font(.hudTitle)
                             .foregroundStyle(Color.appAccent)
                             .shadow(color: .hudGlow, radius: 8)
-                            // Six toolbar buttons squeeze the principal slot;
-                            // scale the wordmark down instead of truncating it
-                            // to "0dteTr…".
+                            // The principal slot still shares the bar with the
+                            // leading buttons; scale the wordmark down instead
+                            // of truncating it to "0dteTr…".
                             .lineLimit(1)
                             .minimumScaleFactor(0.45)
                             .allowsTightening(true)
@@ -98,38 +97,6 @@ struct TradeScreenView: View {
                         }
                         .accessibilityLabel("Trade history")
                     }
-                    ToolbarItem(placement: .topBarTrailing) {
-                        AIAnalysisButton { showAIAnalysis = true }
-                    }
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button {
-                            Haptics.impact(.light)
-                            if let image = ScreenshotCapture.captureKeyWindow() {
-                                capturedScreenshot = CapturedScreenshot(image: image)
-                            } else {
-                                tradeViewModel.showToast("Screenshot failed. Try again.", style: .error)
-                            }
-                        } label: {
-                            Image(systemName: "camera")
-                        }
-                        .accessibilityLabel("Take screenshot")
-                    }
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button {
-                            toggleLock()
-                        } label: {
-                            Image(systemName: tradingLocked ? "lock.fill" : "lock.open.fill")
-                        }
-                        .accessibilityLabel(tradingLocked ? "Unlock trading" : "Lock trading")
-                    }
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button {
-                            toggleLayout()
-                        } label: {
-                            Image(systemName: layout == .fullscreen ? "rectangle.split.1x2" : "rectangle")
-                        }
-                        .accessibilityLabel("Toggle layout")
-                    }
                 }
         }
         .modifier(
@@ -140,9 +107,6 @@ struct TradeScreenView: View {
         )
         .sheet(item: $tradeViewModel.armedTicket) { ticket in
             OrderConfirmSheet(tradeViewModel: tradeViewModel, ticket: ticket)
-        }
-        .sheet(item: $capturedScreenshot) { screenshot in
-            ShareSheet(image: screenshot.image)
         }
         // Closing a position and cancelling a working line both confirm first:
         // the first sends a real market order, and the second cannot be undone.
@@ -449,7 +413,9 @@ struct TradeScreenView: View {
                                 chainViewModel: chainViewModel,
                                 bypass: settingsStore.bypassOrderConfirmation
                             )
-                        }
+                        },
+                        onToggleLock: { toggleLock() },
+                        onShowAIAnalysis: { showAIAnalysis = true }
                     )
                     .frame(height: panelHeight)
                     .clipped()
@@ -492,7 +458,8 @@ struct TradeScreenView: View {
                     onCancel: { chartTrading.dismissPlacement() }
                 )
             },
-            orderLineDelegate: chartTrading
+            orderLineDelegate: chartTrading,
+            onTripleTap: toggleLayout
         )
     }
 

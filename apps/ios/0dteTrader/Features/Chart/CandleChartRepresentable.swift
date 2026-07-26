@@ -31,6 +31,8 @@ struct CandleChartRepresentable: UIViewRepresentable {
     /// only says who owns the guide's level, not whether one is showing.
     var placementPrice: Double?
     weak var orderLineDelegate: OrderLineOverlayDelegate?
+    /// Three taps on the chart toggle the fullscreen/split layout.
+    var onTripleTap: (() -> Void)?
     var resetToken: Int = 0
 
     /// CombinedChartView that reports the end of each draw pass. DGCharts
@@ -58,6 +60,7 @@ struct CandleChartRepresentable: UIViewRepresentable {
         /// mis-grabbing a trend line when you meant to move a stop is the
         /// expensive mistake.
         let orderLineOverlay = OrderLineOverlayView()
+        var onTripleTap: (() -> Void)?
 
         override init(frame: CGRect) {
             super.init(frame: frame)
@@ -93,6 +96,24 @@ struct CandleChartRepresentable: UIViewRepresentable {
             placementTap.delegate = self
             placementTap.cancelsTouchesInView = false
             chart.addGestureRecognizer(placementTap)
+
+            // Three taps toggle the fullscreen layout — the only way in and out
+            // of it now that the toolbar button is gone. It shares the chart
+            // with the guide's single tap, so the guide has to wait to find out
+            // whether a second tap is coming: `require(toFail:)` costs every
+            // summon the double-tap interval (~0.35s). Paid deliberately, on the
+            // grounds that a guide that appears a beat late is recoverable and a
+            // guide that flickers on, off and on again under a layout change is
+            // an order control the user did not ask for.
+            let fullscreenTap = UITapGestureRecognizer(
+                target: self,
+                action: #selector(handleFullscreenTap)
+            )
+            fullscreenTap.numberOfTapsRequired = 3
+            fullscreenTap.delegate = self
+            fullscreenTap.cancelsTouchesInView = false
+            chart.addGestureRecognizer(fullscreenTap)
+            placementTap.require(toFail: fullscreenTap)
         }
 
         @available(*, unavailable)
@@ -102,6 +123,12 @@ struct CandleChartRepresentable: UIViewRepresentable {
 
         @objc private func handlePlacementTap(_ recognizer: UITapGestureRecognizer) {
             orderLineOverlay.toggleGuide(at: recognizer.location(in: orderLineOverlay))
+        }
+
+        /// Internal rather than private so the wiring can be asserted: a real
+        /// triple tap cannot be injected into a simulator from a test.
+        @objc func handleFullscreenTap() {
+            onTripleTap?()
         }
 
         override func layoutSubviews() {
@@ -244,6 +271,7 @@ extension CandleChartRepresentable {
         container.orderLineOverlay.hasSelectedContract = hasSelectedContract
         container.orderLineOverlay.placementPrice = placementPrice
         container.orderLineOverlay.delegate = orderLineDelegate
+        container.onTripleTap = onTripleTap
         // Keep the button rows clear of the analytics rail when it is on. The
         // rail sizes itself from the chart's content rect, not the view bounds,
         // so measuring from bounds would drift by the axis gutter and leave the

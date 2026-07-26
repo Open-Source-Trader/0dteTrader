@@ -9,7 +9,13 @@ import { Spinner } from '../../design/components/Spinner';
 import { Stepper } from '../../design/components/Stepper';
 import { TradeActionButton } from '../../design/components/TradeActionButton';
 import { Format } from '../../design/format';
-import { CalendarIcon, ChartLineIcon, CheckmarkIcon } from '../../design/icons';
+import {
+  CalendarIcon,
+  ChartLineIcon,
+  CheckmarkIcon,
+  LockIcon,
+  LockOpenIcon,
+} from '../../design/icons';
 import type { ChainStore } from './ChainStore';
 import type { TradeStore } from './TradeStore';
 import { PositionsStrip } from './PositionsStrip';
@@ -27,6 +33,8 @@ interface TradePanelProps {
   /** Trading lock: disables Buy/Sell, the order-config controls, and the
    *  positions strip's flatten/cancel. */
   locked?: boolean;
+  /** Flips the lock. The panel only asks; the screen owns and persists it. */
+  onToggleLock?: () => void;
 }
 
 const DENSITY = {
@@ -46,6 +54,7 @@ export function TradePanel({
   onArm,
   density = 'roomy',
   locked = false,
+  onToggleLock,
 }: TradePanelProps) {
   const trade = useStore(tradeStore);
   const chain = useStore(chainStore);
@@ -142,11 +151,13 @@ export function TradePanel({
         locked={locked}
       />
 
-      <div
-        inert={locked}
-        style={{ display: 'flex', flexDirection: 'column', gap: d.gap, opacity: locked ? 0.55 : 1 }}
-      >
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+        {/* The lock rides this row but stays outside the inert wrapper: a
+            control that disables itself cannot be used to undo the lock. */}
+        <div
+          inert={locked}
+          style={{ display: 'flex', gap: 8, alignItems: 'center', opacity: locked ? 0.55 : 1 }}
+        >
           <SegmentedControl
             options={[
               { value: 'call', label: 'Call' },
@@ -165,7 +176,25 @@ export function TradePanel({
             AUTO
           </button>
         </div>
+        <button
+          className={
+            locked
+              ? 'hud-toggle-chip hud-toggle-chip--lock on'
+              : 'hud-toggle-chip hud-toggle-chip--lock'
+          }
+          onClick={onToggleLock}
+          aria-label={locked ? 'Unlock trading' : 'Lock trading'}
+          aria-pressed={locked}
+        >
+          {locked ? <LockIcon size={11} /> : <LockOpenIcon size={11} />}
+          LOCK
+        </button>
+      </div>
 
+      <div
+        inert={locked}
+        style={{ display: 'flex', flexDirection: 'column', gap: d.gap, opacity: locked ? 0.55 : 1 }}
+      >
         <div style={{ display: 'flex', gap: 8 }}>
           <Menu
             className="chip-flex"

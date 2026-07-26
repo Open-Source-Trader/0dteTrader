@@ -12,14 +12,7 @@ import { useStore } from '../../core/observable';
 import { AlertDialog } from '../../design/components/AlertDialog';
 import { NavBar } from '../../design/components/NavBar';
 import { Format } from '../../design/format';
-import {
-  ClockIcon,
-  LayoutFullIcon,
-  LayoutSplitIcon,
-  LockIcon,
-  LockOpenIcon,
-  PersonCircleIcon,
-} from '../../design/icons';
+import { ClockIcon, PersonCircleIcon } from '../../design/icons';
 import type { TradeLayout } from '../../core/storage/SettingsStore';
 import { enabledSubPanes } from '../chart/indicatorSettings';
 import type { ChartTradingProps } from '../chart/CandleChart';
@@ -363,32 +356,6 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
             </button>
           </>
         }
-        trailing={
-          <>
-            <button
-              className="navbar-icon-button"
-              onClick={toggleLock}
-              aria-pressed={locked}
-              aria-label={locked ? 'Unlock trading' : 'Lock trading'}
-            >
-              {locked ? <LockIcon size={22} /> : <LockOpenIcon size={22} />}
-            </button>
-            <button
-              className="navbar-icon-button"
-              onClick={toggleLayout}
-              aria-pressed={layout === 'split'}
-              aria-label={
-                layout === 'fullscreen' ? 'Switch to split layout' : 'Switch to fullscreen layout'
-              }
-            >
-              {layout === 'fullscreen' ? (
-                <LayoutSplitIcon size={22} />
-              ) : (
-                <LayoutFullIcon size={22} />
-              )}
-            </button>
-          </>
-        }
       />
 
       {needsProviderConfig ? (
@@ -424,6 +391,7 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
               onIndicatorSettings={() => setShowIndicatorSettings(true)}
               tradingMode={tradingMode}
               onToggleMode={() => setShowModeConfirmation(true)}
+              onToggleFullscreen={toggleLayout}
               optionsAnalyticsExpiration={optionsAnalyticsExpiration}
               chartTrading={chartTrading}
             />
@@ -478,6 +446,7 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
                 onIndicatorSettings={() => setShowIndicatorSettings(true)}
                 tradingMode={tradingMode}
                 onToggleMode={() => setShowModeConfirmation(true)}
+                onToggleFullscreen={toggleLayout}
                 optionsAnalyticsExpiration={optionsAnalyticsExpiration}
                 chartTrading={chartTrading}
               />
@@ -503,6 +472,7 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
                 onArm={arm}
                 density={panelDensity}
                 locked={locked}
+                onToggleLock={toggleLock}
               />
             </div>
           </div>

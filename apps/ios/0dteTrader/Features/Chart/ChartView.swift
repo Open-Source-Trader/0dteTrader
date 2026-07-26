@@ -23,6 +23,8 @@ struct ChartView: View {
     /// is open — the guide may still be showing.
     var placement: PlacementCardBinding?
     weak var orderLineDelegate: OrderLineOverlayDelegate?
+    /// Three taps on the candles toggle the fullscreen layout.
+    var onTripleTap: () -> Void = {}
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var showClearConfirm = false
@@ -43,7 +45,8 @@ struct ChartView: View {
         entryLines: [EntryLineModel] = [],
         hasSelectedContract: Bool = false,
         placement: PlacementCardBinding? = nil,
-        orderLineDelegate: OrderLineOverlayDelegate? = nil
+        orderLineDelegate: OrderLineOverlayDelegate? = nil,
+        onTripleTap: @escaping () -> Void = {}
     ) {
         _viewModel = ObservedObject(wrappedValue: viewModel)
         _drawings = ObservedObject(wrappedValue: viewModel.drawings)
@@ -57,6 +60,7 @@ struct ChartView: View {
         self.hasSelectedContract = hasSelectedContract
         self.placement = placement
         self.orderLineDelegate = orderLineDelegate
+        self.onTripleTap = onTripleTap
     }
 
     var body: some View {
@@ -86,6 +90,7 @@ struct ChartView: View {
                     hasSelectedContract: hasSelectedContract,
                     placementPrice: placement?.request.price,
                     orderLineDelegate: orderLineDelegate,
+                    onTripleTap: onTripleTap,
                     resetToken: chartResetToken
                 )
                 resetButton { chartResetToken += 1 }
@@ -150,6 +155,14 @@ struct ChartView: View {
                 }
                 if drawings.selectedId != nil {
                     selectionBar
+                }
+                if let tradingMode {
+                    TradingModeBadge(
+                        mode: tradingMode,
+                        analyticsRailShowing: viewModel.optionsAnalyticsSnapshot != nil
+                            && viewModel.optionsAnalyticsSettings.enabled,
+                        action: onToggleMode
+                    )
                 }
                 // Last in the ZStack, and it must stay last: the reset button,
                 // the TWC banner and the STRUCT chip are all corner-anchored
@@ -560,10 +573,6 @@ struct ChartView: View {
                     )
             }
 
-            if let tradingMode {
-                modeBadge(tradingMode)
-            }
-
             intervalMenu
 
             drawingToolsMenu
@@ -590,34 +599,6 @@ struct ChartView: View {
         .hudCard(accent: .hudStrokeDim, chamfer: 8, glow: false, ticks: false)
         .padding(.horizontal, AppSpacing.sm)
         .padding(.top, AppSpacing.xxs)
-    }
-
-    /// Amber PRACTICE / green LIVE badge — tap to switch (confirmed upstream).
-    private func modeBadge(_ mode: TradingMode) -> some View {
-        Button {
-            Haptics.selection()
-            onToggleMode()
-        } label: {
-            Text(mode == .live ? "LIVE" : "PRACTICE")
-                .font(.custom("Orbitron-Bold", size: 11, relativeTo: .caption2))
-                .kerning(1)
-                .foregroundStyle(mode == .live ? Color.buyGreen : Color.hudAmber)
-                .padding(.horizontal, AppSpacing.sm)
-                .padding(.vertical, AppSpacing.xs)
-                .background {
-                    HudPanelShape(chamfer: 5)
-                        .fill(Color.hudPanel)
-                        .overlay {
-                            HudPanelShape(chamfer: 5)
-                                .strokeBorder(
-                                    mode == .live ? Color.buyGreen : Color.hudAmber,
-                                    lineWidth: 1
-                                )
-                        }
-                }
-                .contentShape(Rectangle())
-        }
-        .accessibilityLabel("Trading mode \(mode == .live ? "live" : "practice"). Switch mode")
     }
 
     private var intervalMenu: some View {

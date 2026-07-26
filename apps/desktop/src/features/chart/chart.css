@@ -78,9 +78,10 @@
   }
 }
 
-/* Permanent placement `+`: chamfered HUD chip. clip-path rather than the
+/* Permanent placement `+`: chamfered HUD chip. .hud-clip rather than the
    .hud-chip border-image, whose 21px slices collapse at this size. */
 .order-guide-plus {
+  --hud-chamfer: 5px;
   position: absolute;
   z-index: 5;
   align-items: center;
@@ -93,20 +94,27 @@
   font-size: 15px;
   line-height: 1;
   cursor: ns-resize;
-  clip-path: polygon(
-    5px 0,
-    calc(100% - 5px) 0,
-    100% 5px,
-    100% calc(100% - 5px),
-    calc(100% - 5px) 100%,
-    5px 100%,
-    0 calc(100% - 5px),
-    0 5px
-  );
 }
+/* Inset: clip-path cuts an outer box-shadow, and the same goes for the global
+   :focus-visible outline, whose 2px offset lands outside the chamfer. */
 .order-guide-plus:hover {
   background: rgba(46, 143, 255, 0.18);
-  box-shadow: var(--shadow-toast);
+  box-shadow: inset 0 0 8px rgba(46, 143, 255, 0.35);
+}
+.order-guide-plus:focus-visible,
+.order-placement__btn:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--hud-glow-strong);
+}
+/* Inert while the window owns the level: the press handler refuses, so the
+   control should not keep advertising a drag it will not perform. */
+.order-guide-plus--inert {
+  opacity: 0.45;
+  cursor: default;
+}
+.order-guide-plus--inert:hover {
+  background: var(--hud-panel-fill);
+  box-shadow: none;
 }
 
 /* Chart order window. Vertically centred rather than anchored to the `+`: on a
@@ -170,9 +178,10 @@
   display: flex;
   gap: var(--space-2);
 }
-/* Chamfered via clip-path: the .hud-btn border-image needs ~56px of height and
+/* Chamfered via .hud-clip: the .hud-btn border-image needs ~56px of height and
    these are 34px. */
 .order-placement__btn {
+  --hud-chamfer: 5px;
   flex: 1;
   padding: 8px 0;
   border: 1px solid var(--hud-stroke);
@@ -183,16 +192,6 @@
   font-weight: 700;
   letter-spacing: 0.06em;
   cursor: pointer;
-  clip-path: polygon(
-    5px 0,
-    calc(100% - 5px) 0,
-    100% 5px,
-    100% calc(100% - 5px),
-    calc(100% - 5px) 100%,
-    5px 100%,
-    0 calc(100% - 5px),
-    0 5px
-  );
 }
 .order-placement__btn--buy {
   border-color: var(--buy-green);

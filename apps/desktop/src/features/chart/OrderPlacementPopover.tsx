@@ -51,7 +51,22 @@ export function OrderPlacementPopover({
   const [quantity, setQuantity] = useState(defaultQuantity);
   const [orderType, setOrderType] = useState<OrderType>(defaultOrderType);
   const [submitting, setSubmitting] = useState(false);
+  /** Raw text, held only while it is *not* a usable level. A number input
+   *  cannot be cleared or half-typed without passing through states like `''`,
+   *  and `Number('')` is a perfectly finite 0 — which is an order trigger this
+   *  field must never hand onwards. */
+  const [levelDraft, setLevelDraft] = useState<string | null>(null);
   const ref = useRef<HTMLDivElement>(null);
+  const levelRef = useRef<HTMLInputElement>(null);
+
+  const levelValid = levelDraft === null;
+
+  // The level is the field most likely to be adjusted the moment this opens —
+  // the `+` only gets you approximately where you meant.
+  useEffect(() => {
+    levelRef.current?.focus();
+    levelRef.current?.select();
+  }, []);
 
   // Escape closes, and so does a click anywhere else — the window must never be
   // the thing standing between the user and their chart.
@@ -73,7 +88,7 @@ export function OrderPlacementPopover({
   }, [onCancel]);
 
   const submit = async () => {
-    if (submitting) return;
+    if (submitting || !levelValid) return;
     setSubmitting(true);
     try {
       await onPlace({ side, quantity, orderType });
@@ -96,16 +111,37 @@ export function OrderPlacementPopover({
       <label className="order-placement__row">
         <span>Level</span>
         <input
-          type="number"
-          step={PRICE_STEP}
-          value={price}
+          ref={levelRef}
+          // Text rather than `number`: a number input reports unparseable
+          // intermediate states as `''`, which would wipe what the user is
+          // still typing when the draft is rendered back. The stepper beside it
+          // covers what the native spinner would have.
+          type="text"
+          inputMode="decimal"
+          value={levelDraft ?? String(price)}
           aria-label="Trigger price"
+          aria-invalid={!levelValid}
           onChange={(event) => {
-            const next = Number(event.target.value);
-            if (Number.isFinite(next)) onPriceChange(Math.round(next * 100) / 100);
+            const raw = event.target.value;
+            const next = Number(raw);
+            if (raw.trim() === '' || !Number.isFinite(next) || next <= 0) {
+              setLevelDraft(raw);
+              return;
+            }
+            setLevelDraft(null);
+            onPriceChange(Math.round(next * 100) / 100);
           }}
         />
-        <Stepper value={price} min={0.01} max={100000} step={PRICE_STEP} onChange={onPriceChange} />
+        <Stepper
+          value={price}
+          min={0.01}
+          max={100000}
+          step={PRICE_STEP}
+          onChange={(next) => {
+            setLevelDraft(null);
+            onPriceChange(next);
+          }}
+        />
       </label>
 
       <div className="order-placement__contract">
@@ -146,19 +182,25 @@ export function OrderPlacementPopover({
       </label>
 
       <p className="order-placement__note">
-        Fires an order when {contract.underlying} reaches {Format.price(price)}. Watched by the app
-        — not a broker-side resting order.
+        {levelValid ? (
+          <>
+            Fires an order when {contract.underlying} reaches {Format.price(price)}. Watched by the
+            app — not a broker-side resting order.
+          </>
+        ) : (
+          'Enter a level above 0 to place this line.'
+        )}
       </p>
 
       <div className="order-placement__actions">
-        <button type="button" className="order-placement__btn" onClick={onCancel}>
+        <button type="button" className="order-placement__btn hud-clip" onClick={onCancel}>
           CANCEL
         </button>
         <button
           type="button"
-          className={`order-placement__btn order-placement__btn--${side}`}
+          className={`order-placement__btn hud-clip order-placement__btn--${side}`}
           onClick={() => void submit()}
-          disabled={submitting}
+          disabled={submitting || !levelValid}
         >
           {submitting ? 'PLACING…' : 'PLACE'}
         </button>

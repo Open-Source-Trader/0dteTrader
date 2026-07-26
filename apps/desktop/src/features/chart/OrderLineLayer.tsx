@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { IChartApi, ISeriesApi } from 'lightweight-charts';
 import type { ChartOrder, OptionContract, Position } from '@0dtetrader/shared-types';
 import { bracketKindFor } from '@0dtetrader/shared-types';
@@ -108,6 +108,9 @@ export function OrderLineLayer({
    *  absolutely-positioned button is pure waste. */
   const guidePriceRef = useRef<number | null>(null);
   const guideDragRef = useRef(false);
+  /** A press is live. Guards against a second gesture attaching a second pair
+   *  of window listeners and orphaning the first for the life of the page. */
+  const guidePressRef = useRef(false);
   const plusRef = useRef<HTMLButtonElement>(null);
   const endGuideDragRef = useRef<() => void>(() => {});
   /** Level the open window refers to. State, because the window is React. */
@@ -386,6 +389,10 @@ export function OrderLineLayer({
           plus.style.top = `${guideY - PLUS_SIZE / 2}px`;
           plus.style.right = `${PLUS_MARGIN + latest.current.rightInset}px`;
           plus.setAttribute('aria-label', `Place an order at ${Format.price(guide)}`);
+          // While the window owns the level the handle does nothing, so it says
+          // so rather than presenting a drag cursor it will not honour.
+          plus.classList.toggle('order-guide-plus--inert', open !== null);
+          plus.setAttribute('aria-disabled', open !== null ? 'true' : 'false');
         }
       }
     };
@@ -419,7 +426,9 @@ export function OrderLineLayer({
   // Positions, P/L and the selection all change what is painted.
   useEffect(() => {
     scheduleRef.current();
-  }, [candles, positions, state, symbol, rightInset]);
+    // `selectedContract` and `placementPrice` gate the guide inside the draw
+    // loop rather than in JSX, so a re-render alone would not repaint it.
+  }, [candles, positions, state, symbol, rightInset, selectedContract, placementPrice]);
 
   // MARK: - Pointer handling
 
@@ -559,15 +568,41 @@ export function OrderLineLayer({
   }, [chart, series, store]);
 
   /**
+   * Closes the window. Stable across renders because the popover's dismissal
+   * listener depends on it, and a chart that re-renders every tick would
+   * otherwise re-arm that listener behind a `setTimeout(0)` each time — leaving
+   * a sliver of every tick where an outside click did not dismiss.
+   */
+  const closeWindow = useCallback(() => {
+    // Hand focus back to the handle only when the window still holds it: an
+    // outside click has already put focus where the user aimed it.
+    const held = document.activeElement?.closest('.order-placement') != null;
+    setPlacementPrice(null);
+    if (held) plusRef.current?.focus();
+  }, []);
+
+  /** Arms the window at whatever level the guide is currently on. */
+  const openPlacementWindow = () => {
+    if (latest.current.placementPrice !== null || guidePriceRef.current === null) return;
+    setPlacementPrice(round2(guidePriceRef.current));
+  };
+
+  /**
    * Press on the handle: a drag moves the guide, a click with no travel opens
    * the window. Same gesture the order lines use, so the two feel identical.
    */
   const onPlusPointerDown = (event: React.PointerEvent<HTMLButtonElement>) => {
+    if (event.button !== 0) return; // a context-menu press must not arm an order
     if (latest.current.placementPrice !== null) return; // window owns the level
+    if (guidePressRef.current) return;
     event.preventDefault();
     event.stopPropagation();
     const startY = event.clientY;
+    guidePressRef.current = true;
     guideDragRef.current = false;
+    // Capture so a release outside the browser window still ends the gesture,
+    // rather than leaving the guide following an unheld cursor.
+    event.currentTarget.setPointerCapture(event.pointerId);
 
     const onMove = (moveEvent: PointerEvent) => {
       if (!guideDragRef.current && Math.abs(moveEvent.clientY - startY) < GUIDE_DRAG_THRESHOLD) {
@@ -576,7 +611,10 @@ export function OrderLineLayer({
       guideDragRef.current = true;
       const xy = canvasXY(moveEvent);
       if (!xy) return;
-      const price = series.coordinateToPrice(xy.y);
+      // Pin to the pane's edges instead of extrapolating past them: an
+      // out-of-range level makes resolveGuidePrice re-anchor to the last price
+      // on the next frame, which reads as the guide teleporting mid-drag.
+      const price = series.coordinateToPrice(Math.min(chart.paneSize().height, Math.max(0, xy.y)));
       if (price === null) return;
       guidePriceRef.current = price;
       scheduleRef.current();
@@ -586,24 +624,31 @@ export function OrderLineLayer({
       endGuideDragRef.current = () => {};
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onCancelled);
     };
 
-    const onUp = () => {
+    /** Ends the gesture. Only a release opens the window; a cancelled gesture
+     *  is one the user did not finish making. */
+    const end = (opens: boolean) => {
       const dragged = guideDragRef.current;
       guideDragRef.current = false;
+      guidePressRef.current = false;
       detach();
       scheduleRef.current();
-      if (!dragged && guidePriceRef.current !== null) {
-        setPlacementPrice(round2(guidePriceRef.current));
-      }
+      if (opens && !dragged) openPlacementWindow();
     };
+
+    const onUp = () => end(true);
+    const onCancelled = () => end(false);
 
     window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onCancelled);
     // Unmounting mid-drag abandons the gesture: the series these coordinates
     // mean is going away.
     endGuideDragRef.current = () => {
       guideDragRef.current = false;
+      guidePressRef.current = false;
       detach();
     };
   };
@@ -663,10 +708,16 @@ export function OrderLineLayer({
         ref={plusRef}
         type="button"
         data-chart-placement=""
-        className="order-guide-plus"
-        aria-label="Place an order"
+        className="order-guide-plus hud-clip"
         onPointerDown={onPlusPointerDown}
-        // Positioned imperatively from the draw loop; hidden until it has a level.
+        // Enter and Space synthesise a click with no click count, which is what
+        // separates them from the mouse release the press handler already
+        // served — without this the handle is unreachable from the keyboard.
+        onClick={(event) => {
+          if (event.detail === 0) openPlacementWindow();
+        }}
+        // Position and the aria-label are written by the draw loop, which is the
+        // only place that knows the level; setting them here too would fight it.
         style={{ display: 'none', width: PLUS_SIZE, height: PLUS_SIZE }}
       >
         +
@@ -683,9 +734,9 @@ export function OrderLineLayer({
           contract={selectedContract}
           defaultQuantity={settings.defaultQuantity}
           defaultOrderType={defaultOrderType}
-          onCancel={() => setPlacementPrice(null)}
+          onCancel={closeWindow}
           onPlace={async (input) => {
-            await store.create({
+            const created = await store.create({
               underlying: selectedContract.underlying,
               triggerPrice: round2(placementPrice),
               side: input.side,
@@ -696,7 +747,11 @@ export function OrderLineLayer({
               expiration: selectedContract.expiration,
               strike: selectedContract.strike,
             });
-            setPlacementPrice(null);
+            // `create` reports failure by returning null (it surfaces the error
+            // on the store). Closing regardless would tell the user their order
+            // is armed when nothing was placed, so a failure keeps the window
+            // up with their inputs intact to retry.
+            if (created) closeWindow();
           }}
         />
       ) : null}

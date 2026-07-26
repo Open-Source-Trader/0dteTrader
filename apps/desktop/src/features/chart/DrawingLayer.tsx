@@ -364,6 +364,11 @@ export function DrawingLayer({ chart, series, store, candles, intervalSec }: Dra
     if (!canvas || !containerEl) return;
 
     const onPointerDown = (event: PointerEvent) => {
+      // The order layer's `+` and placement window are children of this same
+      // container, and this listener is in the capture phase — a drawing within
+      // HIT_DISTANCE of them would eat the press before the button ever sees
+      // it. OrderLineLayer's own capture listener carries the same guard.
+      if ((event.target as Element | null)?.closest('[data-chart-placement]')) return;
       if (store.getState().tool !== 'cursor') return;
       const xy = canvasXY(event);
       if (!xy) return;

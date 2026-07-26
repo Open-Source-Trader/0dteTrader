@@ -71,6 +71,22 @@ final class ServerConfigStoreTests: XCTestCase {
         XCTAssertEqual(saved.absoluteString, "https://my-api.up.railway.app")
     }
 
+    func testSaveStripsPastedV1SuffixCaseInsensitively() throws {
+        let saved = try makeStore().save("https://my-api.up.railway.app/V1/HEALTH")
+        XCTAssertEqual(saved.absoluteString, "https://my-api.up.railway.app")
+    }
+
+    func testSaveDropsExplicitDefaultPorts() throws {
+        XCTAssertEqual(
+            try makeStore().save("https://my-api.up.railway.app:443").absoluteString,
+            "https://my-api.up.railway.app"
+        )
+        XCTAssertEqual(
+            try makeStore().save("http://my-api.up.railway.app:80").absoluteString,
+            "http://my-api.up.railway.app"
+        )
+    }
+
     func testSaveKeepsExplicitPort() throws {
         let saved = try makeStore().save("http://192.168.1.20:3000/")
         XCTAssertEqual(saved.absoluteString, "http://192.168.1.20:3000")
@@ -175,6 +191,12 @@ final class ServerConfigStoreTests: XCTestCase {
         XCTAssertNotEqual(
             localhost,
             KeychainStore.refreshTokenAccount(for: URL(string: "http://localhost:4000")!)
+        )
+        // The scheme alone separates accounts: an http:// typo for an https
+        // server must never see the https session's token.
+        XCTAssertNotEqual(
+            KeychainStore.refreshTokenAccount(for: URL(string: "https://my-api.up.railway.app")!),
+            KeychainStore.refreshTokenAccount(for: URL(string: "http://my-api.up.railway.app")!)
         )
     }
 }

@@ -62,19 +62,27 @@ final class ServerConfigStore: ObservableObject {
 
         var path = components.path
         while path.hasSuffix("/") { path.removeLast() }
-        if path.hasSuffix("/v1/health") {
+        // Case-insensitive, matching desktop's /\/v1(\/health)?$/i.
+        if path.lowercased().hasSuffix("/v1/health") {
             path.removeLast("/v1/health".count)
-        } else if path.hasSuffix("/v1") {
+        } else if path.lowercased().hasSuffix("/v1") {
             path.removeLast("/v1".count)
         }
         guard path.isEmpty else {
             throw ServerConfigError.invalidURL
         }
 
+        // Drop explicit default ports, matching desktop's `url.origin` — this
+        // also keeps the Keychain token account identical for both spellings.
+        var port = components.port
+        if (scheme == "https" && port == 443) || (scheme == "http" && port == 80) {
+            port = nil
+        }
+
         var origin = URLComponents()
         origin.scheme = scheme
         origin.host = host
-        origin.port = components.port
+        origin.port = port
         guard let url = origin.url else {
             throw ServerConfigError.invalidURL
         }

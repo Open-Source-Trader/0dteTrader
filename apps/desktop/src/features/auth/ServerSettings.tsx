@@ -7,7 +7,7 @@ import { useStore } from '../../core/observable';
 import { Spinner } from '../../design/components/Spinner';
 
 /** One-click backend template (#59). Updated when the final template publishes. */
-export const RAILWAY_DEPLOY_URL = 'https://railway.com/deploy/Bo-g1p';
+export const RAILWAY_DEPLOY_URL = 'https://railway.com/deploy/hqwdS8';
 
 function hostLabel(baseUrl: string): string {
   try {

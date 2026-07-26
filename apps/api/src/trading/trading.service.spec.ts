@@ -126,6 +126,7 @@ class StubBrokerGateway implements BrokerGateway {
     userId: string,
     order: OrderRequest,
     _idempotencyKey: string,
+    _expectedMode?: TradingMode,
   ): Promise<OrderResult> {
     const resolved = await this.resolveContract(userId, order);
     const result: OrderResult = {
@@ -480,6 +481,117 @@ describe('TradingService', () => {
           autoOtmCall({ selection: { mode: 'explicit', optionType: 'call' } }),
         ),
       ).rejects.toMatchObject({ status: 400, code: 'VALIDATION_ERROR' });
+    });
+  });
+
+  /**
+   * The clients each cap sell-to-close in their own trade panel, but that was
+   * the only cap. A chart bracket leg freezes its size when the line is drawn,
+   * so scaling the position down by hand leaves a stop that would close what
+   * remains and open a short with the rest — unattended.
+   */
+  describe('closing orders are capped to the position', () => {
+    /** The contract auto-OTM resolves to, so the stub position lines up. */
+    async function resolvedSymbol(): Promise<string> {
+      const spy = jest.spyOn(gateway, 'placeOrder');
+      await trading.place(userId, autoOtmCall(), 'idem-warm');
+      const sent = spy.mock.calls[0][1] as OrderRequest;
+      spy.mockRestore();
+      const chain = await gateway.getOptionsChain(userId, 'SPY');
+      return findExplicitOption(chain.contracts, 'call', sent.selection.strike as number)!.symbol;
+    }
+
+    it('caps a sell that exceeds the long position', async () => {
+      const symbol = await resolvedSymbol();
+      jest.spyOn(gateway, 'getPositions').mockResolvedValue([
+        {
+          symbol,
+          assetClass: 'option',
+          quantity: 2,
+          avgPrice: 1,
+          markPrice: 1,
+          unrealizedPnl: 0,
+          multiplier: 100,
+        } as Position,
+      ]);
+      const place = jest.spyOn(gateway, 'placeOrder');
+
+      await trading.place(userId, autoOtmCall({ side: 'sell', quantity: 5 }), 'idem-cap-1');
+
+      expect((place.mock.calls[0][1] as OrderRequest).quantity).toBe(2);
+    });
+
+    it('leaves an opening order alone', async () => {
+      const symbol = await resolvedSymbol();
+      jest.spyOn(gateway, 'getPositions').mockResolvedValue([
+        {
+          symbol,
+          assetClass: 'option',
+          quantity: 2,
+          avgPrice: 1,
+          markPrice: 1,
+          unrealizedPnl: 0,
+          multiplier: 100,
+        } as Position,
+      ]);
+      const place = jest.spyOn(gateway, 'placeOrder');
+
+      // Same direction as the holding: adding, not closing.
+      await trading.place(userId, autoOtmCall({ side: 'buy', quantity: 5 }), 'idem-cap-2');
+
+      expect((place.mock.calls[0][1] as OrderRequest).quantity).toBe(5);
+    });
+
+    it('honours a partial scale-out rather than closing the whole position', async () => {
+      const symbol = await resolvedSymbol();
+      jest.spyOn(gateway, 'getPositions').mockResolvedValue([
+        {
+          symbol,
+          assetClass: 'option',
+          quantity: 10,
+          avgPrice: 1,
+          markPrice: 1,
+          unrealizedPnl: 0,
+          multiplier: 100,
+        } as Position,
+      ]);
+      const place = jest.spyOn(gateway, 'placeOrder');
+
+      await trading.place(userId, autoOtmCall({ side: 'sell', quantity: 4 }), 'idem-cap-3');
+
+      expect((place.mock.calls[0][1] as OrderRequest).quantity).toBe(4);
+    });
+
+    it('places uncapped rather than failing the order when positions cannot be read', async () => {
+      jest.spyOn(gateway, 'getPositions').mockRejectedValue(new Error('broker down'));
+      const place = jest.spyOn(gateway, 'placeOrder');
+
+      await trading.place(userId, autoOtmCall({ side: 'sell', quantity: 3 }), 'idem-cap-4');
+
+      expect((place.mock.calls[0][1] as OrderRequest).quantity).toBe(3);
+    });
+  });
+
+  /**
+   * Each gateway re-derives live-vs-practice from the database when it builds a
+   * client, so the environment the caller validated has to travel with the
+   * order — otherwise a mode flip mid-placement silently reroutes it.
+   */
+  describe('environment is pinned for the whole placement', () => {
+    it("passes the user's current mode to the gateway", async () => {
+      const place = jest.spyOn(gateway, 'placeOrder');
+
+      await trading.place(userId, autoOtmCall(), 'idem-mode-1');
+
+      expect(place.mock.calls[0][3]).toBe('live');
+    });
+
+    it("passes the caller's expected mode when one is given", async () => {
+      const place = jest.spyOn(gateway, 'placeOrder');
+
+      await trading.place(userId, autoOtmCall(), 'idem-mode-2', 'practice');
+
+      expect(place.mock.calls[0][3]).toBe('practice');
     });
   });
 });

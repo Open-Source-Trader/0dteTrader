@@ -1,4 +1,5 @@
-import { ChartOrderKind, OrderSide, OrderType } from '@0dtetrader/shared-types';
+import { ConfigService } from '@nestjs/config';
+import { ChartOrder, ChartOrderKind, OrderSide, OrderType } from '@0dtetrader/shared-types';
 import { InMemoryPrismaService } from '../../test/in-memory-prisma.service';
 import { StubBrokerGateway } from '../../test/stub-broker.gateway';
 import { BrokerGateway } from '../broker/broker-gateway.interface';
@@ -58,12 +59,36 @@ describe('ChartOrdersService', () => {
         orders,
       ),
       new ChartOrderEventsService(),
+      {
+        get: (key: string) => (key === 'chartOrders.staleQuoteMs' ? 10_000 : undefined),
+      } as unknown as ConfigService,
     );
     const user = await prisma.user.create({
       data: { email: 'chart@example.com', passwordHash: 'x' },
     });
     userId = user.id as string;
   });
+
+  /**
+   * Fires a line the way the server now requires.
+   *
+   * `triggerNow` re-derives the crossing from the server's own quote instead of
+   * trusting the client, so the stub has to actually be past the level — one
+   * point beyond it, on the far side from where the line armed. The price is
+   * restored afterwards because the stub builds its option chain around it.
+   */
+  async function triggerCrossed(user: string, order: ChartOrder, now?: Date) {
+    const before = gateway.price;
+    gateway.price =
+      order.armPrice >= order.triggerPrice
+        ? order.triggerPrice - 1 // armed above: crosses on the way down
+        : order.triggerPrice + 1; // armed below: crosses on the way up
+    try {
+      return await service.triggerNow(user, order.id, now);
+    } finally {
+      gateway.price = before;
+    }
+  }
 
   describe('create', () => {
     it('arms from the live quote and resolves the contract server-side', async () => {
@@ -221,7 +246,7 @@ describe('ChartOrdersService', () => {
       const place = jest.spyOn(gateway, 'placeOrder');
       const order = await service.create(userId, draft({ orderType: 'market' }));
 
-      const fired = await service.triggerNow(userId, order.id);
+      const fired = await triggerCrossed(userId, order);
 
       expect(place).toHaveBeenCalledTimes(1);
       expect(fired.status).toBe('triggered');
@@ -232,8 +257,8 @@ describe('ChartOrdersService', () => {
       const place = jest.spyOn(gateway, 'placeOrder');
       const order = await service.create(userId, draft({ orderType: 'market' }));
 
-      const first = await service.triggerNow(userId, order.id);
-      const second = await service.triggerNow(userId, order.id);
+      const first = await triggerCrossed(userId, order);
+      const second = await triggerCrossed(userId, order);
 
       expect(place).toHaveBeenCalledTimes(1);
       expect(second.brokerOrderId).toBe(first.brokerOrderId);
@@ -243,7 +268,7 @@ describe('ChartOrdersService', () => {
       const order = await service.create(userId, draft({ orderType: 'market' }));
       gateway.placeError = new Error('insufficient buying power');
 
-      const fired = await service.triggerNow(userId, order.id);
+      const fired = await triggerCrossed(userId, order);
 
       expect(fired.status).toBe('failed');
       expect(fired.lastError).toContain('insufficient buying power');
@@ -261,7 +286,7 @@ describe('ChartOrdersService', () => {
       prisma.users.find((u) => u.id === practiceId).tradingMode = 'live';
       const place = jest.spyOn(gateway, 'placeOrder');
 
-      const result = await service.triggerNow(practiceId, order.id);
+      const result = await triggerCrossed(practiceId, order);
 
       expect(place).not.toHaveBeenCalled();
       expect(result.status).toBe('working');
@@ -275,7 +300,7 @@ describe('ChartOrdersService', () => {
       const place = jest.spyOn(gateway, 'placeOrder');
 
       const afterSettlement = new Date(Date.parse(order.expiresAt) + 60_000);
-      const result = await service.triggerNow(userId, order.id, afterSettlement);
+      const result = await triggerCrossed(userId, order, afterSettlement);
 
       expect(place).not.toHaveBeenCalled();
       expect(result.status).toBe('expired');
@@ -289,7 +314,7 @@ describe('ChartOrdersService', () => {
         .spyOn(prisma.chartOrder, 'update')
         .mockRejectedValueOnce(new Error('db connection reset'));
 
-      const result = await service.triggerNow(userId, order.id);
+      const result = await triggerCrossed(userId, order);
       update.mockRestore();
 
       expect(place).toHaveBeenCalledTimes(1);
@@ -311,7 +336,7 @@ describe('ChartOrdersService', () => {
           ocoGroupId: groupId,
         }),
       );
-      const result = await service.triggerNow(userId, stop.id);
+      const result = await triggerCrossed(userId, stop);
 
       expect(result.status).toBe('triggered');
     });
@@ -386,7 +411,7 @@ describe('ChartOrdersService', () => {
         draft({ kind: 'stop', triggerPrice: 95, ocoGroupId: groupId }),
       );
 
-      await service.triggerNow(userId, stop.id);
+      await triggerCrossed(userId, stop);
 
       const byId = Object.fromEntries((await service.list(userId)).map((o) => [o.id, o.status]));
       expect(byId[stop.id]).toBe('triggered');
@@ -411,10 +436,20 @@ describe('ChartOrdersService', () => {
         draft({ kind: 'stop', triggerPrice: 95, orderType: 'market', ocoGroupId: groupId }),
       );
 
-      const [first, second] = await Promise.all([
-        service.triggerNow(userId, target.id),
-        service.triggerNow(userId, stop.id),
-      ]);
+      // Straight at `fire`, not through `triggerNow`: this test is about the
+      // group claim serialising two simultaneous fires, and a target above and
+      // a stop below cannot both be crossed by one quote — the client-authority
+      // check `triggerNow` now applies would refuse one of them at the door and
+      // the legs would never race at all.
+      const rows = prisma.chartOrders.filter(
+        (row: { ocoGroupId?: string }) => row.ocoGroupId === groupId,
+      );
+      expect(rows.map((row: { id: string }) => row.id).sort()).toEqual([target.id, stop.id].sort());
+
+      const now = new Date();
+      const [first, second] = await Promise.all(
+        rows.map((row: Parameters<typeof service.fire>[0]) => service.fire(row, now)),
+      );
 
       expect(place).toHaveBeenCalledTimes(1);
       const statuses = [first.status, second.status].sort();
@@ -441,7 +476,7 @@ describe('ChartOrdersService', () => {
         throw new Error('broker refused');
       });
 
-      await service.triggerNow(userId, stop.id);
+      await triggerCrossed(userId, stop);
 
       expect(siblingStatusAtPlace).toBe('cancelled');
     });
@@ -459,7 +494,7 @@ describe('ChartOrdersService', () => {
       );
       gateway.placeError = new Error('insufficient buying power');
 
-      const fired = await service.triggerNow(userId, stop.id);
+      const fired = await triggerCrossed(userId, stop);
 
       expect(fired.status).toBe('failed');
       expect((await service.byId(target.id))?.status).toBe('working');
@@ -488,7 +523,7 @@ describe('ChartOrdersService', () => {
       prisma.users.find((u) => u.id === practiceId).tradingMode = 'live';
       const place = jest.spyOn(gateway, 'placeOrder');
 
-      const result = await service.triggerNow(practiceId, stop.id);
+      const result = await triggerCrossed(practiceId, stop);
 
       expect(place).not.toHaveBeenCalled();
       expect(result.status).toBe('working');
@@ -508,7 +543,7 @@ describe('ChartOrdersService', () => {
       );
       const afterSettlement = new Date(Date.parse(stop.expiresAt) + 60_000);
 
-      const result = await service.triggerNow(userId, stop.id, afterSettlement);
+      const result = await triggerCrossed(userId, stop, afterSettlement);
 
       expect(result.status).toBe('expired');
       // Not `cancelled` — no leg filled. The expiry sweep retires it on its own
@@ -529,7 +564,7 @@ describe('ChartOrdersService', () => {
         userId,
         draft({ kind: 'stop', triggerPrice: 95, orderType: 'market', ocoGroupId: groupId }),
       );
-      await service.triggerNow(userId, stop.id);
+      await triggerCrossed(userId, stop);
 
       await expect(
         service.create(
@@ -588,7 +623,7 @@ describe('ChartOrdersService', () => {
       );
       await service.cancel(userId, stop.id);
 
-      const result = await service.triggerNow(userId, stop.id);
+      const result = await triggerCrossed(userId, stop);
 
       expect(place).not.toHaveBeenCalled();
       expect(result.status).toBe('cancelled');
@@ -631,6 +666,66 @@ describe('ChartOrdersService', () => {
       expect(cancelled).toEqual([]);
       expect((await service.list(userId))[0].id).toBe(stop.id);
       expect((await service.list(userId))[0].status).toBe('working');
+    });
+
+    /**
+     * The sweep reads `working` rows, then writes — and a leg can be claimed for
+     * firing across that await. The two are correlated rather than independent:
+     * a stop firing is exactly what closes the position that makes it look
+     * orphaned. Writing blindly by id would stamp `cancelled` over a line whose
+     * order is already at the broker, so the chart would show a cancelled stop
+     * while a live one sat in the book.
+     */
+    it('does not cancel a leg that was claimed for firing after the sweep read it', async () => {
+      const stop = await service.create(userId, draft({ kind: 'stop' }));
+      const later = new Date(Date.now() + 120_000);
+
+      // Claim it the way `fire` would, between the sweep's read and its write.
+      const findMany = prisma.chartOrder.findMany.bind(prisma.chartOrder);
+      jest.spyOn(prisma.chartOrder, 'findMany').mockImplementationOnce(async (args?: unknown) => {
+        const rows = await findMany(args);
+        await service.claimForFire(stop.id, new Date());
+        return rows;
+      });
+
+      const cancelled = await service.cancelOrphanedBrackets(userId, 'live', [], later);
+
+      expect(cancelled).toEqual([]);
+      expect((await service.list(userId))[0].status).toBe('triggered');
+    });
+  });
+
+  describe('triggerNow re-validates the crossing server-side', () => {
+    it('refuses a line the underlying has not actually crossed', async () => {
+      const order = await service.create(userId, draft()); // arms at 100, trigger 98
+
+      // The client claims a crossing; the server's own quote says otherwise.
+      await expect(service.triggerNow(userId, order.id)).rejects.toMatchObject({
+        status: 409,
+        code: 'CHART_ORDER_NOT_CROSSED',
+      });
+      expect((await service.list(userId))[0].status).toBe('working');
+    });
+
+    it('refuses to act on a stale quote', async () => {
+      const order = await service.create(userId, draft());
+      gateway.price = 97; // genuinely crossed…
+      gateway.quoteTimestamp = new Date(Date.now() - 60_000).toISOString(); // …but from a dead feed
+
+      await expect(service.triggerNow(userId, order.id)).rejects.toMatchObject({
+        status: 503,
+        code: 'QUOTE_STALE',
+      });
+      expect((await service.list(userId))[0].status).toBe('working');
+    });
+
+    it('fires when the server sees the crossing for itself', async () => {
+      const order = await service.create(userId, draft());
+
+      const fired = await triggerCrossed(userId, order);
+
+      expect(fired.status).toBe('triggered');
+      expect(fired.brokerOrderId).toBeTruthy();
     });
   });
 });

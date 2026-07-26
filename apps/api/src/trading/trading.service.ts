@@ -1,6 +1,12 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
-import { OrderPreview, OrderRequest, OrderResult, Position } from '@0dtetrader/shared-types';
+import { Prisma, type User } from '@prisma/client';
+import {
+  OrderPreview,
+  OrderRequest,
+  OrderResult,
+  Position,
+  TradingMode,
+} from '@0dtetrader/shared-types';
 import { BROKER_GATEWAY, BrokerGateway } from '../broker/broker-gateway.interface';
 import { findExplicitOption, pickExpiration, resolveAutoOtm } from '../broker/contract-resolution';
 import { errors, isUniqueViolation } from '../common/api-exception';
@@ -48,8 +54,23 @@ export class TradingService {
     }
   }
 
-  async place(userId: string, dto: OrderRequestDto, idempotencyKey: string): Promise<OrderResult> {
-    await this.assertTradingEnabled(userId, 'place', { order: dto });
+  /**
+   * `expectedMode` pins the environment for the whole placement. Callers that
+   * armed an order against a specific environment — chart order lines above
+   * all, which fire with nobody present — pass the one they validated, and the
+   * gateway refuses if the account has moved since.
+   */
+  async place(
+    userId: string,
+    dto: OrderRequestDto,
+    idempotencyKey: string,
+    expectedMode?: TradingMode,
+  ): Promise<OrderResult> {
+    const user = await this.assertTradingEnabled(userId, 'place', { order: dto });
+    // Resolved once, here, and carried to the send: everything downstream
+    // otherwise re-reads the mode per broker call.
+    const mode: TradingMode =
+      expectedMode ?? (user.tradingMode === 'practice' ? 'practice' : 'live');
 
     // Claim the key BEFORE the broker call: the pending audit row is the
     // single-flight marker. (Previously the row was written after the broker
@@ -58,8 +79,13 @@ export class TradingService {
     if (replay.result) return replay.result;
 
     try {
-      const { request: normalized, underlyingPrice } = await this.resolveAndValidate(userId, dto);
-      const result = await this.gateway.placeOrder(userId, normalized, idempotencyKey);
+      const {
+        request: normalized,
+        underlyingPrice,
+        contractSymbol,
+      } = await this.resolveAndValidate(userId, dto);
+      const capped = await this.capToPosition(userId, normalized, contractSymbol);
+      const result = await this.gateway.placeOrder(userId, capped, idempotencyKey, mode);
       // The broker has accepted. Nothing from here may throw: the catch below
       // deletes the idempotency claim so the caller can retry, which after a
       // real placement would submit the order a SECOND time. Bookkeeping
@@ -184,11 +210,12 @@ export class TradingService {
   // Kill switch (docs/SECURITY.md §4.4)
   // -------------------------------------------------------------------------
 
+  /** Returns the user it read, so callers need not fetch the row a second time. */
   private async assertTradingEnabled(
     userId: string,
     action: AuditAction,
     request: Record<string, unknown>,
-  ): Promise<void> {
+  ): Promise<User> {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user) {
       throw errors.unauthorized('USER_NOT_FOUND', 'User no longer exists');
@@ -206,6 +233,7 @@ export class TradingService {
         'Trading is disabled for this account (kill switch)',
       );
     }
+    return user;
   }
 
   // -------------------------------------------------------------------------
@@ -226,7 +254,11 @@ export class TradingService {
   private async resolveAndValidate(
     userId: string,
     dto: OrderRequestDto,
-  ): Promise<{ request: OrderRequest; underlyingPrice: number | undefined }> {
+  ): Promise<{
+    request: OrderRequest;
+    underlyingPrice: number | undefined;
+    contractSymbol: string;
+  }> {
     const { selection } = dto;
 
     if (!selection.optionType) {
@@ -250,6 +282,7 @@ export class TradingService {
         },
         // The quote that chose the strike is the honest anchor for this fill.
         underlyingPrice: usablePrice(quote.last) ?? usablePrice(chain.underlyingPrice),
+        contractSymbol: contract.symbol,
       };
     }
 
@@ -274,7 +307,55 @@ export class TradingService {
         },
       },
       underlyingPrice: usablePrice(chain.underlyingPrice),
+      contractSymbol: contract.symbol,
     };
+  }
+
+  /**
+   * Caps an order that closes an existing position at the size actually held.
+   *
+   * Each client caps sell-to-close in its own trade panel, but that was the only
+   * cap there was: a raw API call, the flatten path, or — the case that bites
+   * unattended — a chart bracket leg whose size was frozen when the line was
+   * drawn. Scale a position down by hand and the stop still carries the original
+   * size, so firing it closes what is left and opens a short with the remainder,
+   * with nobody watching.
+   *
+   * Best-effort by design: when the positions read fails we cannot tell an
+   * opening order from a closing one, and refusing every order during a broker
+   * blip would trade a rare wrong-size fill for a total loss of trading. The
+   * residual needs a scale-out AND a positions outage in the same moment.
+   */
+  private async capToPosition(
+    userId: string,
+    order: OrderRequest,
+    contractSymbol: string,
+  ): Promise<OrderRequest> {
+    let held: Position | undefined;
+    try {
+      held = (await this.gateway.getPositions(userId)).find(
+        (position) => position.symbol === contractSymbol,
+      );
+    } catch (err) {
+      this.logger.error(
+        `could not read positions to size-check ${contractSymbol}; ` +
+          `placing ${order.quantity} uncapped: ${(err as Error).message}`,
+      );
+      return order;
+    }
+    if (!held || held.quantity === 0) return order;
+
+    // Closing means trading against the sign of what is held.
+    const closing = order.side === 'sell' ? held.quantity > 0 : held.quantity < 0;
+    if (!closing) return order;
+
+    const closable = Math.abs(held.quantity);
+    if (order.quantity <= closable) return order;
+    this.logger.warn(
+      `capping ${order.side} ${order.quantity} ${contractSymbol} to ${closable} ` +
+        `— that is the whole position`,
+    );
+    return { ...order, quantity: closable };
   }
 
   /**

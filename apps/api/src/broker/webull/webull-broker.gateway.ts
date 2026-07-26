@@ -540,8 +540,19 @@ export class WebullBrokerGateway implements BrokerGateway, OnModuleDestroy {
     userId: string,
     order: OrderRequest,
     idempotencyKey: string,
+    expectedMode?: TradingMode,
   ): Promise<OrderResult> {
-    const client = await this.clientFor(userId);
+    // The mode decided here picks the live vs paper hosts, and it is read
+    // independently of whatever the caller checked. Assert they agree before
+    // spending money: a flip in Profile mid-placement must fail the order, not
+    // quietly redirect it to the other account.
+    const mode = await this.tradingModeFor(userId);
+    if (expectedMode && mode !== expectedMode) {
+      throw brokerErrors.orderRejected(
+        `Account switched to ${mode} while this ${expectedMode} order was being placed — nothing was sent`,
+      );
+    }
+    const client = await this.clientFor(userId, mode);
     const resolved = await this.resolveContract(userId, order);
     const limitPrice = resolveLimitPrice(order.orderType, resolved, order.limitPrice);
 

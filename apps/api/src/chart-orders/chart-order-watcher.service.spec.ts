@@ -48,15 +48,18 @@ describe('ChartOrderWatcherService', () => {
   let watcher: ChartOrderWatcherService;
   let userId: string;
 
+  // Shared by the watcher and the service: both read `staleQuoteMs`, and they
+  // must agree on it or the two staleness gates would disagree in tests.
+  const config = {
+    get: (key: string) =>
+      ({
+        'chartOrders.watcherEnabled': false, // never start the real interval in tests
+        'chartOrders.tickMs': 1_000,
+        'chartOrders.staleQuoteMs': 10_000,
+      })[key],
+  } as unknown as ConfigService;
+
   function buildWatcher(): ChartOrderWatcherService {
-    const config = {
-      get: (key: string) =>
-        ({
-          'chartOrders.watcherEnabled': false, // never start the real interval in tests
-          'chartOrders.tickMs': 1_000,
-          'chartOrders.staleQuoteMs': 10_000,
-        })[key],
-    } as unknown as ConfigService;
     return new ChartOrderWatcherService(
       prisma as unknown as ConstructorParameters<typeof ChartOrderWatcherService>[0],
       chartOrders,
@@ -84,6 +87,7 @@ describe('ChartOrderWatcherService', () => {
       gateway as BrokerGateway,
       trading,
       events,
+      config,
     );
     emitted = [];
     events.events$.subscribe((event) => emitted.push(event.order));

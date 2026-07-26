@@ -1,4 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import type { ChartOrder as ChartOrderRow } from '@prisma/client';
 import {
   ChartOrder,
@@ -8,6 +9,8 @@ import {
   OptionType,
   OrderResult,
   OrderSide,
+  TradingMode,
+  chartOrderCrossed,
 } from '@0dtetrader/shared-types';
 import { BROKER_GATEWAY, BrokerGateway } from '../broker/broker-gateway.interface';
 import { findExplicitOption, pickExpiration } from '../broker/contract-resolution';
@@ -85,6 +88,7 @@ export class ChartOrdersService {
     @Inject(BROKER_GATEWAY) private readonly gateway: BrokerGateway,
     private readonly trading: TradingService,
     private readonly events: ChartOrderEventsService,
+    private readonly config: ConfigService,
   ) {}
 
   // -------------------------------------------------------------------------
@@ -275,7 +279,50 @@ export class ChartOrdersService {
    */
   async triggerNow(userId: string, id: string, now = new Date()): Promise<ChartOrder> {
     const row = await this.findOwned(userId, id);
+    // The client is a latency optimisation, never an authority. It reports only
+    // *that* it saw a crossing; the server re-derives whether one happened, from
+    // its own quote, under the same staleness gate the watcher applies. Without
+    // this an authenticated client could fire any of its own working lines at
+    // any price and at any time — a client bug or a wedged in-app quote stream
+    // would send a market order nobody asked for.
+    // A settled line needs no quote: `fire` retires it, and refusing it for a
+    // stale quote would report the wrong reason.
+    if (row.status === 'working' && row.expiresAt.getTime() > now.getTime()) {
+      const last = await this.freshQuote(userId, row.underlying, now);
+      // From `armPrice`, not from a last-observed price: the same gap-safe
+      // reference the watcher uses, so a level jumped in one tick still counts.
+      if (!chartOrderCrossed(toChartOrder(row), row.armPrice, last)) {
+        throw errors.conflict(
+          'CHART_ORDER_NOT_CROSSED',
+          `${row.underlying} has not crossed ${row.triggerPrice} — this order stays armed`,
+        );
+      }
+    }
     return this.fire(row, now);
+  }
+
+  /**
+   * The underlying's price now, refused when the feed is stale.
+   *
+   * A halted or dead feed replays an old price against a live level, which is
+   * the one input that must never fire an order. An unreadable timestamp is
+   * unverifiable, so it counts as stale rather than as fresh.
+   */
+  private async freshQuote(userId: string, underlying: string, now: Date): Promise<number> {
+    const quote = await this.gateway.getQuote(userId, underlying);
+    const last = quote.last;
+    if (!Number.isFinite(last) || last <= 0) {
+      throw errors.unavailable('QUOTE_UNAVAILABLE', `No usable ${underlying} quote right now`);
+    }
+    const quotedAt = Date.parse(quote.timestamp);
+    const staleMs = this.config.get<number>('chartOrders.staleQuoteMs') ?? 10_000;
+    if (!Number.isFinite(quotedAt) || now.getTime() - quotedAt > staleMs) {
+      throw errors.unavailable(
+        'QUOTE_STALE',
+        `The ${underlying} quote is stale — refusing to act on it`,
+      );
+    }
+    return last;
   }
 
   /**
@@ -360,7 +407,18 @@ export class ChartOrdersService {
 
     let placed: OrderResult;
     try {
-      placed = await this.trading.place(row.userId, request, idempotencyKeyFor(row.id));
+      // The environment this line was armed in, asserted all the way to the
+      // send. The gate above proves the account is in that mode *now*; this
+      // proves it has not moved by the time the order actually goes out — the
+      // chain fetch inside `place` is long enough for a Profile toggle to land
+      // in between, and re-deriving the mode at the gateway would silently
+      // route a practice line's order to the live account.
+      placed = await this.trading.place(
+        row.userId,
+        request,
+        idempotencyKeyFor(row.id),
+        row.environment as TradingMode,
+      );
     } catch (err) {
       // The other caller's submission for this same line is still in flight.
       // The claim is already correct — let their result stand.
@@ -550,11 +608,22 @@ export class ChartOrdersService {
       },
     });
     if (orphans.length === 0) return [];
-    await this.prisma.chartOrder.updateMany({
-      where: { id: { in: orphans.map((row) => row.id) } },
-      data: { status: 'cancelled' },
-    });
-    return orphans.map((row) => row.id);
+    // Compare-and-set per row, exactly as every other transition here does.
+    // The read above and this write straddle an await, and a leg can be claimed
+    // for firing in between — a stop firing IS what closes the position that
+    // makes it look orphaned, so the two are correlated, not independent. A
+    // blind update by id would stamp `cancelled` over a line whose order is
+    // already at the broker, leaving a live order the chart calls cancelled.
+    // Bounded by MAX_WORKING_CHART_ORDERS per user per sweep.
+    const cancelled: string[] = [];
+    for (const row of orphans) {
+      const { count } = await this.prisma.chartOrder.updateMany({
+        where: { id: row.id, status: 'working' },
+        data: { status: 'cancelled' },
+      });
+      if (count === 1) cancelled.push(row.id);
+    }
+    return cancelled;
   }
 
   byId(id: string): Promise<ChartOrderRow | null> {

@@ -249,7 +249,16 @@ export class AlpacaBrokerGateway implements BrokerGateway, OnModuleDestroy {
     userId: string,
     order: OrderRequest,
     idempotencyKey: string,
+    expectedMode?: TradingMode,
   ): Promise<OrderResult> {
+    // See the Webull gateway: the mode read here selects paper vs live, so it
+    // must agree with the one the caller validated against.
+    const mode = await this.tradingModeFor(userId);
+    if (expectedMode && mode !== expectedMode) {
+      throw brokerErrors.orderRejected(
+        `Account switched to ${mode} while this ${expectedMode} order was being placed — nothing was sent`,
+      );
+    }
     const client = await this.clientFor(userId);
     const resolved = await this.resolveContract(userId, order);
     const limitPrice = resolveLimitPrice(order.orderType, resolved, order.limitPrice);

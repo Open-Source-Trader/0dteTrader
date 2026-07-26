@@ -38,7 +38,7 @@ The screenshots are reproducible: the `0dteTraderScreenshots` scheme drives the 
 
 ## Host your own backend
 
-[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/hqwdS8)
+[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/0dtetrader-template)
 
 One click deploys the API + Postgres + Redis into your own Railway account — zero configuration, no secrets to fill in. Then open the app, tap **Server** on the login screen, and paste your Railway URL. Full walkthrough: [docs/self-hosting.md](docs/self-hosting.md).
 

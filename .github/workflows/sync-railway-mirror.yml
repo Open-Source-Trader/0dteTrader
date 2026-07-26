@@ -21,4 +21,4 @@ jobs:
           fetch-depth: 0
       - name: Push main to TradeWithCash2025/0dteTrader
         run: |
-          git push "https://x-access-token:${{ secrets.MIRROR_PUSH_TOKEN }}@github.com/TradeWithCash2025/0dteTrader.git" main:main
+          git push "https://TradeWithCash2025:${{ secrets.MIRROR_PUSH_TOKEN }}@github.com/TradeWithCash2025/0dteTrader.git" main:main

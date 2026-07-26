@@ -8,7 +8,7 @@ import SwiftUI
 /// `apps/desktop/src/features/auth/ServerSettings.tsx`.
 struct ServerSettingsView: View {
     /// One-click backend template (#59). Updated when the final template publishes.
-    static let railwayDeployURL = URL(string: "https://railway.com/deploy/hqwdS8")!
+    static let railwayDeployURL = URL(string: "https://railway.com/deploy/0dtetrader-template")!
 
     @EnvironmentObject private var serverConfig: ServerConfigStore
 

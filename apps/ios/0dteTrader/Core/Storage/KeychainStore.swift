@@ -17,6 +17,17 @@ struct KeychainStore: Sendable {
         self.account = account
     }
 
+    /// Keychain account for a server's refresh token, scoped by origin
+    /// (scheme+host+port) so a token issued by one server is never sent to
+    /// another after a runtime server change (#59).
+    static func refreshTokenAccount(for baseURL: URL) -> String {
+        var origin = "\(baseURL.scheme ?? "http")://\(baseURL.host ?? "")"
+        if let port = baseURL.port {
+            origin += ":\(port)"
+        }
+        return "refresh-token.\(origin)"
+    }
+
     func saveRefreshToken(_ token: String) throws {
         guard let data = token.data(using: .utf8) else {
             throw KeychainStoreError.unexpectedStatus(errSecParam)

@@ -27,7 +27,7 @@ import { SymbolSearchView } from '../chart/SymbolSearchView';
 import { SymbolSpotlight } from '../chart/SymbolSpotlight';
 import { ProfileView } from '../profile/ProfileView';
 import { DesktopPositionsPanel } from './DesktopPositionsPanel';
-import { DesktopAppTopBar, DesktopChartTopBar } from './DesktopTopBar';
+import { DesktopChartTopBar } from './DesktopTopBar';
 import { DesktopTradeTicket } from './DesktopTradeTicket';
 import { FloatingTradeButtons } from './FloatingTradeButtons';
 import { HistoryView } from './HistoryView';
@@ -357,6 +357,9 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
               )}
               onFlattenPosition={(position) => void tradeStore.flatten(position)}
               positionsLocked={locked}
+              onToggleLock={toggleLock}
+              onShowHistory={() => setShowHistory(true)}
+              onShowProfile={() => setShowProfile(true)}
             />
           </Panel>
 
@@ -379,12 +382,6 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
             minSize="18"
             style={{ minHeight: 0, display: 'flex', flexDirection: 'column' }}
           >
-            <DesktopAppTopBar
-              locked={locked}
-              onToggleLock={toggleLock}
-              onShowProfile={() => setShowProfile(true)}
-              onShowHistory={() => setShowHistory(true)}
-            />
             <DesktopTradeTicket
               tradeStore={tradeStore}
               chainStore={chainStore}

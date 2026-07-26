@@ -3,14 +3,7 @@ import type { ChartStore, ChartStoreState } from '../chart/ChartStore';
 import { CHART_INTERVALS, INTERVAL_HINTS } from '../chart/ChartStore';
 import { Menu } from '../../design/components/Menu';
 import { Format } from '../../design/format';
-import {
-  ChevronDownIcon,
-  ClockIcon,
-  LockIcon,
-  LockOpenIcon,
-  PersonCircleIcon,
-  SlidersIcon,
-} from '../../design/icons';
+import { ChevronDownIcon, SlidersIcon } from '../../design/icons';
 
 interface DesktopChartTopBarProps {
   chartStore: ChartStore;
@@ -114,56 +107,6 @@ export function DesktopChartTopBar({
           aria-label="Indicator settings"
         >
           <SlidersIcon size={22} />
-        </button>
-      </span>
-    </div>
-  );
-}
-
-interface DesktopAppTopBarProps {
-  locked: boolean;
-  onToggleLock: () => void;
-  onShowProfile: () => void;
-  onShowHistory: () => void;
-}
-
-/**
- * Order-ticket panel's own top bar: global app actions (lock/history/
- * profile). Rendered inside the resizable ticket Panel for the same reason
- * as DesktopChartTopBar — its edges track that panel's real width.
- */
-export function DesktopAppTopBar({
-  locked,
-  onToggleLock,
-  onShowProfile,
-  onShowHistory,
-}: DesktopAppTopBarProps) {
-  return (
-    <div className="desktop-top-bar desktop-top-bar--ticket">
-      {/* Order matches the icon's frequency of use: lock (most reached for
-          while trading), history, profile (least frequent). */}
-      <span className="desktop-top-bar-group">
-        <button
-          className="chart-icon-button chart-icon-button--sm"
-          onClick={onToggleLock}
-          aria-pressed={locked}
-          aria-label={locked ? 'Unlock trading' : 'Lock trading'}
-        >
-          {locked ? <LockIcon size={22} /> : <LockOpenIcon size={22} />}
-        </button>
-        <button
-          className="chart-icon-button chart-icon-button--sm"
-          onClick={onShowHistory}
-          aria-label="Trade history"
-        >
-          <ClockIcon size={22} />
-        </button>
-        <button
-          className="chart-icon-button chart-icon-button--sm"
-          onClick={onShowProfile}
-          aria-label="Profile"
-        >
-          <PersonCircleIcon size={22} />
         </button>
       </span>
     </div>

@@ -100,10 +100,6 @@
   font-size: var(--fs-caption-desktop);
 }
 
-.desktop-top-bar--ticket {
-  justify-content: flex-end;
-}
-
 .desktop-top-bar-group {
   display: flex;
   align-items: center;

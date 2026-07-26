@@ -42,6 +42,12 @@ interface ChartViewProps {
   positionsForSymbol?: Position[];
   onFlattenPosition?: (position: Position) => void;
   positionsLocked?: boolean;
+  /** Global app actions rendered at the bottom of the left drawing-tool
+   *  rail (desktop grid only, when `dense`). Lock icon state reuses
+   *  `positionsLocked` — same trading-lock flag, single source of truth. */
+  onToggleLock?: () => void;
+  onShowHistory?: () => void;
+  onShowProfile?: () => void;
 }
 
 // Interval hotkeys. 'H'/'D' are uppercase (shift held) so they don't collide
@@ -76,6 +82,9 @@ export function ChartView({
   positionsForSymbol = [],
   onFlattenPosition,
   positionsLocked = false,
+  onToggleLock,
+  onShowHistory,
+  onShowProfile,
 }: ChartViewProps) {
   const {
     symbol,
@@ -393,7 +402,15 @@ export function ChartView({
           it — TradingView's left toolbar is always vertically aligned with
           the chart itself. */}
       <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
-        {dense ? <DrawToolsRail store={drawingsStore} /> : null}
+        {dense ? (
+          <DrawToolsRail
+            store={drawingsStore}
+            locked={positionsLocked}
+            onToggleLock={onToggleLock}
+            onShowHistory={onShowHistory}
+            onShowProfile={onShowProfile}
+          />
+        ) : null}
         {/* HUD card wrapping a chamfer-clipped canvas region. The glow is
             baked into the card raster — never a CSS filter here. */}
         <div

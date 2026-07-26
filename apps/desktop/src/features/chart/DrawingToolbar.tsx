@@ -2,8 +2,12 @@ import { useStore } from '../../core/observable';
 import { Menu } from '../../design/components/Menu';
 import {
   BellIcon,
+  ClockIcon,
   CursorIcon,
   HLineToolIcon,
+  LockIcon,
+  LockOpenIcon,
+  PersonCircleIcon,
   RayToolIcon,
   RectToolIcon,
   TrashIcon,
@@ -93,14 +97,35 @@ export function DrawToolsMenu({ store }: { store: DrawingsStore }) {
   );
 }
 
+interface DrawToolsRailProps {
+  store: DrawingsStore;
+  /** Global app actions (lock/history/profile), anchored to the rail's
+   *  bottom — the left rail is the one element always visible in the
+   *  desktop grid regardless of panel layout, so it's the natural home
+   *  for chrome that must stay reachable no matter how chart/ticket are
+   *  split. Omitted entirely when the caller doesn't wire them (e.g. if
+   *  the rail is ever reused somewhere without app-level chrome). */
+  locked?: boolean;
+  onToggleLock?: () => void;
+  onShowHistory?: () => void;
+  onShowProfile?: () => void;
+}
+
 /** Persistent vertical drawing-tool rail (desktop grid only) — TradingView's
  *  left-edge toolbar convention: every tool is always one click away instead
  *  of two (open menu, then pick). The "clear" action stays a small trailing
  *  button rather than living inside a dropdown, so it's not one hover away
  *  from every other tool. */
-export function DrawToolsRail({ store }: { store: DrawingsStore }) {
+export function DrawToolsRail({
+  store,
+  locked,
+  onToggleLock,
+  onShowHistory,
+  onShowProfile,
+}: DrawToolsRailProps) {
   const { tool, selectedId, drawings, alerts } = useStore(store);
   const hasAnnotations = drawings.length > 0 || alerts.length > 0;
+  const hasAppActions = onToggleLock || onShowHistory || onShowProfile;
 
   return (
     <div className="draw-rail">
@@ -133,6 +158,41 @@ export function DrawToolsRail({ store }: { store: DrawingsStore }) {
         >
           <TrashIcon size={18} />
         </button>
+      ) : null}
+      {hasAppActions ? (
+        <div className="draw-rail-app-actions">
+          {onToggleLock ? (
+            <button
+              className="chart-icon-button draw-rail-button"
+              onClick={onToggleLock}
+              aria-pressed={locked}
+              aria-label={locked ? 'Unlock trading' : 'Lock trading'}
+              title={locked ? 'Unlock trading' : 'Lock trading'}
+            >
+              {locked ? <LockIcon size={19} /> : <LockOpenIcon size={19} />}
+            </button>
+          ) : null}
+          {onShowHistory ? (
+            <button
+              className="chart-icon-button draw-rail-button"
+              onClick={onShowHistory}
+              aria-label="Trade history"
+              title="Trade history"
+            >
+              <ClockIcon size={19} />
+            </button>
+          ) : null}
+          {onShowProfile ? (
+            <button
+              className="chart-icon-button draw-rail-button"
+              onClick={onShowProfile}
+              aria-label="Profile"
+              title="Profile"
+            >
+              <PersonCircleIcon size={19} />
+            </button>
+          ) : null}
+        </div>
       ) : null}
     </div>
   );

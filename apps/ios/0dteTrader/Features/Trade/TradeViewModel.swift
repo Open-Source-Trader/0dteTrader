@@ -35,6 +35,12 @@ final class TradeViewModel: ObservableObject {
     // Ticket configuration
     @Published var quantity = 1
     @Published var orderType: OrderType = .mid
+    /// The price a `.custom` order works at, or nil while none has been entered.
+    ///
+    /// Held here rather than in the field so the arm guard and the confirm sheet
+    /// read the same settled number, and so it can be cleared from outside when
+    /// the contract it was typed for changes — see `clearCustomLimitPrice`.
+    @Published private(set) var customLimitPrice: Double?
 
     // Positions & orders
     @Published private(set) var positions: [Position] = []
@@ -65,6 +71,20 @@ final class TradeViewModel: ObservableObject {
         self.apiClient = apiClient
     }
 
+    #if DEBUG
+    /// Seeds positions without a network round trip (tests only).
+    func setPositionsForTesting(_ positions: [Position]) {
+        self.positions = positions
+    }
+
+    /// Seeds a resolved preview without a network round trip (tests only), so
+    /// the confirm popup can be measured in the state it actually ships in —
+    /// spread, warnings and all.
+    func setPreviewForTesting(_ preview: OrderPreview) {
+        self.preview = preview
+    }
+    #endif
+
     // MARK: - Quantity (FR-18)
 
     func setQuantity(_ value: Int) {
@@ -75,6 +95,34 @@ final class TradeViewModel: ObservableObject {
     func addQuantity(_ amount: Int) {
         setQuantity(quantity + amount)
     }
+
+    // MARK: - Custom limit price
+
+    /// The settled custom limit, or nil while the field does not name a price.
+    /// Rounded to the cent the contract is quoted at — the server rejects
+    /// anything finer.
+    func setCustomLimitPrice(_ price: Double?) {
+        customLimitPrice = price.map { ($0 * 100).rounded() / 100 }
+    }
+
+    /// Drops a custom price and the selection that would send it, called when
+    /// the contract underneath changes.
+    ///
+    /// A premium is only meaningful for the contract it was typed against —
+    /// 2.45 is near the money on one strike and ten times the ask on the next —
+    /// so carrying it silently onto a different contract is the one way this
+    /// feature could fill an order nobody meant. Falling back to `.mid` rather
+    /// than merely blanking the field also moves the highlight, so the change
+    /// is visible rather than a field that quietly emptied.
+    func clearCustomLimitPrice() {
+        guard customLimitPrice != nil || orderType == .custom else { return }
+        customLimitPrice = nil
+        if orderType == .custom { orderType = .mid }
+    }
+
+    /// Whether the pricing selection is complete enough to arm. `.custom` with
+    /// nothing typed has no price to send, and the server would refuse it.
+    var canArm: Bool { orderType != .custom || customLimitPrice != nil }
 
     /// Live tick for a subscribed contract symbol: recomputes any matching
     /// position's mark and P/L (server-provided multiplier keeps the math
@@ -99,6 +147,55 @@ final class TradeViewModel: ObservableObject {
         let selection: OrderSelectionDTO
         let summary: String
         let optionType = chainViewModel.optionType
+
+        // Sent only for `.custom`; the server rejects it alongside any other
+        // variant, because those four are priced from its own quote.
+        let limitPrice = orderType == .custom ? customLimitPrice : nil
+        if orderType == .custom, limitPrice == nil {
+            showToast("Enter a limit price first.", style: .error)
+            return
+        }
+
+        // Selling the contract you are already long closes (part of) that
+        // position rather than opening a short. The ticket quantity is honored
+        // but capped at the position size — the cap stops a large ticket from
+        // flipping through zero into a short, while a smaller ticket still
+        // scales out partially. The summary says exactly what will happen.
+        if side == .sell,
+           let contract = chainViewModel.selectedContract,
+           let position = positions.first(where: { $0.symbol == contract.symbol && $0.quantity > 0 }) {
+            let closeQuantity = min(quantity, position.quantity)
+            let sizeLabel = closeQuantity < position.quantity
+                ? "\(closeQuantity) of \(position.quantity)"
+                : "\(closeQuantity)"
+            let request = OrderRequestDTO(
+                underlying: underlying,
+                assetClass: "option",
+                side: side.rawValue,
+                quantity: closeQuantity,
+                orderType: orderType.rawValue,
+                limitPrice: limitPrice,
+                selection: OrderSelectionDTO(
+                    mode: "explicit",
+                    optionType: contract.optionType.rawValue,
+                    expiration: contract.expiration,
+                    strike: contract.strike
+                )
+            )
+            armedTicket = ArmedOrderTicket(
+                id: UUID(),
+                request: request,
+                idempotencyKey: UUID().uuidString,
+                side: side,
+                summary: "CLOSE \(sizeLabel) · \(underlying) "
+                    + "\(Format.strike(contract.strike))\(contract.optionType.shortName)"
+            )
+            preview = nil
+            previewError = nil
+            submitError = nil
+            Task { await loadPreview() }
+            return
+        }
 
         if chainViewModel.isAutoMode {
             selection = OrderSelectionDTO(
@@ -131,6 +228,7 @@ final class TradeViewModel: ObservableObject {
             side: side.rawValue,
             quantity: quantity,
             orderType: orderType.rawValue,
+            limitPrice: limitPrice,
             selection: selection
         )
         let idempotencyKey = UUID().uuidString
@@ -265,6 +363,7 @@ final class TradeViewModel: ObservableObject {
             side: side.rawValue,
             quantity: abs(position.quantity),
             orderType: OrderType.market.rawValue,
+            limitPrice: nil,
             selection: OrderSelectionDTO(
                 mode: "explicit",
                 optionType: contract.optionType.rawValue,

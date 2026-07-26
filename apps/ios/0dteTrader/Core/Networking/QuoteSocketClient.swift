@@ -18,6 +18,24 @@ final class QuoteSocketClient: ObservableObject {
     @Published private(set) var quotes: [String: Quote] = [:]
     @Published private(set) var lastQuote: Quote?
     @Published private(set) var lastOrderUpdate: OrderResult?
+    /// Server-side chart-order watcher fired, failed, or retired a line.
+    ///
+    /// A callback, not a `@Published` slot: an OCO fire emits TWO messages
+    /// back-to-back (the cancelled sibling, then the fired leg), and a
+    /// single-value property observed with `onChange` coalesces them — the
+    /// sibling cancellation would be dropped and the dead stop would keep
+    /// rendering as a working line. A direct call also delivers with no view
+    /// re-render, so watcher pushes land even when the quote stream is idle.
+    var onChartOrder: ((ChartOrder) -> Void)?
+
+    /// Called when the socket comes back after having been connected before.
+    /// Anything pushed while it was down was missed outright, so listeners must
+    /// re-read whatever state the stream keeps current.
+    var onReconnected: (() -> Void)?
+
+    /// Whether a connection was ever established, so the next `.connected`
+    /// transition is a RE-connection with a gap to make up.
+    private var hasConnected = false
     @Published private(set) var lastErrorMessage: String?
 
     private let streamURL: URL
@@ -122,6 +140,9 @@ final class QuoteSocketClient: ObservableObject {
                 task.resume()
                 self.connectionState = .connected
                 self.reconnectAttempt = 0
+                let reconnected = self.hasConnected
+                self.hasConnected = true
+                if reconnected { self.onReconnected?() }
                 if !self.subscribedSymbols.isEmpty {
                     self.send(SocketSubscribeMessage(type: "subscribe", symbols: Array(self.subscribedSymbols)))
                 }
@@ -239,6 +260,11 @@ final class QuoteSocketClient: ObservableObject {
         case "orderUpdate":
             if let payload = try? decoder.decode(SocketOrderUpdateMessage.self, from: data) {
                 lastOrderUpdate = OrderResult(dto: payload.data)
+            }
+        case "chartOrder":
+            if let payload = try? decoder.decode(SocketChartOrderMessage.self, from: data),
+               let order = ChartOrder(dto: payload.data) {
+                onChartOrder?(order)
             }
         case "error":
             if let payload = try? decoder.decode(SocketErrorMessage.self, from: data) {

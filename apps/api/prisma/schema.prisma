@@ -36,6 +36,7 @@ model User {
   brokerCredentials BrokerCredential[]
   brokerApiTokens   BrokerApiToken[]
   tradeOrders     TradeOrder[]
+  chartOrders     ChartOrder[]
 
   @@map("users")
 }
@@ -145,12 +146,64 @@ model TradeOrder {
   orderType      String
   limitPrice     Float?
   filledPrice    Float?
+  // Price of the UNDERLYING when the order was placed. Feeds the chart's entry
+  // line, which is drawn on the underlying's scale, not the contract's. Null
+  // for orders placed before this was recorded.
+  underlyingPrice Float?
   status         String
   placedAt       DateTime
   updatedAt      DateTime @updatedAt
 
   @@index([userId, placedAt])
   @@map("trade_orders")
+}
+
+// A resting order line drawn on the chart. The broker never receives it: the
+// trigger is watched against the UNDERLYING's price, and a crossing fires an
+// ordinary mid/market option order through TradingService. Both the client and
+// the server-side watcher are armed; they converge because the fire uses a
+// deterministic idempotency key derived from `id`.
+model ChartOrder {
+  id             String    @id @default(uuid()) @db.Uuid
+  userId         String    @db.Uuid
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // "live" | "practice" — a line armed in practice must never fire against live.
+  environment    String    @default("live")
+  // Chart symbol whose price arms the trigger (SPY), not the contract.
+  underlying     String
+  triggerPrice   Float
+  // Underlying price when the line was armed (created, or moved). Firing tests
+  // the segment armPrice → last, so a gap, a restart, or a watcher failover
+  // cannot step over a level unnoticed.
+  armPrice       Float
+  side           String
+  quantity       Int
+  // Execution type used when the level is crossed. Owned by the line, not by
+  // the trade panel, and flippable from the chart.
+  orderType      String
+  // "limit" | "target" | "stop"
+  kind           String
+  optionType     String
+  expiration     String
+  strike         Float
+  contractSymbol String
+  // Shared by the target and stop of one position; firing either cancels the other.
+  ocoGroupId     String?   @db.Uuid
+  // "working" | "triggered" | "filled" | "cancelled" | "failed" | "expired"
+  status         String    @default("working")
+  // The contract's expiration close; past this the line expires unfilled.
+  expiresAt      DateTime
+  triggeredAt    DateTime?
+  brokerOrderId  String?
+  lastError      String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@index([userId, status])
+  // The watcher's sweep: every working line, grouped by what it must quote.
+  @@index([status, environment, underlying])
+  @@index([ocoGroupId])
+  @@map("chart_orders")
 }
 
 model OrderAudit {

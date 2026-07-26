@@ -51,6 +51,14 @@ final class AppContainer: ObservableObject {
         TradeViewModel(apiClient: apiClient)
     }
 
+    func makeChartOrdersModel() -> ChartOrdersModel {
+        ChartOrdersModel(apiClient: apiClient)
+    }
+
+    func makeChartTradingCoordinator(chartOrders: ChartOrdersModel) -> ChartTradingCoordinator {
+        ChartTradingCoordinator(chartOrders: chartOrders, settingsStore: settingsStore)
+    }
+
     func makeProfileViewModel(onLogout: @escaping () async -> Void) -> ProfileViewModel {
         ProfileViewModel(
             apiClient: apiClient,

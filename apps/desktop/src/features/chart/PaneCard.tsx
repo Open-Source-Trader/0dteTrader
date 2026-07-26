@@ -31,7 +31,7 @@ export function PaneCard({ title, readouts, children }: PaneCardProps) {
           fontVariantNumeric: 'tabular-nums',
         }}
       >
-        <span style={{ color: 'var(--app-accent-text)', fontWeight: 600 }}>{title}</span>
+        <span style={{ color: 'var(--label-secondary)', fontWeight: 600 }}>{title}</span>
         {readouts.map((readout) => (
           <span key={readout.label} style={{ color: readout.color }}>
             {readout.label ? `${readout.label} ` : ''}

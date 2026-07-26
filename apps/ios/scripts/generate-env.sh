@@ -15,7 +15,9 @@ API_BASE_URL="${API_BASE_URL:-}"
 
 if [[ -f "$ENV_FILE" ]]; then
 	# Strip comments and blank lines, then extract API_BASE_URL.
-	FILE_API_BASE_URL=$(grep '^API_BASE_URL=' "$ENV_FILE" | head -1 | sed 's/^API_BASE_URL=//' | tr -d '"' | tr -d "'")
+	# `|| true`: under pipefail a missing key would abort the script instead
+	# of reaching the localhost fallback below.
+	FILE_API_BASE_URL=$(grep '^API_BASE_URL=' "$ENV_FILE" | head -1 | sed 's/^API_BASE_URL=//' | tr -d '"' | tr -d "'" || true)
 	if [[ -n "$FILE_API_BASE_URL" ]]; then
 		API_BASE_URL="$FILE_API_BASE_URL"
 	fi

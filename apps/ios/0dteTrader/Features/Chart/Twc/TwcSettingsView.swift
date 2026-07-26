@@ -221,9 +221,7 @@ struct TwcSettingsView: View {
         }
         .navigationTitle("TWC Heatmap V5")
         .navigationBarTitleDisplayMode(.inline)
-        .scrollContentBackground(.hidden)
-        .background(Color.appBackground)
-        .tint(.appAccent)
+        .hudListChrome()
     }
 
     private func picker(_ title: String, _ binding: Binding<String>, _ options: [String]) -> some View {

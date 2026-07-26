@@ -1,28 +1,28 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import type { Me, OptionContract, OrderSide, TradingMode } from '@0dtetrader/shared-types';
+import type {
+  ChartOrder,
+  Me,
+  OptionContract,
+  OrderSide,
+  Position,
+  TradingMode,
+} from '@0dtetrader/shared-types';
+import { narrowToChartOrderType } from '@0dtetrader/shared-types';
 import { useContainer } from '../../app/container';
 import { useStore } from '../../core/observable';
 import { AlertDialog } from '../../design/components/AlertDialog';
-import { NavBar } from '../../design/components/NavBar';
 import { Format } from '../../design/format';
-import {
-  ClockIcon,
-  LayoutFullIcon,
-  LayoutSplitIcon,
-  LockIcon,
-  LockOpenIcon,
-  PersonCircleIcon,
-} from '../../design/icons';
 import type { TradeLayout } from '../../core/storage/SettingsStore';
 import { enabledSubPanes } from '../chart/indicatorSettings';
+import type { ChartTradingProps } from '../chart/CandleChart';
 import { ChartView } from '../chart/ChartView';
+import { kindLabel } from '../chart/chartOrders';
 import { IndicatorSettingsView } from '../chart/IndicatorSettingsView';
 import { TwcSettingsView } from '../chart/TwcSettingsView';
-import { SymbolSearchView } from '../chart/SymbolSearchView';
 import { ProfileView } from '../profile/ProfileView';
 import { FloatingTradeButtons } from './FloatingTradeButtons';
 import { HistoryView } from './HistoryView';
-import { OrderConfirmSheet } from './OrderConfirmSheet';
+import { OrderConfirmPopup } from './OrderConfirmPopup';
 import { PositionsStrip } from './PositionsStrip';
 import { ToastView } from './ToastView';
 import { TradePanel } from './TradePanel';
@@ -47,6 +47,7 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
     settingsStore,
     quoteSocket,
     drawingsStore,
+    chartOrdersStore,
   } = container;
 
   const chart = useStore(chartStore);
@@ -55,8 +56,6 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
 
   const [layout, setLayout] = useState<TradeLayout>(() => settingsStore.layoutMode);
   const [locked, setLocked] = useState(() => settingsStore.tradingLocked);
-  const [showSymbolSearch, setShowSymbolSearch] = useState(false);
-  const [showIndicatorSettings, setShowIndicatorSettings] = useState(false);
   const [showTwcSettings, setShowTwcSettings] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
@@ -64,6 +63,17 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
   // 'practice' is only the pre-fetch placeholder; the server value wins.
   const [tradingMode, setTradingMode] = useState<TradingMode>('practice');
   const [showModeConfirmation, setShowModeConfirmation] = useState(false);
+  const [chartTradingSettings, setChartTradingSettings] = useState(
+    () => settingsStore.chartTrading,
+  );
+  // The entry line's ✕ sends a market order to close a real position, so it
+  // confirms first — same gate as flattening from the positions strip.
+  const [positionPendingChartFlatten, setPositionPendingChartFlatten] = useState<Position | null>(
+    null,
+  );
+  // A working line's ✕ throws away a resting order the user set up deliberately,
+  // so it confirms — matching the iOS alert rather than cancelling on one click.
+  const [orderPendingCancel, setOrderPendingCancel] = useState<ChartOrder | null>(null);
   const [me, setMe] = useState<Me | null>(null);
   const nextMode: TradingMode = tradingMode === 'live' ? 'practice' : 'live';
 
@@ -93,10 +103,14 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
     void apiClient
       .me()
       .then((m) => {
-        if (!cancelled) {
-          setTradingMode(m.tradingMode);
-          setMe(m);
-        }
+        if (cancelled) return;
+        setTradingMode(m.tradingMode);
+        setMe(m);
+        // Session proven valid: if the initial candle load raced login and
+        // left the chart empty, reload the current symbol rather than making
+        // the user switch tickers to force it.
+        const { candles, isLoading } = chartStore.getState();
+        if (candles.length === 0 && !isLoading) void chartStore.start();
       })
       .catch(() => {
         // Keep the placeholder; profile/quote errors surface elsewhere.
@@ -104,7 +118,7 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
     return () => {
       cancelled = true;
     };
-  }, [apiClient]);
+  }, [apiClient, chartStore]);
 
   const confirmModeSwitch = async () => {
     await apiClient.updateTradingMode(nextMode);
@@ -124,13 +138,34 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
       chainStore
         .getState()
         .chain?.contracts.find((contract: OptionContract) => contract.symbol === symbol);
-    return quoteSocket.onOrderUpdate((update) => tradeStore.handleOrderUpdate(update));
-  }, [chartStore, tradeStore, chainStore, quoteSocket]);
+    void chartOrdersStore.load();
+    const offOrders = quoteSocket.onOrderUpdate((update) => tradeStore.handleOrderUpdate(update));
+    // The server-side watcher fires lines with the app closed or backgrounded;
+    // these pushes are how the chart learns about it.
+    const offChartOrders = quoteSocket.onChartOrder((order) => {
+      chartOrdersStore.applyServerUpdate(order);
+      // A fired line means a real order went out — refresh positions so the
+      // entry line appears without waiting for the next poll.
+      void tradeStore.refreshTradingData();
+    });
+    // Pushes that landed while the socket was down are gone; re-read on the
+    // way back rather than drawing a bracket that already fired.
+    const offReconnect = quoteSocket.onReconnect(() => {
+      void chartOrdersStore.load();
+      void tradeStore.refreshTradingData();
+    });
+    return () => {
+      offOrders();
+      offChartOrders();
+      offReconnect();
+    };
+  }, [chartStore, tradeStore, chainStore, chartOrdersStore, quoteSocket]);
 
   useEffect(() => {
     void chainStore.load(chart.symbol);
     drawingsStore.setSymbol(chart.symbol);
-  }, [chart.symbol, chainStore, drawingsStore]);
+    chartOrdersStore.setSymbol(chart.symbol);
+  }, [chart.symbol, chainStore, drawingsStore, chartOrdersStore]);
 
   // Stream live quotes for the selected contracts and all open positions.
   // The chart's own symbol is excluded: its subscription is owned by ChartStore.
@@ -192,8 +227,12 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
         }
       }
       prevLast = quote.last;
+      // Chart order lines fire off the same tick. The store nudges the server,
+      // which is also polling — the shared idempotency key makes that a race
+      // with one winner rather than two orders.
+      chartOrdersStore.applyQuote(symbol, quote.last);
     });
-  }, [quoteSocket, chartStore, chainStore, drawingsStore, tradeStore]);
+  }, [quoteSocket, chartStore, chainStore, drawingsStore, tradeStore, chartOrdersStore]);
 
   // Track the content area height for the split layout math.
   useLayoutEffect(() => {
@@ -257,6 +296,48 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
     chain.selectedExpiration,
   );
 
+  // Order-line overlay inputs. resolveContract reuses the same chain lookup the
+  // flatten path already depends on, so an entry line only draws for a contract
+  // whose chain is loaded — the same constraint, surfaced the same way.
+  const chartTrading: ChartTradingProps = {
+    store: chartOrdersStore,
+    settings: chartTradingSettings,
+    positions: trade.positions,
+    resolveContract: (contractSymbol) =>
+      chainStore.getState().chain?.contracts.find((c) => c.symbol === contractSymbol) ?? null,
+    selectedContract: chainStore.selectedContract,
+    // Narrowed here, at the one seam where the panel's five-way pricing meets
+    // the chart's two-way. A line fires unattended, so `custom`/`bid`/`ask`
+    // collapse onto the server-computed mid — see narrowToChartOrderType.
+    defaultOrderType: narrowToChartOrderType(trade.orderType),
+    onFlatten: (position) => setPositionPendingChartFlatten(position),
+    onCancelOrder: (order) => setOrderPendingCancel(order),
+  };
+
+  // Body of the indicator chip's dropdown. Built here rather than in the chart
+  // because the settings it edits span three stores; the chip only supplies the
+  // anchor and the closer.
+  const indicatorPopup = (close: () => void) => (
+    <IndicatorSettingsView
+      settings={chart.indicatorSettings}
+      onChange={(settings) => chartStore.setIndicatorSettings(settings)}
+      onDismiss={close}
+      twcEnabled={chart.twcSettings.enabled}
+      onToggleTwc={(on) => chartStore.setTwcSettings({ ...chart.twcSettings, enabled: on })}
+      onOpenTwcSettings={() => {
+        close();
+        setShowTwcSettings(true);
+      }}
+      optionsAnalytics={chart.optionsAnalytics}
+      onChangeOptionsAnalytics={(settings) => chartStore.setOptionsAnalytics(settings)}
+      chartTrading={chartTradingSettings}
+      onChangeChartTrading={(settings) => {
+        settingsStore.chartTrading = settings;
+        setChartTradingSettings(settings);
+      }}
+    />
+  );
+
   const positionsStrip = (
     <PositionsStrip
       positions={trade.positions}
@@ -278,54 +359,8 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
         position: 'relative',
       }}
     >
-      <NavBar
-        title="0dteTrader"
-        leading={
-          <>
-            <button
-              className="navbar-icon-button"
-              onClick={() => setShowProfile(true)}
-              aria-label="Profile"
-            >
-              <PersonCircleIcon size={22} />
-            </button>
-            <button
-              className="navbar-icon-button"
-              onClick={() => setShowHistory(true)}
-              aria-label="Trade history"
-            >
-              <ClockIcon size={22} />
-            </button>
-          </>
-        }
-        trailing={
-          <>
-            <button
-              className="navbar-icon-button"
-              onClick={toggleLock}
-              aria-pressed={locked}
-              aria-label={locked ? 'Unlock trading' : 'Lock trading'}
-            >
-              {locked ? <LockIcon size={22} /> : <LockOpenIcon size={22} />}
-            </button>
-            <button
-              className="navbar-icon-button"
-              onClick={toggleLayout}
-              aria-pressed={layout === 'split'}
-              aria-label={
-                layout === 'fullscreen' ? 'Switch to split layout' : 'Switch to fullscreen layout'
-              }
-            >
-              {layout === 'fullscreen' ? (
-                <LayoutSplitIcon size={22} />
-              ) : (
-                <LayoutFullIcon size={22} />
-              )}
-            </button>
-          </>
-        }
-      />
-
+      {/* No navigation bar: the wordmark and both account destinations moved
+          into the chart header, which gives that height back to the chart. */}
       {needsProviderConfig ? (
         <button
           type="button"
@@ -355,11 +390,15 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
               store={chartStore}
               drawingsStore={drawingsStore}
               apiClient={apiClient}
-              onSymbolSearch={() => setShowSymbolSearch(true)}
-              onIndicatorSettings={() => setShowIndicatorSettings(true)}
+              onSelectSymbol={(symbol) => chartStore.selectSymbol(symbol)}
+              indicatorPopup={indicatorPopup}
+              onShowProfile={() => setShowProfile(true)}
+              onShowHistory={() => setShowHistory(true)}
               tradingMode={tradingMode}
               onToggleMode={() => setShowModeConfirmation(true)}
+              onToggleFullscreen={toggleLayout}
               optionsAnalyticsExpiration={optionsAnalyticsExpiration}
+              chartTrading={chartTrading}
             />
             {/* Scrim so the dock never lets chart content bleed through the buttons */}
             <div
@@ -408,19 +447,25 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
                 store={chartStore}
                 drawingsStore={drawingsStore}
                 apiClient={apiClient}
-                onSymbolSearch={() => setShowSymbolSearch(true)}
-                onIndicatorSettings={() => setShowIndicatorSettings(true)}
+                onSelectSymbol={(symbol) => chartStore.selectSymbol(symbol)}
+                indicatorPopup={indicatorPopup}
+                onShowProfile={() => setShowProfile(true)}
+                onShowHistory={() => setShowHistory(true)}
                 tradingMode={tradingMode}
                 onToggleMode={() => setShowModeConfirmation(true)}
+                onToggleFullscreen={toggleLayout}
                 optionsAnalyticsExpiration={optionsAnalyticsExpiration}
+                chartTrading={chartTrading}
               />
             </div>
 
-            {/* Static hairline between chart and panel */}
-            <div
-              aria-hidden
-              style={{ height: DIVIDER_HEIGHT, flex: 'none', background: 'var(--hud-stroke-dim)' }}
-            />
+            {/* The chart card and the trade panel are each already read as a
+                surface — the card by its border, the panel by the controls
+                filling it — so a rule between them was drawing a seam nobody
+                needed. Kept as an empty 1px gap rather than deleted:
+                `chartHeight` subtracts it, and reclaiming it would move the
+                split by a pixel for no reason. */}
+            <div aria-hidden style={{ height: DIVIDER_HEIGHT, flex: 'none' }} />
 
             <div
               style={{
@@ -436,6 +481,7 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
                 onArm={arm}
                 density={panelDensity}
                 locked={locked}
+                onToggleLock={toggleLock}
               />
             </div>
           </div>
@@ -447,40 +493,19 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
         <ToastView toast={trade.toast} onDismiss={() => tradeStore.dismissToast()} />
       ) : null}
 
-      {/* Sheets */}
+      {/* The order confirmation is an anchored popup over the SELL/BUY row,
+          not a sheet — but it is still driven by the armed ticket, which is
+          what makes Cancel, the scrim and a successful submit one path. */}
       {trade.armedTicket ? (
-        <OrderConfirmSheet tradeStore={tradeStore} ticket={trade.armedTicket} />
+        <OrderConfirmPopup tradeStore={tradeStore} ticket={trade.armedTicket} />
       ) : null}
-      {showSymbolSearch ? (
-        <SymbolSearchView
-          currentSymbol={chart.symbol}
-          onSelect={(symbol) => chartStore.selectSymbol(symbol)}
-          onDismiss={() => setShowSymbolSearch(false)}
-        />
-      ) : null}
-      {showIndicatorSettings ? (
-        <IndicatorSettingsView
-          settings={chart.indicatorSettings}
-          onChange={(settings) => chartStore.setIndicatorSettings(settings)}
-          onDismiss={() => setShowIndicatorSettings(false)}
-          twcEnabled={chart.twcSettings.enabled}
-          onToggleTwc={(on) => chartStore.setTwcSettings({ ...chart.twcSettings, enabled: on })}
-          onOpenTwcSettings={() => {
-            setShowIndicatorSettings(false);
-            setShowTwcSettings(true);
-          }}
-          optionsAnalytics={chart.optionsAnalytics}
-          onChangeOptionsAnalytics={(settings) => chartStore.setOptionsAnalytics(settings)}
-        />
-      ) : null}
+
+      {/* Sheets */}
       {showTwcSettings ? (
         <TwcSettingsView
           settings={chart.twcSettings}
           onChange={(settings) => chartStore.setTwcSettings(settings)}
-          onBack={() => {
-            setShowTwcSettings(false);
-            setShowIndicatorSettings(true);
-          }}
+          onBack={() => setShowTwcSettings(false)}
           onDismiss={() => setShowTwcSettings(false)}
         />
       ) : null}
@@ -505,6 +530,38 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
             { label: 'Cancel', role: 'cancel' },
           ]}
           onDismiss={() => setShowModeConfirmation(false)}
+        />
+      ) : null}
+      {positionPendingChartFlatten ? (
+        <AlertDialog
+          title="Close position?"
+          message={`Sends a market order to close ${positionPendingChartFlatten.symbol}. Only this contract is closed.`}
+          actions={[
+            {
+              label: 'Close position',
+              role: 'destructive',
+              onSelect: () => void tradeStore.flatten(positionPendingChartFlatten),
+            },
+            { label: 'Cancel', role: 'cancel' },
+          ]}
+          onDismiss={() => setPositionPendingChartFlatten(null)}
+        />
+      ) : null}
+      {orderPendingCancel ? (
+        <AlertDialog
+          title="Cancel order line?"
+          message={`Removes the ${kindLabel(orderPendingCancel.kind)} line at ${Format.price(
+            orderPendingCancel.triggerPrice,
+          )}. Nothing was sent to the broker.`}
+          actions={[
+            {
+              label: 'Cancel line',
+              role: 'destructive',
+              onSelect: () => void chartOrdersStore.cancel(orderPendingCancel.id),
+            },
+            { label: 'Keep', role: 'cancel' },
+          ]}
+          onDismiss={() => setOrderPendingCancel(null)}
         />
       ) : null}
     </div>

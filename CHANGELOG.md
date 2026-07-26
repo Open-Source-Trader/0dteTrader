@@ -25,6 +25,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Partial fill tracking (`filledQuantity` on orders)
 - Trading lock toggle in the top-right nav (iOS + desktop) — disables all order-placing controls (Buy/Sell, order config, flatten/cancel) while leaving the chart interactive; remembered across launches
 - Profile setting to skip the buy/sell confirmation sheet and place orders immediately (per-device)
+- Chart trading: TradingView-style order lines on the candle chart (iOS + desktop, on by default)
+  - Entry line per open position on the underlying's price scale — signed quantity, live P/L, and a ✕ that closes only that contract (anchored by the underlying price recorded at placement, `Position.underlyingEntryPrice`)
+  - Draggable limit / target / stop lines watched against the **underlying**; a crossing fires a normal mid/market option order through the existing order pipeline (kill switch, idempotency, server-side re-validation, audit unchanged)
+  - Per-line `MID`/`MKT` execution pill, visible on the line and flippable with one tap
+  - Futures-style brackets: drag off the entry line to place target + stop as an OCO pair; direction follows the contract (a long put's target sits below entry), not the screen
+  - Placement guide: tap (iOS) or click (desktop) empty chart space to summon a dashed level with a chamfered `+` handle flush against the pane's right border; tap again to dismiss it, drag the handle to fine-tune the level, and tap the `+` for a HUD order window whose level, side, size, and execution are all editable. Keyboard and VoiceOver reach the same two steps through the handle, which stays focusable while dormant
+  - Server-side watcher (`ChartOrderWatcherService`, leased singleton) fires lines with no client connected; client and watcher race safely via deterministic idempotency keys
+  - Environment isolation at the fire boundary: a practice-armed line can never route to the live account, including the client-trigger path
+  - Armed-side crossing predicate (no instant fires on placement, gap-safe across restarts), stale-quote refusal, settled-contract expiry, orphaned-bracket sweep with an opening grace window
+  - New API surface: `GET/POST/PATCH/DELETE /v1/chart-orders`, `POST /v1/chart-orders/:id/trigger`, `chartOrder` WebSocket message, `ChartOrder` Prisma model, `CHART_ORDER_WATCHER_*` env vars
+- Sell with a held contract selected now closes (part of) that position instead of opening a short — ticket quantity honored but capped at the position size, with a `CLOSE n of m` confirm summary (iOS + desktop)
+
+### Changed
+
+- TWC Heatmap V5: VWAP RIP markers now default to off (iOS + desktop)
+- After login, the chart reloads the current symbol instead of sitting empty until a ticker change (iOS + desktop)
+
+### Fixed
+
+- `/v1/health` responds 200 with degraded status instead of failing, so Railway healthchecks pass during broker outages
+- iOS header wordmark scales down instead of truncating to `0dteTr…` when the toolbar is full
+- `scripts/generate-env.sh` no longer aborts the iOS build when `.env` lacks `API_BASE_URL` (falls back to localhost as intended)
+- Trade-history accounting ignores degenerate broker rows reporting a fill with zero executed quantity (would NaN-poison a contract's average-cost book)
+- A broker-accepted chart-order fire is never relabeled `failed` by a bookkeeping error (which would orphan its OCO sibling to double-fire)
 
 ## [0.1.0] - 2026-07-19
 

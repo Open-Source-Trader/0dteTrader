@@ -21,7 +21,9 @@ import { optionExpirations } from '../broker/expiration-calendar';
 import { BrokerGateway } from '../broker/broker-gateway.interface';
 import { brokerErrors } from '../common/broker-error';
 import { InMemoryPrismaService } from '../../test/in-memory-prisma.service';
+import { OrderEventsService } from '../broker/order-events.service';
 import { OrderRequestDto } from './dto/order-request.dto';
+import { OrdersService } from './orders.service';
 import { TradingService } from './trading.service';
 
 const round2 = (v: number): number => Math.round(v * 100) / 100;
@@ -113,6 +115,8 @@ class StubBrokerGateway implements BrokerGateway {
         contractSymbol: resolved.contractSymbol,
         price,
         estBuyingPower: round2(estimateBuyingPower(order.quantity, price)),
+        bid: resolved.bid,
+        ask: resolved.ask,
       },
       warnings: [],
     };
@@ -122,6 +126,7 @@ class StubBrokerGateway implements BrokerGateway {
     userId: string,
     order: OrderRequest,
     _idempotencyKey: string,
+    _expectedMode?: TradingMode,
   ): Promise<OrderResult> {
     const resolved = await this.resolveContract(userId, order);
     const result: OrderResult = {
@@ -199,15 +204,21 @@ function autoOtmCall(overrides: Partial<OrderRequestDto> = {}): OrderRequestDto 
 describe('TradingService', () => {
   let prisma: InMemoryPrismaService;
   let gateway: StubBrokerGateway;
+  let orders: OrdersService;
   let trading: TradingService;
   let userId: string;
 
   beforeEach(async () => {
     prisma = new InMemoryPrismaService();
     gateway = new StubBrokerGateway();
+    orders = new OrdersService(
+      prisma as unknown as ConstructorParameters<typeof OrdersService>[0],
+      new OrderEventsService(),
+    );
     trading = new TradingService(
       prisma as unknown as ConstructorParameters<typeof TradingService>[0],
       gateway as BrokerGateway,
+      orders,
     );
     const user = await prisma.user.create({
       data: { email: 'trader@example.com', passwordHash: 'x' },
@@ -390,6 +401,72 @@ describe('TradingService', () => {
     });
   });
 
+  describe('entry-line anchor', () => {
+    /** Mirrors what the stub gateway would report after a market order fills. */
+    function positionFor(contractSymbol: string, quantity: number): Position {
+      return {
+        symbol: contractSymbol,
+        assetClass: 'option',
+        quantity,
+        avgPrice: 1,
+        markPrice: 1,
+        unrealizedPnl: 0,
+        multiplier: 100,
+      };
+    }
+
+    it('annotates a position with the underlying price its opening fill happened at', async () => {
+      const placed = await trading.place(userId, autoOtmCall(), 'idem-anchor-1');
+      jest
+        .spyOn(gateway, 'getPositions')
+        .mockResolvedValue([positionFor(placed.contractSymbol, 1)]);
+
+      const [position] = await trading.getPositions(userId);
+      // The stub quotes the underlying at a fixed 100 — that is the level the
+      // chart's entry line must be drawn at.
+      expect(position.underlyingEntryPrice).toBe(StubBrokerGateway.PRICE);
+    });
+
+    it('leaves a position unannotated when no fill of it recorded an underlying price', async () => {
+      jest.spyOn(gateway, 'getPositions').mockResolvedValue([positionFor('SPY260717C00505000', 1)]);
+
+      const [position] = await trading.getPositions(userId);
+      expect(position.underlyingEntryPrice).toBeUndefined();
+    });
+
+    it('never fails a positions read because the anchor lookup failed', async () => {
+      jest.spyOn(gateway, 'getPositions').mockResolvedValue([positionFor('SPY260717C00505000', 1)]);
+      jest.spyOn(orders, 'positionAnchors').mockRejectedValue(new Error('db down'));
+
+      await expect(trading.getPositions(userId)).resolves.toHaveLength(1);
+    });
+  });
+
+  describe('post-placement bookkeeping', () => {
+    /**
+     * Once the broker accepts, a bookkeeping failure must not surface as a
+     * thrown order. The catch deletes the idempotency claim so the caller can
+     * retry — after a real placement that retry would submit a SECOND order.
+     */
+    it('returns the order when the audit write fails after the broker accepted', async () => {
+      const place = jest.spyOn(gateway, 'placeOrder');
+      jest.spyOn(prisma.orderAudit, 'update').mockRejectedValueOnce(new Error('connection reset'));
+
+      const result = await trading.place(userId, autoOtmCall(), 'idem-audit-fail');
+
+      expect(place).toHaveBeenCalledTimes(1);
+      expect(result.orderId).toBeTruthy();
+
+      // The claim must survive the failed write. It still holds the result the
+      // audit row never received, so a retry cannot replay — but the invariant
+      // that matters is that it refuses rather than submitting a second order.
+      await expect(trading.place(userId, autoOtmCall(), 'idem-audit-fail')).rejects.toMatchObject({
+        code: 'ORDER_IN_FLIGHT',
+      });
+      expect(place).toHaveBeenCalledTimes(1);
+    });
+  });
+
   describe('validation', () => {
     it('requires optionType for option orders', async () => {
       await expect(
@@ -404,6 +481,117 @@ describe('TradingService', () => {
           autoOtmCall({ selection: { mode: 'explicit', optionType: 'call' } }),
         ),
       ).rejects.toMatchObject({ status: 400, code: 'VALIDATION_ERROR' });
+    });
+  });
+
+  /**
+   * The clients each cap sell-to-close in their own trade panel, but that was
+   * the only cap. A chart bracket leg freezes its size when the line is drawn,
+   * so scaling the position down by hand leaves a stop that would close what
+   * remains and open a short with the rest — unattended.
+   */
+  describe('closing orders are capped to the position', () => {
+    /** The contract auto-OTM resolves to, so the stub position lines up. */
+    async function resolvedSymbol(): Promise<string> {
+      const spy = jest.spyOn(gateway, 'placeOrder');
+      await trading.place(userId, autoOtmCall(), 'idem-warm');
+      const sent = spy.mock.calls[0][1] as OrderRequest;
+      spy.mockRestore();
+      const chain = await gateway.getOptionsChain(userId, 'SPY');
+      return findExplicitOption(chain.contracts, 'call', sent.selection.strike as number)!.symbol;
+    }
+
+    it('caps a sell that exceeds the long position', async () => {
+      const symbol = await resolvedSymbol();
+      jest.spyOn(gateway, 'getPositions').mockResolvedValue([
+        {
+          symbol,
+          assetClass: 'option',
+          quantity: 2,
+          avgPrice: 1,
+          markPrice: 1,
+          unrealizedPnl: 0,
+          multiplier: 100,
+        } as Position,
+      ]);
+      const place = jest.spyOn(gateway, 'placeOrder');
+
+      await trading.place(userId, autoOtmCall({ side: 'sell', quantity: 5 }), 'idem-cap-1');
+
+      expect((place.mock.calls[0][1] as OrderRequest).quantity).toBe(2);
+    });
+
+    it('leaves an opening order alone', async () => {
+      const symbol = await resolvedSymbol();
+      jest.spyOn(gateway, 'getPositions').mockResolvedValue([
+        {
+          symbol,
+          assetClass: 'option',
+          quantity: 2,
+          avgPrice: 1,
+          markPrice: 1,
+          unrealizedPnl: 0,
+          multiplier: 100,
+        } as Position,
+      ]);
+      const place = jest.spyOn(gateway, 'placeOrder');
+
+      // Same direction as the holding: adding, not closing.
+      await trading.place(userId, autoOtmCall({ side: 'buy', quantity: 5 }), 'idem-cap-2');
+
+      expect((place.mock.calls[0][1] as OrderRequest).quantity).toBe(5);
+    });
+
+    it('honours a partial scale-out rather than closing the whole position', async () => {
+      const symbol = await resolvedSymbol();
+      jest.spyOn(gateway, 'getPositions').mockResolvedValue([
+        {
+          symbol,
+          assetClass: 'option',
+          quantity: 10,
+          avgPrice: 1,
+          markPrice: 1,
+          unrealizedPnl: 0,
+          multiplier: 100,
+        } as Position,
+      ]);
+      const place = jest.spyOn(gateway, 'placeOrder');
+
+      await trading.place(userId, autoOtmCall({ side: 'sell', quantity: 4 }), 'idem-cap-3');
+
+      expect((place.mock.calls[0][1] as OrderRequest).quantity).toBe(4);
+    });
+
+    it('places uncapped rather than failing the order when positions cannot be read', async () => {
+      jest.spyOn(gateway, 'getPositions').mockRejectedValue(new Error('broker down'));
+      const place = jest.spyOn(gateway, 'placeOrder');
+
+      await trading.place(userId, autoOtmCall({ side: 'sell', quantity: 3 }), 'idem-cap-4');
+
+      expect((place.mock.calls[0][1] as OrderRequest).quantity).toBe(3);
+    });
+  });
+
+  /**
+   * Each gateway re-derives live-vs-practice from the database when it builds a
+   * client, so the environment the caller validated has to travel with the
+   * order — otherwise a mode flip mid-placement silently reroutes it.
+   */
+  describe('environment is pinned for the whole placement', () => {
+    it("passes the user's current mode to the gateway", async () => {
+      const place = jest.spyOn(gateway, 'placeOrder');
+
+      await trading.place(userId, autoOtmCall(), 'idem-mode-1');
+
+      expect(place.mock.calls[0][3]).toBe('live');
+    });
+
+    it("passes the caller's expected mode when one is given", async () => {
+      const place = jest.spyOn(gateway, 'placeOrder');
+
+      await trading.place(userId, autoOtmCall(), 'idem-mode-2', 'practice');
+
+      expect(place.mock.calls[0][3]).toBe('practice');
     });
   });
 });

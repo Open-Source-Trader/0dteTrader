@@ -169,6 +169,11 @@ struct OrderRequestDTO: Encodable, Equatable, Sendable {
     let side: String
     let quantity: Int
     let orderType: String
+    /// Only sent for `custom`; the server rejects it alongside any other
+    /// variant, because those four are priced from its own quote. Encoded as
+    /// absent rather than null when nil — `JSONEncoder` omits a nil `Optional`
+    /// by default, which is exactly what the DTO's rule wants to see.
+    var limitPrice: Double?
     let selection: OrderSelectionDTO
 }
 
@@ -177,6 +182,11 @@ struct OrderPreviewDTO: Decodable, Equatable, Sendable {
         let contractSymbol: String
         let price: Double
         let estBuyingPower: Double
+        /// The quote the price was resolved against, so the confirm sheet can
+        /// print a custom limit next to the live spread. Optional so a server
+        /// older than this field still decodes rather than failing the preview.
+        let bid: Double?
+        let ask: Double?
     }
 
     let resolved: Resolved
@@ -204,6 +214,54 @@ struct PositionDTO: Decodable, Equatable, Sendable {
     let unrealizedPnl: Double
     /// Contract multiplier (options: 100) for client-side live P/L.
     let multiplier: Double
+    /// Quantity-weighted price of the UNDERLYING across the opening fills —
+    /// where the chart draws this position's entry line. Absent for positions
+    /// opened before it was recorded, or outside the app.
+    let underlyingEntryPrice: Double?
+}
+
+// MARK: - Chart trading
+
+struct ChartOrderDTO: Decodable, Equatable, Sendable {
+    let id: String
+    let underlying: String
+    let triggerPrice: Double
+    let armPrice: Double
+    let side: String
+    let quantity: Int
+    let orderType: String
+    let kind: String
+    let optionType: String
+    let expiration: String
+    let strike: Double
+    let contractSymbol: String
+    let ocoGroupId: String?
+    let status: String
+    let createdAt: String
+    let expiresAt: String
+    let triggeredAt: String?
+    let brokerOrderId: String?
+    let lastError: String?
+}
+
+struct ChartOrderDraftDTO: Encodable, Equatable, Sendable {
+    let underlying: String
+    let triggerPrice: Double
+    let side: String
+    let quantity: Int
+    let orderType: String
+    let kind: String
+    let optionType: String
+    let expiration: String
+    let strike: Double
+    let ocoGroupId: String?
+}
+
+/// Every field optional: the server leaves untouched whatever is omitted.
+struct ChartOrderPatchDTO: Encodable, Equatable, Sendable {
+    var triggerPrice: Double?
+    var quantity: Int?
+    var orderType: String?
 }
 
 struct TradeHistoryEntryDTO: Decodable, Equatable, Sendable {
@@ -241,6 +299,10 @@ struct SocketEnvelope: Decodable, Sendable {
 
 struct SocketQuoteMessage: Decodable, Sendable {
     let data: QuoteDTO
+}
+
+struct SocketChartOrderMessage: Decodable, Sendable {
+    let data: ChartOrderDTO
 }
 
 struct SocketOrderUpdateMessage: Decodable, Sendable {

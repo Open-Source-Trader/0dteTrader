@@ -553,7 +553,9 @@ describe('0dteTrader API (e2e)', () => {
       .expect(200);
     expect(res.body.orderId).toBe(placedOrderId);
 
-    const audits = prisma.orderAudits.filter((a) => a.idempotencyKey === 'e2e-key-1');
+    // Client-supplied keys are namespaced so they cannot collide with the
+    // server-minted `chartorder:{id}` keys the chart-order fire path uses.
+    const audits = prisma.orderAudits.filter((a) => a.idempotencyKey === 'client:e2e-key-1');
     expect(audits).toHaveLength(1);
   });
 

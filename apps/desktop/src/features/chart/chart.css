@@ -2,7 +2,68 @@
    (feature-local, like profile.css). Reduced-motion is handled globally by
    base.css (all animation durations collapse to 1ms). */
 
-/* Circular header icon buttons (drawing tools, indicator settings):
+/* The chips on the chart's first line — symbol, interval, indicators, drawing
+   tools. One chamfered outline for all four, sized to the mode badge next to
+   them, so the row reads as a set rather than as four separate controls.
+   Opaque, because they sit over candles rather than over a card's fill. */
+.chart-chip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 22px;
+  padding: 3px 8px 2px;
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: var(--fs-caption2);
+  letter-spacing: 0.04em;
+  color: var(--label-secondary);
+  background: var(--hud-panel-fill);
+  border: 1px solid var(--hud-stroke-dim);
+  clip-path: polygon(
+    6px 0,
+    calc(100% - 6px) 0,
+    100% 6px,
+    100% calc(100% - 6px),
+    calc(100% - 6px) 100%,
+    6px 100%,
+    0 calc(100% - 6px),
+    0 6px
+  );
+  transition: border-color var(--dur-fast) var(--ease-out);
+}
+
+.chart-chip:hover {
+  border-color: var(--hud-stroke);
+}
+
+.chart-chip:active {
+  transform: scale(var(--press-scale));
+}
+
+/* The header's two account buttons. A fixed square box, because the profile
+   circle and the history clock do not measure alike and unframed they render
+   at two visibly different sizes — 20px, the profile circle's diameter, which
+   is also what the mode badge's border at the other end of this row is pinned
+   to. White, not the chips' grey: an unlabelled glyph with no outline needs
+   the contrast. */
+.header-glyph {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  color: var(--label-primary);
+}
+
+/* An armed drawing tool. The chip keeps its outline and changes color rather
+   than filling in: on this row a solid accent block was the one control that
+   stopped reading as part of the set. */
+.chart-chip.active {
+  color: var(--hud-amber);
+  border-color: var(--hud-amber);
+}
+
+/* Circular header icon buttons (indicator settings):
    compact HUD rings with hover/press feedback. */
 .chart-icon-button {
   width: 32px;
@@ -76,4 +137,147 @@
     opacity: 1;
     transform: none;
   }
+}
+
+/* Permanent placement `+`: chamfered HUD chip. .hud-clip rather than the
+   .hud-chip border-image, whose 21px slices collapse at this size. */
+.order-guide-plus {
+  --hud-chamfer: 5px;
+  position: absolute;
+  z-index: 5;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid var(--hud-stroke);
+  background: var(--hud-panel-fill);
+  color: var(--app-accent);
+  font-family: var(--font-mono);
+  font-size: 15px;
+  line-height: 1;
+  cursor: ns-resize;
+}
+/* Inset: clip-path cuts an outer box-shadow, and the same goes for the global
+   :focus-visible outline, whose 2px offset lands outside the chamfer. */
+.order-guide-plus:hover {
+  background: rgba(46, 143, 255, 0.18);
+  box-shadow: inset 0 0 8px rgba(46, 143, 255, 0.35);
+}
+.order-guide-plus:focus-visible,
+.order-placement__btn:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--hud-glow-strong);
+}
+/* Inert while the window owns the level: the press handler refuses, so the
+   control should not keep advertising a drag it will not perform. */
+.order-guide-plus--inert {
+  opacity: 0.45;
+  cursor: default;
+}
+.order-guide-plus--inert:hover {
+  background: var(--hud-panel-fill);
+  box-shadow: none;
+}
+/* Dormant: no guide has been summoned yet. Invisible and pointer-transparent,
+   so a mouse never meets it — clicking empty chart space is what summons the
+   guide — but still in the tab order, because a keyboard user has no such
+   click and chart order placement must not become pointer-only. It shows
+   itself the moment it takes focus. */
+.order-guide-plus--dormant {
+  opacity: 0;
+  pointer-events: none;
+}
+.order-guide-plus--dormant:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* Chart order window. Vertically centred rather than anchored to the `+`: on a
+   short pane a line-anchored card clips against the top edge, and a window that
+   half-disappears is worse than one that is simply always in the same place. */
+.order-placement {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 6;
+  width: 240px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  font-size: var(--fs-caption);
+  color: var(--label-primary);
+}
+.order-placement__title {
+  font-family: var(--font-display);
+  font-size: var(--fs-caption2);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--app-accent);
+}
+.order-placement__row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.order-placement__row > span {
+  color: var(--label-secondary);
+  min-width: 34px;
+}
+.order-placement__row input {
+  flex: 1;
+  min-width: 0;
+  padding: 5px 6px;
+  border: 1px solid var(--hud-stroke-dim);
+  border-radius: 3px;
+  background: var(--app-background);
+  color: var(--label-primary);
+  font-family: var(--font-mono);
+}
+.order-placement__row input:focus {
+  outline: none;
+  border-color: var(--hud-stroke);
+}
+.order-placement__contract {
+  color: var(--label-secondary);
+  font-family: var(--font-mono);
+  font-size: var(--fs-caption2);
+}
+.order-placement__note {
+  margin: 0;
+  color: var(--label-secondary);
+  font-size: 10px;
+  line-height: 1.35;
+}
+.order-placement__actions {
+  display: flex;
+  gap: var(--space-2);
+}
+/* Chamfered via .hud-clip: the .hud-btn border-image needs ~56px of height and
+   these are 34px. */
+.order-placement__btn {
+  --hud-chamfer: 5px;
+  flex: 1;
+  padding: 8px 0;
+  border: 1px solid var(--hud-stroke);
+  background: transparent;
+  color: var(--app-accent-text);
+  font-family: var(--font-display);
+  font-size: var(--fs-caption2);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+}
+.order-placement__btn--buy {
+  border-color: var(--buy-green);
+  background: rgba(34, 224, 106, 0.16);
+  color: var(--buy-green);
+}
+.order-placement__btn--sell {
+  border-color: var(--sell-red);
+  background: rgba(255, 59, 78, 0.16);
+  color: var(--sell-red);
+}
+.order-placement__btn:disabled {
+  opacity: 0.55;
+  cursor: default;
 }

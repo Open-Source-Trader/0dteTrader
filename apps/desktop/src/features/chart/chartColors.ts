@@ -26,6 +26,10 @@ export interface ChartPalette {
   tagText: string;
   rectFill: string;
   handleFill: string;
+  /** Chart trading: profitable side / losing side / a resting entry limit. */
+  pnlPositive: string;
+  pnlNegative: string;
+  orderLimit: string;
 }
 
 /** Overlay line colors on the main chart (ChartView.overlayColors analog). */
@@ -70,6 +74,9 @@ function resolve(): { chart: ChartPalette; overlay: OverlayPalette; pane: PanePa
         tagText: tokenColor('--app-background', '#050a14'),
         rectFill: tokenColor('--chart-rect-fill', 'rgba(59, 158, 255, 0.12)'),
         handleFill: tokenColor('--label-primary', '#eaf2ff'),
+        pnlPositive: tokenColor('--pnl-positive', '#22e06a'),
+        pnlNegative: tokenColor('--pnl-negative', '#ff3b4e'),
+        orderLimit: tokenColor('--app-accent', '#3b9eff'),
       },
       overlay: {
         sma: tokenColor('--chart-sma', '#3b9eff'),

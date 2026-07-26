@@ -20,6 +20,7 @@ struct OptionsAnalyticsDetailsView: View {
                     row("OI effective", snapshot.quality.oiEffectiveDate ?? "Unavailable")
                     row("Settlement", snapshot.scope.settlementAt)
                 }
+                .listRowBackground(Color.appSurface)
                 Section("Method and quality") {
                     Text(snapshot.exposureUnit)
                     row("Feed", snapshot.quality.feedMode.rawValue)
@@ -41,6 +42,7 @@ struct OptionsAnalyticsDetailsView: View {
                         }
                     }
                 }
+                .listRowBackground(Color.appSurface)
                 Section("Observed structure") {
                     row("Call gamma", optionalNotional(snapshot.structure.callGammaExposure))
                     row("Put gamma", optionalNotional(snapshot.structure.putGammaExposure))
@@ -63,6 +65,7 @@ struct OptionsAnalyticsDetailsView: View {
                     optionalPriceRow("Put wall", snapshot.structure.putWall)
                     optionalPriceRow("Max OI strike", snapshot.structure.maxOpenInterestStrike)
                 }
+                .listRowBackground(Color.appSurface)
                 if settings.showImpliedRange, let range = snapshot.impliedRange {
                     Section("Implied range") {
                         row("Model range", "\(Format.price(range.lower)) – \(Format.price(range.upper))")
@@ -74,6 +77,7 @@ struct OptionsAnalyticsDetailsView: View {
                             "\(Format.price(range.straddleLower)) – \(Format.price(range.straddleUpper))"
                         )
                     }
+                    .listRowBackground(Color.appSurface)
                 }
                 if !snapshot.strikes.isEmpty {
                     Section("Strike profile details") {
@@ -102,6 +106,7 @@ struct OptionsAnalyticsDetailsView: View {
                             }
                         }
                     }
+                    .listRowBackground(Color.appSurface)
                 }
                 if settings.showDealerProxy, let proxy = snapshot.scenarios.callPutDealerProxy {
                     Section("Optional scenario — not observed dealer inventory") {
@@ -114,8 +119,12 @@ struct OptionsAnalyticsDetailsView: View {
                         )
                         optionalPriceRow("Primary gamma flip proxy", proxy.primaryGammaRoot)
                     }
+                    .listRowBackground(Color.appSurface)
                 }
             }
+            // The HUD treatment every other sheet wears; this one was still
+            // rendering on the stock grouped-list backdrop.
+            .hudListChrome()
             .navigationTitle("Options Structure")
             .navigationBarTitleDisplayMode(.inline)
         }

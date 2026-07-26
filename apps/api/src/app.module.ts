@@ -8,6 +8,7 @@ import { GlobalExceptionFilter } from './common/global-exception.filter';
 import { AuthModule } from './auth/auth.module';
 import { JwtAuthGuard } from './auth/jwt-auth.guard';
 import { BrokerModule } from './broker/broker.module';
+import { ChartOrdersModule } from './chart-orders/chart-orders.module';
 import { CredentialsModule } from './credentials/credentials.module';
 import { HealthModule } from './health/health.module';
 import { MarketDataModule } from './market-data/market-data.module';
@@ -41,6 +42,7 @@ import { UsersModule } from './users/users.module';
     BrokerModule,
     MarketDataModule,
     TradingModule,
+    ChartOrdersModule,
     OptionsAnalyticsModule,
   ],
   providers: [

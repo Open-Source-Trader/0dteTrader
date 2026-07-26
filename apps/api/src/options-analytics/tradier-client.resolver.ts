@@ -1,4 +1,4 @@
-import { createHash } from 'crypto';
+import { randomUUID } from 'crypto';
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { TradingMode } from '@0dtetrader/shared-types';
@@ -12,10 +12,11 @@ export const TRADIER_SANDBOX_BASE_URL = 'https://sandbox.tradier.com';
 export interface ResolvedTradier {
   client: TradierClient;
   /**
-   * Cache-scoping token: 'shared' for the env-token client, a secrets
-   * fingerprint prefix for per-user clients. Consumers MUST key any cache
-   * shared across users by this scope — a sandbox key returns delayed
-   * sandbox data that must never be served to another user's live view.
+   * Cache-scoping token: 'shared' for the env-token client, an opaque
+   * random token minted per built client otherwise (deliberately NOT
+   * derived from the secret). Consumers MUST key any cache shared across
+   * users by this scope — a sandbox key returns delayed sandbox data that
+   * must never be served to another user's live view.
    */
   scope: string;
 }
@@ -33,9 +34,12 @@ export type TradierFactory = (token: string, baseUrl: string) => TradierClient;
  *  - practice mode prefers the sandbox key (sandbox base URL) but falls back
  *    to the live key, whose production data is strictly better.
  *
- * Per-user clients are cached and keyed by a fingerprint of the secrets
- * (AlpacaBrokerGateway pattern), so a re-saved key rebuilds the client and
- * its rate-limit state. Resolutions (including "no key") are memoized for
+ * Per-user clients are cached per user and rebuilt when the stored secret
+ * changes — detected by direct comparison against the cached credential
+ * (the plaintext already lives inside the client instance, and hashing a
+ * secret with a fast hash is what CodeQL rightly flags), so a re-saved key
+ * rebuilds the client and its rate-limit state. Resolutions (including
+ * "no key") are memoized for
  * RESOLUTION_TTL_MS, so the hot market-data path pays no per-request DB
  * reads and a key save/delete takes effect within a few seconds. Callers
  * with no user context (capture cron, the shared index-quote poll in
@@ -47,13 +51,13 @@ export class TradierClientResolver {
    *  is re-read. Bounds a key save/delete to a few seconds of staleness while
    *  keeping the hot market-data path free of per-request DB reads. */
   private static readonly RESOLUTION_TTL_MS = 5_000;
-  /** Fingerprint stored for a cached "no key" resolution. */
-  private static readonly NO_KEY = 'none';
 
   private readonly logger = new Logger(TradierClientResolver.name);
+  /** `credential` is `environment:apiKey` for a built client, null for a
+   *  cached "no key" resolution. */
   private readonly clients = new Map<
     string,
-    { fingerprint: string; resolved: ResolvedTradier; refreshedAt: number }
+    { credential: string | null; resolved: ResolvedTradier; refreshedAt: number }
   >();
   private readonly shared: ResolvedTradier;
 
@@ -78,17 +82,11 @@ export class TradierClientResolver {
     try {
       const secrets = await this.storedKeyFor(userId);
       if (!secrets) {
-        this.clients.set(userId, {
-          fingerprint: TradierClientResolver.NO_KEY,
-          resolved: this.shared,
-          refreshedAt: now,
-        });
+        this.clients.set(userId, { credential: null, resolved: this.shared, refreshedAt: now });
         return this.shared;
       }
-      const fingerprint = createHash('sha256')
-        .update(`${secrets.environment}:${secrets.apiKey}`)
-        .digest('hex');
-      if (cached?.fingerprint === fingerprint) {
+      const credential = `${secrets.environment}:${secrets.apiKey}`;
+      if (cached?.credential === credential) {
         cached.refreshedAt = now;
         return cached.resolved;
       }
@@ -98,9 +96,11 @@ export class TradierClientResolver {
           : this.config.get<string>('tradier.baseUrl') || 'https://api.tradier.com';
       const resolved: ResolvedTradier = {
         client: this.factory(secrets.apiKey, baseUrl),
-        scope: fingerprint.slice(0, 16),
+        // Opaque, never secret-derived: it keys shared caches and shows up
+        // in log lines (e.g. options_analytics_stale_fallback).
+        scope: `u-${randomUUID()}`,
       };
-      this.clients.set(userId, { fingerprint, resolved, refreshedAt: now });
+      this.clients.set(userId, { credential, resolved, refreshedAt: now });
       return resolved;
     } catch (err) {
       // A broken stored key (corrupt blob, DB read failure) must degrade to

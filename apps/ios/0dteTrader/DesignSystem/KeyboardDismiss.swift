@@ -38,8 +38,10 @@ extension View {
     /// Self-gating: the keyboard frame notifications say when a keyboard is up,
     /// so callers do not need to know which field has focus — which is what
     /// lets one copy of this serve a whole screen of fields it cannot name.
-    /// While no keyboard is up the gestures are masked to `.subviews` and every
-    /// touch goes exactly where it always went.
+    /// While no keyboard is up the gestures are masked to `.subviews`, which
+    /// disables the *added* gesture while leaving every subview gesture alone —
+    /// so every touch goes exactly where it always went. (`.gesture` is the
+    /// reverse: it would keep ours and kill the subviews'.)
     func dismissKeyboardOnInteraction() -> some View {
         modifier(DismissKeyboardOnInteraction())
     }

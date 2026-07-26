@@ -63,10 +63,26 @@ enum ChartMetrics {
     /// exactly the widest label, which parks the first digit on the card's
     /// stroke and reads as a clipped number; this is the gap that fixes it.
     static let priceAxisLeftInset: CGFloat = 6
-    /// Leading pad for SwiftUI chrome laid over the pane (the price readout,
-    /// the STRUCT chip, the analytics error): past the axis gutter, so a label
-    /// and an overlay never print over one another.
+    /// Leading pad for SwiftUI chrome laid over the pane (the analytics error):
+    /// past the axis gutter, so a label and an overlay never print over one
+    /// another. The top-row chrome hugs the borders instead and accepts the
+    /// overlap, which only ever falls on the topmost axis label.
     static let overlayLeading: CGFloat = 52 + priceAxisLeftInset
+    /// Corner cut on the price card.
+    static let paneChamfer: CGFloat = 10
+
+    /// Inset that seats a corner control equally off both borders and the
+    /// diagonal of a chamfered corner.
+    ///
+    /// The bottom-right chamfer is the line `x + y = W + H - c`. A corner point
+    /// `m` in from both borders sits at `(W - m, H - m)`, a perpendicular
+    /// `(2m - c) / √2` from it, so equal spacing on all three edges is
+    /// `m = c / (2 - √2)`. A corner rounded by `r` reaches `r` closer to the
+    /// diagonal than its bounding box does, so the inset owes that back.
+    /// With c = 10 and r = 4 this is 13.07pt.
+    static func cornerSeat(cornerRadius: CGFloat, chamfer: CGFloat = paneChamfer) -> CGFloat {
+        chamfer / (2 - sqrt(2)) - cornerRadius
+    }
 }
 
 /// Cached date formatters for axis/marker time labels.

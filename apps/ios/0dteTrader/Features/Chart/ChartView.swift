@@ -37,6 +37,8 @@ struct ChartView: View {
     @State private var paneResetTokens: [String: Int] = [:]
 
     private let paneHeight: CGFloat = 68
+    private static let resetCornerRadius: CGFloat = 4
+    private static let resetInset = ChartMetrics.cornerSeat(cornerRadius: resetCornerRadius)
 
     init(
         viewModel: ChartViewModel,
@@ -152,8 +154,8 @@ struct ChartView: View {
                         .accessibilityAddTraits(.isModal)
                 }
             }
-            .clipShape(HudPanelShape(chamfer: 10))
-            .hudCard(accent: .hudStrokeDim, glow: false, ticks: false)
+            .clipShape(HudPanelShape(chamfer: ChartMetrics.paneChamfer))
+            .hudCard(accent: .hudStrokeDim, chamfer: ChartMetrics.paneChamfer, glow: false, ticks: false)
             .padding(.horizontal, AppSpacing.sm)
             .padding(.vertical, AppSpacing.xxs)
             .layoutPriority(1)
@@ -461,24 +463,36 @@ struct ChartView: View {
                 .font(.system(size: 11, weight: .semibold, design: .monospaced))
                 .foregroundStyle(.secondary)
                 .frame(width: 24, height: 24)
-                .background(Color.appSurface, in: RoundedRectangle(cornerRadius: 4))
-                .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(Color.hudStroke.opacity(0.5), lineWidth: 1))
+                .background(Color.appSurface, in: RoundedRectangle(cornerRadius: Self.resetCornerRadius))
+                .overlay(
+                    RoundedRectangle(cornerRadius: Self.resetCornerRadius)
+                        .strokeBorder(Color.hudStroke.opacity(0.5), lineWidth: 1)
+                )
         }
         .opacity(0.7)
         .accessibilityLabel("Reset chart view")
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
-        .padding(.trailing, AppSpacing.sm)
-        .padding(.bottom, 28)
+        // Seated in the corner cut rather than parked above the time axis: the
+        // same gap to the bottom border, the right border and the chamfer.
+        .padding(.trailing, Self.resetInset)
+        .padding(.bottom, Self.resetInset)
     }
 
     // MARK: - On-chart top row
 
-    /// Quote readout hard left, mode badge hard right, both on the pane's first
-    /// line. Only the two chips inside take touches — the row has no shape of
-    /// its own, so the candles still answer everywhere between them.
+    /// Symbol menu hard left, mode badge hard right, quote readout centred
+    /// between them, all on the pane's first line. The two matching Spacers do
+    /// the centring: it is the midpoint of the gap the two chips leave, not of
+    /// the pane, so the readout stays clear of both however wide they run.
+    ///
+    /// Only the chips take touches — the row has no shape of its own, so the
+    /// candles still answer the single tap and the triple tap everywhere
+    /// between them.
     private var chartTopBar: some View {
         HStack(alignment: .top, spacing: AppSpacing.sm) {
-            VStack(alignment: .leading, spacing: AppSpacing.xs) {
+            ChartSymbolButton(symbol: viewModel.symbol, action: onSymbolSearch)
+            Spacer(minLength: AppSpacing.sm)
+            VStack(spacing: AppSpacing.xs) {
                 if let quote = viewModel.quote {
                     ChartQuoteReadout(
                         quote: quote,
@@ -503,8 +517,7 @@ struct ChartView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .padding(.leading, ChartMetrics.overlayLeading)
-        .padding(.trailing, AppSpacing.sm)
+        .padding(.horizontal, AppSpacing.sm)
         .padding(.top, AppSpacing.sm)
         // Capped for the same reason the header is: past XXXL the readout wraps
         // and starts covering the candles it is supposed to be labelling. The
@@ -515,12 +528,40 @@ struct ChartView: View {
 
     // MARK: - Header
 
-    /// One bar for the whole top of the screen: wordmark and the two account
-    /// destinations on the left, chart controls on the right. The quote block
-    /// that used to sit between them now labels the candles instead, which is
-    /// what made room for the navigation bar to be folded in here.
+    /// One bar for the whole top of the screen: the two account destinations on
+    /// the left, chart controls on the right, wordmark centred between them.
+    ///
+    /// Both side groups take `maxWidth: .infinity`, so they split the slack
+    /// evenly and the wordmark lands on the bar's midline rather than on the
+    /// midpoint of two unequal groups — the symbol menu leaving for the chart
+    /// made the right group much the wider of the two.
     private var header: some View {
         HStack(spacing: AppSpacing.xs) {
+            HStack(spacing: AppSpacing.xs) {
+                Button {
+                    onShowProfile()
+                } label: {
+                    Image(systemName: "person.circle")
+                        .font(.title3)
+                        .foregroundStyle(Color.appAccent)
+                        .frame(width: 34, height: 36)
+                        .contentShape(Rectangle())
+                }
+                .accessibilityLabel("Profile")
+
+                Button {
+                    onShowHistory()
+                } label: {
+                    Image(systemName: "clock.arrow.circlepath")
+                        .font(.subheadline)
+                        .foregroundStyle(Color.appAccent)
+                        .frame(width: 34, height: 36)
+                        .contentShape(Rectangle())
+                }
+                .accessibilityLabel("Trade history")
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
             Text("0dteTrader")
                 .font(.hudButton)
                 .foregroundStyle(Color.appAccent)
@@ -532,85 +573,37 @@ struct ChartView: View {
                 .lineLimit(1)
                 .minimumScaleFactor(0.45)
                 .allowsTightening(true)
-                .layoutPriority(-1)
 
-            Button {
-                onShowProfile()
-            } label: {
-                Image(systemName: "person.circle")
-                    .font(.title3)
-                    .foregroundStyle(Color.appAccent)
-                    .frame(width: 34, height: 36)
-                    .contentShape(Rectangle())
-            }
-            .accessibilityLabel("Profile")
+            HStack(spacing: AppSpacing.xs) {
+                intervalMenu
 
-            Button {
-                onShowHistory()
-            } label: {
-                Image(systemName: "clock.arrow.circlepath")
-                    .font(.subheadline)
-                    .foregroundStyle(Color.appAccent)
-                    .frame(width: 34, height: 36)
-                    .contentShape(Rectangle())
-            }
-            .accessibilityLabel("Trade history")
+                drawingToolsMenu
 
-            Spacer(minLength: AppSpacing.xs)
-
-            Button {
-                Haptics.selection()
-                onSymbolSearch()
-            } label: {
-                HStack(spacing: AppSpacing.xs) {
-                    Text(viewModel.symbol)
-                        .font(.hudButton)
-                    Image(systemName: "chevron.down")
-                        .font(.caption2.weight(.bold))
+                Button {
+                    Haptics.selection()
+                    onIndicatorSettings()
+                } label: {
+                    Image(systemName: "slider.horizontal.3")
+                        .font(.subheadline)
                         .foregroundStyle(Color.appAccent)
-                }
-                .foregroundStyle(.primary)
-                .padding(.horizontal, AppSpacing.sm)
-                .frame(minHeight: 36)
-                .background {
-                    HudPanelShape(chamfer: 6)
-                        .fill(Color.hudPanel)
-                        .overlay {
-                            HudPanelShape(chamfer: 6)
-                                .strokeBorder(Color.hudStroke.opacity(0.6), lineWidth: 1.2)
+                        .frame(width: 36, height: 36)
+                        .background {
+                            Circle()
+                                .fill(Color.hudPanel)
+                                .overlay { Circle().strokeBorder(Color.hudStroke.opacity(0.35), lineWidth: 1) }
                         }
+                        .contentShape(Circle())
                 }
-                .contentShape(Rectangle())
+                .accessibilityLabel("Indicator settings")
             }
-            .accessibilityLabel("Change symbol")
-
-            intervalMenu
-
-            drawingToolsMenu
-
-            Button {
-                Haptics.selection()
-                onIndicatorSettings()
-            } label: {
-                Image(systemName: "slider.horizontal.3")
-                    .font(.subheadline)
-                    .foregroundStyle(Color.appAccent)
-                    .frame(width: 36, height: 36)
-                    .background {
-                        Circle()
-                            .fill(Color.hudPanel)
-                            .overlay { Circle().strokeBorder(Color.hudStroke.opacity(0.35), lineWidth: 1) }
-                    }
-                    .contentShape(Circle())
-            }
-            .accessibilityLabel("Indicator settings")
+            .frame(maxWidth: .infinity, alignment: .trailing)
         }
         .padding(.horizontal, AppSpacing.sm)
         .padding(.vertical, AppSpacing.xs)
         .hudCard(accent: .hudStrokeDim, chamfer: 8, glow: false, ticks: false)
         .padding(.horizontal, AppSpacing.sm)
         .padding(.top, AppSpacing.xxs)
-        // Seven controls on one line: at the accessibility sizes the glyphs
+        // Five controls and the wordmark on one line: at the accessibility sizes the glyphs
         // outgrow their 36pt targets and start overlapping each other, which is
         // worse than not scaling. Capped at XXXL, where it still fits with room
         // to spare; every button keeps its VoiceOver label and its touch target.

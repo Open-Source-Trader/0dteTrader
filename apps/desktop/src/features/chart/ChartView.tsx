@@ -115,6 +115,18 @@ export function ChartView({
 
   const closes = useMemo(() => candles.map((c) => c.close), [candles]);
 
+  // Percent change vs the open of the current session's first candle — the
+  // same client-side prev-close proxy the iOS view model uses, since Quote
+  // carries no previous close.
+  const dayChangePercent = useMemo<number | null>(() => {
+    const lastBar = candles[candles.length - 1];
+    if (!lastBar) return null;
+    const day = new Date(lastBar.time * 1000).toDateString();
+    const open = candles.find((c) => new Date(c.time * 1000).toDateString() === day)?.open;
+    if (!open) return null;
+    return (((quote?.last ?? lastBar.close) - open) / open) * 100;
+  }, [candles, quote]);
+
   const overlays = useMemo<OverlaySeries[]>(() => {
     const colors = overlayPalette();
     const result: OverlaySeries[] = [];
@@ -264,10 +276,12 @@ export function ChartView({
 
   return (
     <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-      {/* Header — one bar for the whole top of the screen: wordmark and the
-          account destinations on the left, chart controls on the right. The
-          quote block that used to sit between them labels the candles now,
-          which is what made room to fold the navigation bar in here. */}
+      {/* Header — one bar for the whole top of the screen: the account
+          destinations on the left, chart controls on the right, wordmark
+          centred between them. Both side groups are `flex: 1 1 0`, so they
+          split the slack evenly and the wordmark lands on the bar's midline
+          rather than on the midpoint of two unequal groups — the symbol menu
+          leaving for the chart made the right group much the wider. */}
       <div
         className="hud-chip hud-card--flat"
         style={{
@@ -279,40 +293,34 @@ export function ChartView({
           flex: 'none',
         }}
       >
+        <div style={{ flex: '1 1 0', display: 'flex', alignItems: 'center', gap: 4 }}>
+          <button className="navbar-icon-button" onClick={onShowProfile} aria-label="Profile">
+            <PersonCircleIcon size={20} />
+          </button>
+          <button className="navbar-icon-button" onClick={onShowHistory} aria-label="Trade history">
+            <ClockIcon size={18} />
+          </button>
+        </div>
+
+        {/* `hud-title`, not `navbar-title`: the latter's styles are scoped to
+            `.navbar`, which this bar replaced, so the wordmark was rendering
+            as plain body text. */}
         <span
-          className="navbar-title"
-          style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'clip', whiteSpace: 'nowrap' }}
+          className="hud-title"
+          style={{ fontSize: 'var(--fs-headline)', whiteSpace: 'nowrap' }}
         >
           0dteTrader
         </span>
-        <button className="navbar-icon-button" onClick={onShowProfile} aria-label="Profile">
-          <PersonCircleIcon size={20} />
-        </button>
-        <button className="navbar-icon-button" onClick={onShowHistory} aria-label="Trade history">
-          <ClockIcon size={18} />
-        </button>
 
-        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
-          <button
-            className="hud-chip"
-            style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '5px 6px' }}
-            onClick={onSymbolSearch}
-            aria-label={`Symbol ${symbol}. Change symbol`}
-          >
-            <span
-              style={{
-                fontFamily: 'var(--font-display)',
-                fontSize: 'var(--fs-subheadline)',
-                fontWeight: 700,
-                letterSpacing: '0.03em',
-              }}
-            >
-              {symbol}
-            </span>
-            <span aria-hidden="true" style={{ display: 'flex', color: 'var(--app-accent)' }}>
-              <ChevronDownIcon size={12} />
-            </span>
-          </button>
+        <div
+          style={{
+            flex: '1 1 0',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'flex-end',
+            gap: 6,
+          }}
+        >
           <Menu
             trigger={
               <button
@@ -376,99 +384,135 @@ export function ChartView({
             onToggleFullscreen();
           }}
         >
-          {/* The quote readout labels the candles it belongs to (TradingView's
-              arrangement) rather than sitting in a bar above them. Inert: the
-              surface under it answers a triple click with the fullscreen
-              toggle, and a label must not eat that. */}
-          {quote ? (
-            <div
-              style={{
-                position: 'absolute',
-                top: 8,
-                left: 65,
-                zIndex: 4,
-                pointerEvents: 'none',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: 1,
-                padding: '2px 6px',
-                borderRadius: 4,
-                // Candles run under this corner; the numbers carry their own
-                // backing rather than relying on what happens to be behind.
-                background: 'rgba(0, 0, 0, 0.55)',
-              }}
-            >
-              <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <span
-                  style={{
-                    fontFamily: 'var(--font-mono)',
-                    fontSize: 18,
-                    fontWeight: 600,
-                    fontVariantNumeric: 'tabular-nums',
-                    textShadow: '0 0 8px var(--hud-glow)',
-                  }}
-                >
-                  {Format.price(quote.last)}
-                </span>
-                {isStale ? (
-                  <span
-                    style={{
-                      fontSize: 'var(--fs-caption2)',
-                      color: 'var(--warning-orange)',
-                      fontWeight: 600,
-                    }}
-                  >
-                    ● STALE
-                  </span>
-                ) : null}
-              </span>
-              <span
-                style={{
-                  fontFamily: 'var(--font-mono)',
-                  fontSize: 'var(--fs-caption2)',
-                  fontVariantNumeric: 'tabular-nums',
-                  display: 'flex',
-                  gap: 10,
-                }}
-              >
-                <span>
-                  <span style={{ color: 'var(--buy-green)', fontWeight: 600 }}>BID </span>
-                  <span style={{ color: 'var(--buy-green)' }}>{Format.price(quote.bid)}</span>
-                </span>
-                <span>
-                  <span style={{ color: 'var(--sell-red)', fontWeight: 600 }}>ASK </span>
-                  <span style={{ color: 'var(--sell-red)' }}>{Format.price(quote.ask)}</span>
-                </span>
-                {tickProgress ? (
-                  <span
-                    style={{ color: 'var(--label-secondary)' }}
-                    aria-label={`Building candle: ${tickProgress.count} of ${tickProgress.size} ticks`}
-                  >
-                    {tickProgress.count}/{tickProgress.size} ticks
-                  </span>
-                ) : null}
-              </span>
-            </div>
-          ) : null}
-          {/* Hard against the top-trailing border, on the readout's line. It
-              used to step inboard of the guide's `+` handle band and of the
-              analytics rail; parked ~130px off the edge it read as floating in
-              the pane rather than labelling it, so both overlaps were traded
-              away for the corner. */}
-          <button
-            className={tradingMode === 'live' ? 'hud-badge hud-badge--live' : 'hud-badge'}
-            onClick={onToggleMode}
-            aria-label={`Trading mode ${tradingMode === 'live' ? 'LIVE' : 'PRACTICE'}. Switch mode`}
+          {/* Top row over the candles: symbol menu hard against the leading
+              border, mode badge hard against the trailing one, quote readout
+              centred between them by the auto margins. Both chips sit 8px off
+              their two borders, which reads as a matched pair.
+
+              The row is inert apart from the two buttons, so the surface below
+              still answers a triple click with the fullscreen toggle. */}
+          <div
             style={{
               position: 'absolute',
               top: 8,
+              left: 8,
               right: 8,
               zIndex: 5,
-              background: 'var(--hud-panel)',
+              display: 'flex',
+              alignItems: 'flex-start',
+              gap: 8,
+              pointerEvents: 'none',
             }}
           >
-            {tradingMode === 'live' ? 'LIVE' : 'PRACTICE'}
-          </button>
+            <button
+              className="hud-chip"
+              style={{
+                pointerEvents: 'auto',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 4,
+                padding: '5px 6px',
+                // Opaque, like the mode badge: it sits over candles now, not
+                // over the header card's fill.
+                background: 'var(--hud-panel)',
+              }}
+              onClick={onSymbolSearch}
+              aria-label={`Symbol ${symbol}. Change symbol`}
+            >
+              <span
+                style={{
+                  fontFamily: 'var(--font-display)',
+                  fontSize: 'var(--fs-subheadline)',
+                  fontWeight: 700,
+                  letterSpacing: '0.03em',
+                }}
+              >
+                {symbol}
+              </span>
+              <span aria-hidden="true" style={{ display: 'flex', color: 'var(--app-accent)' }}>
+                <ChevronDownIcon size={12} />
+              </span>
+            </button>
+            {/* Last price and percent change only. The bid/ask pair was the
+                width that forced this block onto a plate of its own; without
+                it the numbers are short enough to sit on the candles unbacked,
+                which keeps the chart reading as one surface. A tight black
+                shadow does the legibility work the box used to. */}
+            <div
+              style={{
+                margin: '0 auto',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                gap: 1,
+                textShadow: '0 1px 3px rgba(0, 0, 0, 0.85)',
+              }}
+            >
+              {quote ? (
+                <span style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
+                  <span
+                    style={{
+                      fontFamily: 'var(--font-mono)',
+                      fontSize: 18,
+                      fontWeight: 600,
+                      fontVariantNumeric: 'tabular-nums',
+                      textShadow: '0 0 8px var(--hud-glow), 0 1px 3px rgba(0, 0, 0, 0.85)',
+                    }}
+                  >
+                    {Format.price(quote.last)}
+                  </span>
+                  {dayChangePercent !== null ? (
+                    <span
+                      style={{
+                        fontFamily: 'var(--font-mono)',
+                        fontSize: 'var(--fs-footnote)',
+                        fontWeight: 500,
+                        fontVariantNumeric: 'tabular-nums',
+                        color:
+                          dayChangePercent >= 0 ? 'var(--pnl-positive)' : 'var(--pnl-negative)',
+                      }}
+                      aria-label={`${dayChangePercent >= 0 ? 'Up' : 'Down'} ${Math.abs(dayChangePercent).toFixed(2)} percent today`}
+                    >
+                      ({dayChangePercent >= 0 ? '+' : '−'}
+                      {Math.abs(dayChangePercent).toFixed(2)}%)
+                    </span>
+                  ) : null}
+                  {isStale ? (
+                    <span
+                      style={{
+                        fontSize: 'var(--fs-caption2)',
+                        color: 'var(--warning-orange)',
+                        fontWeight: 600,
+                      }}
+                    >
+                      ● STALE
+                    </span>
+                  ) : null}
+                </span>
+              ) : null}
+              {tickProgress ? (
+                <span
+                  style={{
+                    fontFamily: 'var(--font-mono)',
+                    fontSize: 'var(--fs-caption2)',
+                    fontVariantNumeric: 'tabular-nums',
+                    color: 'var(--label-secondary)',
+                  }}
+                  aria-label={`Building candle: ${tickProgress.count} of ${tickProgress.size} ticks`}
+                >
+                  {tickProgress.count}/{tickProgress.size} ticks
+                </span>
+              ) : null}
+            </div>
+            <button
+              className={tradingMode === 'live' ? 'hud-badge hud-badge--live' : 'hud-badge'}
+              onClick={onToggleMode}
+              aria-label={`Trading mode ${tradingMode === 'live' ? 'LIVE' : 'PRACTICE'}. Switch mode`}
+              style={{ pointerEvents: 'auto', background: 'var(--hud-panel)' }}
+            >
+              {tradingMode === 'live' ? 'LIVE' : 'PRACTICE'}
+            </button>
+          </div>
           <CandleChart
             candles={candles}
             overlays={twcLineOverlays.length > 0 ? [...overlays, ...twcLineOverlays] : overlays}

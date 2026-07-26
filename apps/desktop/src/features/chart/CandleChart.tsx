@@ -448,10 +448,16 @@ export function CandleChart({
       <button
         onClick={resetView}
         aria-label="Reset chart view"
+        // Seated in the card's bottom-right corner cut rather than parked above
+        // the time axis. The chamfer is the line `x + y = W + H - c`; a corner
+        // point `m` in from both borders is `(2m - c) / √2` from it, so equal
+        // spacing on all three edges is `m = c / (2 - √2)`, less the 4px corner
+        // radius, which reaches that much closer to the diagonal.
+        // c = var(--hud-chamfer) = 10px → 10 / (2 - √2) - 4 = 13.07.
         style={{
           position: 'absolute',
-          bottom: 28,
-          right: 8,
+          bottom: 13,
+          right: 13,
           zIndex: 5,
           width: 24,
           height: 24,

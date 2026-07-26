@@ -64,7 +64,7 @@ export function LoginView({ store }: { store: AuthStore }) {
             0dteTrader
           </h1>
           <span className="text-secondary" style={{ fontSize: 'var(--fs-subheadline)' }}>
-            Rapid options trading
+            Open Source Trader
           </span>
         </div>
 

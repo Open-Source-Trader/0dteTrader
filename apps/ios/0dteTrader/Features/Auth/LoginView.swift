@@ -26,7 +26,7 @@ struct LoginView: View {
                         .font(.custom("Orbitron-Bold", size: 30, relativeTo: .largeTitle))
                         .foregroundStyle(Color.appAccent)
                         .shadow(color: .hudGlow, radius: 10)
-                    Text("Rapid options trading")
+                    Text("Open Source Trader")
                         .font(.panelLabel)
                         .foregroundStyle(.secondary)
                 }

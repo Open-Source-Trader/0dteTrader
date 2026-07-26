@@ -35,6 +35,23 @@ final class GuideHandleElement: UIAccessibilityElement {
         overlay?.stepGuidePrice(by: -AppPlacementGuide.adjustmentStep)
     }
 
+    /// Dismissal, offered through the rotor rather than by overloading the
+    /// double-tap. Everyone else dismisses with a second tap on empty chart
+    /// space, which VoiceOver cannot make; making activation mean "arm" or
+    /// "dismiss" depending on state would leave the primary gesture doing two
+    /// different things with nothing on screen to say which. The element only
+    /// carries it while a guide is actually showing.
+    ///
+    /// Built once and reused: the element is long-lived precisely so focus
+    /// survives repaints, and handing VoiceOver a freshly allocated action on
+    /// every frame would churn the rotor under someone reading it. `[weak self]`
+    /// because the action is stored on the element the closure reaches back to.
+    private(set) lazy var dismissAction = UIAccessibilityCustomAction(
+        name: "Dismiss the placement guide"
+    ) { [weak self] _ in
+        self?.overlay?.dismissGuide() ?? false
+    }
+
     /// Reached through the container UIKit already holds weakly, so the view's
     /// `accessibilityElements` array does not retain the view back.
     private var overlay: OrderLineOverlayView? {
@@ -124,13 +141,30 @@ extension OrderLineOverlayView {
     func toggleGuide(at point: CGPoint) {
         guard settings.enabled, hasSelectedContract, !isPlacementOpen else { return }
         if guidePrice != nil {
-            guidePrice = nil
-        } else {
-            guard let price = price(at: point.y) else { return }
-            guidePrice = price
+            _ = dismissGuide()
+            return
         }
+        guard let price = price(at: point.y) else { return }
+        guidePrice = price
         Haptics.impact(.light)
         setNeedsDisplay()
+    }
+
+    /// Puts the guide away. The tap-on-empty-space half of `toggleGuide`, split
+    /// out so VoiceOver's custom action and the pointer share one path — a
+    /// dismissal that only one of them performed would be a state the other
+    /// could not get out of.
+    ///
+    /// Reports whether it did anything, which is what a custom action's handler
+    /// returns: a call with no guide showing, or with the card holding the
+    /// level, is one VoiceOver should announce as failed rather than silently
+    /// swallow.
+    fileprivate func dismissGuide() -> Bool {
+        guard !isPlacementOpen, guidePrice != nil else { return false }
+        guidePrice = nil
+        Haptics.impact(.light)
+        setNeedsDisplay()
+        return true
     }
 
     /// Assistive tech's route through the handle, which has no drag and no tap
@@ -307,12 +341,19 @@ extension OrderLineOverlayView {
             handle.accessibilityTraits = isPlacementOpen
                 ? [.button, .adjustable, .notEnabled]
                 : [.button, .adjustable]
+            // Dismissal, for the second tap on empty chart space that VoiceOver
+            // cannot make. Withheld while the card owns the level, for the same
+            // reason the handle refuses touches then.
+            handle.accessibilityCustomActions = isPlacementOpen ? nil : [handle.dismissAction]
             handle.accessibilityFrameInContainerSpace = handleTouchFrame
         } else {
             handle.accessibilityLabel = "Show the order placement guide"
             handle.accessibilityValue = nil
             handle.accessibilityHint = nil
             handle.accessibilityTraits = .button
+            // Nothing to dismiss: offering it here would be an action that
+            // cannot do anything.
+            handle.accessibilityCustomActions = nil
             handle.accessibilityFrameInContainerSpace = dormantHandleTouchFrame
         }
         return handle

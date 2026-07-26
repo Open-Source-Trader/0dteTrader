@@ -143,6 +143,41 @@ final class PlacementGuideTests: XCTestCase {
         XCTAssertGreaterThan(width - (row.right + AppOrderLine.rowLineGap), overlay.rightInset / 2)
     }
 
+    // MARK: - Accessibility
+
+    /// Everyone else dismisses the guide with a second tap on empty chart space.
+    /// VoiceOver cannot make that tap, so without the custom action a summoned
+    /// guide could never be put away without a pointer. It is offered only while
+    /// one is showing — a dismiss on the dormant handle would do nothing.
+    @MainActor
+    func testVoiceOverCanDismissAGuideItSummoned() {
+        let overlay = OrderLineOverlayView(frame: CGRect(x: 0, y: 0, width: 430, height: 400))
+        overlay.settings = .default
+        overlay.hasSelectedContract = true
+
+        // Dormant: an element to focus, but nothing to dismiss.
+        overlay.guidePrice = nil
+        overlay.handleFrame = .zero
+        let dormant = overlay.placementAccessibilityElement()
+        XCTAssertEqual(dormant?.accessibilityLabel, "Show the order placement guide")
+        XCTAssertNil(dormant?.accessibilityCustomActions)
+
+        // Showing: the action is there and it actually puts the guide away.
+        overlay.guidePrice = 500
+        overlay.handleFrame = CGRect(x: overlay.handleLeft, y: 100, width: 20, height: 20)
+        let showing = overlay.placementAccessibilityElement()
+        let actions = showing?.accessibilityCustomActions
+        XCTAssertEqual(actions?.count, 1)
+        XCTAssertEqual(actions?.first?.name, "Dismiss the placement guide")
+        XCTAssertTrue(actions?.first?.actionHandler?(actions![0]) ?? false)
+        XCTAssertNil(overlay.guidePrice)
+        XCTAssertFalse(overlay.isGuideShowing)
+
+        // And a second invocation reports failure rather than silently
+        // succeeding at nothing.
+        XCTAssertFalse(actions?.first?.actionHandler?(actions![0]) ?? true)
+    }
+
     // MARK: - Level input
 
     /// The defect the desktop twin shipped: holding the raw text only while it

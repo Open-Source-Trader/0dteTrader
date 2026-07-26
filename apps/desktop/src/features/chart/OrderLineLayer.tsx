@@ -5,6 +5,7 @@ import { bracketKindFor } from '@0dtetrader/shared-types';
 import { useStore } from '../../core/observable';
 import { Format } from '../../design/format';
 import { chartPalette } from './chartColors';
+import { isPointerClaimed } from './chartPointerClaim';
 import type { ChartCandle } from './ChartStore';
 import type { ChartOrdersStore } from './chartOrders';
 import { isWorking, kindLabel, orderTypeLabel } from './chartOrders';
@@ -111,8 +112,10 @@ export function OrderLineLayer({
    *  they survive with a disposed series behind them. */
   const endDragRef = useRef<() => void>(() => {});
   const hoverRef = useRef<{ id: string; pill: PillKey | null } | null>(null);
-  /** The guide's level. A ref, not state: it changes on every drag frame and
-   *  the canvas is already repainting — re-rendering React at 60fps to move an
+  /** The guide's level, or null when no guide is showing — which is the resting
+   *  state: a click on empty chart space summons it and the next one dismisses
+   *  it. A ref, not state: it changes on every drag frame and the canvas is
+   *  already repainting — re-rendering React at 60fps to move an
    *  absolutely-positioned button is pure waste. */
   const guidePriceRef = useRef<number | null>(null);
   const guideDragRef = useRef(false);
@@ -135,7 +138,6 @@ export function OrderLineLayer({
     onFlatten,
     onCancelOrder,
     rightInset,
-    candles,
     placementPrice,
   });
   latest.current = {
@@ -148,7 +150,6 @@ export function OrderLineLayer({
     onFlatten,
     onCancelOrder,
     rightInset,
-    candles,
     placementPrice,
   };
 
@@ -228,21 +229,36 @@ export function OrderLineLayer({
       ctx.font = FONT;
 
       const rows: LineRow[] = [];
-      // Resolved before the rows are laid out, because it decides how much room
-      // they get: the guide is suppressed when there is no contract to trade,
-      // and only a drawn handle needs a band reserved for it.
+      // The guide is resolved before the rows are laid out, because whether one
+      // is showing decides how much room they get. It is suppressed outright
+      // when there is no contract to trade, since arming a line against nothing
+      // is not a state the user can act on.
       const guideOn = latest.current.settings.enabled && latest.current.selectedContract !== null;
-      /** Left edge of the `+` handle. */
-      const plusLeft = pane.width - latest.current.rightInset - PLUS_MARGIN - PLUS_SIZE;
-      // Rows stop short of the handle rather than running under it. The handle
-      // is a DOM button stacked above this canvas, so it takes the click from
-      // any control it covers — and the rightmost control is ✕, which cancels a
-      // live order. Resolving it the other way is not an option: a row at the
-      // guide's level would make the handle unreachable, and the handle is the
-      // only way to move the guide.
+      const open = latest.current.placementPrice;
+      // While the window is open it owns the level (`open ?? …`), so the guide
+      // does not shift underneath the number the user is editing.
+      const guide = !guideOn
+        ? null
+        : (open ??
+          resolveGuidePrice(guidePriceRef.current, {
+            max: series.coordinateToPrice(0) ?? NaN,
+            min: series.coordinateToPrice(pane.height) ?? NaN,
+          }));
+      guidePriceRef.current = guide;
+      /** Left edge of the `+` handle: flush to the pane's right border. */
+      const plusLeft = pane.width - PLUS_MARGIN - PLUS_SIZE;
+      // Rows stop short of the handle rather than running under it, but only
+      // while a handle is actually showing — it is summoned and dismissed, and
+      // a band reserved against a control that is not there just costs every
+      // row width for nothing. The band itself is not optional while it is:
+      // the handle is a DOM button stacked above this canvas, so it takes the
+      // click from any control it covers, and the rightmost control is ✕, which
+      // cancels a live order. Resolving it the other way is not an option — a
+      // row at the guide's level would make the handle unreachable, and the
+      // handle is the only way to drag the guide.
       const rightEdge = Math.min(
         pane.width - ROW_RIGHT_MARGIN - latest.current.rightInset,
-        guideOn ? plusLeft - PILL_GAP / 2 : Infinity,
+        guide !== null ? plusLeft - PILL_GAP / 2 : Infinity,
       );
       const measure = (label: string) => ctx.measureText(label).width;
       const hovered = hoverRef.current;
@@ -369,20 +385,8 @@ export function OrderLineLayer({
 
       rowsRef.current = rows;
 
-      // Placement guide: permanent dashed level with the `+` handle at its right
-      // edge. Suppressed when there is no contract to trade, because arming a
-      // line against nothing is not a state the user can act on.
-      const open = latest.current.placementPrice;
-      // While the window is open it owns the level (`open ?? …`), so the guide
-      // does not re-anchor underneath the number the user is editing.
-      const guide = !guideOn
-        ? null
-        : (open ??
-          resolveGuidePrice(guidePriceRef.current, latest.current.candles.at(-1)?.close ?? null, {
-            max: series.coordinateToPrice(0) ?? NaN,
-            min: series.coordinateToPrice(pane.height) ?? NaN,
-          }));
-      guidePriceRef.current = guide;
+      // Placement guide: a dashed level with the `+` handle at its right edge,
+      // shown only once a click on empty chart space has summoned one.
       const guideY = guide === null ? null : series.priceToCoordinate(guide);
 
       if (guide !== null && guideY !== null) {
@@ -404,18 +408,27 @@ export function OrderLineLayer({
 
       const plus = plusRef.current;
       if (plus) {
-        if (guide === null || guideY === null) {
-          plus.style.display = 'none';
-        } else {
-          plus.style.display = 'flex';
-          plus.style.top = `${guideY - PLUS_SIZE / 2}px`;
-          plus.style.right = `${PLUS_MARGIN + latest.current.rightInset}px`;
-          plus.setAttribute('aria-label', `Place an order at ${Format.price(guide)}`);
-          // While the window owns the level the handle does nothing, so it says
-          // so rather than presenting a drag cursor it will not honour.
-          plus.classList.toggle('order-guide-plus--inert', open !== null);
-          plus.setAttribute('aria-disabled', open !== null ? 'true' : 'false');
-        }
+        // Kept mounted, but dormant, whenever the guide could be summoned and
+        // has not been: a keyboard user has no "click on empty chart space", so
+        // without a focusable handle in the resting state chart order placement
+        // would be pointer-only. The dormant style is invisible and
+        // pointer-transparent, so a mouse never meets it.
+        const dormant = guide === null || guideY === null;
+        plus.style.display = guideOn ? 'flex' : 'none';
+        plus.classList.toggle('order-guide-plus--dormant', dormant);
+        // Flush to the pane's right border, not inset past the analytics rail.
+        plus.style.right = `${PLUS_MARGIN}px`;
+        plus.style.top = `${(dormant ? pane.height / 2 : guideY) - PLUS_SIZE / 2}px`;
+        plus.setAttribute(
+          'aria-label',
+          dormant
+            ? 'Show the order placement guide'
+            : `Place an order at ${Format.price(guide as number)}`,
+        );
+        // While the window owns the level the handle does nothing, so it says
+        // so rather than presenting a drag cursor it will not honour.
+        plus.classList.toggle('order-guide-plus--inert', open !== null);
+        plus.setAttribute('aria-disabled', open !== null ? 'true' : 'false');
       }
     };
 
@@ -459,6 +472,62 @@ export function OrderLineLayer({
     const containerEl = canvas?.parentElement;
     if (!canvas || !containerEl) return;
 
+    /** Summons the guide at `y`, or dismisses the one already showing. */
+    const toggleGuide = (y: number) => {
+      const {
+        settings: current,
+        selectedContract: contract,
+        placementPrice: open,
+      } = latest.current;
+      // The window owns the level while it is open; the same gate the guide is
+      // drawn under applies to summoning it.
+      if (open !== null || !current.enabled || contract === null) return;
+      if (guidePriceRef.current !== null) {
+        guidePriceRef.current = null;
+      } else {
+        const price = series.coordinateToPrice(y);
+        if (price === null) return;
+        guidePriceRef.current = price;
+      }
+      scheduleRef.current();
+    };
+
+    /**
+     * A press that landed on nothing of ours. It may still turn out to be a
+     * click on genuinely empty chart space, which is what summons and dismisses
+     * the guide — so the decision is deferred to the release, for two reasons.
+     * A press that travels is a pan, and a pan has no single level to place a
+     * guide at; and whether another layer spent this press on a drawing is only
+     * knowable once every `pointerdown` handler has run.
+     */
+    const armGuideToggle = (downEvent: PointerEvent, y: number) => {
+      const startX = downEvent.clientX;
+      const startY = downEvent.clientY;
+
+      const detach = () => {
+        window.removeEventListener('pointerup', onUp);
+        window.removeEventListener('pointercancel', onCancelled);
+      };
+
+      // Both ends filter on the pointer that started this, so a second finger
+      // going up cannot resolve a press it was never part of.
+      const onUp = (upEvent: PointerEvent) => {
+        if (upEvent.pointerId !== downEvent.pointerId) return;
+        detach();
+        if (isPointerClaimed(downEvent)) return;
+        const travel = Math.hypot(upEvent.clientX - startX, upEvent.clientY - startY);
+        if (travel > GUIDE_DRAG_THRESHOLD) return;
+        toggleGuide(y);
+      };
+
+      const onCancelled = (cancelEvent: PointerEvent) => {
+        if (cancelEvent.pointerId === downEvent.pointerId) detach();
+      };
+
+      window.addEventListener('pointerup', onUp);
+      window.addEventListener('pointercancel', onCancelled);
+    };
+
     const onPointerDown = (event: PointerEvent) => {
       // The `+` and the placement window live inside this container, so a row
       // at the same y would otherwise eat their press in the capture phase.
@@ -466,7 +535,10 @@ export function OrderLineLayer({
       const xy = canvasXY(event);
       if (!xy) return;
       const hit = hitRows(rowsRef.current, xy.x, xy.y);
-      if (!hit) return;
+      if (!hit) {
+        if (event.button === 0) armGuideToggle(event, xy.y);
+        return;
+      }
       // Claim the gesture before lightweight-charts (and DrawingLayer) can pan.
       event.preventDefault();
       event.stopPropagation();
@@ -610,14 +682,37 @@ export function OrderLineLayer({
   };
 
   /**
-   * Keyboard adjustment of the guide's level. Dragging the handle is the only
-   * pointer route to a different level and a keyboard user has no drag, so
-   * without this they could only ever arm an order at whatever level
-   * `resolveGuidePrice` anchored to. Mirrors VoiceOver's increment/decrement on
-   * iOS, at the same one-tick step.
+   * Summons the guide without a pointer, at the middle of the visible range.
+   *
+   * The pointer route picks the level by where you clicked; a keyboard user has
+   * no click on empty chart space, so they get a level in view and the arrow
+   * keys below to move it. Mirrors what activating the dormant handle does for
+   * VoiceOver on iOS.
+   */
+  const summonGuide = () => {
+    if (latest.current.placementPrice !== null) return;
+    const price = series.coordinateToPrice(chart.paneSize().height / 2);
+    if (price === null) return;
+    guidePriceRef.current = round2(price);
+    scheduleRef.current();
+  };
+
+  /**
+   * Keyboard adjustment of the guide's level, and the keyboard's dismissal.
+   * Dragging the handle is the only pointer route to a different level and a
+   * keyboard user has no drag, so without this they could only ever arm an
+   * order at the level it was summoned to. Mirrors VoiceOver's
+   * increment/decrement on iOS, at the same one-tick step.
    */
   const onPlusKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>) => {
     if (latest.current.placementPrice !== null) return; // the window owns the level
+    if (event.key === 'Escape' && guidePriceRef.current !== null) {
+      // The keyboard's second click: what dismisses a guide it summoned.
+      event.preventDefault();
+      guidePriceRef.current = null;
+      scheduleRef.current();
+      return;
+    }
     const up = event.key === 'ArrowUp' || event.key === 'PageUp';
     const down = event.key === 'ArrowDown' || event.key === 'PageDown';
     if ((!up && !down) || guidePriceRef.current === null) return;
@@ -635,6 +730,7 @@ export function OrderLineLayer({
   const onPlusPointerDown = (event: React.PointerEvent<HTMLButtonElement>) => {
     if (event.button !== 0) return; // a context-menu press must not arm an order
     if (latest.current.placementPrice !== null) return; // window owns the level
+    if (guidePriceRef.current === null) return; // dormant: nothing to drag yet
     if (guidePressRef.current) return;
     event.preventDefault();
     event.stopPropagation();
@@ -656,8 +752,9 @@ export function OrderLineLayer({
       const xy = canvasXY(moveEvent);
       if (!xy) return;
       // Pin to the pane's edges instead of extrapolating past them: an
-      // out-of-range level makes resolveGuidePrice re-anchor to the last price
-      // on the next frame, which reads as the guide teleporting mid-drag.
+      // out-of-range level is one resolveGuidePrice dismisses on the next
+      // frame, so dragging a little too far would delete the guide out from
+      // under the pointer holding it.
       const price = series.coordinateToPrice(Math.min(chart.paneSize().height, Math.max(0, xy.y)));
       if (price === null) return;
       guidePriceRef.current = price;
@@ -762,8 +859,12 @@ export function OrderLineLayer({
         // Enter and Space synthesise a click with no click count, which is what
         // separates them from the mouse release the press handler already
         // served — without this the handle is unreachable from the keyboard.
+        // Dormant, it summons the guide; showing, it opens the window. The same
+        // two steps a pointer gets from a click on the chart and a click on `+`.
         onClick={(event) => {
-          if (event.detail === 0) openPlacementWindow();
+          if (event.detail !== 0) return;
+          if (guidePriceRef.current === null) summonGuide();
+          else openPlacementWindow();
         }}
         // Position and the aria-label are written by the draw loop, which is the
         // only place that knows the level; setting them here too would fight it.

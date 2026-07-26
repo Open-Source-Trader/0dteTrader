@@ -15,11 +15,17 @@ import UIKit
 
 /// The `+` handle as assistive tech sees it.
 ///
-/// A bare `UIAccessibilityElement` has no direct-manipulation path, and a swipe
-/// on one drives the rotor rather than dragging anything — so without increment
-/// and decrement a VoiceOver user is stuck at whatever level `resolveGuidePrice`
-/// anchored to and can only ever arm an order there.
+/// A bare `UIAccessibilityElement` has no direct-manipulation path: a swipe on
+/// one drives the rotor rather than dragging anything, and a double-tap on one
+/// synthesises a touch wherever it happens to sit. Neither of the two gestures
+/// this control is built from — a tap on empty chart space to summon the guide,
+/// a drag on the handle to move it — is available that way, so both are offered
+/// here explicitly instead.
 final class GuideHandleElement: UIAccessibilityElement {
+    override func accessibilityActivate() -> Bool {
+        overlay?.activateGuideHandle() ?? false
+    }
+
     override func accessibilityIncrement() {
         overlay?.stepGuidePrice(by: AppPlacementGuide.adjustmentStep)
     }
@@ -44,8 +50,14 @@ extension OrderLineOverlayView {
     /// from that. Deriving the same quantity twice from the raw constants would
     /// let the two drift apart silently, and the failure mode is the handle
     /// shadowing ✕ on a live order — the exact collision the band prevents.
+    ///
+    /// Flush to the pane's right border, `handleMargin` aside. Deliberately not
+    /// inset by `rightInset`: the rows clear the options-analytics rail because
+    /// they are a column of readable values that the rail would overlap, but the
+    /// handle is a single chip the user reaches for at the edge of the screen,
+    /// and pushing it inboard of the rail put it somewhere nobody aims.
     var handleLeft: CGFloat {
-        bounds.width - rightInset - AppPlacementGuide.handleMargin - AppPlacementGuide.handleSize
+        bounds.width - AppPlacementGuide.handleMargin - AppPlacementGuide.handleSize
     }
 
     /// How far the 44pt touch target overhangs the drawn glyph on each side.
@@ -70,17 +82,18 @@ extension OrderLineOverlayView {
     /// reaches into that band loses the touch to the handle — and the rightmost
     /// pill is ✕, which cancels a live order. Resolving it the other way round
     /// is not an option: a row sitting at the guide's level would then make the
-    /// handle unreachable, and the handle is the only way to move the guide.
+    /// handle unreachable, and the handle is the only way to drag the guide.
     ///
-    /// Every row gives up the band, not just one that happens to share the
-    /// guide's level, so the rows stay aligned with each other and the
-    /// collision cannot occur at any y. Reserving it per-row would buy back a
-    /// few points for rows far from the guide at the cost of a layout that
-    /// shifts as the guide is dragged past them.
+    /// The band is given up only while a guide is actually showing. It is
+    /// summoned and dismissed now rather than always there, and charging every
+    /// row for a control that is not on screen costs width for nothing. While it
+    /// *is* on screen every row gives it up, not just one that happens to share
+    /// the guide's level, so the rows stay aligned with each other and the
+    /// collision cannot occur at any y.
     var rowRightEdge: CGFloat {
         Swift.min(
             bounds.width - AppOrderLine.rowRightMargin - rightInset,
-            handleTouchLeft - AppOrderLine.pillGap / 2
+            isGuideShowing ? handleTouchLeft - AppOrderLine.pillGap / 2 : .greatestFiniteMagnitude
         )
     }
 
@@ -92,6 +105,51 @@ extension OrderLineOverlayView {
 
     /// The level the guide is drawn at: the open window's, or the handle's own.
     var effectiveGuidePrice: Double? { placementPrice ?? guidePrice }
+
+    /// Whether a guide is on screen right now. Pure, so `rowRightEdge` can ask
+    /// it while the rows are being laid out — `draw(_:)` settles `guidePrice`
+    /// before that point precisely so this answer is already this frame's.
+    var isGuideShowing: Bool {
+        settings.enabled && hasSelectedContract && effectiveGuidePrice != nil
+    }
+
+    /// A tap on empty chart space: summons the guide at that level, or dismisses
+    /// the one already showing.
+    ///
+    /// Driven from the chart's own tap recognizer rather than one of this view's
+    /// because `point(inside:)` refuses empty space so the chart keeps pan and
+    /// zoom. That routing is also what defines "empty": a tap that reached the
+    /// chart at all is one no order line, pill, handle or drawing claimed.
+    func toggleGuide(at point: CGPoint) {
+        guard settings.enabled, hasSelectedContract, !isPlacementOpen else { return }
+        if guidePrice != nil {
+            guidePrice = nil
+        } else {
+            guard let price = price(at: point.y) else { return }
+            guidePrice = price
+        }
+        Haptics.impact(.light)
+        setNeedsDisplay()
+    }
+
+    /// Assistive tech's route through the handle, which has no drag and no tap
+    /// on empty space: summons the guide into the middle of the pane when none
+    /// is showing, and otherwise arms the card at the level it is on — the same
+    /// two steps a tap on the chart and a tap on the `+` give everyone else.
+    func activateGuideHandle() -> Bool {
+        guard settings.enabled, hasSelectedContract, !isPlacementOpen else { return false }
+        if let price = effectiveGuidePrice {
+            Haptics.impact(.light)
+            delegate?.orderLineOverlayDidRequestPlacement(at: price)
+            return true
+        }
+        let visibleRect = chart?.viewPortHandler.contentRect ?? bounds
+        guard let price = price(at: visibleRect.midY) else { return false }
+        guidePrice = price
+        Haptics.impact(.light)
+        setNeedsDisplay()
+        return true
+    }
 
     /// Nudges the guide by one tick. VoiceOver's increment/decrement path, and
     /// the only way to move the guide without a pointer.
@@ -107,40 +165,51 @@ extension OrderLineOverlayView {
 
     // MARK: - Rendering
 
-    /// Permanent placement guide: a dashed level with the `+` handle at its
-    /// right edge. Suppressed when chart trading is off, and when there is no
-    /// chain contract for a new line to trade — `ChartTradingCoordinator`
-    /// discards a placement raised in that state, and a control that takes the
-    /// tap, spends a haptic and arms nothing is worse than no control.
+    /// Settles the guide's level for this paint pass.
     ///
-    /// Clearing `handleFrame` is what makes the suppression total: hit-testing,
-    /// both gesture handlers and the accessibility element all read it, so none
-    /// of them can find a handle that was not drawn.
-    func renderPlacementGuide(in context: CGContext) {
+    /// Split out of the render so it can run before the rows are laid out: the
+    /// band they give up to the handle depends on whether one is showing, and
+    /// asking that question against the previous frame's answer would leave the
+    /// rows a frame behind the control they are avoiding.
+    ///
+    /// The guide is suppressed outright when there is no chain contract for a
+    /// new line to trade — `ChartTradingCoordinator` discards a placement raised
+    /// in that state, and a control that takes the tap, spends a haptic and arms
+    /// nothing is worse than no control.
+    func resolveGuideForFrame() {
         guard hasSelectedContract else {
-            handleFrame = .zero
+            guidePrice = nil
+            return
+        }
+        // Tracked while the card is open too, not just when it is closed. The
+        // card's level is the handle's rounded to a tick by the coordinator, so
+        // without this the guide would un-round itself on dismiss and sit a
+        // fraction off the level the order was actually armed at — and since the
+        // card's Level field can move the guide, it is also what keeps a typed
+        // price from being discarded the moment the card closes.
+        if isPlacementOpen {
+            guidePrice = placementPrice
             return
         }
         let visibleRect = chart?.viewPortHandler.contentRect ?? bounds
-        let resolved = isPlacementOpen
-            // While the card is open it owns the level, so the guide does not
-            // re-anchor away from the price the card is armed at.
-            ? placementPrice
-            : resolveGuidePrice(
-                current: guidePrice,
-                lastPrice: lastPrice,
-                min: price(at: visibleRect.maxY) ?? .nan,
-                max: price(at: visibleRect.minY) ?? .nan
-            )
-        // Tracked in both states, not just when the card is closed. The card's
-        // level is the handle's rounded to a tick by the coordinator, so
-        // without this the guide would un-round itself on dismiss and sit a
-        // fraction off the level the order was actually armed at — and now that
-        // the card's Level field can move the guide, it is also what keeps a
-        // typed price from being discarded the moment the card closes.
-        guidePrice = resolved
+        guidePrice = resolveGuidePrice(
+            current: guidePrice,
+            min: price(at: visibleRect.maxY) ?? .nan,
+            max: price(at: visibleRect.minY) ?? .nan
+        )
+    }
 
-        guard let resolved, let y = yPixel(for: resolved) else {
+    /// The placement guide: a dashed level with the `+` handle flush to the
+    /// pane's right edge, drawn only once a tap on empty chart space has
+    /// summoned one.
+    ///
+    /// Clearing `handleFrame` is what makes a dismissal total: hit-testing, both
+    /// gesture handlers and the accessibility element all read it, so none of
+    /// them can find a handle that was not drawn.
+    func renderPlacementGuide(in context: CGContext) {
+        guard isGuideShowing, let resolved = effectiveGuidePrice,
+              let y = yPixel(for: resolved)
+        else {
             handleFrame = .zero
             return
         }
@@ -213,26 +282,48 @@ extension OrderLineOverlayView {
 
     // MARK: - Accessibility
 
-    /// The handle as VoiceOver sees it, or nil when no handle was drawn — with
-    /// chart trading off or no contract selected there is nothing to focus.
+    /// The handle as VoiceOver sees it, or nil when chart trading is off or
+    /// there is no contract for a new line to trade — nothing to focus then.
+    ///
+    /// Present even with no guide showing, parked where the handle would appear.
+    /// Summoning one is a tap on empty chart space, which is not a gesture
+    /// VoiceOver can make, so without a dormant element to activate there would
+    /// be no assistive route to chart order placement at all.
     func placementAccessibilityElement() -> UIAccessibilityElement? {
-        guard !handleFrame.isEmpty, let price = effectiveGuidePrice else { return nil }
+        guard settings.enabled, hasSelectedContract else { return nil }
         // Reused rather than rebuilt so the element keeps its identity
         // across repaints: `draw(_:)` runs on every pan frame, and handing
         // VoiceOver a fresh element each time would drop focus out from
         // under someone in the middle of adjusting the level.
         let handle: GuideHandleElement = guideHandleElement
-        handle.accessibilityLabel = "Place an order"
-        handle.accessibilityValue = Format.price(price)
-        handle.accessibilityHint = "Swipe up or down to change the level"
-        // Adjustable, not merely a button: the handle is the only way to
-        // move the guide, and dragging it is not a gesture VoiceOver can
-        // make. While the card owns the level the handle refuses touches,
-        // so it must not advertise controls it will not honour.
-        handle.accessibilityTraits = isPlacementOpen
-            ? [.button, .adjustable, .notEnabled]
-            : [.button, .adjustable]
-        handle.accessibilityFrameInContainerSpace = handleTouchFrame
+        if let price = effectiveGuidePrice, !handleFrame.isEmpty {
+            handle.accessibilityLabel = "Place an order"
+            handle.accessibilityValue = Format.price(price)
+            handle.accessibilityHint = "Swipe up or down to change the level"
+            // Adjustable, not merely a button: the handle is the only way to
+            // move the guide, and dragging it is not a gesture VoiceOver can
+            // make. While the card owns the level the handle refuses touches,
+            // so it must not advertise controls it will not honour.
+            handle.accessibilityTraits = isPlacementOpen
+                ? [.button, .adjustable, .notEnabled]
+                : [.button, .adjustable]
+            handle.accessibilityFrameInContainerSpace = handleTouchFrame
+        } else {
+            handle.accessibilityLabel = "Show the order placement guide"
+            handle.accessibilityValue = nil
+            handle.accessibilityHint = nil
+            handle.accessibilityTraits = .button
+            handle.accessibilityFrameInContainerSpace = dormantHandleTouchFrame
+        }
         return handle
+    }
+
+    /// Where the dormant handle sits: the pane's right edge, vertically centred,
+    /// at the same 44pt target the drawn one carries.
+    private var dormantHandleTouchFrame: CGRect {
+        let visibleRect = chart?.viewPortHandler.contentRect ?? bounds
+        let size = AppPlacementGuide.handleSize
+        return CGRect(x: handleLeft, y: visibleRect.midY - size / 2, width: size, height: size)
+            .insetBy(dx: -handleTouchInset, dy: -handleTouchInset)
     }
 }

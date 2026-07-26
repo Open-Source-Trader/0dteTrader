@@ -95,20 +95,14 @@ final class OrderLineOverlayView: UIView {
     /// Keeps rows clear of the options-analytics rail when it is on.
     var rightInset: CGFloat = 0 { didSet { setNeedsDisplay() } }
 
-    /// Last traded price — where the guide parks when it has nowhere else to be.
-    var lastPrice: Double? {
-        didSet {
-            guard lastPrice != oldValue else { return }
-            setNeedsDisplay()
-        }
-    }
-
-    /// The guide's level. Owned here because dragging it is a UIKit gesture;
+    /// The guide's level, or nil when no guide is showing — which is the resting
+    /// state: a tap on empty chart space summons it and the next one dismisses
+    /// it. Owned here because summoning and dragging it are UIKit gestures;
     /// SwiftUI only hears about it when the `+` is tapped.
     ///
     /// Advanced by `draw(_:)` as well as by the gesture handlers — the paint
-    /// pass is what re-anchors it through `resolveGuidePrice` — so the ordering
-    /// of drag and paint is load-bearing. Safe because it has no `didSet` and
+    /// pass is what settles it through `resolveGuidePrice` — so the ordering of
+    /// drag and paint is load-bearing. Safe because it has no `didSet` and
     /// nothing in the paint path can re-enter drawing.
     var guidePrice: Double?
     /// The handle as last drawn, for hit-testing.
@@ -161,7 +155,7 @@ final class OrderLineOverlayView: UIView {
     /// handle — owns the guide's level, and there is one source of truth at any
     /// moment. Closing it hands the level back to `guidePrice`, which has been
     /// tracking it, so the guide keeps the tick-rounded level the card was
-    /// armed at rather than reverting. The guide itself is permanent either way.
+    /// armed at rather than reverting to the one the handle was dragged to.
     var placementPrice: Double? {
         didSet {
             guard placementPrice != oldValue else { return }
@@ -308,15 +302,22 @@ final class OrderLineOverlayView: UIView {
     }
 
     @objc private func handlePan(_ recognizer: UIPanGestureRecognizer) {
-        // No `guard let model` here: the placement handle is chrome that exists
-        // whether or not there are orders to draw, so it must stay draggable
-        // when the model is nil. The branches that dereference it guard below.
+        // No `guard let model` here: the placement handle can be showing whether
+        // or not there are orders to draw, so it must stay draggable when the
+        // model is nil. The branches that dereference it guard below.
         let location = recognizer.location(in: self)
 
         switch recognizer.state {
         case .began:
-            if !isPlacementOpen, handleTouchFrame.contains(location) {
-                drag = .guideHandle(startY: location.y, moved: false)
+            // Tested where the finger went down, not where it is now: a pan does
+            // not reach `.began` until it has cleared the recognizer's own slop,
+            // and a brisk drag can carry the reported location clear of the 44pt
+            // target before the first callback arrives — which presents as a
+            // handle that simply refuses to be dragged.
+            let translation = recognizer.translation(in: self)
+            let start = CGPoint(x: location.x - translation.x, y: location.y - translation.y)
+            if !isPlacementOpen, handleTouchFrame.contains(start) {
+                drag = .guideHandle(startY: start.y, moved: false)
                 return
             }
             guard let hit = hitTest(at: location), hit.pill == nil else { return }
@@ -348,9 +349,9 @@ final class OrderLineOverlayView: UIView {
                 drag = .bracket(entry: entry, startY: startY, price: price, engaged: engaged || moved)
             case .guideHandle(let startY, let moved):
                 // Pin to the pane's edges instead of extrapolating past them: an
-                // out-of-range level makes `resolveGuidePrice` re-anchor to the
-                // last price on the next frame, which reads as the guide
-                // teleporting mid-drag.
+                // out-of-range level is one `resolveGuidePrice` dismisses on the
+                // next frame, so dragging a little too far would delete the
+                // guide out from under the finger holding it.
                 let content = chart?.viewPortHandler.contentRect ?? bounds
                 let clampedY = Swift.min(content.maxY, Swift.max(content.minY, location.y))
                 guard let price = price(at: clampedY) else { return }
@@ -396,6 +397,9 @@ final class OrderLineOverlayView: UIView {
             accessibilityElements = nil
             return
         }
+        // Settled before the rows are laid out, because whether a guide is
+        // showing decides how much room `rowRightEdge` gives them.
+        resolveGuideForFrame()
         var built: [OrderLineRow] = []
 
         // Entry lines first, so a target or stop resting on one wins the touch —

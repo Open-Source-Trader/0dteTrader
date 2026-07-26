@@ -30,7 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Draggable limit / target / stop lines watched against the **underlying**; a crossing fires a normal mid/market option order through the existing order pipeline (kill switch, idempotency, server-side re-validation, audit unchanged)
   - Per-line `MID`/`MKT` execution pill, visible on the line and flippable with one tap
   - Futures-style brackets: drag off the entry line to place target + stop as an OCO pair; direction follows the contract (a long put's target sits below entry), not the screen
-  - Placement via long-press (iOS) or price-axis hover `+` (desktop) with a side/quantity/execution window
+  - Placement guide: tap (iOS) or click (desktop) empty chart space to summon a dashed level with a chamfered `+` handle flush against the pane's right border; tap again to dismiss it, drag the handle to fine-tune the level, and tap the `+` for a HUD order window whose level, side, size, and execution are all editable. Keyboard and VoiceOver reach the same two steps through the handle, which stays focusable while dormant
   - Server-side watcher (`ChartOrderWatcherService`, leased singleton) fires lines with no client connected; client and watcher race safely via deterministic idempotency keys
   - Environment isolation at the fire boundary: a practice-armed line can never route to the live account, including the client-trigger path
   - Armed-side crossing predicate (no instant fires on placement, gap-safe across restarts), stale-quote refusal, settled-contract expiry, orphaned-bracket sweep with an opening grace window

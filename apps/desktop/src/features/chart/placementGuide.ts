@@ -1,5 +1,5 @@
 /**
- * Where the permanent order-placement guide sits.
+ * Whether the order-placement guide still has a level to sit at.
  *
  * Kept pure and out of the canvas component for the same reason the order-line
  * geometry is: the guide is the thing that decides what price a new line gets
@@ -33,39 +33,31 @@ function isUsablePrice(value: number | null): value is number {
 }
 
 /**
- * Resolves the guide's price for this frame.
+ * Resolves the guide's price for this frame — or null for no guide at all.
  *
- * The guide is permanent chrome, so it must never end up somewhere the user
- * cannot see or reach. Panning the price axis past it re-anchors it to the last
- * traded price — the level it would have started at — and if that is off-screen
- * too it clamps to the nearest edge. A guide left outside the pane would pin the
- * `+` to a border with no relationship to the price it arms, which is the one
- * way this control can lie about what it is going to do.
+ * The guide is summoned by a click on empty chart space and dismissed by the
+ * next one, so `null` is its resting state rather than a failure, and the level
+ * is one the user picked by pointing at it. That is why nothing here re-anchors:
+ * moving a deliberately-placed level to the last traded price because the axis
+ * panned would silently arm an order somewhere the user never chose. Panning the
+ * level out of view dismisses the guide instead — clamping it to an edge would
+ * pin the `+` to a border with no relationship to the price it arms, and holding
+ * it off-screen would leave a control that toggles something invisible.
+ *
+ * A degenerate range is the one case that holds rather than dismisses: it means
+ * the chart has no usable price transform this frame, which is a fact about the
+ * chart and not about where the user put the guide.
  *
  * Mirrored by `apps/ios/0dteTrader/Features/Chart/PlacementGuide.swift`; the two
  * test suites are what keep the platforms from drifting apart. Change one and
  * you change both.
  */
-export function resolveGuidePrice(
-  current: number | null,
-  lastPrice: number | null,
-  range: PriceRange,
-): number | null {
+export function resolveGuidePrice(current: number | null, range: PriceRange): number | null {
+  // `current` is filtered on the way out either way — a non-finite level
+  // escaping here would become a non-finite y-coordinate and paint the guide
+  // nowhere while every hit path still believed in it.
+  if (!isUsablePrice(current)) return null;
   const { min, max } = range;
-  // A degenerate range means the chart has no usable price transform yet; hold
-  // whatever we had rather than inventing a level from garbage. `current` is
-  // still filtered on the way out — a non-finite level escaping here would
-  // become a non-finite y-coordinate and silently erase the guide, which is the
-  // exact failure this module exists to prevent.
-  if (!Number.isFinite(min) || !Number.isFinite(max) || max <= min) {
-    return isUsablePrice(current) ? current : null;
-  }
-
-  const inRange = (price: number | null): price is number =>
-    isUsablePrice(price) && price >= min && price <= max;
-
-  if (inRange(current)) return current;
-  if (inRange(lastPrice)) return lastPrice;
-  if (isUsablePrice(current)) return Math.min(max, Math.max(min, current));
-  return (min + max) / 2;
+  if (!Number.isFinite(min) || !Number.isFinite(max) || max <= min) return current;
+  return current >= min && current <= max ? current : null;
 }

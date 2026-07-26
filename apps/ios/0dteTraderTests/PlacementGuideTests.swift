@@ -7,121 +7,62 @@ final class PlacementGuideTests: XCTestCase {
     // `resolveGuidePrice` sidesteps with its `min lowerBound:` label.
     private let lowerBound = 500.0
     private let upperBound = 520.0
-    // Deliberately not the midpoint (510). An in-range last price that collided
-    // with the midpoint fallback would let "re-anchored to the last price" and
-    // "fell all the way through" pass the same assertion, so deleting a branch
-    // would not fail the test that names it.
-    private let lastPrice = 512.0
 
-    func testKeepsAGuideThatIsAlreadyInView() {
+    func testKeepsAGuideThatIsInViewExactlyWhereItWasSummoned() {
         XCTAssertEqual(
-            resolveGuidePrice(
-                current: 507.5,
-                lastPrice: lastPrice,
-                min: lowerBound,
-                max: upperBound
-            ),
+            resolveGuidePrice(current: 507.5, min: lowerBound, max: upperBound),
             507.5
         )
     }
 
-    func testParksAtTheLastPriceWhenThereIsNoGuideYet() {
-        XCTAssertEqual(
-            resolveGuidePrice(current: nil, lastPrice: lastPrice, min: lowerBound, max: upperBound),
-            512
-        )
+    func testHasNoGuideUntilOneHasBeenSummoned() {
+        XCTAssertNil(resolveGuidePrice(current: nil, min: lowerBound, max: upperBound))
     }
 
-    func testReanchorsToTheLastPriceWhenTheAxisPansAway() {
-        XCTAssertEqual(
-            resolveGuidePrice(current: 480, lastPrice: lastPrice, min: lowerBound, max: upperBound),
-            512
-        )
-    }
-
-    func testClampsIntoViewWhenTheLastPriceIsOffScreenToo() {
-        XCTAssertEqual(
-            resolveGuidePrice(current: 480, lastPrice: 470, min: lowerBound, max: upperBound),
-            500
-        )
-        XCTAssertEqual(
-            resolveGuidePrice(current: 560, lastPrice: 570, min: lowerBound, max: upperBound),
-            520
-        )
-    }
-
-    func testFallsBackToTheMiddleWithNothingToSeedFrom() {
-        XCTAssertEqual(
-            resolveGuidePrice(current: nil, lastPrice: nil, min: lowerBound, max: upperBound),
-            510
-        )
-    }
-
-    func testLeavesTheGuideAloneWhenTheRangeIsDegenerate() {
-        XCTAssertEqual(
-            resolveGuidePrice(current: 507.5, lastPrice: lastPrice, min: 520, max: 500),
-            507.5
-        )
-        XCTAssertEqual(
-            resolveGuidePrice(current: 507.5, lastPrice: lastPrice, min: .nan, max: 520),
-            507.5
-        )
-        // An axis zoomed to a single price is the realistic degenerate case, and
-        // the strict `upperBound > lowerBound` guard has to reject it too.
-        XCTAssertEqual(
-            resolveGuidePrice(current: 507.5, lastPrice: lastPrice, min: 510, max: 510),
-            507.5
-        )
-    }
-
-    func testIgnoresANonFiniteGuideOrLastPrice() {
-        XCTAssertEqual(
-            resolveGuidePrice(current: .nan, lastPrice: lastPrice, min: lowerBound, max: upperBound),
-            512
-        )
-        XCTAssertEqual(
-            resolveGuidePrice(
-                current: .infinity,
-                lastPrice: lastPrice,
-                min: lowerBound,
-                max: upperBound
-            ),
-            512
-        )
-        // Nothing usable to seed from once a NaN last price is discarded, so this
-        // one lands on the midpoint rather than the last price.
-        XCTAssertEqual(
-            resolveGuidePrice(current: nil, lastPrice: .nan, min: lowerBound, max: upperBound),
-            510
-        )
+    func testDismissesTheGuideWhenTheAxisPansTheLevelOutOfView() {
+        // Not re-anchored to anything: the level is one the user pointed at, and
+        // quietly moving it elsewhere would arm an order they never chose.
+        XCTAssertNil(resolveGuidePrice(current: 480, min: lowerBound, max: upperBound))
+        XCTAssertNil(resolveGuidePrice(current: 560, min: lowerBound, max: upperBound))
     }
 
     func testCountsTheVisibleEdgesAsInView() {
-        XCTAssertEqual(
-            resolveGuidePrice(current: 500, lastPrice: lastPrice, min: lowerBound, max: upperBound),
-            500
-        )
-        XCTAssertEqual(
-            resolveGuidePrice(current: 520, lastPrice: lastPrice, min: lowerBound, max: upperBound),
-            520
-        )
+        XCTAssertEqual(resolveGuidePrice(current: 500, min: lowerBound, max: upperBound), 500)
+        XCTAssertEqual(resolveGuidePrice(current: 520, min: lowerBound, max: upperBound), 520)
+    }
+
+    func testHoldsTheLevelWhenTheRangeIsDegenerate() {
+        // No usable price transform this frame is a fact about the chart, not
+        // about where the user put the guide, so it must not dismiss one.
+        XCTAssertEqual(resolveGuidePrice(current: 507.5, min: 520, max: 500), 507.5)
+        XCTAssertEqual(resolveGuidePrice(current: 507.5, min: .nan, max: 520), 507.5)
+        // An axis zoomed to a single price is the realistic degenerate case, and
+        // the strict `upperBound > lowerBound` guard has to reject it too.
+        XCTAssertEqual(resolveGuidePrice(current: 507.5, min: 510, max: 510), 507.5)
     }
 
     func testNeverHandsBackANonFiniteLevel() {
-        XCTAssertNil(
-            resolveGuidePrice(current: .nan, lastPrice: lastPrice, min: .nan, max: 520)
-        )
+        XCTAssertNil(resolveGuidePrice(current: .nan, min: lowerBound, max: upperBound))
+        XCTAssertNil(resolveGuidePrice(current: .infinity, min: lowerBound, max: upperBound))
+        XCTAssertNil(resolveGuidePrice(current: .nan, min: .nan, max: 520))
     }
 
     /// The order-line rows must never reach into the placement handle's touch
-    /// target. Both hit paths check the handle before the rows, so a pill that
-    /// overlapped it would lose the touch — and the rightmost pill is ✕, which
-    /// cancels a working order. This asserts the geometry directly rather than
-    /// the constants that feed it, so any future change to either derivation
-    /// fails here instead of silently covering a live-money control.
+    /// target while a guide is showing. Both hit paths check the handle before
+    /// the rows, so a pill that overlapped it would lose the touch — and the
+    /// rightmost pill is ✕, which cancels a working order. This asserts the
+    /// geometry directly rather than the constants that feed it, so any future
+    /// change to either derivation fails here instead of silently covering a
+    /// live-money control.
     @MainActor
     func testRowsNeverReachIntoTheHandlesTouchTarget() {
         let overlay = OrderLineOverlayView(frame: .zero)
+        overlay.settings = .default
+        overlay.hasSelectedContract = true
+        // Any level will do: the band is reserved at every y, not just the
+        // guide's, so that the rows stay aligned as it is dragged past them.
+        overlay.guidePrice = 500
+        XCTAssertTrue(overlay.isGuideShowing, "the guide must be showing for this to mean anything")
         // Narrow and wide panes, with the options-analytics rail off and on.
         for width in [320.0, 430.0, 1024.0] as [CGFloat] {
             for inset in [0.0, 64.0, 180.0] as [CGFloat] {
@@ -133,6 +74,36 @@ final class PlacementGuideTests: XCTestCase {
                     "rows overlap the handle at width \(width), inset \(inset)"
                 )
             }
+        }
+    }
+
+    /// And they get the width back when no guide is showing. The band exists to
+    /// keep ✕ out from under the handle; with no handle drawn there is nothing
+    /// to avoid, and charging every row for it would shrink the pills for free.
+    @MainActor
+    func testRowsReclaimTheHandlesBandWithNoGuideShowing() {
+        let overlay = OrderLineOverlayView(frame: CGRect(x: 0, y: 0, width: 430, height: 400))
+        overlay.settings = .default
+        overlay.hasSelectedContract = true
+        overlay.guidePrice = nil
+        XCTAssertFalse(overlay.isGuideShowing)
+        XCTAssertEqual(overlay.rowRightEdge, 430 - AppOrderLine.rowRightMargin)
+        // …and the rail still pushes them in when it is on.
+        overlay.rightInset = 64
+        XCTAssertEqual(overlay.rowRightEdge, 430 - AppOrderLine.rowRightMargin - 64)
+    }
+
+    /// The handle sits flush against the pane's right border regardless of the
+    /// options-analytics rail. The rows clear the rail because they are a column
+    /// of values it would overlap; the handle is a single chip the user reaches
+    /// for at the edge, and inset past the rail it lands where nobody aims.
+    @MainActor
+    func testTheHandleStaysFlushRightWhateverTheRailDoes() {
+        let overlay = OrderLineOverlayView(frame: CGRect(x: 0, y: 0, width: 430, height: 400))
+        let flush = 430 - AppPlacementGuide.handleMargin - AppPlacementGuide.handleSize
+        for inset in [0.0, 64.0, 180.0] as [CGFloat] {
+            overlay.rightInset = inset
+            XCTAssertEqual(overlay.handleLeft, flush, "inset \(inset) moved the handle")
         }
     }
 

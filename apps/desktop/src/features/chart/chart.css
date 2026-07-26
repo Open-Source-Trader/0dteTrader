@@ -116,6 +116,19 @@
   background: var(--hud-panel-fill);
   box-shadow: none;
 }
+/* Dormant: no guide has been summoned yet. Invisible and pointer-transparent,
+   so a mouse never meets it — clicking empty chart space is what summons the
+   guide — but still in the tab order, because a keyboard user has no such
+   click and chart order placement must not become pointer-only. It shows
+   itself the moment it takes focus. */
+.order-guide-plus--dormant {
+  opacity: 0;
+  pointer-events: none;
+}
+.order-guide-plus--dormant:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
+}
 
 /* Chart order window. Vertically centred rather than anchored to the `+`: on a
    short pane a line-anchored card clips against the top edge, and a window that

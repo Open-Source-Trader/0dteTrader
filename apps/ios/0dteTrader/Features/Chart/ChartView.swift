@@ -19,8 +19,8 @@ struct ChartView: View {
     /// Whether there is a contract for a new line to trade. No contract, no
     /// placement guide: the handle would take the tap and arm nothing.
     var hasSelectedContract: Bool = false
-    /// The open placement card and everything done with it; nil means the
-    /// guide is idle.
+    /// The open placement card and everything done with it; nil means no card
+    /// is open — the guide may still be showing.
     var placement: PlacementCardBinding?
     weak var orderLineDelegate: OrderLineOverlayDelegate?
 
@@ -85,7 +85,6 @@ struct ChartView: View {
                     entryLines: entryLines,
                     hasSelectedContract: hasSelectedContract,
                     placementPrice: placement?.request.price,
-                    lastPrice: viewModel.candles.last?.close,
                     orderLineDelegate: orderLineDelegate,
                     resetToken: chartResetToken
                 )

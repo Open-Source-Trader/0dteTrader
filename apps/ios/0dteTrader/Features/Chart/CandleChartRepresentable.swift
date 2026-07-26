@@ -27,12 +27,9 @@ struct CandleChartRepresentable: UIViewRepresentable {
     /// Whether a contract is selected for a new line to trade; the placement
     /// guide is suppressed entirely without one.
     var hasSelectedContract: Bool = false
-    /// Level the open placement card refers to; nil when it is closed. The
-    /// guide itself is permanent — this only says who owns its level.
+    /// Level the open placement card refers to; nil when it is closed. This
+    /// only says who owns the guide's level, not whether one is showing.
     var placementPrice: Double?
-    /// Last traded price — where the placement guide parks when it has nowhere
-    /// else to be.
-    var lastPrice: Double?
     weak var orderLineDelegate: OrderLineOverlayDelegate?
     var resetToken: Int = 0
 
@@ -81,11 +78,30 @@ struct CandleChartRepresentable: UIViewRepresentable {
                 self.overlay.setNeedsDisplay()
                 self.orderLineOverlay.setNeedsDisplay()
             }
+
+            // A tap on empty chart space summons the placement guide at that
+            // level, and the next one dismisses it. It hangs off the chart
+            // rather than the order overlay because the overlay's
+            // `point(inside:)` deliberately refuses empty space so the chart
+            // keeps pan and zoom — which makes the chart exactly the view a tap
+            // reaches when no order line, pill, handle or drawing wanted it.
+            // `cancelsTouchesInView` stays on so DGCharts still sees the touch.
+            let placementTap = UITapGestureRecognizer(
+                target: self,
+                action: #selector(handlePlacementTap(_:))
+            )
+            placementTap.delegate = self
+            placementTap.cancelsTouchesInView = false
+            chart.addGestureRecognizer(placementTap)
         }
 
         @available(*, unavailable)
         required init?(coder: NSCoder) {
             fatalError("init(coder:) is not supported")
+        }
+
+        @objc private func handlePlacementTap(_ recognizer: UITapGestureRecognizer) {
+            orderLineOverlay.toggleGuide(at: recognizer.location(in: orderLineOverlay))
         }
 
         override func layoutSubviews() {
@@ -101,7 +117,22 @@ struct CandleChartRepresentable: UIViewRepresentable {
             chart.setDragOffsetX(bounds.width * 0.45)
         }
     }
+}
 
+extension CandleChartRepresentable.ContainerView: UIGestureRecognizerDelegate {
+    /// The placement tap only observes: it must run alongside DGCharts' own
+    /// recognizers and the gesture controller's pinch/pan, never instead of
+    /// them. A chart that stopped panning because a `+` might be summoned would
+    /// be a bad trade.
+    func gestureRecognizer(
+        _ gestureRecognizer: UIGestureRecognizer,
+        shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer
+    ) -> Bool {
+        true
+    }
+}
+
+extension CandleChartRepresentable {
     /// Keeps the annotation overlays' time/price-anchored shapes redrawn in
     /// sync with the chart viewport on pan/zoom.
     final class Coordinator: NSObject, ChartViewDelegate {
@@ -212,7 +243,6 @@ struct CandleChartRepresentable: UIViewRepresentable {
         container.orderLineOverlay.entryLines = entryLines
         container.orderLineOverlay.hasSelectedContract = hasSelectedContract
         container.orderLineOverlay.placementPrice = placementPrice
-        container.orderLineOverlay.lastPrice = lastPrice
         container.orderLineOverlay.delegate = orderLineDelegate
         // Keep the button rows clear of the analytics rail when it is on. The
         // rail sizes itself from the chart's content rect, not the view bounds,

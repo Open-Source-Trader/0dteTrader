@@ -3,6 +3,7 @@ import type { IChartApi, ISeriesApi, Logical } from 'lightweight-charts';
 import { useStore } from '../../core/observable';
 import { Format } from '../../design/format';
 import { chartPalette } from './chartColors';
+import { claimPointer } from './chartPointerClaim';
 import type { ChartCandle } from './ChartStore';
 import type { Drawing, DrawingPoint, DrawingsStore, DrawingTool } from './drawings';
 
@@ -379,6 +380,9 @@ export function DrawingLayer({ chart, series, store, candles, intervalSec }: Dra
       }
       event.preventDefault();
       event.stopPropagation();
+      // Tells OrderLineLayer this press was spent on a drawing, so its release
+      // does not also read as a click on empty space and toggle the guide.
+      claimPointer(event);
       store.select(hit.id);
       const pointer = toPoint(xy.x, xy.y);
       if (!pointer) return;
@@ -498,6 +502,10 @@ export function DrawingLayer({ chart, series, store, candles, intervalSec }: Dra
     if (!xy) return;
     const point = toPoint(xy.x, xy.y);
     if (!point) return;
+    // An armed tool spends the press on the shape it is drawing. This runs in
+    // the bubble phase, after OrderLineLayer's capture listener has already
+    // armed its click check but well before the release that resolves it.
+    claimPointer(event.nativeEvent);
     if (activeTool === 'alert') {
       store.addAlert(point.price);
       return;

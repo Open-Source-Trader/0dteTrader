@@ -35,48 +35,37 @@ enum AppPlacementGuide {
     static let levelMaximum: Double = 100_000
 }
 
-/// Resolves the guide's price for this frame.
+/// Resolves the guide's price for this frame — or nil for no guide at all.
 ///
-/// The guide is permanent chrome, so it must never end up somewhere the user
-/// cannot see or reach. Panning the price axis past it re-anchors it to the last
-/// traded price — the level it would have started at — and if that is off-screen
-/// too it clamps to the nearest edge. A guide left outside the pane would pin the
-/// `+` to a border with no relationship to the price it arms, which is the one
-/// way this control can lie about what it is going to do.
+/// The guide is summoned by a tap on empty chart space and dismissed by the next
+/// one, so nil is its resting state rather than a failure, and the level is one
+/// the user picked by pointing at it. That is why nothing here re-anchors:
+/// moving a deliberately-placed level to the last traded price because the axis
+/// panned would silently arm an order somewhere the user never chose. Panning
+/// the level out of view dismisses the guide instead — clamping it to an edge
+/// would pin the `+` to a border with no relationship to the price it arms, and
+/// holding it off-screen would leave a control that toggles something invisible.
+///
+/// A degenerate range is the one case that holds rather than dismisses: it means
+/// the chart has no usable price transform this frame, which is a fact about the
+/// chart and not about where the user put the guide.
 ///
 /// `min` is the price at the *bottom* of the pane and `max` the price at the
 /// top. Callers derive them from a content rect, where the y axis runs the other
 /// way — `min` comes from `maxY` and `max` from `minY`. Swapping them yields a
-/// range that always looks degenerate, so the guide silently stops re-anchoring
-/// instead of failing loudly.
+/// range that always looks degenerate, so the guide silently stops being
+/// dismissed instead of failing loudly.
 ///
 /// Mirrors `apps/desktop/src/features/chart/placementGuide.ts`; the two test
 /// suites are what keep the platforms from drifting apart. Change one and you
 /// change both.
-func resolveGuidePrice(
-    current: Double?,
-    lastPrice: Double?,
-    min lowerBound: Double,
-    max upperBound: Double
-) -> Double? {
-    // A degenerate range means the chart has no usable price transform yet; hold
-    // whatever we had rather than inventing a level from garbage. `current` is
-    // still filtered on the way out — a non-finite level escaping here would
-    // become a non-finite y-coordinate and silently erase the guide, which is
-    // the exact failure this function exists to prevent.
-    guard lowerBound.isFinite, upperBound.isFinite, upperBound > lowerBound else {
-        return usablePrice(current)
-    }
-
-    func inRange(_ price: Double?) -> Bool {
-        guard let price = usablePrice(price) else { return false }
-        return price >= lowerBound && price <= upperBound
-    }
-
-    if inRange(current) { return current }
-    if inRange(lastPrice) { return lastPrice }
-    if let current = usablePrice(current) { return min(upperBound, max(lowerBound, current)) }
-    return (lowerBound + upperBound) / 2
+func resolveGuidePrice(current: Double?, min lowerBound: Double, max upperBound: Double) -> Double? {
+    // `current` is filtered either way — a non-finite level escaping here would
+    // become a non-finite y-coordinate and paint the guide nowhere while every
+    // hit path still believed in it.
+    guard let current = usablePrice(current) else { return nil }
+    guard lowerBound.isFinite, upperBound.isFinite, upperBound > lowerBound else { return current }
+    return current >= lowerBound && current <= upperBound ? current : nil
 }
 
 /// A price only counts if it can survive the trip through the chart's price

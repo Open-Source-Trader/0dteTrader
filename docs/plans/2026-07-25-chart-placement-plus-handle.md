@@ -1,5 +1,14 @@
 # Chart Placement `+` Handle Implementation Plan
 
+> **Status: implemented, then partly superseded.** Everything below shipped, but
+> the interaction model changed straight afterwards on user feedback: the guide
+> is no longer permanent chrome parked at the last traded price. It is summoned
+> by a tap (iOS) or click (desktop) on empty chart space at the level you point
+> at, dismissed by the next one, and its `+` sits flush against the pane's right
+> border rather than inset past the analytics rail. `resolveGuidePrice` no longer
+> re-anchors — a user-placed level panned out of view is dismissed, not moved.
+> Read the code and its tests, not this document, for current behaviour.
+
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** Replace the 1.5s long-press that arms a chart order line with a permanent, draggable TradingView-style `+` handle on a dashed guide line, and rebuild the order window it opens in the app's HUD branding with every field editable.

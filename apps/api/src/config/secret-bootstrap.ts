@@ -8,6 +8,10 @@ import { randomBytes } from 'crypto';
  * with no configured secrets still passes the production checks in
  * configuration.ts. An env var, when set, always wins and is never written to
  * the database. Values are never logged; callers may log the returned names.
+ *
+ * Runs before ConfigModule loads any .env file, so a secret present only in a
+ * .env file (with DATABASE_URL set as a real env var) would be shadowed by the
+ * DB fallback — no current run path does this; keep it that way.
  */
 
 const MANAGED_SECRETS: ReadonlyArray<{ name: string; generate: () => string }> = [
@@ -48,7 +52,7 @@ export async function bootstrapSecrets(prisma: SecretStore): Promise<string[]> {
 
     // ON CONFLICT DO NOTHING, then re-read: two racing replicas both land on
     // whichever insert won.
-    await prisma.runtimeSecret.createMany({
+    const inserted = await prisma.runtimeSecret.createMany({
       data: [{ name: secret.name, value: secret.generate() }],
       skipDuplicates: true,
     });
@@ -57,7 +61,7 @@ export async function bootstrapSecrets(prisma: SecretStore): Promise<string[]> {
       throw new Error(`secret bootstrap failed: ${secret.name} missing after insert`);
     }
     process.env[secret.name] = row.value;
-    generated.push(secret.name);
+    if (inserted.count > 0) generated.push(secret.name);
   }
 
   return generated;

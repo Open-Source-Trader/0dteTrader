@@ -41,7 +41,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - TWC Heatmap V5: VWAP RIP markers now default to off (iOS + desktop)
-- AI analysis prompt fits the on-device model's context window (candle budget with retry, truncated lists labeled `(+N more)`) (iOS)
 - After login, the chart reloads the current symbol instead of sitting empty until a ticker change (iOS + desktop)
 
 ### Fixed

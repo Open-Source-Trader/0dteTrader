@@ -32,40 +32,21 @@ final class AIAnalysisViewModel: ObservableObject {
             return
         }
 
-        let limits = [AIAnalysisPromptBuilder.defaultCandleLimit,
-                      AIAnalysisPromptBuilder.retryCandleLimit]
+        let prompt = AIAnalysisPromptBuilder.buildPrompt(from: snapshot)
+
         do {
-            for (index, limit) in limits.enumerated() {
-                do {
-                    analysis = try await respond(
-                        to: AIAnalysisPromptBuilder.buildPrompt(from: snapshot, candleLimit: limit)
-                    )
-                    Haptics.success()
-                    return
-                } catch LanguageModelSession.GenerationError.exceededContextWindowSize
-                    where index < limits.count - 1 {
-                    // Retry once with a smaller prompt in a fresh session (TN3193).
-                }
-            }
+            let session = LanguageModelSession(
+                instructions: AIAnalysisPromptBuilder.systemInstructions
+            )
+            let response = try await session.respond(to: prompt, generating: MarketAnalysis.self)
+            analysis = response.content
+            Haptics.success()
         } catch is CancellationError {
             // Sheet dismissed mid-generation; silent.
-        } catch LanguageModelSession.GenerationError.exceededContextWindowSize {
-            errorMessage = "Analysis failed: too much market data for the on-device model. Disable some chart indicators and try again."
-            Haptics.error()
         } catch {
             errorMessage = "Analysis failed: \(error.localizedDescription)"
             Haptics.error()
         }
-    }
-
-    private func respond(to prompt: String) async throws -> MarketAnalysis {
-        #if DEBUG
-        print("[AIAnalysis] prompt: \(prompt.count) chars (~\(prompt.count / 4)–\(prompt.count / 3) tokens)")
-        #endif
-        let session = LanguageModelSession(
-            instructions: AIAnalysisPromptBuilder.systemInstructions
-        )
-        return try await session.respond(to: prompt, generating: MarketAnalysis.self).content
     }
 
     func reset() {

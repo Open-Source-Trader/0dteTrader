@@ -81,15 +81,8 @@ enum AIAnalysisPromptBuilder {
         recommendations — only analysis of the data.
         """
 
-    /// Sized so a typical prompt stays well inside the on-device model's
-    /// 4,096-token context window, which is shared with the instructions,
-    /// the @Generable schema, and the response (Apple TN3193).
-    static let defaultCandleLimit = 30
-    /// Fallback for the single retry after a context-window overflow.
-    static let retryCandleLimit = 15
-
     // swiftlint:disable:next function_body_length
-    static func buildPrompt(from snap: AIAnalysisSnapshot, candleLimit: Int = defaultCandleLimit) -> String {
+    static func buildPrompt(from snap: AIAnalysisSnapshot) -> String {
         var parts: [String] = []
 
         parts.append("MARKET DATA SNAPSHOT FOR \(snap.symbol)")
@@ -103,7 +96,7 @@ enum AIAnalysisPromptBuilder {
             parts.append(line)
         }
 
-        let recentCandles = snap.candles.suffix(candleLimit)
+        let recentCandles = snap.candles.suffix(50)
         if !recentCandles.isEmpty {
             let formatter = DateFormatter()
             formatter.dateFormat = "yyyy-MM-dd HH:mm"
@@ -168,13 +161,7 @@ enum AIAnalysisPromptBuilder {
                 )
             }
             if let proxy = options.scenarios.callPutDealerProxy {
-                // Truncated lists must SAY they are truncated: the model treats
-                // the prompt as complete, so silently dropped roots/warnings
-                // would read as "there are only these".
-                var roots = proxy.gammaRoots.prefix(4).map(f).joined(separator: ", ")
-                if proxy.gammaRoots.count > 4 {
-                    roots += " (+\(proxy.gammaRoots.count - 4) more)"
-                }
+                let roots = proxy.gammaRoots.map(f).joined(separator: ", ")
                 parts.append(
                     "OPTIONAL DEALER POSITIONING SCENARIO — Gamma: \(dollarText(proxy.gammaExposure)) | " +
                     "Primary root: \(proxy.primaryGammaRoot.map(f) ?? "Unavailable") | " +
@@ -183,11 +170,7 @@ enum AIAnalysisPromptBuilder {
                 parts.append("Scenario assumption: \(proxy.assumption)")
             }
             if !options.quality.warnings.isEmpty {
-                var warnings = options.quality.warnings.prefix(3).joined(separator: "; ")
-                if options.quality.warnings.count > 3 {
-                    warnings += " (+\(options.quality.warnings.count - 3) more warnings)"
-                }
-                parts.append("Data quality warnings: \(warnings)")
+                parts.append("Data quality warnings: \(options.quality.warnings.joined(separator: "; "))")
             }
         }
 

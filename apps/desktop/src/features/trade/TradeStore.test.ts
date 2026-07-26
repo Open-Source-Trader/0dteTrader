@@ -191,3 +191,73 @@ describe('TradeStore.arm confirmation bypass', () => {
     expect(store.getState().armedTicket).not.toBeNull();
   });
 });
+
+describe('TradeStore — order pricing', () => {
+  it('rounds a custom limit to the contract tick', () => {
+    const store = makeStore();
+    store.setCustomLimitPrice(2.456);
+    expect(store.getState().customLimitPrice).toBe(2.46);
+    store.setCustomLimitPrice(null);
+    expect(store.getState().customLimitPrice).toBeNull();
+  });
+
+  it('blocks arming Custom with no price, and nothing else', () => {
+    const store = makeStore();
+    for (const orderType of ['bid', 'mid', 'ask', 'market'] as const) {
+      store.setOrderType(orderType);
+      expect(store.canArm).toBe(true);
+    }
+    store.setOrderType('custom');
+    expect(store.canArm).toBe(false);
+    store.setCustomLimitPrice(2.45);
+    expect(store.canArm).toBe(true);
+  });
+
+  it('drops the price and moves the highlight off Custom when the contract changes', () => {
+    // A premium is only meaningful for the contract it was typed against, so a
+    // contract change must not leave it armed on a different one.
+    const store = makeStore();
+    store.setOrderType('custom');
+    store.setCustomLimitPrice(2.45);
+
+    store.clearCustomLimitPrice();
+
+    expect(store.getState().customLimitPrice).toBeNull();
+    expect(store.getState().orderType).toBe('mid');
+  });
+
+  it('leaves another selection alone when clearing', () => {
+    const store = makeStore();
+    store.setOrderType('ask');
+    store.clearCustomLimitPrice();
+    expect(store.getState().orderType).toBe('ask');
+  });
+
+  it('sends limitPrice only for custom', () => {
+    const store = makeStore();
+    store.setOrderType('custom');
+    store.setCustomLimitPrice(2.4);
+    store.arm('buy', 'SPY', chainStub());
+    expect(store.getState().armedTicket?.request.orderType).toBe('custom');
+    expect(store.getState().armedTicket?.request.limitPrice).toBe(2.4);
+
+    // The other four are priced from the server's own quote; a number
+    // alongside them is one the server rejects outright.
+    for (const orderType of ['bid', 'mid', 'ask', 'market'] as const) {
+      store.setOrderType(orderType);
+      store.arm('buy', 'SPY', chainStub());
+      expect(store.getState().armedTicket?.request.orderType).toBe(orderType);
+      expect(store.getState().armedTicket?.request.limitPrice).toBeUndefined();
+    }
+  });
+
+  it('refuses to arm Custom with no price rather than sending none', () => {
+    const store = makeStore();
+    store.setOrderType('custom');
+
+    store.arm('buy', 'SPY', chainStub());
+
+    expect(store.getState().armedTicket).toBeNull();
+    expect(store.getState().toast?.style).toBe('error');
+  });
+});

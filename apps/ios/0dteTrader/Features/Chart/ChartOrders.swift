@@ -37,7 +37,7 @@ struct ChartOrder: Equatable, Identifiable, Sendable {
     var armPrice: Double
     let side: OrderSide
     var quantity: Int
-    var orderType: OrderType
+    var orderType: ChartOrderType
     let kind: ChartOrderKind
     let optionType: OptionType
     let expiration: String
@@ -71,7 +71,7 @@ struct ChartOrder: Equatable, Identifiable, Sendable {
 
     /// The tappable execution pill. `MKT` is abbreviated so the pill keeps its
     /// width across a toggle and the row does not jump.
-    var orderTypeLabel: String { orderType == .market ? "MKT" : "MID" }
+    var orderTypeLabel: String { orderType.shortLabel }
 }
 
 extension ChartOrder {
@@ -79,7 +79,7 @@ extension ChartOrder {
     /// would arm a trade we cannot describe.
     init?(dto: ChartOrderDTO) {
         guard let side = OrderSide(rawValue: dto.side),
-              let orderType = OrderType(rawValue: dto.orderType),
+              let orderType = ChartOrderType(rawValue: dto.orderType),
               let kind = ChartOrderKind(rawValue: dto.kind),
               let optionType = OptionType(rawValue: dto.optionType),
               let status = ChartOrderStatus(rawValue: dto.status)
@@ -270,7 +270,7 @@ final class ChartOrdersModel: ObservableObject {
     /// Flips MID ↔ MKT for one line, optimistically so the pill responds at once.
     func toggleOrderType(id: String) async {
         guard let current = order(id: id), current.isWorking else { return }
-        let next: OrderType = current.orderType == .mid ? .market : .mid
+        let next: ChartOrderType = current.orderType == .mid ? .market : .mid
         var optimistic = current
         optimistic.orderType = next
         upsert(optimistic)

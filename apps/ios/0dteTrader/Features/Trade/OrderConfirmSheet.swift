@@ -10,6 +10,12 @@ struct OrderConfirmSheet: View {
         ticket.side == .buy ? .buyGreen : .sellRed
     }
 
+    /// The ticket carries the raw wire value; an unrecognised one is printed as
+    /// it came rather than mislabelled as something else.
+    private var pricingDescription: String {
+        OrderType(rawValue: ticket.request.orderType)?.pricingDescription ?? ticket.request.orderType
+    }
+
     var body: some View {
         ScrollView(.vertical) {
             VStack(spacing: AppSpacing.lg) {
@@ -19,7 +25,17 @@ struct OrderConfirmSheet: View {
 
                 VStack(spacing: AppSpacing.md) {
                     LabeledContent("Quantity", value: "\(ticket.request.quantity)")
-                    LabeledContent("Order type", value: ticket.request.orderType == OrderType.mid.rawValue ? "Limit at mid" : "Market")
+                    LabeledContent("Order type", value: pricingDescription)
+                    // With a typed price this sheet is the last place a wrong
+                    // number can be caught, so it prints the number as entered
+                    // rather than only the server's resolved price — and the
+                    // spread beside it below, since a premium with nothing to
+                    // compare it to catches nothing.
+                    if let limitPrice = ticket.request.limitPrice {
+                        LabeledContent("Your limit") {
+                            Text(Format.price(limitPrice)).font(.priceMedium)
+                        }
+                    }
 
                     if tradeViewModel.isPreviewLoading {
                         // Placeholder rows mirror the loaded layout so the card
@@ -37,6 +53,12 @@ struct OrderConfirmSheet: View {
                     } else if let preview = tradeViewModel.preview {
                         LabeledContent("Contract") {
                             Text(preview.contractSymbol).font(.priceMedium)
+                        }
+                        if let bid = preview.bid, let ask = preview.ask {
+                            LabeledContent("Bid / Ask") {
+                                Text("\(Format.price(bid)) / \(Format.price(ask))")
+                                    .font(.priceMedium)
+                            }
                         }
                         LabeledContent("Est. price") {
                             Text(Format.price(preview.price))

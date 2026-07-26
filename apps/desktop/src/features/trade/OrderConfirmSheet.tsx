@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { useStore } from '../../core/observable';
-import { sideDisplayName } from '../../core/models/domain';
+import { orderPricingDescription, sideDisplayName } from '../../core/models/domain';
 import { Sheet } from '../../design/components/Sheet';
 import { Spinner } from '../../design/components/Spinner';
 import { Format } from '../../design/format';
@@ -76,6 +76,10 @@ export function OrderConfirmSheet({ tradeStore, ticket }: OrderConfirmSheetProps
           <span>Contract</span>
           <span className="text-secondary numeric">{preview.resolved.contractSymbol}</span>
         </div>
+        <DetailRow
+          label="Bid / Ask"
+          value={`${Format.price(preview.resolved.bid)} / ${Format.price(preview.resolved.ask)}`}
+        />
         <DetailRow label="Est. price" value={Format.price(preview.resolved.price)} />
         <DetailRow
           label="Est. buying power"
@@ -161,10 +165,14 @@ export function OrderConfirmSheet({ tradeStore, ticket }: OrderConfirmSheetProps
           }}
         >
           <DetailRow label="Quantity" value={String(ticket.request.quantity)} />
-          <DetailRow
-            label="Order type"
-            value={ticket.request.orderType === 'mid' ? 'Limit at mid' : 'Market'}
-          />
+          <DetailRow label="Order type" value={orderPricingDescription(ticket.request.orderType)} />
+          {/* With a typed price this sheet is the last place a wrong number can
+              be caught, so it prints the number as entered rather than only the
+              server's resolved price — and the spread beside it, since a
+              premium with nothing to compare it to catches nothing. */}
+          {ticket.request.limitPrice !== undefined ? (
+            <DetailRow label="Your limit" value={Format.price(ticket.request.limitPrice)} />
+          ) : null}
 
           {previewSection}
 

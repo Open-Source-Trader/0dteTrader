@@ -14,7 +14,48 @@ export type TradingMode = 'live' | 'practice';
  *  Alpaca is added behind the same BrokerGateway seam. */
 export type BrokerProvider = 'webull' | 'alpaca';
 export type OrderSide = 'buy' | 'sell';
-export type OrderType = 'mid' | 'market';
+/**
+ * Execution types a resting chart-order line may carry.
+ *
+ * Deliberately narrower than `OrderType`, and deliberately its own name rather
+ * than an inline union: a line is fired by `ChartOrderWatcherService` with
+ * nobody watching and nothing on screen to type a price into, so the variants
+ * that need a human-supplied number cannot reach it. Both platforms mirror this
+ * split, and the compiler is what enforces it — see `narrowToChartOrderType`.
+ */
+export type ChartOrderType = 'mid' | 'market';
+
+/**
+ * How the trade panel prices an order.
+ *
+ * Only `custom` carries a client-supplied price (`OrderRequest.limitPrice`);
+ * `bid`, `mid` and `ask` are resolved server-side from the server's own quote
+ * at execution time, exactly as `mid` always was. Four of the five therefore
+ * add no new trust boundary, and the price validation only has to guard the one
+ * path where a human typed a number.
+ *
+ * `mid` and `market` keep their spellings, so rows and settings already
+ * persisted as either still decode.
+ */
+export type OrderType = ChartOrderType | 'custom' | 'bid' | 'ask';
+
+/** The four variants that place a limit order; the fifth, `market`, does not. */
+export function isLimitOrderType(orderType: OrderType): boolean {
+  return orderType !== 'market';
+}
+
+/**
+ * The chart line's execution type for a panel selection.
+ *
+ * The three price-carrying variants collapse onto `mid` — the server-computed
+ * limit — because a line fires unattended: a bid/ask read at arming time would
+ * be stale by the time the level is crossed, and a custom price belongs to the
+ * contract and the moment it was typed for.
+ */
+export function narrowToChartOrderType(orderType: OrderType): ChartOrderType {
+  return orderType === 'market' ? 'market' : 'mid';
+}
+
 export type OptionType = 'call' | 'put';
 export type SelectionMode = 'auto_otm' | 'explicit';
 export type OrderStatus = 'submitted' | 'filled' | 'partially_filled' | 'cancelled' | 'rejected';
@@ -334,6 +375,13 @@ export interface OrderRequest {
   side: OrderSide;
   quantity: number;
   orderType: OrderType;
+  /**
+   * The price to work the limit at. Required when `orderType` is `custom` and
+   * rejected otherwise — every other variant is priced from the server's own
+   * quote, so accepting a number alongside them would be accepting one the
+   * server then ignores.
+   */
+  limitPrice?: number;
   selection: OrderSelection;
 }
 
@@ -342,6 +390,14 @@ export interface OrderPreview {
     contractSymbol: string;
     price: number;
     estBuyingPower: number;
+    /**
+     * The quote the price was resolved against. Returned so the confirm sheet
+     * can print a custom limit next to the live spread — with a typed price the
+     * sheet is the last place a wrong number can be caught, and a number with
+     * nothing to compare it to catches nothing.
+     */
+    bid: number;
+    ask: number;
   };
   warnings: string[];
 }
@@ -423,7 +479,7 @@ export interface ChartOrder {
    * the trade panel: a resting line must not change behaviour because a panel
    * toggle moved. Rendered on the line and tappable to flip.
    */
-  orderType: OrderType;
+  orderType: ChartOrderType;
   kind: ChartOrderKind;
   optionType: OptionType;
   /** YYYY-MM-DD. */
@@ -452,7 +508,7 @@ export interface ChartOrderDraft {
   triggerPrice: number;
   side: OrderSide;
   quantity: number;
-  orderType: OrderType;
+  orderType: ChartOrderType;
   kind: ChartOrderKind;
   optionType: OptionType;
   expiration: string;
@@ -465,7 +521,7 @@ export interface ChartOrderPatch {
   /** Re-arms the order: `armPrice` is re-read from the live quote. */
   triggerPrice?: number;
   quantity?: number;
-  orderType?: OrderType;
+  orderType?: ChartOrderType;
 }
 
 /** The side of the trigger the order is waiting to be crossed *from*. */

@@ -4,10 +4,10 @@ import {
   ChartOrder,
   ChartOrderKind,
   ChartOrderStatus,
+  ChartOrderType,
   OptionType,
   OrderResult,
   OrderSide,
-  OrderType,
 } from '@0dtetrader/shared-types';
 import { BROKER_GATEWAY, BrokerGateway } from '../broker/broker-gateway.interface';
 import { findExplicitOption, pickExpiration } from '../broker/contract-resolution';
@@ -55,7 +55,7 @@ export function toChartOrder(row: ChartOrderRow): ChartOrder {
     armPrice: row.armPrice,
     side: row.side as OrderSide,
     quantity: row.quantity,
-    orderType: row.orderType as OrderType,
+    orderType: row.orderType as ChartOrderType,
     kind: row.kind as ChartOrderKind,
     optionType: row.optionType as OptionType,
     expiration: row.expiration,
@@ -346,7 +346,10 @@ export class ChartOrdersService {
       assetClass: 'option',
       side: fresh.side as OrderSide,
       quantity: fresh.quantity,
-      orderType: fresh.orderType as OrderType,
+      // `ChartOrderType`, not `OrderType`: a line can only ever be MID or MKT,
+      // and the fire path is exactly where a widened union must not leak — this
+      // request is built with nobody present and no price to type.
+      orderType: fresh.orderType as ChartOrderType,
       selection: {
         mode: 'explicit',
         optionType: fresh.optionType as OptionType,

@@ -159,7 +159,11 @@ struct TradePanelView: View {
                     optionsSection
                     Group {
                         quantityRow
-                        orderTypeRow
+                        OrderPricingRow(
+                            tradeViewModel: tradeViewModel,
+                            chainViewModel: chainViewModel,
+                            density: density
+                        )
                     }
                     .disabled(tradingLocked)
                     .opacity(tradingLocked ? 0.55 : 1)
@@ -359,7 +363,7 @@ struct TradePanelView: View {
         return contract.mid.map { "≈ \(Format.price($0))" } ?? "—"
     }
 
-    // MARK: - Quantity & order type
+    // MARK: - Quantity & order pricing
 
     private var quantityRow: some View {
         HStack(spacing: AppSpacing.md) {
@@ -440,61 +444,10 @@ struct TradePanelView: View {
         }
     }
 
-    /// Mid hard left, Market hard right, the selected contract's bid/mid/ask
-    /// between them — replacing the single `≈ 2.46` that used to trail the row.
-    ///
-    /// Still one `HudSegmentedControl`, not two buttons: Mid and Market are one
-    /// either/or, and two separately-bordered chips at opposite ends of a row
-    /// would read as two independent toggles. The track's own frame runs behind
-    /// all three, so the pair stays visibly bracketed, and only the chosen end
-    /// carries the accent border and fill.
-    private var orderTypeRow: some View {
-        HudSegmentedControl(
-            options: [
-                .init(OrderType.mid, "Mid"),
-                .init(OrderType.market, "Market"),
-            ],
-            selection: $tradeViewModel.orderType,
-            minHeight: density.segmentedMinHeight,
-            labelColor: .secondary,
-            center: { quoteColumns }
-        )
-        .accessibilityLabel("Order type")
-    }
-
-    /// Bid / mid / ask with their names beneath them. Em dashes rather than an
-    /// empty middle while the chain is loading or nothing is selected: the row
-    /// keeps its three columns and its height either way, and a dash says "no
-    /// quote yet" where a blank says nothing at all.
-    private var quoteColumns: some View {
-        let contract = chainViewModel.selectedContract
-        return HStack(spacing: AppSpacing.xs) {
-            quoteColumn("Bid", contract.map { Format.price($0.bid) })
-            quoteColumn("Mid", contract?.mid.map { Format.price($0) })
-            quoteColumn("Ask", contract.map { Format.price($0.ask) })
-        }
-        .frame(maxWidth: .infinity)
-    }
-
-    /// One column: price over its label. Both grey — the panel's chrome text is
-    /// one colour now — so the hierarchy is carried by type size and position
-    /// rather than by brightness.
-    private func quoteColumn(_ label: String, _ value: String?) -> some View {
-        VStack(spacing: 0) {
-            Text(value ?? "—")
-                .font(.priceSmall)
-            Text(label)
-                .font(.caption2)
-        }
-        .foregroundStyle(Color.secondary)
-        .lineLimit(1)
-        .minimumScaleFactor(0.7)
-        .frame(maxWidth: .infinity)
-        .accessibilityElement(children: .combine)
-    }
-
     private var canTrade: Bool {
-        chainViewModel.selectedContract != nil && !tradingLocked
+        // Custom with nothing typed in it has no price to send, and the server
+        // would refuse the request anyway.
+        chainViewModel.selectedContract != nil && !tradingLocked && tradeViewModel.canArm
     }
 
     // MARK: - Shared chrome

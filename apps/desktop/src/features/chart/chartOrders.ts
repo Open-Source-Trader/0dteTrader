@@ -2,7 +2,7 @@ import type {
   ChartOrder,
   ChartOrderDraft,
   ChartOrderKind,
-  OrderType,
+  ChartOrderType,
 } from '@0dtetrader/shared-types';
 import { chartOrderCrossed } from '@0dtetrader/shared-types';
 import type { ApiClient } from '../../core/api/ApiClient';
@@ -138,7 +138,7 @@ export class ChartOrdersStore extends Store<ChartOrdersState> {
   async toggleOrderType(id: string): Promise<void> {
     const current = this.byId(id);
     if (!current || !isWorking(current)) return;
-    const orderType: OrderType = current.orderType === 'mid' ? 'market' : 'mid';
+    const orderType: ChartOrderType = current.orderType === 'mid' ? 'market' : 'mid';
     this.upsert({ ...current, orderType });
     try {
       this.upsert(await this.apiClient.updateChartOrder(id, { orderType }));
@@ -261,6 +261,6 @@ export function kindLabel(kind: ChartOrderKind): string {
 
 /** The tappable execution pill. `MKT` is deliberately abbreviated so the pill
  *  stays the same width in both states and the row does not jump on toggle. */
-export function orderTypeLabel(orderType: OrderType): string {
+export function orderTypeLabel(orderType: ChartOrderType): string {
   return orderType === 'market' ? 'MKT' : 'MID';
 }

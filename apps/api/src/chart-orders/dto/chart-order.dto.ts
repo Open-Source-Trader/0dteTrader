@@ -11,7 +11,7 @@ import {
   Max,
   Min,
 } from 'class-validator';
-import { ChartOrderKind, OptionType, OrderSide, OrderType } from '@0dtetrader/shared-types';
+import { ChartOrderKind, ChartOrderType, OptionType, OrderSide } from '@0dtetrader/shared-types';
 
 /**
  * Create payload for a chart order line. The server re-resolves the contract,
@@ -36,8 +36,11 @@ export class CreateChartOrderDto {
   @Max(1000)
   quantity!: number;
 
+  /** `ChartOrderType`, not `OrderType`: the panel's `custom`/`bid`/`ask` are
+   *  priced at the moment they are chosen, and a line fires unattended, hours
+   *  later, with nobody present to have meant them. */
   @IsIn(['mid', 'market'])
-  orderType!: OrderType;
+  orderType!: ChartOrderType;
 
   @IsIn(['limit', 'target', 'stop'])
   kind!: ChartOrderKind;
@@ -74,5 +77,5 @@ export class UpdateChartOrderDto {
 
   @IsOptional()
   @IsIn(['mid', 'market'])
-  orderType?: OrderType;
+  orderType?: ChartOrderType;
 }

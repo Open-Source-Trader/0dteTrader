@@ -19,8 +19,43 @@ export function sideDisplayName(side: OrderSide): string {
   return side.toUpperCase();
 }
 
-export function orderTypeDisplayName(type: OrderType): string {
-  return type === 'mid' ? 'Mid' : 'Market';
+/** Short name for a list (history, the positions strip). */
+export function orderTypeDisplayName(type: OrderType | string): string {
+  switch (type) {
+    case 'custom':
+      return 'Custom';
+    case 'bid':
+      return 'Bid';
+    case 'mid':
+      return 'Mid';
+    case 'ask':
+      return 'Ask';
+    case 'market':
+      return 'Market';
+    // Rows written before this widened, and anything a broker reports back
+    // that we do not have a name for, print as they came.
+    default:
+      return String(type);
+  }
+}
+
+/**
+ * How the order is priced, spelled out — the confirm sheet's phrasing, where
+ * "Ask" alone would not say whether it is a limit or a market order.
+ */
+export function orderPricingDescription(type: OrderType): string {
+  switch (type) {
+    case 'custom':
+      return 'Limit at your price';
+    case 'bid':
+      return 'Limit at bid';
+    case 'mid':
+      return 'Limit at mid';
+    case 'ask':
+      return 'Limit at ask';
+    case 'market':
+      return 'Market';
+  }
 }
 
 export function optionTypeDisplayName(type: OptionType): string {

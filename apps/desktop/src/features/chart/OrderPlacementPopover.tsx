@@ -1,5 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
-import type { OptionContract, OrderSide, OrderType } from '@0dtetrader/shared-types';
+import type { ChartOrderType, OptionContract, OrderSide } from '@0dtetrader/shared-types';
+import {
+  PRICE_MAX,
+  PRICE_MIN,
+  PRICE_STEP,
+  isPriceInputShape,
+  parsePriceInput,
+  roundToTick,
+} from '../../core/models/priceInput';
 import { SegmentedControl } from '../../design/components/SegmentedControl';
 import { Stepper } from '../../design/components/Stepper';
 import { Format } from '../../design/format';
@@ -7,7 +15,7 @@ import { Format } from '../../design/format';
 export interface OrderPlacementInput {
   side: OrderSide;
   quantity: number;
-  orderType: OrderType;
+  orderType: ChartOrderType;
 }
 
 interface OrderPlacementPopoverProps {
@@ -19,23 +27,11 @@ interface OrderPlacementPopoverProps {
   rightInset: number;
   contract: OptionContract;
   defaultQuantity: number;
-  defaultOrderType: OrderType;
+  defaultOrderType: ChartOrderType;
   onPlace: (input: OrderPlacementInput) => Promise<void>;
   onCancel: () => void;
 }
 
-/** Trigger price step: one cent, the tick the level is rounded to anyway. */
-const PRICE_STEP = 0.01;
-/** Bounds a level has to fall inside to be armable. The stepper clamps to the
- *  same range, but the validation is what stops a *typed or pasted* level from
- *  getting through — without the ceiling a twenty-digit level is finite, passes
- *  every guard, and arms. Mirrored by `AppPlacementGuide.levelMinimum/Maximum`
- *  on iOS. */
-const LEVEL_MIN = 0.01;
-const LEVEL_MAX = 100000;
-/** Digits, optionally one decimal point. Also matches the part-typed forms a
- *  level passes through on the way in (`''`, `'.'`, `'4300.'`). */
-const LEVEL_SHAPE = /^\d*\.?\d*$/;
 /** Ties the note to the level input, so a screen reader reads *why* it is
  *  invalid rather than only that it is. */
 const NOTE_ID = 'order-placement-note';
@@ -62,7 +58,7 @@ export function OrderPlacementPopover({
 }: OrderPlacementPopoverProps) {
   const [side, setSide] = useState<OrderSide>('buy');
   const [quantity, setQuantity] = useState(defaultQuantity);
-  const [orderType, setOrderType] = useState<OrderType>(defaultOrderType);
+  const [orderType, setOrderType] = useState<ChartOrderType>(defaultOrderType);
   const [submitting, setSubmitting] = useState(false);
   /** Raw text, held for as long as the user is typing. A level cannot be
    *  reached keystroke by keystroke without passing through text that is not
@@ -75,9 +71,7 @@ export function OrderPlacementPopover({
   const levelRef = useRef<HTMLInputElement>(null);
 
   const levelText = levelDraft ?? String(price);
-  const levelNumber = Number(levelText);
-  const levelValid =
-    Number.isFinite(levelNumber) && levelNumber >= LEVEL_MIN && levelNumber <= LEVEL_MAX;
+  const levelValid = parsePriceInput(levelText) !== null;
 
   // The level is the field most likely to be adjusted the moment this opens —
   // the `+` only gets you approximately where you meant.
@@ -150,12 +144,10 @@ export function OrderPlacementPopover({
             // Digits and at most one point, nothing else: `Number` is happy to
             // read `0x1f`, `1e5` and `' 42 '` as prices, and none of those are
             // things anyone means to type into a dollar level.
-            if (!LEVEL_SHAPE.test(raw)) return;
+            if (!isPriceInputShape(raw)) return;
             setLevelDraft(raw);
-            const next = Number(raw);
-            if (Number.isFinite(next) && next >= LEVEL_MIN && next <= LEVEL_MAX) {
-              onPriceChange(Math.round(next * 100) / 100);
-            }
+            const next = parsePriceInput(raw);
+            if (next !== null) onPriceChange(roundToTick(next));
           }}
           // Typing is over, so the field can stop showing the keystrokes and
           // show the level they added up to.
@@ -163,8 +155,8 @@ export function OrderPlacementPopover({
         />
         <Stepper
           value={price}
-          min={LEVEL_MIN}
-          max={LEVEL_MAX}
+          min={PRICE_MIN}
+          max={PRICE_MAX}
           step={PRICE_STEP}
           onChange={(next) => {
             setLevelDraft(null);
@@ -192,7 +184,7 @@ export function OrderPlacementPopover({
           { value: 'market', label: 'MKT' },
         ]}
         value={orderType}
-        onChange={(value) => setOrderType(value as OrderType)}
+        onChange={(value) => setOrderType(value as ChartOrderType)}
       />
 
       <label className="order-placement__row">
@@ -217,7 +209,7 @@ export function OrderPlacementPopover({
             app — not a broker-side resting order.
           </>
         ) : (
-          `Enter a level between ${LEVEL_MIN} and ${LEVEL_MAX} to place this line.`
+          `Enter a level between ${PRICE_MIN} and ${PRICE_MAX} to place this line.`
         )}
       </p>
 

@@ -20,12 +20,8 @@ import { brokerErrors } from '../../common/broker-error';
 import { AGGREGATION_PLANS, aggregateCandles } from '../../market-data/candle-aggregation';
 import { CredentialsService } from '../../credentials/credentials.service';
 import { PrismaService } from '../../prisma/prisma.service';
-import {
-  computeMid,
-  estimateBuyingPower,
-  parseOccSymbol,
-  resolveAutoOtm,
-} from '../contract-resolution';
+import { estimateBuyingPower, parseOccSymbol, resolveAutoOtm } from '../contract-resolution';
+import { customPriceWarning, resolveLimitPrice } from '../order-pricing';
 import { BrokerGateway } from '../broker-gateway.interface';
 import { optionExpirations } from '../expiration-calendar';
 import { OrderEventsService } from '../order-events.service';
@@ -479,8 +475,10 @@ export class WebullBrokerGateway implements BrokerGateway, OnModuleDestroy {
   async previewOrder(userId: string, order: OrderRequest): Promise<OrderPreview> {
     const client = await this.clientFor(userId);
     const resolved = await this.resolveContract(userId, order);
-    const price =
-      order.orderType === 'market' ? resolved.last : computeMid(resolved.bid, resolved.ask);
+    // The limit the order would rest at, or the last for a market order — the
+    // same resolution `placeOrder` uses, so the preview cannot quote one price
+    // and the placement send another.
+    const price = resolveLimitPrice(order.orderType, resolved, order.limitPrice) ?? resolved.last;
 
     const warnings: string[] = [];
     if (resolved.optionTerms && resolved.optionTerms.expiration === tradingDay()) {
@@ -489,6 +487,8 @@ export class WebullBrokerGateway implements BrokerGateway, OnModuleDestroy {
     if (order.assetClass === 'option' && order.orderType === 'market') {
       warnings.push('Market order on an option contract — fills at last price');
     }
+    const priceWarning = customPriceWarning(order.orderType, resolved, order.limitPrice);
+    if (priceWarning) warnings.push(priceWarning);
 
     // Ask the broker for a cost estimate; fall back to a local estimate.
     let estBuyingPower: number | undefined;
@@ -529,6 +529,8 @@ export class WebullBrokerGateway implements BrokerGateway, OnModuleDestroy {
         contractSymbol: resolved.contractSymbol,
         price,
         estBuyingPower: Math.round(estBuyingPower * 100) / 100,
+        bid: resolved.bid,
+        ask: resolved.ask,
       },
       warnings,
     };
@@ -541,8 +543,7 @@ export class WebullBrokerGateway implements BrokerGateway, OnModuleDestroy {
   ): Promise<OrderResult> {
     const client = await this.clientFor(userId);
     const resolved = await this.resolveContract(userId, order);
-    const limitPrice =
-      order.orderType === 'market' ? undefined : computeMid(resolved.bid, resolved.ask);
+    const limitPrice = resolveLimitPrice(order.orderType, resolved, order.limitPrice);
 
     const clientOrderId = toClientOrderId(userId, idempotencyKey);
     const newOrder = await this.buildNewOrder(userId, order, resolved, clientOrderId, limitPrice);

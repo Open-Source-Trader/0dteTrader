@@ -24,7 +24,7 @@ final class ChartTradingCoordinator: ObservableObject, OrderLineOverlayDelegate 
     /// wired by the trade screen to the loaded chain.
     var selectedContract: () -> OptionContract? = { nil }
     var contractResolver: (String) -> OptionContract? = { _ in nil }
-    var defaultOrderType: () -> OrderType = { .mid }
+    var defaultOrderType: () -> ChartOrderType = { .mid }
     var onFlattenConfirmed: (Position) -> Void = { _ in }
 
     init(chartOrders: ChartOrdersModel, settingsStore: SettingsStore) {
@@ -145,7 +145,7 @@ final class ChartTradingCoordinator: ObservableObject, OrderLineOverlayDelegate 
         onFlattenConfirmed(position)
     }
 
-    func placeFromSheet(side: OrderSide, quantity: Int, orderType: OrderType) async {
+    func placeFromSheet(side: OrderSide, quantity: Int, orderType: ChartOrderType) async {
         guard let request = placementRequest else { return }
         // Re-checked at the moment of arming, not just when the selection
         // changes: the dismissal above should make this unreachable, but the

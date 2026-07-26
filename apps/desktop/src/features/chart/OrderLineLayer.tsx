@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { IChartApi, ISeriesApi } from 'lightweight-charts';
-import type { ChartOrder, OptionContract, Position } from '@0dtetrader/shared-types';
+import type {
+  ChartOrder,
+  ChartOrderType,
+  OptionContract,
+  Position,
+} from '@0dtetrader/shared-types';
 import { bracketKindFor } from '@0dtetrader/shared-types';
 import { useStore } from '../../core/observable';
 import { Format } from '../../design/format';
@@ -50,7 +55,7 @@ interface OrderLineLayerProps {
   /** Contract a newly placed line trades — the trade panel's current selection. */
   selectedContract: OptionContract | null;
   /** Execution type a new line inherits from the panel. */
-  defaultOrderType: 'mid' | 'market';
+  defaultOrderType: ChartOrderType;
   onFlatten: (position: Position) => void;
   /** Confirms cancelling a *working* line. Terminal lines are dismissed here
    *  without asking — they already reached the broker, so "nothing was sent"

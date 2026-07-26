@@ -1,5 +1,39 @@
 import SwiftUI
 
+extension View {
+    /// The track a segmented control's choices sit inside.
+    ///
+    /// Factored out of `HudSegmentedControl` so a row whose segments are not
+    /// all plain labels — the trade panel's pricing row, where one of the five
+    /// is a text field — wears the same chrome instead of a hand-copied
+    /// lookalike that can drift from it.
+    func hudSegmentTrack(accent: Color = .hudStroke) -> some View {
+        padding(AppSpacing.xxs)
+            .background {
+                HudPanelShape(chamfer: 8)
+                    .fill(accent.opacity(0.08))
+                    .overlay {
+                        HudPanelShape(chamfer: 8)
+                            .strokeBorder(accent.opacity(0.35), lineWidth: 1)
+                    }
+            }
+    }
+
+    /// The chrome the chosen segment wears, and nothing at all otherwise.
+    func hudSegmentHighlight(isSelected: Bool, tint: Color = .hudStroke) -> some View {
+        background {
+            if isSelected {
+                HudPanelShape(chamfer: 6)
+                    .fill(tint.opacity(0.18))
+                    .overlay {
+                        HudPanelShape(chamfer: 6)
+                            .strokeBorder(tint, lineWidth: 1.2)
+                    }
+            }
+        }
+    }
+}
+
 /// Chamfered segmented control replacing `.pickerStyle(.segmented)` —
 /// UISegmentedControl can't take the HUD silhouette. Selection keeps the
 /// same haptic and exposes the standard `isSelected` accessibility trait.
@@ -66,31 +100,14 @@ struct HudSegmentedControl<Value: Hashable, Center: View>: View {
                             maxWidth: hasCenter ? nil : .infinity,
                             minHeight: minHeight
                         )
-                        .background {
-                            if isSelected {
-                                HudPanelShape(chamfer: 6)
-                                    .fill(tint.opacity(0.18))
-                                    .overlay {
-                                        HudPanelShape(chamfer: 6)
-                                            .strokeBorder(tint, lineWidth: 1.2)
-                                    }
-                            }
-                        }
+                        .hudSegmentHighlight(isSelected: isSelected, tint: tint)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(AppPressStyle())
                 .accessibilityAddTraits(isSelected ? .isSelected : [])
             }
         }
-        .padding(AppSpacing.xxs)
-        .background {
-            HudPanelShape(chamfer: 8)
-                .fill(accent.opacity(0.08))
-                .overlay {
-                    HudPanelShape(chamfer: 8)
-                        .strokeBorder(accent.opacity(0.35), lineWidth: 1)
-                }
-        }
+        .hudSegmentTrack(accent: accent)
         .accessibilityElement(children: .contain)
     }
 }

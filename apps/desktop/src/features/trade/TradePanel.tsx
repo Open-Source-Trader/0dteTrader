@@ -1,7 +1,9 @@
+import { useEffect, useRef, useState } from 'react';
 import type { OrderSide } from '@0dtetrader/shared-types';
 import { useStore } from '../../core/observable';
 import { midPrice } from '../../core/models/domain';
 import { dayString } from '../../core/models/dates';
+import { isPriceInputShape, parsePriceInput } from '../../core/models/priceInput';
 import { Menu } from '../../design/components/Menu';
 import { QuickChip } from '../../design/components/QuickChip';
 import { SegmentedControl } from '../../design/components/SegmentedControl';
@@ -63,12 +65,27 @@ function expirationLabel(expiration: string): string {
  * rather than a blank while the chain is loading or nothing is selected: the
  * row keeps its three columns and its height either way.
  */
-function QuoteColumn({ label, value }: { label: string; value: string | null }) {
+function QuoteColumn({
+  label,
+  value,
+  selected,
+  onSelect,
+}: {
+  label: string;
+  value: string | null;
+  selected: boolean;
+  onSelect: () => void;
+}) {
   return (
-    <div className="quote-column">
+    <button
+      type="button"
+      className={`quote-column segment${selected ? ' selected' : ''}`}
+      aria-pressed={selected}
+      onClick={onSelect}
+    >
       <span className="quote-column__value numeric">{value || '—'}</span>
       <span className="quote-column__label">{label}</span>
-    </div>
+    </button>
   );
 }
 
@@ -88,7 +105,26 @@ export function TradePanel({
   const selectedContract = chainStore.selectedContract;
   const autoMid = autoContract ? midPrice(autoContract.bid, autoContract.ask) : null;
 
-  const canTrade = selectedContract !== null && !locked;
+  /** Raw keystrokes while the custom field is being typed in; null shows the
+   *  settled price. See `priceInput.ts` — a field that re-renders the canonical
+   *  string mid-word turns `2.45` into `245`. */
+  const [customDraft, setCustomDraft] = useState<string | null>(null);
+  const customRef = useRef<HTMLInputElement>(null);
+  const customText = customDraft ?? trade.customLimitPrice?.toFixed(2) ?? '';
+
+  // A typed price belongs to the contract it was typed against, so the store
+  // drops it (and the Custom selection with it) when the contract changes
+  // underneath. Keyed on the symbol, which covers a strike change, an
+  // expiration change and AUTO repicking alike.
+  const selectedSymbol = selectedContract?.symbol ?? null;
+  useEffect(() => {
+    tradeStore.clearCustomLimitPrice();
+    setCustomDraft(null);
+  }, [selectedSymbol, tradeStore]);
+
+  // Custom with nothing typed in it cannot be armed — there is no price to
+  // send, and the server would reject the request anyway.
+  const canTrade = selectedContract !== null && !locked && tradeStore.canArm;
 
   const selectedQuote = selectedContract;
   const indicativeMid = selectedQuote ? midPrice(selectedQuote.bid, selectedQuote.ask) : null;
@@ -319,40 +355,82 @@ export function TradePanel({
           <QuickChip title="+10" onClick={() => tradeStore.addQuantity(10)} />
         </div>
 
-        {/* Order-type row: Mid hard left, Market hard right, the selected
-            contract's bid/mid/ask between them — replacing the single `≈ 2.46`
-            that used to trail the row. Still one segmented track, because Mid
-            and Market are one either/or and two separately-bordered chips at
-            opposite ends would read as two independent toggles. */}
+        {/* Pricing row: five ways to price the order, one highlight. Custom
+            hard left where the Mid button used to be, Market hard right, and
+            the three readouts between them are selectable now rather than
+            passive — each still shows its live price over its grey caption.
+
+            One track, not five chips: these are one either/or, and five
+            separately-bordered controls across a row would read as five
+            independent toggles. The segments are laid out directly rather than
+            through `SegmentedControl` because one of them is a text field, but
+            they wear that component's own `.segmented` / `.segment` chrome, so
+            the highlight cannot drift from the rest of the panel's. */}
         <div
           inert={locked}
           style={{ display: 'flex', alignItems: 'center', gap: 8, opacity: locked ? 0.55 : 1 }}
         >
-          <SegmentedControl
-            className="segmented--split"
-            options={[
-              { value: 'mid', label: 'Mid' },
-              { value: 'market', label: 'Market' },
-            ]}
-            value={trade.orderType}
-            onChange={(value) => tradeStore.setOrderType(value)}
-            center={
-              <div className="quote-columns">
-                <QuoteColumn
-                  label="Bid"
-                  value={selectedQuote ? Format.price(selectedQuote.bid) : null}
-                />
-                <QuoteColumn
-                  label="Mid"
-                  value={indicativeMid !== null ? Format.price(indicativeMid) : null}
-                />
-                <QuoteColumn
-                  label="Ask"
-                  value={selectedQuote ? Format.price(selectedQuote.ask) : null}
-                />
-              </div>
-            }
-          />
+          <div className="segmented segmented--split" role="group" aria-label="Order pricing">
+            {/* Selecting Custom and typing in it are the same gesture: a click
+                anywhere on the segment focuses the field. */}
+            <div
+              className={`segment segment--field${trade.orderType === 'custom' ? ' selected' : ''}`}
+              onClick={() => {
+                tradeStore.setOrderType('custom');
+                customRef.current?.focus();
+              }}
+            >
+              <input
+                ref={customRef}
+                // Text rather than `number`: a number input reports the
+                // part-typed states as `''`, which wipes what is being typed.
+                type="text"
+                inputMode="decimal"
+                className="segment__input numeric"
+                aria-label="Custom limit price"
+                aria-invalid={trade.orderType === 'custom' && trade.customLimitPrice === null}
+                placeholder="0.00"
+                value={customText}
+                onFocus={() => tradeStore.setOrderType('custom')}
+                onChange={(event) => {
+                  const raw = event.target.value;
+                  if (!isPriceInputShape(raw)) return;
+                  setCustomDraft(raw);
+                  tradeStore.setCustomLimitPrice(parsePriceInput(raw));
+                }}
+                // Typing is over, so the field can stop showing the keystrokes
+                // and show the price they added up to.
+                onBlur={() => setCustomDraft(null)}
+              />
+              <span className="quote-column__label">Custom</span>
+            </div>
+            <QuoteColumn
+              label="Bid"
+              value={selectedQuote ? Format.price(selectedQuote.bid) : null}
+              selected={trade.orderType === 'bid'}
+              onSelect={() => tradeStore.setOrderType('bid')}
+            />
+            <QuoteColumn
+              label="Mid"
+              value={indicativeMid !== null ? Format.price(indicativeMid) : null}
+              selected={trade.orderType === 'mid'}
+              onSelect={() => tradeStore.setOrderType('mid')}
+            />
+            <QuoteColumn
+              label="Ask"
+              value={selectedQuote ? Format.price(selectedQuote.ask) : null}
+              selected={trade.orderType === 'ask'}
+              onSelect={() => tradeStore.setOrderType('ask')}
+            />
+            <button
+              type="button"
+              className={`segment${trade.orderType === 'market' ? ' selected' : ''}`}
+              aria-pressed={trade.orderType === 'market'}
+              onClick={() => tradeStore.setOrderType('market')}
+            >
+              Market
+            </button>
+          </div>
         </div>
 
         {/* Action row — pinned to the panel's bottom edge */}

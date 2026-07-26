@@ -115,6 +115,8 @@ class StubBrokerGateway implements BrokerGateway {
         contractSymbol: resolved.contractSymbol,
         price,
         estBuyingPower: round2(estimateBuyingPower(order.quantity, price)),
+        bid: resolved.bid,
+        ask: resolved.ask,
       },
       warnings: [],
     };

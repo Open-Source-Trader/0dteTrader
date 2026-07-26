@@ -169,6 +169,11 @@ struct OrderRequestDTO: Encodable, Equatable, Sendable {
     let side: String
     let quantity: Int
     let orderType: String
+    /// Only sent for `custom`; the server rejects it alongside any other
+    /// variant, because those four are priced from its own quote. Encoded as
+    /// absent rather than null when nil — `JSONEncoder` omits a nil `Optional`
+    /// by default, which is exactly what the DTO's rule wants to see.
+    var limitPrice: Double?
     let selection: OrderSelectionDTO
 }
 
@@ -177,6 +182,11 @@ struct OrderPreviewDTO: Decodable, Equatable, Sendable {
         let contractSymbol: String
         let price: Double
         let estBuyingPower: Double
+        /// The quote the price was resolved against, so the confirm sheet can
+        /// print a custom limit next to the live spread. Optional so a server
+        /// older than this field still decodes rather than failing the preview.
+        let bid: Double?
+        let ask: Double?
     }
 
     let resolved: Resolved

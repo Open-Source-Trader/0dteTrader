@@ -18,7 +18,7 @@ import type {
   ChartOrder,
   OptionContract,
   OptionsAnalyticsSnapshot,
-  OrderType,
+  ChartOrderType,
   Position,
 } from '@0dtetrader/shared-types';
 import { useStore } from '../../core/observable';
@@ -76,7 +76,7 @@ export interface ChartTradingProps {
   positions: Position[];
   resolveContract: (contractSymbol: string) => OptionContract | null;
   selectedContract: OptionContract | null;
-  defaultOrderType: OrderType;
+  defaultOrderType: ChartOrderType;
   onFlatten: (position: Position) => void;
   /** Confirms cancelling a working line — the desktop half of the alert iOS
    *  shows in ChartTradingCoordinator. */

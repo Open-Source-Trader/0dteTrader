@@ -14,13 +14,13 @@ import {
 } from '@0dtetrader/shared-types';
 import { BrokerGateway } from '../src/broker/broker-gateway.interface';
 import {
-  computeMid,
   estimateBuyingPower,
   findExplicitOption,
   formatOccSymbol,
   OPTION_MULTIPLIER,
   resolveAutoOtm,
 } from '../src/broker/contract-resolution';
+import { customPriceWarning, resolveLimitPrice } from '../src/broker/order-pricing';
 import { optionExpirations } from '../src/broker/expiration-calendar';
 import { brokerErrors } from '../src/common/broker-error';
 
@@ -161,15 +161,17 @@ export class StubBrokerGateway implements BrokerGateway {
 
   async previewOrder(userId: string, order: OrderRequest): Promise<OrderPreview> {
     const resolved = await this.resolveContract(userId, order);
-    const price =
-      order.orderType === 'market' ? resolved.last : computeMid(resolved.bid, resolved.ask);
+    const price = resolveLimitPrice(order.orderType, resolved, order.limitPrice) ?? resolved.last;
+    const warning = customPriceWarning(order.orderType, resolved, order.limitPrice);
     return {
       resolved: {
         contractSymbol: resolved.contractSymbol,
         price,
         estBuyingPower: round2(estimateBuyingPower(order.quantity, price)),
+        bid: resolved.bid,
+        ask: resolved.ask,
       },
-      warnings: [],
+      warnings: warning ? [warning] : [],
     };
   }
 
@@ -198,7 +200,7 @@ export class StubBrokerGateway implements BrokerGateway {
       return this.publicOrder(record);
     }
 
-    record.limitPrice = computeMid(resolved.bid, resolved.ask);
+    record.limitPrice = resolveLimitPrice(order.orderType, resolved, order.limitPrice);
     record.timer = setTimeout(() => {
       record.timer = undefined;
       if (record.status !== 'submitted') return;

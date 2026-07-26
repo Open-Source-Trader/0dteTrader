@@ -212,7 +212,10 @@ struct TradeScreenView: View {
                 chainViewModel.chain?.contracts.first { $0.symbol == symbol }
             }
             chartTrading.selectedContract = { chainViewModel.selectedContract }
-            chartTrading.defaultOrderType = { tradeViewModel.orderType }
+            // Narrowed here, at the one seam where the panel's five-way
+            // pricing meets the chart's two-way. A line fires unattended, so
+            // `.custom`/`.bid`/`.ask` collapse onto the server-computed mid.
+            chartTrading.defaultOrderType = { tradeViewModel.orderType.chartOrderType }
             chartTrading.onFlattenConfirmed = { position in
                 Task { await tradeViewModel.flatten(position) }
             }
@@ -252,6 +255,11 @@ struct TradeScreenView: View {
         // showing.
         .onChange(of: chainViewModel.selectedContract?.symbol) { _, _ in
             chartTrading.dismissPlacementIfContractChanged()
+            // A typed premium belongs to the contract it was typed against, so
+            // it is dropped rather than carried onto a different one. Keyed on
+            // the symbol, which covers a strike change, an expiration change
+            // and AUTO repicking alike.
+            tradeViewModel.clearCustomLimitPrice()
         }
         .onChange(of: container.quoteSocket.lastOrderUpdate) { _, update in
             if let update {
@@ -443,7 +451,7 @@ struct TradeScreenView: View {
                 PlacementCardBinding(
                     request: request,
                     defaultQuantity: chartTrading.settings.defaultQuantity,
-                    defaultOrderType: tradeViewModel.orderType,
+                    defaultOrderType: tradeViewModel.orderType.chartOrderType,
                     onPriceChange: { chartTrading.updatePlacementPrice($0) },
                     onPlace: { side, quantity, orderType in
                         await chartTrading.placeFromSheet(

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { midPrice } from './domain';
+import { narrowToChartOrderType } from '@0dtetrader/shared-types';
+import { midPrice, orderPricingDescription, orderTypeDisplayName } from './domain';
 
 describe('midPrice', () => {
   it('averages bid and ask rounded to pennies', () => {
@@ -29,5 +30,34 @@ describe('midPrice', () => {
   it('returns null for NaN inputs', () => {
     expect(midPrice(Number.NaN, 1.0)).toBeNull();
     expect(midPrice(1.0, Number.NaN)).toBeNull();
+  });
+});
+
+describe('narrowToChartOrderType', () => {
+  it('collapses every priced variant onto mid', () => {
+    // A line fires unattended: a bid/ask read now would be stale by the time
+    // the level is crossed, and a custom price belongs to the moment it was
+    // typed. Only Market survives as itself.
+    expect(narrowToChartOrderType('custom')).toBe('mid');
+    expect(narrowToChartOrderType('bid')).toBe('mid');
+    expect(narrowToChartOrderType('mid')).toBe('mid');
+    expect(narrowToChartOrderType('ask')).toBe('mid');
+    expect(narrowToChartOrderType('market')).toBe('market');
+  });
+});
+
+describe('order-type labels', () => {
+  it('names all five', () => {
+    expect(orderTypeDisplayName('custom')).toBe('Custom');
+    expect(orderTypeDisplayName('bid')).toBe('Bid');
+    expect(orderTypeDisplayName('ask')).toBe('Ask');
+    expect(orderPricingDescription('custom')).toBe('Limit at your price');
+    expect(orderPricingDescription('ask')).toBe('Limit at ask');
+    expect(orderPricingDescription('market')).toBe('Market');
+  });
+
+  it('prints an unrecognised stored value as it came', () => {
+    // History rows predate this union and are read back as raw strings.
+    expect(orderTypeDisplayName('limit')).toBe('limit');
   });
 });

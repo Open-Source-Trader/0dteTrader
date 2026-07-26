@@ -7,7 +7,7 @@ private func makeOrder(
     triggerPrice: Double = 98,
     armPrice: Double = 100,
     kind: ChartOrderKind = .limit,
-    orderType: OrderType = .mid,
+    orderType: ChartOrderType = .mid,
     status: ChartOrderStatus = .working,
     quantity: Int = 1
 ) -> ChartOrder {

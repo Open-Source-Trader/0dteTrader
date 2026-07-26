@@ -19,11 +19,11 @@ struct OrderPlacementRequest: Identifiable, Equatable {
 struct PlacementCardBinding {
     let request: OrderPlacementRequest
     var defaultQuantity: Int = 1
-    var defaultOrderType: OrderType = .mid
+    var defaultOrderType: ChartOrderType = .mid
     /// Editing the level moves the guide on the chart — the number and the line
     /// are the same fact, so they must never disagree.
     var onPriceChange: (Double) -> Void = { _ in }
-    var onPlace: (OrderSide, Int, OrderType) async -> Void = { _, _, _ in }
+    var onPlace: (OrderSide, Int, ChartOrderType) async -> Void = { _, _, _ in }
     var onCancel: () -> Void = {}
 }
 
@@ -42,7 +42,7 @@ struct OrderPlacementCard: View {
 
     @State private var side: OrderSide = .buy
     @State private var quantity: Int
-    @State private var orderType: OrderType
+    @State private var orderType: ChartOrderType
     @State private var isSubmitting = false
     /// Raw text, held for as long as the user is typing. A level cannot be
     /// reached keystroke by keystroke without passing through text that is not
@@ -104,7 +104,7 @@ struct OrderPlacementCard: View {
                 minHeight: 32
             )
             HudSegmentedControl(
-                options: [.init(OrderType.mid, "MID"), .init(OrderType.market, "MKT")],
+                options: [.init(ChartOrderType.mid, "MID"), .init(ChartOrderType.market, "MKT")],
                 selection: $orderType,
                 minHeight: 32
             )

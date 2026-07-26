@@ -7,6 +7,7 @@ import type {
   Position,
   TradingMode,
 } from '@0dtetrader/shared-types';
+import { narrowToChartOrderType } from '@0dtetrader/shared-types';
 import { useContainer } from '../../app/container';
 import { useStore } from '../../core/observable';
 import { AlertDialog } from '../../design/components/AlertDialog';
@@ -305,7 +306,10 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
     resolveContract: (contractSymbol) =>
       chainStore.getState().chain?.contracts.find((c) => c.symbol === contractSymbol) ?? null,
     selectedContract: chainStore.selectedContract,
-    defaultOrderType: trade.orderType,
+    // Narrowed here, at the one seam where the panel's five-way pricing meets
+    // the chart's two-way. A line fires unattended, so `custom`/`bid`/`ask`
+    // collapse onto the server-computed mid — see narrowToChartOrderType.
+    defaultOrderType: narrowToChartOrderType(trade.orderType),
     onFlatten: (position) => setPositionPendingChartFlatten(position),
     onCancelOrder: (order) => setOrderPendingCancel(order),
   };

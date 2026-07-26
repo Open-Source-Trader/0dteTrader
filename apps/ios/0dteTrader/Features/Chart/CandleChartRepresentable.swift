@@ -26,6 +26,9 @@ struct CandleChartRepresentable: UIViewRepresentable {
     var entryLines: [EntryLineModel] = []
     /// Level the open placement sheet refers to; nil clears the dashed guide.
     var placementPrice: Double?
+    /// Last traded price — where the placement guide parks when it has nowhere
+    /// else to be.
+    var lastPrice: Double?
     weak var orderLineDelegate: OrderLineOverlayDelegate?
     var resetToken: Int = 0
 
@@ -74,28 +77,6 @@ struct CandleChartRepresentable: UIViewRepresentable {
                 self.overlay.setNeedsDisplay()
                 self.orderLineOverlay.setNeedsDisplay()
             }
-
-            // Long-press to arm the `+` placement affordance. It lives on the
-            // container, not the overlay: the overlay refuses touches on empty
-            // space by design, so a recognizer there would never fire.
-            let longPress = UILongPressGestureRecognizer(
-                target: self,
-                action: #selector(handleLongPress(_:))
-            )
-            longPress.minimumPressDuration = 1.5
-            longPress.allowableMovement = 12
-            addGestureRecognizer(longPress)
-        }
-
-        @objc private func handleLongPress(_ recognizer: UILongPressGestureRecognizer) {
-            guard recognizer.state == .began,
-                  orderLineOverlay.settings.enabled,
-                  let price = orderLineOverlay.price(
-                      at: recognizer.location(in: orderLineOverlay).y
-                  )
-            else { return }
-            Haptics.impact(.medium)
-            orderLineOverlay.armPlacement(at: price)
         }
 
         @available(*, unavailable)
@@ -226,6 +207,7 @@ struct CandleChartRepresentable: UIViewRepresentable {
         container.orderLineOverlay.settings = chartTradingSettings
         container.orderLineOverlay.entryLines = entryLines
         container.orderLineOverlay.placementPrice = placementPrice
+        container.orderLineOverlay.lastPrice = lastPrice
         container.orderLineOverlay.delegate = orderLineDelegate
         // Keep the button rows clear of the analytics rail when it is on. The
         // rail sizes itself from the chart's content rect, not the view bounds,

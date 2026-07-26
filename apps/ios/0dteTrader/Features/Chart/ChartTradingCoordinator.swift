@@ -106,12 +106,15 @@ final class ChartTradingCoordinator: ObservableObject, OrderLineOverlayDelegate 
         Task { await chartOrders.create(draft) }
     }
 
-    func orderLineOverlayDidArmPlacement(at price: Double?) {
-        guard let price, let contract = selectedContract() else {
-            placementRequest = nil
-            return
-        }
+    func orderLineOverlayDidRequestPlacement(at price: Double) {
+        guard let contract = selectedContract() else { return }
         placementRequest = OrderPlacementRequest(price: rounded(price), contract: contract)
+    }
+
+    /// The window's own price field moved the level; the guide follows it.
+    func updatePlacementPrice(_ price: Double) {
+        guard let request = placementRequest else { return }
+        placementRequest = OrderPlacementRequest(price: rounded(price), contract: request.contract)
     }
 
     // MARK: - Confirmed actions

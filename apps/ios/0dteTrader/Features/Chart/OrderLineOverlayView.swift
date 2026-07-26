@@ -75,8 +75,8 @@ protocol OrderLineOverlayDelegate: AnyObject {
     func orderLineOverlayDidMove(order: ChartOrder, to price: Double)
     func orderLineOverlayDidTapFlatten(position: Position)
     func orderLineOverlayDidDragBracket(entry: EntryLineModel, to price: Double)
-    /// Long-press armed the `+` affordance at a price, or cleared it (nil).
-    func orderLineOverlayDidArmPlacement(at price: Double?)
+    /// The `+` handle was tapped at this level.
+    func orderLineOverlayDidRequestPlacement(at price: Double)
 }
 
 /// TradingView-style order lines above the candles: a live entry line per open
@@ -94,6 +94,15 @@ final class OrderLineOverlayView: UIView {
 
     /// Keeps rows clear of the options-analytics rail when it is on.
     var rightInset: CGFloat = 0 { didSet { setNeedsDisplay() } }
+
+    /// Last traded price — where the guide parks when it has nowhere else to be.
+    var lastPrice: Double? { didSet { setNeedsDisplay() } }
+
+    /// The guide's level. Owned here because dragging it is a UIKit gesture;
+    /// SwiftUI only hears about it when the `+` is tapped.
+    private var guidePrice: Double?
+    /// The handle as last drawn, for hit-testing.
+    private var handleFrame: CGRect = .zero
 
     var entryLines: [EntryLineModel] = [] {
         didSet {
@@ -140,6 +149,7 @@ final class OrderLineOverlayView: UIView {
     private enum Drag {
         case move(orderId: String, price: Double)
         case bracket(entry: EntryLineModel, startY: CGFloat, price: Double, engaged: Bool)
+        case guideHandle(startY: CGFloat, moved: Bool)
     }
 
     private var drag: Drag?
@@ -178,17 +188,19 @@ final class OrderLineOverlayView: UIView {
         setNeedsDisplay()
     }
 
-    /// Called by the container's long-press recognizer. The guide itself is
-    /// drawn only once SwiftUI feeds `placementPrice` back down.
-    func armPlacement(at price: Double?) {
-        delegate?.orderLineOverlayDidArmPlacement(at: price)
-    }
-
-    /// Claim only touches on a line or a pill; the chart keeps pan/zoom
-    /// everywhere else.
+    /// Claim only touches on a line, a pill, or the placement handle; the chart
+    /// keeps pan/zoom everywhere else.
     override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
         guard settings.enabled else { return false }
+        if !isPlacementOpen, handleTouchFrame.contains(point) { return true }
         return hitTest(at: point) != nil
+    }
+
+    /// Enlarged to the 44pt minimum without moving the drawn glyph.
+    private var handleTouchFrame: CGRect {
+        guard !handleFrame.isEmpty else { return .zero }
+        let inset = (AppOrderLine.minimumTouchTarget - AppPlacementGuide.handleSize) / 2
+        return handleFrame.insetBy(dx: -inset, dy: -inset)
     }
 
     // MARK: - Coordinate mapping
@@ -207,6 +219,13 @@ final class OrderLineOverlayView: UIView {
         guard value.y.isFinite else { return nil }
         return Double(value.y)
     }
+
+    /// Whether the placement window is open. While it is, it owns the level and
+    /// the handle goes inert — one source of truth at any moment.
+    private var isPlacementOpen: Bool { placementPrice != nil }
+
+    /// The level the guide is drawn at: the open window's, or the handle's own.
+    private var effectiveGuidePrice: Double? { placementPrice ?? guidePrice }
 
     // MARK: - Hit testing
 
@@ -227,7 +246,13 @@ final class OrderLineOverlayView: UIView {
     // MARK: - Gestures
 
     @objc private func handleTap(_ recognizer: UITapGestureRecognizer) {
-        guard let model, let hit = hitTest(at: recognizer.location(in: self)) else { return }
+        let location = recognizer.location(in: self)
+        if !isPlacementOpen, handleTouchFrame.contains(location), let price = effectiveGuidePrice {
+            Haptics.impact(.light)
+            delegate?.orderLineOverlayDidRequestPlacement(at: price)
+            return
+        }
+        guard let model, let hit = hitTest(at: location) else { return }
 
         switch hit.row.target {
         case .entry(let contractSymbol):
@@ -253,15 +278,21 @@ final class OrderLineOverlayView: UIView {
     }
 
     @objc private func handlePan(_ recognizer: UIPanGestureRecognizer) {
-        guard let model else { return }
+        // No `guard let model` here: the placement handle is chrome that exists
+        // whether or not there are orders to draw, so it must stay draggable
+        // when the model is nil. The branches that dereference it guard below.
         let location = recognizer.location(in: self)
 
         switch recognizer.state {
         case .began:
+            if !isPlacementOpen, handleTouchFrame.contains(location) {
+                drag = .guideHandle(startY: location.y, moved: false)
+                return
+            }
             guard let hit = hitTest(at: location), hit.pill == nil else { return }
             switch hit.row.target {
             case .order(let id):
-                guard let order = model.order(id: id), order.isWorking else { return }
+                guard let model, let order = model.order(id: id), order.isWorking else { return }
                 model.selectedId = id
                 Haptics.selection()
                 drag = .move(orderId: id, price: order.triggerPrice)
@@ -273,16 +304,32 @@ final class OrderLineOverlayView: UIView {
             }
 
         case .changed:
-            guard let current = drag, let price = price(at: location.y) else { return }
+            guard let current = drag else { return }
             switch current {
             case .move(let orderId, _):
+                guard let price = price(at: location.y) else { return }
                 drag = .move(orderId: orderId, price: price)
             case .bracket(let entry, let startY, _, let engaged):
+                guard let price = price(at: location.y) else { return }
                 // A bracket only materialises once the finger has travelled, so
                 // a tap on the entry line never drops a stop on top of it.
                 let moved = abs(location.y - startY) >= AppOrderLine.bracketDragThreshold
                 if moved, !engaged { Haptics.impact(.light) }
                 drag = .bracket(entry: entry, startY: startY, price: price, engaged: engaged || moved)
+            case .guideHandle(let startY, let moved):
+                // Pin to the pane's edges instead of extrapolating past them: an
+                // out-of-range level makes `resolveGuidePrice` re-anchor to the
+                // last price on the next frame, which reads as the guide
+                // teleporting mid-drag.
+                let content = chart?.viewPortHandler.contentRect ?? bounds
+                let clampedY = Swift.min(content.maxY, Swift.max(content.minY, location.y))
+                guard let price = price(at: clampedY) else { return }
+                let travelled = moved
+                    || abs(location.y - startY) >= AppPlacementGuide.dragThreshold
+                if travelled {
+                    guidePrice = price
+                    drag = .guideHandle(startY: startY, moved: true)
+                }
             }
             setNeedsDisplay()
 
@@ -292,11 +339,14 @@ final class OrderLineOverlayView: UIView {
             setNeedsDisplay()
             switch finished {
             case .move(let orderId, let price):
-                guard let order = model.order(id: orderId), order.triggerPrice != price else { return }
+                guard let model, let order = model.order(id: orderId),
+                      order.triggerPrice != price else { return }
                 delegate?.orderLineOverlayDidMove(order: order, to: price)
             case .bracket(let entry, _, let price, let engaged):
                 guard engaged else { return }
                 delegate?.orderLineOverlayDidDragBracket(entry: entry, to: price)
+            case .guideHandle:
+                break // the level is already where the finger left it
             case .none:
                 break
             }
@@ -312,6 +362,7 @@ final class OrderLineOverlayView: UIView {
     override func draw(_ rect: CGRect) {
         guard settings.enabled, let context = UIGraphicsGetCurrentContext() else {
             rows = []
+            handleFrame = .zero
             accessibilityElements = nil
             return
         }
@@ -426,16 +477,93 @@ final class OrderLineOverlayView: UIView {
         )
     }
 
+    /// Permanent placement guide: a dashed level with the `+` handle at its
+    /// right edge. Suppressed when chart trading is off; the SwiftUI layer
+    /// additionally gates it on there being a contract to trade.
     private func renderPlacementGuide(in context: CGContext) {
-        guard let placementPrice, let y = yPixel(for: placementPrice) else { return }
+        let visibleRect = chart?.viewPortHandler.contentRect ?? bounds
+        let resolved = isPlacementOpen
+            // While the window is open it owns the level, so the guide does not
+            // re-anchor underneath the number the user is editing.
+            ? placementPrice
+            : resolveGuidePrice(
+                current: guidePrice,
+                lastPrice: lastPrice,
+                min: price(at: visibleRect.maxY) ?? .nan,
+                max: price(at: visibleRect.minY) ?? .nan
+            )
+        if !isPlacementOpen { guidePrice = resolved }
+
+        guard let resolved, let y = yPixel(for: resolved) else {
+            handleFrame = .zero
+            return
+        }
+
+        let size = AppPlacementGuide.handleSize
+        let frame = CGRect(
+            x: bounds.width - rightInset - AppPlacementGuide.handleMargin - size,
+            y: y - size / 2,
+            width: size,
+            height: size
+        )
+        handleFrame = frame
+
         strokeLine(
-            to: bounds.width - rightInset,
+            to: frame.minX - AppPlacementGuide.handleMargin,
             y: y,
             color: .hudAxisLabel,
             width: 1,
-            dash: [4, 4],
+            dash: AppPlacementGuide.dash,
             in: context
         )
+        // The level only needs calling out while it is moving; the rest of the
+        // time the price axis already says where the line is.
+        if case .guideHandle(_, true) = drag {
+            draw(text: Format.price(resolved), at: CGPoint(x: 8, y: y - 18), color: .hudAxisLabel)
+        }
+        renderHandle(frame, in: context)
+    }
+
+    /// Chamfered HUD chip with a `+` glyph — the same silhouette as
+    /// `HudPanelShape` at chip scale, drawn in CoreGraphics because this view
+    /// paints itself.
+    ///
+    /// Dimmed while the placement window is open: it is drawn unconditionally
+    /// but hit-tested only when the window is closed, and at full opacity it
+    /// would advertise an action it will not perform.
+    private func renderHandle(_ frame: CGRect, in context: CGContext) {
+        context.saveGState()
+        if isPlacementOpen { context.setAlpha(CGFloat(AppOpacity.disabled)) }
+        defer { context.restoreGState() }
+
+        let c = AppPlacementGuide.handleChamfer
+        let path = CGMutablePath()
+        path.move(to: CGPoint(x: frame.minX + c, y: frame.minY))
+        path.addLine(to: CGPoint(x: frame.maxX - c, y: frame.minY))
+        path.addLine(to: CGPoint(x: frame.maxX, y: frame.minY + c))
+        path.addLine(to: CGPoint(x: frame.maxX, y: frame.maxY - c))
+        path.addLine(to: CGPoint(x: frame.maxX - c, y: frame.maxY))
+        path.addLine(to: CGPoint(x: frame.minX + c, y: frame.maxY))
+        path.addLine(to: CGPoint(x: frame.minX, y: frame.maxY - c))
+        path.addLine(to: CGPoint(x: frame.minX, y: frame.minY + c))
+        path.closeSubpath()
+
+        context.setFillColor(UIColor.black.withAlphaComponent(0.85).cgColor)
+        context.addPath(path)
+        context.fillPath()
+        context.setStrokeColor(UIColor.appAccent.cgColor)
+        context.setLineWidth(1)
+        context.addPath(path)
+        context.strokePath()
+
+        let arm = frame.width * 0.28
+        context.setStrokeColor(UIColor.appAccent.cgColor)
+        context.setLineWidth(1.5)
+        context.move(to: CGPoint(x: frame.midX - arm, y: frame.midY))
+        context.addLine(to: CGPoint(x: frame.midX + arm, y: frame.midY))
+        context.move(to: CGPoint(x: frame.midX, y: frame.midY - arm))
+        context.addLine(to: CGPoint(x: frame.midX, y: frame.midY + arm))
+        context.strokePath()
     }
 
     private func strokeLine(
@@ -566,6 +694,16 @@ final class OrderLineOverlayView: UIView {
                 element.accessibilityFrameInContainerSpace = layout.touchFrame
                 elements.append(element)
             }
+        }
+        if !handleFrame.isEmpty, let price = effectiveGuidePrice {
+            let handle = UIAccessibilityElement(accessibilityContainer: self)
+            handle.accessibilityLabel = "Place an order at \(Format.price(price))"
+            handle.accessibilityHint = "Swipe up or down to change the level"
+            // While the window owns the level the handle refuses touches, so it
+            // must not advertise a button it will not honour.
+            handle.accessibilityTraits = isPlacementOpen ? [.button, .notEnabled] : .button
+            handle.accessibilityFrameInContainerSpace = handleTouchFrame
+            elements.append(handle)
         }
         accessibilityElements = elements
     }

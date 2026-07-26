@@ -77,6 +77,7 @@ struct ChartView: View {
                     chartTradingSettings: chartTradingSettings,
                     entryLines: entryLines,
                     placementPrice: placementPrice,
+                    lastPrice: viewModel.candles.last?.close,
                     orderLineDelegate: orderLineDelegate,
                     resetToken: chartResetToken
                 )

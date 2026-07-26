@@ -2,8 +2,10 @@ import SwiftUI
 
 /// What the placement sheet collects before a line is armed.
 struct OrderPlacementRequest: Identifiable, Equatable {
-    let id = UUID()
-    /// Level on the underlying the long-press landed on.
+    /// Stable across price edits: the window is one continuous interaction, not
+    /// a new request per keystroke.
+    let id = "chart-placement"
+    /// Level on the underlying the `+` handle armed.
     let price: Double
     let contract: OptionContract
 }

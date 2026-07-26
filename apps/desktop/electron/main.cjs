@@ -7,7 +7,7 @@
 // Production loads dist/ over a loopback HTTP server, not file:// — Chromium
 // blocks ES-module scripts and stylesheets on file:// origins (blank window),
 // and http keeps webSecurity intact (no CORS bypass needed).
-const { app, BrowserWindow, screen } = require('electron');
+const { app, BrowserWindow, screen, shell } = require('electron');
 const { spawn } = require('node:child_process');
 const path = require('node:path');
 const http = require('node:http');
@@ -162,6 +162,12 @@ async function createWindow() {
     backgroundColor: '#000000',
   });
   win.setAspectRatio(430 / 932);
+  // External links (e.g. the "Deploy on Railway" link on the login screen)
+  // belong in the OS browser, not a new Electron window.
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    void shell.openExternal(url);
+    return { action: 'deny' };
+  });
 
   let startUrl = process.env.ELECTRON_START_URL;
   if (!startUrl) {

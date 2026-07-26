@@ -15,12 +15,25 @@ enum AppOrderLine {
     /// Vertical slop for grabbing the line body itself.
     static let lineHitSlop: CGFloat = 16
     static let rowRightMargin: CGFloat = 8
+    /// Gap between a row's buttons and the line resuming either side of them.
+    static let rowLineGap: CGFloat = 4
     static let strokeNormal: CGFloat = 1.25
     static let strokeSelected: CGFloat = 2
     static let strokeEntry: CGFloat = 1.5
     static let stopDash: [CGFloat] = [6, 4]
     /// A bracket drag must travel this far before it places anything.
     static let bracketDragThreshold: CGFloat = 16
+}
+
+/// How a row's line is stroked.
+///
+/// Bundled rather than passed as three arguments because a line is drawn in two
+/// segments either side of its buttons, and the two must never be able to
+/// disagree about colour, weight, or dash.
+struct OrderLineStroke {
+    let color: UIColor
+    let width: CGFloat
+    let dash: [CGFloat]
 }
 
 /// Which control within a row a touch landed on.
@@ -58,6 +71,11 @@ struct OrderLineRow {
     /// Left edge of the button row; the line is stroked up to it, not under it.
     let left: CGFloat
     let pills: [OrderLinePillLayout]
+
+    /// Right edge of the button row, where the line picks up again on its way
+    /// to the pane's border. `pills` is laid out left-to-right, so the last one
+    /// is the ✕.
+    var right: CGFloat { pills.last?.frame.maxX ?? left }
 }
 
 /// What the overlay needs to draw a position's entry line.
@@ -184,7 +202,9 @@ final class OrderLineOverlayView: UIView {
     private let limitColor: UIColor = .appAccent
     private let positiveColor: UIColor = .appPnlPositive
     private let negativeColor: UIColor = .appPnlNegative
-    private let pillTextColor = UIColor.black
+    /// Internal, not `private`: `renderPill` lives in the rows extension, and
+    /// `private` on a member is scoped to its own file.
+    let pillTextColor = UIColor.black
 
     /// One long-lived element for the handle, so VoiceOver focus survives the
     /// repaints that rebuild everything else. `let`, not `var`: reassigning it
@@ -418,12 +438,9 @@ final class OrderLineOverlayView: UIView {
             )
             built.append(row)
 
-            strokeLine(
-                to: row.left - 4,
-                y: y,
-                color: color,
-                width: AppOrderLine.strokeEntry,
-                dash: [],
+            strokeRowLine(
+                row,
+                style: OrderLineStroke(color: color, width: AppOrderLine.strokeEntry, dash: []),
                 in: context
             )
             for layout in row.pills {
@@ -447,14 +464,15 @@ final class OrderLineOverlayView: UIView {
 
             context.saveGState()
             context.setAlpha(order.isWorking ? 1 : 0.65)
-            strokeLine(
-                to: row.left - 4,
-                y: y,
-                color: color,
-                width: model?.selectedId == order.id
-                    ? AppOrderLine.strokeSelected
-                    : AppOrderLine.strokeNormal,
-                dash: order.kind == .stop ? AppOrderLine.stopDash : [],
+            strokeRowLine(
+                row,
+                style: OrderLineStroke(
+                    color: color,
+                    width: model?.selectedId == order.id
+                        ? AppOrderLine.strokeSelected
+                        : AppOrderLine.strokeNormal,
+                    dash: order.kind == .stop ? AppOrderLine.stopDash : []
+                ),
                 in: context
             )
             for layout in row.pills {
@@ -497,136 +515,20 @@ final class OrderLineOverlayView: UIView {
         )
         let color = kind == .target ? positiveColor : negativeColor
         strokeLine(
+            from: 0,
             to: bounds.width,
             y: y,
-            color: color,
-            width: AppOrderLine.strokeEntry,
-            dash: AppOrderLine.stopDash,
+            style: OrderLineStroke(
+                color: color,
+                width: AppOrderLine.strokeEntry,
+                dash: AppOrderLine.stopDash
+            ),
             in: context
         )
         draw(
             text: "\(kind == .target ? "TARGET" : "STOP") \(Format.price(price))",
             at: CGPoint(x: 8, y: y - 18),
             color: color
-        )
-    }
-
-    /// Only valid inside `draw(_:)` — it paints into the passed context, which
-    /// is the one UIKit made current for the paint pass. Called anywhere else it
-    /// silently draws nothing.
-    func strokeLine(
-        to x: CGFloat,
-        y: CGFloat,
-        color: UIColor,
-        width: CGFloat,
-        dash: [CGFloat],
-        in context: CGContext
-    ) {
-        context.setStrokeColor(color.cgColor)
-        context.setLineWidth(width)
-        context.setLineDash(phase: 0, lengths: dash)
-        context.move(to: CGPoint(x: 0, y: y))
-        context.addLine(to: CGPoint(x: max(0, x), y: y))
-        context.strokePath()
-        context.setLineDash(phase: 0, lengths: [])
-    }
-
-    // MARK: - Layout
-
-    private var pillFont: UIFont {
-        UIFontMetrics(forTextStyle: .caption2)
-            .scaledFont(for: .monospacedDigitSystemFont(ofSize: 11, weight: .semibold))
-    }
-
-    /// Lays a row out right-to-left from the pane's right edge.
-    ///
-    /// Touch rects are taller than the pills they cover but never overlap
-    /// horizontally — each claims only half the gap to its neighbour, so ✕ and
-    /// MID/MKT stay distinct targets no matter how tight the row gets.
-    private func layoutRow(
-        target: OrderLineRow.Target,
-        y: CGFloat,
-        labels: [(OrderLinePill, String)]
-    ) -> OrderLineRow {
-        let font = pillFont
-        let widths = labels.map { _, text in
-            ceil((text as NSString).size(withAttributes: [.font: font]).width)
-                + AppOrderLine.pillPaddingH * 2
-        }
-        let total = widths.reduce(0, +) + AppOrderLine.pillGap * CGFloat(labels.count - 1)
-        let left = rowRightEdge - total
-        let touchHeight = max(AppOrderLine.minimumTouchTarget, AppOrderLine.rowHeight)
-
-        var x = left
-        var pills: [OrderLinePillLayout] = []
-        for (index, entry) in labels.enumerated() {
-            let width = widths[index]
-            pills.append(
-                OrderLinePillLayout(
-                    pill: entry.0,
-                    label: entry.1,
-                    frame: CGRect(
-                        x: x,
-                        y: y - AppOrderLine.rowHeight / 2,
-                        width: width,
-                        height: AppOrderLine.rowHeight
-                    ),
-                    touchFrame: CGRect(
-                        x: x - AppOrderLine.pillGap / 2,
-                        y: y - touchHeight / 2,
-                        width: width + AppOrderLine.pillGap,
-                        height: touchHeight
-                    )
-                )
-            )
-            x += width + AppOrderLine.pillGap
-        }
-        return OrderLineRow(target: target, y: y, left: left, pills: pills)
-    }
-
-    /// Filled pills read as controls; an outlined one reads as a value.
-    private func renderPill(
-        _ layout: OrderLinePillLayout,
-        fill: UIColor?,
-        accent: UIColor,
-        in context: CGContext
-    ) {
-        let path = UIBezierPath(
-            roundedRect: layout.frame,
-            cornerRadius: AppOrderLine.pillCornerRadius
-        )
-        if let fill {
-            context.setFillColor(fill.cgColor)
-            context.addPath(path.cgPath)
-            context.fillPath()
-        } else {
-            context.setStrokeColor(accent.cgColor)
-            context.setLineWidth(1)
-            context.addPath(path.cgPath)
-            context.strokePath()
-        }
-
-        let attributes: [NSAttributedString.Key: Any] = [
-            .font: pillFont,
-            .foregroundColor: fill == nil ? accent : pillTextColor,
-        ]
-        let text = layout.label as NSString
-        let size = text.size(withAttributes: attributes)
-        text.draw(
-            at: CGPoint(
-                x: layout.frame.midX - size.width / 2,
-                y: layout.frame.midY - size.height / 2
-            ),
-            withAttributes: attributes
-        )
-    }
-
-    /// Like `strokeLine`, only valid inside `draw(_:)`: `NSString.draw(at:)`
-    /// paints into the current context and no-ops without one.
-    func draw(text: String, at point: CGPoint, color: UIColor) {
-        (text as NSString).draw(
-            at: point,
-            withAttributes: [.font: pillFont, .foregroundColor: color]
         )
     }
 

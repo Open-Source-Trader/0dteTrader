@@ -107,6 +107,42 @@ final class PlacementGuideTests: XCTestCase {
         }
     }
 
+    // MARK: - Row line
+
+    /// A row's line is drawn in two segments — left edge to `row.left`, and
+    /// `row.right` out to the pane's border — so it emerges on the far side of
+    /// the ✕ instead of stopping at the buttons. Both ends are derived from the
+    /// row as laid out, so they cannot drift from the pills they bracket.
+    @MainActor
+    func testARowsLineResumesPastItsButtonsAndRunsToTheBorder() {
+        let width: CGFloat = 430
+        let overlay = OrderLineOverlayView(frame: CGRect(x: 0, y: 0, width: width, height: 400))
+        overlay.settings = .default
+        // The options-analytics rail on, which is what pulls the row inboard far
+        // enough for the right-hand segment to be worth drawing.
+        overlay.rightInset = 120
+        let row = overlay.layoutRow(
+            target: .order("id"),
+            y: 100,
+            labels: [(.quantity, "1"), (.kind, "LIMIT"), (.orderType, "MID"), (.close, "✕")]
+        )
+
+        // `right` is the ✕'s trailing edge, not a second derivation of the row's
+        // extent — the two would drift apart the moment layout changed.
+        XCTAssertEqual(row.right, row.pills.last?.frame.maxX)
+        XCTAssertEqual(row.right, overlay.rowRightEdge)
+        XCTAssertLessThan(row.left, row.right)
+
+        // Segment 1 stops short of the first pill, segment 2 starts clear of the
+        // last one, and segment 2 reaches the pane's true border rather than the
+        // rail's inset edge — a line that stopped at the rail would end in the
+        // middle of the chart with nothing to explain why.
+        XCTAssertLessThan(row.left - AppOrderLine.rowLineGap, row.pills[0].frame.minX)
+        XCTAssertGreaterThan(row.right + AppOrderLine.rowLineGap, row.right)
+        XCTAssertGreaterThan(width, row.right + AppOrderLine.rowLineGap)
+        XCTAssertGreaterThan(width - (row.right + AppOrderLine.rowLineGap), overlay.rightInset / 2)
+    }
+
     // MARK: - Level input
 
     /// The defect the desktop twin shipped: holding the raw text only while it

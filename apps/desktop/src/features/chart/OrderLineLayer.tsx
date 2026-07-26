@@ -27,6 +27,7 @@ import {
   type PillKey,
   PILL_GAP,
   ROW_HEIGHT,
+  ROW_LINE_GAP,
   ROW_RIGHT_MARGIN,
 } from './orderLineGeometry';
 
@@ -263,6 +264,35 @@ export function OrderLineLayer({
       const measure = (label: string) => ctx.measureText(label).width;
       const hovered = hoverRef.current;
 
+      /**
+       * A row's line, in two segments: one to the left of its buttons and one
+       * from their right edge out to the pane's border.
+       *
+       * Two segments rather than one stroke behind the row, because some pills
+       * are outlined rather than filled — the kind pill on an order line, P/L on
+       * an entry line — and a line drawn under those would show through their
+       * interiors and strike through their text. The caller has already set
+       * strokeStyle, lineWidth, dash and alpha, so both halves match by
+       * construction: a stop stays dashed and a terminal line stays dimmed on
+       * either side.
+       *
+       * It runs to the pane's true border rather than stopping at `rightInset`.
+       * The rows clear the options-analytics rail because they are a block of
+       * text it would collide with; a 1.25px line crossing a sparse profile
+       * reads as a chart line, and stopping short would leave a stub a few
+       * pixels long that nobody would recognise as the line continuing. The
+       * placement guide already crosses the rail on the same reasoning.
+       */
+      const strokeRowLine = (row: LineRow) => {
+        const last = row.pills[row.pills.length - 1];
+        ctx.beginPath();
+        ctx.moveTo(0, row.y);
+        ctx.lineTo(row.left - ROW_LINE_GAP, row.y);
+        ctx.moveTo(last.x + last.width + ROW_LINE_GAP, row.y);
+        ctx.lineTo(pane.width, row.y);
+        ctx.stroke();
+      };
+
       // Entry lines first, so a target or stop sitting on top of one wins the
       // pointer — the bracket legs are what you actually adjust.
       for (const entry of entryLines()) {
@@ -288,10 +318,7 @@ export function OrderLineLayer({
         ctx.strokeStyle = color;
         ctx.lineWidth = 1.5;
         ctx.setLineDash([]);
-        ctx.beginPath();
-        ctx.moveTo(0, y);
-        ctx.lineTo(row.left - 4, y);
-        ctx.stroke();
+        strokeRowLine(row);
 
         for (const p of pills) {
           const isQuantity = p.key === 'quantity';
@@ -331,10 +358,7 @@ export function OrderLineLayer({
         // at its mount-time value and the selection highlight would never draw.
         ctx.lineWidth = store.getState().selectedId === order.id ? 2 : 1.25;
         ctx.setLineDash(order.kind === 'stop' ? [6, 4] : []);
-        ctx.beginPath();
-        ctx.moveTo(0, y);
-        ctx.lineTo(row.left - 4, y);
-        ctx.stroke();
+        strokeRowLine(row);
         ctx.setLineDash([]);
 
         for (const p of pills) {

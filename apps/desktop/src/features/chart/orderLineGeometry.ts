@@ -15,6 +15,8 @@ export const PILL_GAP = 2;
 export const LINE_HIT_DISTANCE = 7;
 /** Margin between the row and the right edge of the pane. */
 export const ROW_RIGHT_MARGIN = 8;
+/** Gap between a row's buttons and the line resuming either side of them. */
+export const ROW_LINE_GAP = 4;
 
 export type PillKey = 'quantity' | 'kind' | 'orderType' | 'pnl' | 'close';
 

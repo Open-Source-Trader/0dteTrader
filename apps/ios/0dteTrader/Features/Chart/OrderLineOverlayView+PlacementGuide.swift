@@ -6,12 +6,13 @@ import UIKit
 // out of `OrderLineOverlayView.swift` to keep both files under the 700-line
 // limit; the order-line and bracket code stays there.
 //
-// The members both halves touch — `guidePrice`, `handleFrame`, `strokeLine`,
-// `yPixel`, `draw(text:)` going one way, and `renderPlacementGuide`,
-// `isPlacementOpen`, `effectiveGuidePrice`, `handleTouchFrame` the other — are
-// module-internal rather than `private` for exactly this reason: `private` on a
-// member is scoped to its own file, so a cross-file extension cannot see it.
-// Nothing outside this type is meant to use them.
+// The members these files share — `guidePrice`, `handleFrame` and `yPixel` from
+// the main file, `strokeLine` and `draw(text:)` from the rows extension, and
+// `renderPlacementGuide`, `isPlacementOpen`, `effectiveGuidePrice`,
+// `handleTouchFrame` going the other way — are module-internal rather than
+// `private` for exactly this reason: `private` on a member is scoped to its own
+// file, so a cross-file extension cannot see it. Nothing outside this type is
+// meant to use them.
 
 /// The `+` handle as assistive tech sees it.
 ///
@@ -221,11 +222,10 @@ extension OrderLineOverlayView {
         // Stroked up to the handle rather than stopping short of it, matching
         // the desktop twin: the dash and the chip read as one control.
         strokeLine(
+            from: 0,
             to: handleLeft,
             y: y,
-            color: .hudAxisLabel,
-            width: 1,
-            dash: AppPlacementGuide.dash,
+            style: OrderLineStroke(color: .hudAxisLabel, width: 1, dash: AppPlacementGuide.dash),
             in: context
         )
         // The level only needs calling out while it is moving; the rest of the

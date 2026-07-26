@@ -36,6 +36,9 @@ struct TradeScreenView: View {
     @State private var tradingMode: TradingMode?
     @State private var me: MeDTO?
     @State private var showModeConfirmation = false
+    /// True while the trade panel's custom-price field holds the keyboard; see
+    /// `layoutContent`.
+    @State private var editingPanelPrice = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
 
@@ -406,7 +409,8 @@ struct TradeScreenView: View {
                             )
                         },
                         onToggleLock: { toggleLock() },
-                        onShowAIAnalysis: { showAIAnalysis = true }
+                        onShowAIAnalysis: { showAIAnalysis = true },
+                        isEditingPrice: $editingPanelPrice
                     )
                     .frame(height: panelHeight)
                     .clipped()
@@ -417,6 +421,19 @@ struct TradeScreenView: View {
                 .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: paneCount)
             }
         }
+        // The whole screen is sized off the reader above, so SwiftUI's automatic
+        // keyboard avoidance does not politely "push the field up" here: it
+        // takes the keyboard's height out of the safe area, the reader shrinks,
+        // and the chart and the panel both collapse into what is left — the
+        // header runs off the top and the panel smears into the chart. Raising
+        // the keyboard should leave the screen where it is and come over it.
+        //
+        // The one exception is the panel's custom-price field, which sits in the
+        // bottom third and would be typed into blind. That field, and only that
+        // field, puts the avoidance back — the rest of the screen's text entry
+        // (the placement card's level, the ticker dropdown's search) already
+        // happens well above the keys.
+        .ignoresSafeArea(.keyboard, edges: editingPanelPrice ? [] : .bottom)
     }
 
     private var chartView: some View {

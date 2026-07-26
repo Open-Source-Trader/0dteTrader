@@ -9,6 +9,14 @@ struct OrderPricingRow: View {
     @ObservedObject var tradeViewModel: TradeViewModel
     @ObservedObject var chainViewModel: OptionsChainViewModel
     var density: TradePanelDensity = .roomy
+    /// Raised while this row's price field holds the keyboard.
+    ///
+    /// This is the one text field on the trade screen that the keyboard would
+    /// otherwise cover — the row sits at the bottom of the panel — so it is also
+    /// the one the screen has to keep making room for. Everything else on the
+    /// screen types above the keys and is better off not moving at all; see
+    /// `TradeScreenView.layoutContent`.
+    @Binding var isEditingPrice: Bool
 
     /// Raw keystrokes while the custom price is being typed; nil shows the
     /// settled price. A field that re-renders the canonical string mid-word
@@ -86,7 +94,12 @@ struct OrderPricingRow: View {
             } else {
                 customPriceDraft = nil
             }
+            isEditingPrice = focused
         }
+        // The panel is torn down with the keyboard still up when the layout is
+        // toggled mid-edit; without this the screen would stay braced for a
+        // keyboard that no longer belongs to anything.
+        .onDisappear { isEditingPrice = false }
     }
 
     /// What the field shows: the keystrokes while typing, the settled price

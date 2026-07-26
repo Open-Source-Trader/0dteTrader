@@ -126,6 +126,10 @@ struct TradePanelView: View {
     /// persisted upstream, and the panel only ever asks for the flip.
     var onToggleLock: () -> Void = {}
     var onShowAIAnalysis: () -> Void = {}
+    /// Passed straight through to the pricing row, which raises it while its
+    /// price field holds the keyboard. The screen above needs it, and the panel
+    /// is only the wire — see `OrderPricingRow.isEditingPrice`.
+    @Binding var isEditingPrice: Bool
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -162,7 +166,8 @@ struct TradePanelView: View {
                         OrderPricingRow(
                             tradeViewModel: tradeViewModel,
                             chainViewModel: chainViewModel,
-                            density: density
+                            density: density,
+                            isEditingPrice: $isEditingPrice
                         )
                     }
                     .disabled(tradingLocked)

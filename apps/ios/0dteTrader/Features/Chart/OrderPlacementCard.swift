@@ -176,6 +176,12 @@ struct OrderPlacementCard: View {
             // Text, not a numeric `FormatStyle` binding: a formatted binding
             // re-renders the canonical string on every keystroke, which is what
             // swallows the decimal point half-way through `4300.50`.
+            // `decimalPad` has no return key, and tapping the chart hits the
+            // dismiss scrim, so this field needs a `Done` — but not one
+            // declared here. A keyboard toolbar this deep in the tree is never
+            // installed; the app's single one lives on `RootView`, which
+            // explains why. Blurring from there runs the `onChange` below, so
+            // the draft still settles to canonical.
             TextField("Level", text: levelBinding)
                 .keyboardType(.decimalPad)
                 .focused($priceFocused)
@@ -203,19 +209,6 @@ struct OrderPlacementCard: View {
                 // and show the level they added up to.
                 .onChange(of: priceFocused) { _, focused in
                     if !focused { levelDraft = nil }
-                }
-                // `decimalPad` has no return key, and tapping the chart hits the
-                // dismiss scrim — so without this the only ways out of the
-                // keyboard are PLACE, CANCEL, or a stepper, and a keyboard
-                // covering BUY/SELL would force a cancel-and-start-over on the
-                // one field this feature exists to expose. It also settles the
-                // draft to canonical, so the level can be read back before
-                // committing to it.
-                .toolbar {
-                    ToolbarItemGroup(placement: .keyboard) {
-                        Spacer()
-                        Button("Done") { priceFocused = false }
-                    }
                 }
             stepper(
                 decrement: { stepLevel(by: -priceStep) },

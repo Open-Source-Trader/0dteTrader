@@ -9,20 +9,29 @@ struct OrderPricingRow: View {
     @ObservedObject var tradeViewModel: TradeViewModel
     @ObservedObject var chainViewModel: OptionsChainViewModel
     var density: TradePanelDensity = .roomy
-    /// Raised while this row's price field holds the keyboard.
+    /// While this row's price field holds the keyboard: how far down the panel
+    /// the row's bottom edge sits. Nil the rest of the time.
     ///
     /// This is the one text field on the trade screen that the keyboard would
     /// otherwise cover — the row sits at the bottom of the panel — so it is also
-    /// the one the screen has to keep making room for. Everything else on the
-    /// screen types above the keys and is better off not moving at all; see
-    /// `TradeScreenView.layoutContent`.
-    @Binding var isEditingPrice: Bool
+    /// the one the screen has to move something for. It moves the panel, by a
+    /// drawing offset; it does not put SwiftUI's keyboard avoidance back, which
+    /// would collapse the whole layout. Everything else on the screen types
+    /// above the keys and nothing moves for it. See `KeyboardLift`.
+    ///
+    /// A distance rather than a flag because the screen has to lift the panel
+    /// by the right amount, not merely by *some* amount: too little and the
+    /// field is still under the keys, too much and SELL/BUY come up from behind
+    /// the keyboard with it.
+    @Binding var editingRowBottomInPanel: CGFloat?
 
     /// Raw keystrokes while the custom price is being typed; nil shows the
     /// settled price. A field that re-renders the canonical string mid-word
     /// eats the decimal point — see `customPriceBinding`.
     @State private var customPriceDraft: String?
     @FocusState private var customPriceFocused: Bool
+    /// The row's bottom edge in the panel's own coordinate space.
+    @State private var rowBottomInPanel: CGFloat = 0
 
     /// Five ways to price the order, one highlight. Custom hard left where the
     /// Mid button used to be, Market hard right, and the three readouts between
@@ -44,6 +53,19 @@ struct OrderPricingRow: View {
             labelSegment(.market, "Market")
         }
         .hudSegmentTrack()
+        // Measured in the panel's own space, so the reading does not move when
+        // the screen offsets the panel — measuring against the window would
+        // feed the lift back into its own input.
+        .background {
+            GeometryReader { proxy in
+                let bottom = proxy.frame(in: .named(TradePanelView.coordinateSpace)).maxY
+                Color.clear
+                    .onChange(of: bottom, initial: true) { _, newBottom in
+                        rowBottomInPanel = newBottom
+                        if customPriceFocused { editingRowBottomInPanel = newBottom }
+                    }
+            }
+        }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Order pricing")
     }
@@ -61,18 +83,17 @@ struct OrderPricingRow: View {
             // every keystroke, which is what swallows the decimal point
             // half-way through `2.45`. Same rule, same helpers, as the
             // placement guide's level field — see PlacementGuide.swift.
+            //
+            // No keyboard toolbar on it, either: `decimalPad` has no return key
+            // and this field does need a `Done`, but one declared this deep in
+            // the tree is never installed. The app's single one lives on
+            // `RootView`, which explains why.
             TextField("0.00", text: customPriceBinding)
                 .keyboardType(.decimalPad)
                 .focused($customPriceFocused)
                 .font(.priceSmall)
                 .multilineTextAlignment(.center)
                 .accessibilityLabel("Custom limit price")
-                .toolbar {
-                    ToolbarItemGroup(placement: .keyboard) {
-                        Spacer()
-                        Button("Done") { customPriceFocused = false }
-                    }
-                }
             Text("Custom")
                 .font(.caption2)
         }
@@ -94,12 +115,12 @@ struct OrderPricingRow: View {
             } else {
                 customPriceDraft = nil
             }
-            isEditingPrice = focused
+            editingRowBottomInPanel = focused ? rowBottomInPanel : nil
         }
         // The panel is torn down with the keyboard still up when the layout is
         // toggled mid-edit; without this the screen would stay braced for a
         // keyboard that no longer belongs to anything.
-        .onDisappear { isEditingPrice = false }
+        .onDisappear { editingRowBottomInPanel = nil }
     }
 
     /// What the field shows: the keystrokes while typing, the settled price

@@ -32,6 +32,37 @@ struct RootView: View {
             }
         }
         .animation(.easeInOut(duration: 0.2), value: lockManager.isLocked)
+        // The app's one way out of a `decimalPad`, which has no return key.
+        //
+        // Declared here, and only here, because here is the one place it works.
+        // Both decimal fields — the trade panel's custom price and the chart
+        // placement card's level — used to carry their own
+        // `ToolbarItemGroup(placement: .keyboard)`, and neither ever rendered.
+        // The reason is `content` below: SwiftUI installs a scene's keyboard
+        // toolbar from the content it has at set-up, and the switch there swaps
+        // its whole branch when the session check finishes (`.checking` →
+        // `.authenticated`). Toolbar items that arrive with the replacement
+        // branch are never installed, so a `Done` declared inside the trade
+        // screen is silently dropped. One declared *above* the switch, on a
+        // view whose identity never changes, is installed once and stays.
+        //
+        // Which is why this resigns the first responder rather than clearing a
+        // `@FocusState`: it is above every field it serves and cannot name any
+        // of them. The fields' own `onChange(of:focused)` still runs, so the
+        // draft still settles and the panel still drops back down.
+        .toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                Button("Done") {
+                    UIApplication.shared.sendAction(
+                        #selector(UIResponder.resignFirstResponder),
+                        to: nil,
+                        from: nil,
+                        for: nil
+                    )
+                }
+            }
+        }
         .task {
             await authViewModel.start()
         }

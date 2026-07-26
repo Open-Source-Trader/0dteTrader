@@ -126,10 +126,17 @@ struct TradePanelView: View {
     /// persisted upstream, and the panel only ever asks for the flip.
     var onToggleLock: () -> Void = {}
     var onShowAIAnalysis: () -> Void = {}
-    /// Passed straight through to the pricing row, which raises it while its
-    /// price field holds the keyboard. The screen above needs it, and the panel
-    /// is only the wire — see `OrderPricingRow.isEditingPrice`.
-    @Binding var isEditingPrice: Bool
+    /// Passed straight through to the pricing row, which fills it in while its
+    /// price field holds the keyboard. The screen above lifts this panel clear
+    /// of the keys by it — the panel is only the wire, because the lift has to
+    /// be applied outside the `.clipped()` frame the screen puts round it. See
+    /// `OrderPricingRow.editingRowBottomInPanel` and `KeyboardLift`.
+    @Binding var editingRowBottomInPanel: CGFloat?
+
+    /// The panel's own coordinate space. Named, so the pricing row can report
+    /// where it sits *within the panel* — a distance the keyboard lift above
+    /// does not change, unlike anything measured against the window.
+    static let coordinateSpace = "tradePanel"
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -167,7 +174,7 @@ struct TradePanelView: View {
                             tradeViewModel: tradeViewModel,
                             chainViewModel: chainViewModel,
                             density: density,
-                            isEditingPrice: $isEditingPrice
+                            editingRowBottomInPanel: $editingRowBottomInPanel
                         )
                     }
                     .disabled(tradingLocked)
@@ -198,6 +205,7 @@ struct TradePanelView: View {
         .padding(.horizontal, AppSpacing.md)
         .padding(density.verticalPadding)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .coordinateSpace(.named(Self.coordinateSpace))
         .animation(reduceMotion ? nil : .snappy(duration: 0.22, extraBounce: 0), value: chainViewModel.isAutoMode)
         .background(Color.appBackground)
     }
@@ -454,7 +462,16 @@ struct TradePanelView: View {
     private var canTrade: Bool {
         // Custom with nothing typed in it has no price to send, and the server
         // would refuse the request anyway.
-        chainViewModel.selectedContract != nil && !tradingLocked && tradeViewModel.canArm
+        //
+        // Also off while the price field holds the keyboard. The panel lifts
+        // just far enough to clear the keys, which leaves SELL/BUY behind them
+        // — except for the strip the keyboard's floating `Done` sits in, where
+        // a thumb reaching for `Done` and missing would land on BUY. Nothing is
+        // lost by making the order wait for the price the user is still typing.
+        chainViewModel.selectedContract != nil
+            && !tradingLocked
+            && tradeViewModel.canArm
+            && editingRowBottomInPanel == nil
     }
 
     // MARK: - Shared chrome

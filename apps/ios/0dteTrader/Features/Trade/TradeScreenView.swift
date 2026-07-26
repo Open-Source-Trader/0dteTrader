@@ -36,9 +36,11 @@ struct TradeScreenView: View {
     @State private var tradingMode: TradingMode?
     @State private var me: MeDTO?
     @State private var showModeConfirmation = false
-    /// True while the trade panel's custom-price field holds the keyboard; see
-    /// `layoutContent`.
-    @State private var editingPanelPrice = false
+    /// Where the trade panel's pricing row sits inside the panel while its
+    /// custom-price field holds the keyboard, and nil the rest of the time.
+    /// That field is the one on this screen the keys would cover, and so the
+    /// one thing that makes the panel move. See `layoutContent`.
+    @State private var editingPriceRowBottom: CGFloat?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
 
@@ -382,6 +384,7 @@ struct TradeScreenView: View {
                 let fraction = Self.panelFractions[min(paneCount, Self.panelFractions.count - 1)]
                 let panelHeight = (usableHeight * fraction).rounded()
                 let chartHeight = max(usableHeight - panelHeight - 1, 96)
+                let density = Self.panelDensities[min(paneCount, Self.panelDensities.count - 1)]
                 VStack(spacing: 0) {
                     chartView
                         .frame(height: chartHeight)
@@ -398,7 +401,7 @@ struct TradeScreenView: View {
                         chainViewModel: chainViewModel,
                         underlying: chartViewModel.symbol,
                         positionsStrip: positionsStrip,
-                        density: Self.panelDensities[min(paneCount, Self.panelDensities.count - 1)],
+                        density: density,
                         tradingLocked: tradingLocked,
                         onArm: { side in
                             tradeViewModel.arm(
@@ -410,10 +413,20 @@ struct TradeScreenView: View {
                         },
                         onToggleLock: { toggleLock() },
                         onShowAIAnalysis: { showAIAnalysis = true },
-                        isEditingPrice: $editingPanelPrice
+                        editingRowBottomInPanel: $editingPriceRowBottom
                     )
                     .frame(height: panelHeight)
                     .clipped()
+                    // Drawn offset, not layout: the panel slides up over the
+                    // chart far enough to bring the price field clear of the
+                    // keys, and `panelHeight` — with every other number on this
+                    // screen — stays exactly what it was. Sized to the field
+                    // and not to the panel, so SELL/BUY stay behind the
+                    // keyboard rather than ending up beside its Done bar.
+                    .keyboardLift(
+                        clearance: editingPriceRowBottom.map { panelHeight - $0 },
+                        maxLift: chartHeight
+                    )
                 }
                 // Reserve the swipe-up strip so BUY/SELL never enter it.
                 .padding(.bottom, insetBottom)
@@ -426,14 +439,14 @@ struct TradeScreenView: View {
         // takes the keyboard's height out of the safe area, the reader shrinks,
         // and the chart and the panel both collapse into what is left — the
         // header runs off the top and the panel smears into the chart. Raising
-        // the keyboard should leave the screen where it is and come over it.
+        // the keyboard has to leave this reader's height alone and come over it.
         //
-        // The one exception is the panel's custom-price field, which sits in the
-        // bottom third and would be typed into blind. That field, and only that
-        // field, puts the avoidance back — the rest of the screen's text entry
-        // (the placement card's level, the ticker dropdown's search) already
-        // happens well above the keys.
-        .ignoresSafeArea(.keyboard, edges: editingPanelPrice ? [] : .bottom)
+        // Unconditionally, with no exception for the panel's custom-price field.
+        // That field does sit under the keys, but putting avoidance back for it
+        // bought visibility with the very collapse this opts out of — the lever
+        // is the reader's height in both directions. The panel clears the keys
+        // by moving itself instead; see `keyboardLift` above.
+        .ignoresSafeArea(.keyboard, edges: .bottom)
     }
 
     private var chartView: some View {

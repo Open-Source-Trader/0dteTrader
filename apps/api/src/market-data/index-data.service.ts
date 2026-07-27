@@ -60,12 +60,19 @@ export class IndexDataService {
   async getQuote(symbol: string, userId?: string): Promise<Quote> {
     const { client, scope } = await this.clientFor(userId);
     const key = `${scope}:${symbol.toUpperCase()}`;
+    const now = Date.now();
     const cached = this.quoteCache.get(key);
-    if (cached && Date.now() - cached.at < IndexDataService.QUOTE_TTL_MS) {
+    if (cached && now - cached.at < IndexDataService.QUOTE_TTL_MS) {
       return cached.quote;
     }
     const quote = await this.wrap(() => client.getChartQuote(symbol.toUpperCase()));
     this.quoteCache.set(key, { quote, at: Date.now() });
+    // Scope-keyed entries die whenever a user's client is rebuilt, so sweep
+    // expired ones on write — without this the map grows for the process
+    // lifetime (the TTL above only gates reads).
+    for (const [staleKey, entry] of this.quoteCache) {
+      if (Date.now() - entry.at >= IndexDataService.QUOTE_TTL_MS) this.quoteCache.delete(staleKey);
+    }
     return quote;
   }
 

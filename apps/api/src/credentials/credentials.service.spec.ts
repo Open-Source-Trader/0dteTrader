@@ -92,6 +92,32 @@ describe('CredentialsService', () => {
     });
   });
 
+  it('stores secrets trimmed — a pasted trailing newline must never reach an Authorization header', async () => {
+    await service.save('u1', { provider: 'tradier', apiKey: '  tk-123\n' });
+    expect(await service.getDecrypted('u1', 'tradier')).toEqual({
+      provider: 'tradier',
+      apiKey: 'tk-123',
+    });
+
+    await service.save('u1', { provider: 'alpaca', apiKey: ' ak\n', apiSecret: 'as\r\n' });
+    expect(await service.getDecrypted('u1', 'alpaca')).toEqual({
+      provider: 'alpaca',
+      apiKey: 'ak',
+      apiSecret: 'as',
+    });
+  });
+
+  it('returns all of a provider rows keyed by environment in one query (no webull shim)', async () => {
+    await service.save('u1', { provider: 'tradier', apiKey: 'tk-live' });
+    await service.save('u1', { provider: 'tradier', apiKey: 'tk-sandbox' }, 'practice');
+    const rows = await service.getDecryptedProviderRows('u1', 'tradier');
+    expect(rows).toEqual({
+      live: { provider: 'tradier', apiKey: 'tk-live' },
+      practice: { provider: 'tradier', apiKey: 'tk-sandbox' },
+    });
+    expect(await service.getDecryptedProviderRows('u1', 'alpaca')).toEqual({});
+  });
+
   it('rejects a save whose provider secret fields are missing or blank', async () => {
     // The generic PUT body is a TS union with no class-validator DTO, so the
     // service is the last line of defense against storing a garbage blob.

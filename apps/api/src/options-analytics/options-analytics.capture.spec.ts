@@ -56,6 +56,7 @@ function result(symbol = 'SPY', observedAt = NOW): OptionsAnalyticsSnapshotResul
   const output = snapshot(symbol, '2026-07-20', observedAt);
   return {
     snapshot: output,
+    scope: 'shared',
     input: {
       symbol,
       rootSymbol: symbol,

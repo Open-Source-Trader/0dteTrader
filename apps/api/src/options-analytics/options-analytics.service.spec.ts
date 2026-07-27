@@ -442,4 +442,31 @@ describe('OptionsAnalyticsService exact cache', () => {
     expect(userProvider.calls.chain).toBe(1);
     expect(service.metrics.cacheHits).toBe(1);
   });
+
+  it('evicts user-scoped entries before shared ones when over the cache budget', async () => {
+    const sharedProvider = client();
+    const userProvider = client();
+    const resolver = {
+      resolve: jest.fn(async () => ({ client: userProvider, scope: 'user-scope' })),
+    };
+    // cacheMaxEntries is 2 (see config()): one shared + two user snapshots
+    // overflow the budget, and the user entries must be the victims.
+    const service = new OptionsAnalyticsService(
+      config(),
+      sharedProvider as never,
+      resolver as never,
+    );
+
+    await service.getSnapshotResult('SPY', EXPIRATION_A);
+    await service.getSnapshotResult('SPY', EXPIRATION_A, 'user-1');
+    await service.getSnapshotResult('SPY', EXPIRATION_B, 'user-1');
+
+    // The shared entry survived the user churn…
+    await service.getSnapshotResult('SPY', EXPIRATION_A);
+    expect(sharedProvider.calls.chain).toBe(1);
+    expect(service.metrics.cacheHits).toBe(1);
+    // …and it was a user entry that got evicted.
+    await service.getSnapshotResult('SPY', EXPIRATION_A, 'user-1');
+    expect(userProvider.calls.chain).toBe(3);
+  });
 });

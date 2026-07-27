@@ -285,7 +285,8 @@ describe('0dteTrader API (e2e)', () => {
       .set('Authorization', `Bearer ${token}`)
       .send({ provider: 'tradier', apiKey: 'user-tradier-key' })
       .expect(200);
-    expect(userTradierTokens).toHaveLength(0);
+    // The save-time probe already exercised the key once.
+    expect(userTradierTokens).toEqual(['user-tradier-key']);
 
     const chain = await request(server)
       .get('/v1/market/options-chain')
@@ -293,9 +294,9 @@ describe('0dteTrader API (e2e)', () => {
       .set('Authorization', `Bearer ${token}`)
       .expect(200);
     expect(chain.body.underlying).toBe('SPY');
-    // The per-user factory was invoked with the stored key — the shared
-    // env-token client did not serve this request.
-    expect(userTradierTokens).toEqual(['user-tradier-key']);
+    // The per-user factory served the request — the shared env-token client
+    // did not.
+    expect(userTradierTokens).toEqual(['user-tradier-key', 'user-tradier-key']);
 
     const me = await request(server)
       .get('/v1/me')

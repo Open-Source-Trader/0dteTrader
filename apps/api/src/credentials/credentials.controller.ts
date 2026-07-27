@@ -2,9 +2,11 @@ import { Body, Controller, Delete, HttpCode, Put, Query } from '@nestjs/common';
 import {
   BrokerCredentialsInput,
   BrokerCredentialsSaved,
+  TradierCredentialsInput,
   WebullCredentialsSaved,
 } from '@0dtetrader/shared-types';
 import { AuthenticatedUser, CurrentUser } from '../common/current-user.decorator';
+import { TradierClientResolver } from '../options-analytics/tradier-client.resolver';
 import { CredentialsService } from './credentials.service';
 import { BrokerCredentialsQueryDto } from './dto/broker-credentials-query.dto';
 import { EnvironmentQueryDto } from './dto/environment-query.dto';
@@ -53,7 +55,10 @@ export class CredentialsController {
  */
 @Controller('me/broker-credentials')
 export class BrokerCredentialsController {
-  constructor(private readonly credentials: CredentialsService) {}
+  constructor(
+    private readonly credentials: CredentialsService,
+    private readonly tradierResolver: TradierClientResolver,
+  ) {}
 
   @Put()
   async save(
@@ -62,6 +67,14 @@ export class BrokerCredentialsController {
   ): Promise<BrokerCredentialsSaved> {
     const environment = (dto.environment ?? 'live') as 'live' | 'practice';
     const provider = dto.provider ?? 'webull';
+    if (provider === 'tradier') {
+      // Probe the key before storing it: a typo'd/revoked token would
+      // otherwise save with a 200 and then fail every market-data request.
+      const apiKey = (dto as TradierCredentialsInput).apiKey;
+      if (typeof apiKey === 'string' && apiKey.trim() !== '') {
+        await this.tradierResolver.verifyKey(apiKey.trim(), environment);
+      }
+    }
     await this.credentials.save(user.userId, dto, environment);
     return { provider, configured: true, environment };
   }

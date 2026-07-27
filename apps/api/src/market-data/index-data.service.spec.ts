@@ -129,4 +129,14 @@ describe('IndexDataService', () => {
     await scoped.getQuote('SPX', 'user-1');
     expect(userTradier.getChartQuote).toHaveBeenCalledTimes(1);
   });
+
+  it('sweeps expired quote-cache entries on write so dead scopes cannot accumulate', async () => {
+    await service.getQuote('SPX');
+    const cache = (service as unknown as { quoteCache: Map<string, { at: number }> }).quoteCache;
+    expect(cache.size).toBe(1);
+    for (const entry of cache.values()) entry.at -= 10_000;
+
+    await service.getQuote('NDX');
+    expect([...cache.keys()]).toEqual(['shared:NDX']);
+  });
 });

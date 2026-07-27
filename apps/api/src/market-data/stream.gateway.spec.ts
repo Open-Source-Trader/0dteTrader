@@ -147,7 +147,7 @@ describe('StreamGateway.tickSymbol', () => {
     expect(socket2.send).toHaveBeenCalledTimes(1);
   });
 
-  it('index symbols use one shared user-independent Tradier fetch', async () => {
+  it('index symbols are fetched per user so a stored Tradier key streams its own feed', async () => {
     index.isIndexSymbol.mockReturnValue(true);
     const socket1 = fakeSocket();
     const socket2 = fakeSocket();
@@ -158,7 +158,11 @@ describe('StreamGateway.tickSymbol', () => {
 
     await (gateway as unknown as { tickSymbol(symbol: string): Promise<void> }).tickSymbol('SPX');
 
-    expect(index.getQuote).toHaveBeenCalledTimes(1);
+    // One fetch per user (IndexDataService's scope-keyed cache collapses
+    // same-credential users to a single Tradier call downstream).
+    expect(index.getQuote).toHaveBeenCalledTimes(2);
+    expect(index.getQuote).toHaveBeenCalledWith('SPX', 'u1');
+    expect(index.getQuote).toHaveBeenCalledWith('SPX', 'u2');
     expect(broker.getQuote).not.toHaveBeenCalled();
     expect(socket1.send).toHaveBeenCalledTimes(1);
     expect(JSON.parse(socket1.send.mock.calls[0][0]).data.last).toBe(400);

@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { CredentialsModule } from '../credentials/credentials.module';
+import { OptionsAnalyticsModule } from '../options-analytics/options-analytics.module';
 import { CredentialsService } from '../credentials/credentials.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { BROKER_GATEWAY, BrokerGateway } from './broker-gateway.interface';
@@ -25,7 +26,9 @@ import { WebullAccountController } from './webull-account.controller';
  * consumers (trading.service, market-data.controller, stream.gateway).
  */
 @Module({
-  imports: [CredentialsModule],
+  // OptionsAnalyticsModule supplies TradierClientResolver for the save-time
+  // Tradier key probe in BrokerCredentialsController.
+  imports: [CredentialsModule, OptionsAnalyticsModule],
   controllers: [
     WebullSessionController,
     BrokerSessionController,

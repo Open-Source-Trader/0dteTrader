@@ -148,7 +148,7 @@ describe('TradierClientResolver', () => {
     expect(factoryCalls).toHaveLength(0);
   });
 
-  it('degrades to the shared client when the stored blob is corrupt', async () => {
+  it('degrades to the shared client when the stored blob is corrupt — and memoizes the failure', async () => {
     const userId = await seedUser();
     prisma.brokerCredentials.push({
       id: 'bad',
@@ -163,5 +163,88 @@ describe('TradierClientResolver', () => {
     const resolved = await resolver.resolve(userId);
     expect(resolved.client).toBe(shared);
     expect(resolved.scope).toBe('shared');
+
+    // The failure is memoized like any resolution: an unhealthy blob/DB is
+    // not re-read (and re-warned) on every market-data request.
+    const userReads = jest.spyOn(prisma.user, 'findUnique');
+    expect((await resolver.resolve(userId)).client).toBe(shared);
+    expect(userReads).not.toHaveBeenCalled();
+  });
+
+  it('reuses the last-known-good client when a refresh fails past the TTL', async () => {
+    const userId = await seedUser();
+    await credentials.save(userId, { provider: 'tradier', apiKey: 'user-key' });
+    const first = await resolver.resolve(userId);
+
+    expireResolutionTtl();
+    jest.spyOn(prisma.user, 'findUnique').mockRejectedValueOnce(new Error('db blip'));
+    const second = await resolver.resolve(userId);
+    expect(second.client).toBe(first.client);
+    expect(second.scope).toBe(first.scope);
+  });
+
+  it('verifyKey rejects a token Tradier answers with 401, and only that', async () => {
+    const rejecting = {
+      getExpirations: async () => {
+        throw new Error('Tradier /markets/options/expirations -> HTTP 401');
+      },
+    } as unknown as TradierClient;
+    const flaky = {
+      getExpirations: async () => {
+        throw new Error('Tradier /markets/options/expirations -> HTTP 502');
+      },
+    } as unknown as TradierClient;
+    const ok = { getExpirations: async () => ['2026-08-20'] } as unknown as TradierClient;
+
+    const make = (client: TradierClient) =>
+      new TradierClientResolver(
+        new ConfigService({ tradier: { baseUrl: PROD_BASE_URL } }),
+        credentials,
+        prisma as unknown as ConstructorParameters<typeof TradierClientResolver>[2],
+        shared,
+        () => client,
+      );
+
+    await expect(make(rejecting).verifyKey('bad-key', 'live')).rejects.toMatchObject({
+      code: 'TRADIER_KEY_INVALID',
+    });
+    // A Tradier outage must not block saving a possibly-valid key.
+    await expect(make(flaky).verifyKey('maybe-key', 'live')).resolves.toBeUndefined();
+    await expect(make(ok).verifyKey('good-key', 'live')).resolves.toBeUndefined();
+  });
+
+  it('pins a credential to the shared client after a request-time 401', async () => {
+    const userId = await seedUser();
+    await credentials.save(userId, { provider: 'tradier', apiKey: 'revoked-key' });
+    const rejecting = {
+      getChartQuote: async () => {
+        throw new Error('Tradier /markets/quotes -> HTTP 401');
+      },
+    } as unknown as TradierClient;
+    resolver = new TradierClientResolver(
+      new ConfigService({ tradier: { baseUrl: PROD_BASE_URL } }),
+      credentials,
+      prisma as unknown as ConstructorParameters<typeof TradierClientResolver>[2],
+      shared,
+      (token, baseUrl) => {
+        factoryCalls.push({ token, baseUrl });
+        return rejecting;
+      },
+    );
+
+    const resolved = await resolver.resolve(userId);
+    await expect(
+      (resolved.client as unknown as { getChartQuote(s: string): Promise<unknown> }).getChartQuote(
+        'SPX',
+      ),
+    ).rejects.toThrow('HTTP 401');
+
+    // The revoked key now degrades to the shared client instead of failing
+    // every request — until a different key is saved.
+    expect((await resolver.resolve(userId)).client).toBe(shared);
+    await credentials.save(userId, { provider: 'tradier', apiKey: 'new-key' });
+    expireResolutionTtl();
+    await resolver.resolve(userId);
+    expect(factoryCalls.map((c) => c.token)).toEqual(['revoked-key', 'new-key']);
   });
 });

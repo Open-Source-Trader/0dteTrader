@@ -45,6 +45,11 @@ interface NormalizedSnapshotInput {
 export interface OptionsAnalyticsSnapshotResult {
   snapshot: OptionsAnalyticsSnapshot;
   input: NormalizedSnapshotInput;
+  /** Tradier client scope that produced this snapshot ('shared' or a
+   *  per-user token). Capture must only persist 'shared' results — a
+   *  user-keyed (possibly sandbox) snapshot must not enter the global
+   *  history table. */
+  scope: string;
 }
 
 interface CacheEntry {
@@ -211,11 +216,15 @@ export class OptionsAnalyticsService {
     const existing = this.inFlight.get(exactKey);
     if (existing) return existing;
 
-    const calculation = this.calculateExact(normalizedSymbol, selected, tradier, exactKey).finally(
-      () => {
-        this.inFlight.delete(exactKey);
-      },
-    );
+    const calculation = this.calculateExact(
+      normalizedSymbol,
+      selected,
+      tradier,
+      scope,
+      exactKey,
+    ).finally(() => {
+      this.inFlight.delete(exactKey);
+    });
     this.inFlight.set(exactKey, calculation);
     return calculation;
   }
@@ -281,6 +290,7 @@ export class OptionsAnalyticsService {
     symbol: string,
     selected: string,
     tradier: TradierClient,
+    scope: string,
     exactKey: string,
   ): Promise<OptionsAnalyticsSnapshotResult> {
     try {
@@ -385,7 +395,7 @@ export class OptionsAnalyticsService {
         contracts: synchronizedContracts,
         warnings,
       };
-      const result = { snapshot, input };
+      const result = { snapshot, input, scope };
       this.storeCache(exactKey, result);
       this.metrics.calculated += 1;
       if (snapshot.quality.status === 'partial') this.metrics.partial += 1;
@@ -453,6 +463,7 @@ export class OptionsAnalyticsService {
   ): OptionsAnalyticsSnapshotResult {
     return {
       input: result.input,
+      scope: result.scope,
       snapshot: {
         ...result.snapshot,
         quality: { ...result.snapshot.quality, cacheStatus },
@@ -476,10 +487,25 @@ export class OptionsAnalyticsService {
   private storeCache(key: string, result: OptionsAnalyticsSnapshotResult): void {
     this.cache.delete(key);
     this.cache.set(key, { storedAt: Date.now(), result });
-    while (this.cache.size > this.cacheMaxEntries) {
-      const oldest = this.cache.keys().next().value as string | undefined;
-      if (oldest === undefined) break;
-      this.cache.delete(oldest);
+    this.evictOverBudget(this.cache);
+  }
+
+  /** Evict oldest-first, but prefer user-scoped victims: the `shared:`
+   *  entries back every keyless user, the capture cron, and the stale-
+   *  fallback outage safety net, so per-user churn must not push them out
+   *  of the budget. */
+  private evictOverBudget(map: Map<string, unknown>): void {
+    while (map.size > this.cacheMaxEntries) {
+      let victim: string | undefined;
+      for (const key of map.keys()) {
+        if (!key.startsWith('shared:')) {
+          victim = key;
+          break;
+        }
+      }
+      victim ??= map.keys().next().value as string | undefined;
+      if (victim === undefined) break;
+      map.delete(victim);
     }
   }
 
@@ -527,11 +553,7 @@ export class OptionsAnalyticsService {
       .getExpirations(symbol)
       .then((expirations) => {
         this.expirationCache.set(key, { storedAt: Date.now(), expirations });
-        while (this.expirationCache.size > this.cacheMaxEntries) {
-          const oldest = this.expirationCache.keys().next().value as string | undefined;
-          if (oldest === undefined) break;
-          this.expirationCache.delete(oldest);
-        }
+        this.evictOverBudget(this.expirationCache);
         return expirations;
       })
       .finally(() => {

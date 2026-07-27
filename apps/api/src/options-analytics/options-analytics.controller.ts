@@ -35,6 +35,11 @@ export class OptionsAnalyticsController {
       query.expiration,
       user.userId,
     );
+    // Only shared-client snapshots enter the global capture history: a
+    // per-user-key result (possibly sandbox-quality) would claim the
+    // symbol/expiration/bucket slot and silently displace the production
+    // row the capture cron writes.
+    if (result.scope !== 'shared') return result.snapshot;
     // Persistence failures are swallowed and logged by the capture service so
     // a valid interactive market-data response remains available.
     void this.capture.persist(result, 'viewed').catch((error: unknown) => {

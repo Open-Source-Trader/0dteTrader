@@ -46,9 +46,12 @@ enum TradingMode: String, Codable, Equatable, Sendable, Hashable {
 }
 
 /// Trading provider selected by the user (Webull or Alpaca).
+/// `tradier` is a stored market-data API key, not a selectable trading
+/// provider — it appears only in credential save/delete payloads.
 enum BrokerProvider: String, Codable, Equatable, Sendable {
     case webull
     case alpaca
+    case tradier
 }
 
 struct MeDTO: Decodable, Equatable, Sendable {
@@ -72,6 +75,9 @@ struct MeDTO: Decodable, Equatable, Sendable {
     /// Alpaca v2 is key-scoped: no account id is stored.
     let alpacaAccountId: String?
     let alpacaPracticeAccountId: String?
+    /// Tradier market-data API key is stored (used alongside Webull).
+    let tradierConfigured: Bool?
+    let tradierPracticeConfigured: Bool?
 }
 
 struct UpdateTradingModeDTO: Encodable, Sendable {
@@ -105,6 +111,12 @@ struct AlpacaCredentialsInputDTO: Encodable, Sendable {
     let provider = "alpaca"
     let apiKey: String
     let apiSecret: String
+    let environment: TradingMode
+}
+
+struct TradierCredentialsInputDTO: Encodable, Sendable {
+    let provider = "tradier"
+    let apiKey: String
     let environment: TradingMode
 }
 

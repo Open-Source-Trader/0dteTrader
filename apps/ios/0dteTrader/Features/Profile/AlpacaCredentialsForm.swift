@@ -13,7 +13,7 @@ struct AlpacaCredentialsForm: View {
     @FocusState private var focused: Field?
 
     private var canSave: Bool {
-        !apiKey.trimmingCharacters(in: .whitespaces).isEmpty && !apiSecret.isEmpty
+        !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !apiSecret.isEmpty
     }
     private var isSaving: Bool {
         viewModel.savingAlpaca.contains(environment)

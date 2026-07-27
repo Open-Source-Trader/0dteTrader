@@ -175,6 +175,13 @@ struct APIClient: @unchecked Sendable {
         return try await request(endpoint, body: encode(credentials))
     }
 
+    /// Save the Tradier market-data API key via the generic broker-credentials endpoint.
+    @discardableResult
+    func putTradierCredentials(_ credentials: TradierCredentialsInputDTO) async throws -> BrokerCredentialsSavedDTO {
+        let endpoint = Endpoint(method: .put, path: "v1/me/broker-credentials")
+        return try await request(endpoint, body: encode(credentials))
+    }
+
     /// Delete stored broker credentials by provider (defaults to live env).
     func deleteBrokerCredentials(provider: BrokerProvider, environment: TradingMode = .live) async throws {
         var query = [URLQueryItem(name: "provider", value: provider.rawValue)]

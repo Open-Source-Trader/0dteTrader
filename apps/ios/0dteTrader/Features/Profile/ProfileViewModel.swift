@@ -26,8 +26,16 @@ final class ProfileViewModel: ObservableObject {
     @Published private(set) var deletingAlpaca: Set<TradingMode> = []
     @Published private(set) var editingAlpaca: Set<TradingMode> = []
 
+    @Published private(set) var savingTradier: Set<TradingMode> = []
+    @Published private(set) var deletingTradier: Set<TradingMode> = []
+    @Published private(set) var editingTradier: Set<TradingMode> = []
+
     /// Which section the current success/error message belongs to.
     @Published private(set) var messageEnv: TradingMode? = nil
+    /// Provider the current message belongs to — the Tradier sections render
+    /// alongside the Webull ones, so the environment alone no longer
+    /// identifies a section.
+    @Published private(set) var messageProvider: BrokerProvider? = nil
 
     @Published var appLockEnabled: Bool {
         didSet { settingsStore.appLockEnabled = appLockEnabled }
@@ -70,6 +78,10 @@ final class ProfileViewModel: ObservableObject {
         if isEditing { editingAlpaca.insert(environment) } else { editingAlpaca.remove(environment) }
     }
 
+    func setEditingTradier(_ environment: TradingMode, _ isEditing: Bool) {
+        if isEditing { editingTradier.insert(environment) } else { editingTradier.remove(environment) }
+    }
+
     func load() async {
         isLoading = true
         loadFailed = false
@@ -100,19 +112,20 @@ final class ProfileViewModel: ObservableObject {
 
     func saveWebull(environment: TradingMode, appKey: String, appSecret: String) async {
         guard !savingWebull.contains(environment),
-              !appKey.trimmingCharacters(in: .whitespaces).isEmpty,
+              !appKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               !appSecret.isEmpty else { return }
         savingWebull.insert(environment)
         errorMessage = nil
         successMessage = nil
         messageEnv = environment
+        messageProvider = .webull
         defer { savingWebull.remove(environment) }
         do {
             // Account id is intentionally absent: the server discovers it via
             // Webull's account/list once the token is approved.
             try await apiClient.putWebullCredentials(
                 WebullCredentialsInputDTO(
-                    appKey: appKey.trimmingCharacters(in: .whitespaces),
+                    appKey: appKey.trimmingCharacters(in: .whitespacesAndNewlines),
                     appSecret: appSecret,
                     environment: environment
                 )
@@ -131,6 +144,7 @@ final class ProfileViewModel: ObservableObject {
         errorMessage = nil
         successMessage = nil
         messageEnv = environment
+        messageProvider = .webull
         defer { deletingWebull.remove(environment) }
         do {
             try await apiClient.deleteWebullCredentials(environment: environment)
@@ -150,6 +164,7 @@ final class ProfileViewModel: ObservableObject {
         errorMessage = nil
         successMessage = nil
         messageEnv = environment
+        messageProvider = .webull
         defer { reconnectingWebull.remove(environment) }
         do {
             try await apiClient.refreshWebullSession()
@@ -167,6 +182,7 @@ final class ProfileViewModel: ObservableObject {
             webullAccounts[environment] = try await apiClient.webullAccounts(environment: environment)
         } catch {
             messageEnv = environment
+            messageProvider = .webull
             setError(error)
         }
     }
@@ -179,9 +195,11 @@ final class ProfileViewModel: ObservableObject {
             try await apiClient.selectWebullAccount(accountId: accountId, environment: environment)
             successMessage = "Webull account selected."
             messageEnv = environment
+            messageProvider = .webull
             await load()
         } catch {
             messageEnv = environment
+            messageProvider = .webull
             setError(error)
         }
     }
@@ -194,17 +212,18 @@ final class ProfileViewModel: ObservableObject {
 
     func saveAlpaca(environment: TradingMode, apiKey: String, apiSecret: String) async {
         guard !savingAlpaca.contains(environment),
-              !apiKey.trimmingCharacters(in: .whitespaces).isEmpty,
+              !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               !apiSecret.isEmpty else { return }
         savingAlpaca.insert(environment)
         errorMessage = nil
         successMessage = nil
         messageEnv = environment
+        messageProvider = .alpaca
         defer { savingAlpaca.remove(environment) }
         do {
             try await apiClient.putAlpacaCredentials(
                 AlpacaCredentialsInputDTO(
-                    apiKey: apiKey.trimmingCharacters(in: .whitespaces),
+                    apiKey: apiKey.trimmingCharacters(in: .whitespacesAndNewlines),
                     apiSecret: apiSecret,
                     environment: environment
                 )
@@ -240,10 +259,54 @@ final class ProfileViewModel: ObservableObject {
         errorMessage = nil
         successMessage = nil
         messageEnv = environment
+        messageProvider = .alpaca
         defer { deletingAlpaca.remove(environment) }
         do {
             try await apiClient.deleteBrokerCredentials(provider: .alpaca, environment: environment)
             successMessage = "Alpaca \(environment.label) credentials removed."
+            await load()
+        } catch {
+            setError(error)
+        }
+    }
+
+    // MARK: - Tradier market-data API key (generic broker-credentials endpoint)
+
+    func saveTradier(environment: TradingMode, apiKey: String) async {
+        guard !savingTradier.contains(environment),
+              !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        savingTradier.insert(environment)
+        errorMessage = nil
+        successMessage = nil
+        messageEnv = environment
+        messageProvider = .tradier
+        defer { savingTradier.remove(environment) }
+        do {
+            try await apiClient.putTradierCredentials(
+                TradierCredentialsInputDTO(
+                    apiKey: apiKey.trimmingCharacters(in: .whitespacesAndNewlines),
+                    environment: environment
+                )
+            )
+            editingTradier.remove(environment)
+            successMessage = "Tradier \(environment.label) API key saved."
+            await load()
+        } catch {
+            setError(error)
+        }
+    }
+
+    func deleteTradier(environment: TradingMode) async {
+        guard !deletingTradier.contains(environment) else { return }
+        deletingTradier.insert(environment)
+        errorMessage = nil
+        successMessage = nil
+        messageEnv = environment
+        messageProvider = .tradier
+        defer { deletingTradier.remove(environment) }
+        do {
+            try await apiClient.deleteBrokerCredentials(provider: .tradier, environment: environment)
+            successMessage = "Tradier \(environment.label) API key removed."
             await load()
         } catch {
             setError(error)

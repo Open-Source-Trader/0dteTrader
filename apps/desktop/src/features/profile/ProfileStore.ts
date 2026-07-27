@@ -1,4 +1,10 @@
-import type { BrokerProvider, Me, TradingMode, WebullAccount } from '@0dtetrader/shared-types';
+import type {
+  BrokerProvider,
+  CredentialProvider,
+  Me,
+  TradingMode,
+  WebullAccount,
+} from '@0dtetrader/shared-types';
 import type { ApiClient } from '../../core/api/ApiClient';
 import { errorMessage } from '../../core/api/ApiError';
 import { Store } from '../../core/observable';
@@ -23,6 +29,13 @@ interface AlpacaEnvironmentState {
   isDeleting: boolean;
 }
 
+interface TradierEnvironmentState {
+  apiKey: string;
+  isEditing: boolean;
+  isSaving: boolean;
+  isDeleting: boolean;
+}
+
 interface ProfileStoreState {
   me: Me | null;
   isLoading: boolean;
@@ -30,11 +43,16 @@ interface ProfileStoreState {
   successMessage: string | null;
   /** Which section the current success/error message belongs to. */
   messageEnv: TradingMode | null;
+  /** Provider the current success/error message belongs to — the Tradier
+   *  sections render alongside the Webull ones, so the environment alone
+   *  no longer identifies a section. */
+  messageProvider: CredentialProvider | null;
   /** Active trading provider chosen by the user (webull | alpaca). */
   tradingProvider: BrokerProvider;
   live: CredentialEnvironmentState;
   practice: CredentialEnvironmentState;
   alpaca: Record<TradingMode, AlpacaEnvironmentState>;
+  tradier: Record<TradingMode, TradierEnvironmentState>;
   webullAccounts: Record<TradingMode, WebullAccount[]>;
   loadingAccounts: Record<TradingMode, boolean>;
   selectingAccount: Record<TradingMode, boolean>;
@@ -57,12 +75,19 @@ const emptyAlpacaEnvironment = (): AlpacaEnvironmentState => ({
   isDeleting: false,
 });
 
+const emptyTradierEnvironment = (): TradierEnvironmentState => ({
+  apiKey: '',
+  isEditing: false,
+  isSaving: false,
+  isDeleting: false,
+});
+
 /**
  * Profile sheet state (ProfileViewModel.swift analog): account info, the active
- * trading provider, and the write-only credential lifecycle for both Webull
- * (legacy webull-credentials endpoint) and Alpaca (generic broker-credentials
- * endpoint) — one credential set per environment (live / practice). Secrets are
- * never re-displayed.
+ * trading provider, and the write-only credential lifecycle for Webull
+ * (legacy webull-credentials endpoint), Alpaca and Tradier (generic
+ * broker-credentials endpoint) — one credential set per environment
+ * (live / practice). Secrets are never re-displayed.
  */
 export class ProfileStore extends Store<ProfileStoreState> {
   constructor(private readonly apiClient: ApiClient) {
@@ -72,10 +97,12 @@ export class ProfileStore extends Store<ProfileStoreState> {
       errorMessage: null,
       successMessage: null,
       messageEnv: null,
+      messageProvider: null,
       tradingProvider: 'webull',
       live: emptyEnvironment(),
       practice: emptyEnvironment(),
       alpaca: { live: emptyAlpacaEnvironment(), practice: emptyAlpacaEnvironment() },
+      tradier: { live: emptyTradierEnvironment(), practice: emptyTradierEnvironment() },
       webullAccounts: { live: [], practice: [] },
       loadingAccounts: { live: false, practice: false },
       selectingAccount: { live: false, practice: false },
@@ -147,6 +174,7 @@ export class ProfileStore extends Store<ProfileStoreState> {
       errorMessage: null,
       successMessage: null,
       messageEnv: environment,
+      messageProvider: 'webull',
     });
     try {
       // Account id is intentionally absent: the server discovers it via
@@ -180,6 +208,7 @@ export class ProfileStore extends Store<ProfileStoreState> {
       errorMessage: null,
       successMessage: null,
       messageEnv: environment,
+      messageProvider: 'webull',
     });
     try {
       await this.apiClient.deleteWebullCredentials(environment);
@@ -207,6 +236,7 @@ export class ProfileStore extends Store<ProfileStoreState> {
       errorMessage: null,
       successMessage: null,
       messageEnv: environment,
+      messageProvider: 'webull',
     });
     try {
       await this.apiClient.refreshWebullSession();
@@ -226,6 +256,7 @@ export class ProfileStore extends Store<ProfileStoreState> {
       loadingAccounts: { ...this.getState().loadingAccounts, [environment]: true },
       errorMessage: null,
       messageEnv: environment,
+      messageProvider: 'webull',
     });
     try {
       const accounts = await this.apiClient.webullAccounts(environment);
@@ -246,6 +277,7 @@ export class ProfileStore extends Store<ProfileStoreState> {
       errorMessage: null,
       successMessage: null,
       messageEnv: environment,
+      messageProvider: 'webull',
     });
     try {
       await this.apiClient.selectWebullAccount(accountId, environment);
@@ -269,6 +301,7 @@ export class ProfileStore extends Store<ProfileStoreState> {
       errorMessage: null,
       successMessage: null,
       messageEnv: environment,
+      messageProvider: 'alpaca',
     });
     try {
       await this.apiClient.putBrokerCredentials(
@@ -291,6 +324,83 @@ export class ProfileStore extends Store<ProfileStoreState> {
     }
   }
 
+  canSaveTradier(environment: TradingMode): boolean {
+    return this.getState().tradier[environment].apiKey.trim() !== '';
+  }
+
+  setTradierApiKey(environment: TradingMode, apiKey: string): void {
+    const next = {
+      ...this.getState().tradier,
+      [environment]: { ...this.getState().tradier[environment], apiKey },
+    };
+    this.set({ tradier: next });
+  }
+
+  setTradierEditing(environment: TradingMode, isEditing: boolean): void {
+    const next = {
+      ...this.getState().tradier,
+      [environment]: { ...this.getState().tradier[environment], isEditing },
+    };
+    this.set({ tradier: next });
+  }
+
+  async saveTradierCredentials(environment: TradingMode): Promise<void> {
+    const env = this.getState().tradier[environment];
+    if (!this.canSaveTradier(environment) || env.isSaving) return;
+    const next = { ...this.getState().tradier, [environment]: { ...env, isSaving: true } };
+    this.set({
+      tradier: next,
+      errorMessage: null,
+      successMessage: null,
+      messageEnv: environment,
+      messageProvider: 'tradier',
+    });
+    try {
+      await this.apiClient.putBrokerCredentials(
+        { provider: 'tradier', apiKey: env.apiKey.trim() },
+        environment,
+      );
+      // Write-only: wipe the field, never render it back.
+      this.set({
+        tradier: { ...this.getState().tradier, [environment]: { ...emptyTradierEnvironment() } },
+        successMessage: 'Tradier API key saved.',
+      });
+      await this.load();
+    } catch (error) {
+      this.set({ errorMessage: errorMessage(error) });
+    } finally {
+      const done = this.getState().tradier[environment];
+      this.set({
+        tradier: { ...this.getState().tradier, [environment]: { ...done, isSaving: false } },
+      });
+    }
+  }
+
+  async deleteTradierCredentials(environment: TradingMode): Promise<void> {
+    const env = this.getState().tradier[environment];
+    if (env.isDeleting) return;
+    const next = { ...this.getState().tradier, [environment]: { ...env, isDeleting: true } };
+    this.set({
+      tradier: next,
+      errorMessage: null,
+      successMessage: null,
+      messageEnv: environment,
+      messageProvider: 'tradier',
+    });
+    try {
+      await this.apiClient.deleteBrokerCredentials('tradier', environment);
+      this.set({ successMessage: 'Tradier API key removed.' });
+      await this.load();
+    } catch (error) {
+      this.set({ errorMessage: errorMessage(error) });
+    } finally {
+      const done = this.getState().tradier[environment];
+      this.set({
+        tradier: { ...this.getState().tradier, [environment]: { ...done, isDeleting: false } },
+      });
+    }
+  }
+
   async deleteAlpacaCredentials(environment: TradingMode): Promise<void> {
     const env = this.getState().alpaca[environment];
     if (env.isDeleting) return;
@@ -300,6 +410,7 @@ export class ProfileStore extends Store<ProfileStoreState> {
       errorMessage: null,
       successMessage: null,
       messageEnv: environment,
+      messageProvider: 'alpaca',
     });
     try {
       await this.apiClient.deleteBrokerCredentials('alpaca', environment);

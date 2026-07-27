@@ -53,17 +53,29 @@ export class UsersService {
     return { exists: Boolean(broker), accountId: null };
   }
 
+  /** Tradier API-key presence for /me. Tradier is a market-data key
+   *  (single bearer token), so only existence matters. */
+  private async tradierCred(userId: string, environment: TradingMode): Promise<boolean> {
+    const broker = await this.prisma.brokerCredential.findUnique({
+      where: { userId_provider_environment: { userId, provider: 'tradier', environment } },
+    });
+    return Boolean(broker);
+  }
+
   async getMe(userId: string): Promise<Me> {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user) {
       throw errors.unauthorized('USER_NOT_FOUND', 'User no longer exists');
     }
-    const [live, practice, alpacaLive, alpacaPractice] = await Promise.all([
-      this.webullCred(userId, 'live'),
-      this.webullCred(userId, 'practice'),
-      this.alpacaCred(userId, 'live'),
-      this.alpacaCred(userId, 'practice'),
-    ]);
+    const [live, practice, alpacaLive, alpacaPractice, tradierLive, tradierPractice] =
+      await Promise.all([
+        this.webullCred(userId, 'live'),
+        this.webullCred(userId, 'practice'),
+        this.alpacaCred(userId, 'live'),
+        this.alpacaCred(userId, 'practice'),
+        this.tradierCred(userId, 'live'),
+        this.tradierCred(userId, 'practice'),
+      ]);
     return {
       id: user.id,
       email: user.email,
@@ -82,6 +94,10 @@ export class UsersService {
       alpacaPracticeConfigured: alpacaPractice.exists,
       alpacaAccountId: alpacaLive.accountId,
       alpacaPracticeAccountId: alpacaPractice.accountId,
+      // Tradier is a market-data key needed alongside Webull (no index data
+      // on Webull's OpenAPI); the flags drive the profile page's key section.
+      tradierConfigured: tradierLive,
+      tradierPracticeConfigured: tradierPractice,
     };
   }
 

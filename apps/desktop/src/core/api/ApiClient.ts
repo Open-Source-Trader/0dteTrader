@@ -3,6 +3,7 @@ import type {
   BrokerCredentialsInput,
   BrokerCredentialsSaved,
   BrokerProvider,
+  CredentialProvider,
   Candle,
   CandleInterval,
   ChartOrder,
@@ -201,7 +202,7 @@ export class ApiClient {
   }
 
   deleteBrokerCredentials(
-    provider: BrokerProvider,
+    provider: CredentialProvider,
     environment: TradingMode = 'live',
   ): Promise<void> {
     return this.requestVoid({

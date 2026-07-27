@@ -67,6 +67,8 @@ describe('UsersService', () => {
       alpacaPracticeConfigured: false,
       alpacaAccountId: null,
       alpacaPracticeAccountId: null,
+      tradierConfigured: false,
+      tradierPracticeConfigured: false,
     });
 
     addCredential(userId, 'practice');
@@ -113,5 +115,21 @@ describe('UsersService', () => {
     expect(me.alpacaConfigured).toBe(true);
     expect(me.alpacaPracticeConfigured).toBe(false);
     expect(me.alpacaAccountId).toBeNull();
+  });
+
+  it('reports Tradier API-key flags from broker_credentials', async () => {
+    const userId = await seedUser();
+    prisma.brokerCredentials.push({
+      id: 'tradier-live',
+      userId,
+      provider: 'tradier',
+      environment: 'live',
+      encSecrets: Buffer.from(JSON.stringify({ provider: 'tradier', apiKey: 'tk' })),
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    const me = await users.getMe(userId);
+    expect(me.tradierConfigured).toBe(true);
+    expect(me.tradierPracticeConfigured).toBe(false);
   });
 });

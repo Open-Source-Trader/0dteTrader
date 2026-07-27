@@ -5,7 +5,6 @@ import {
   BrokerProvider,
   BrokerSecrets,
   CredentialProvider,
-  SnapTradeSecrets,
   TradierCredentialsInput,
   SnapTradeCredentialsInput,
   TradingMode,
@@ -167,7 +166,11 @@ export class CredentialsService {
   private toSecrets(input: BrokerCredentialsInput, provider: CredentialProvider): BrokerSecrets {
     if (provider === 'snaptrade') {
       const s = input as SnapTradeCredentialsInput;
-      return { provider: 'snaptrade', clientId: s.clientId, consumerKey: s.consumerKey };
+      return {
+        provider: 'snaptrade',
+        clientId: this.requireSecret(s.clientId, 'clientId'),
+        consumerKey: this.requireSecret(s.consumerKey, 'consumerKey'),
+      };
     }
     if (provider === 'alpaca') {
       const a = input as AlpacaCredentialsInput;

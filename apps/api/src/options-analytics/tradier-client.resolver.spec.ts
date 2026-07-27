@@ -208,6 +208,13 @@ describe('TradierClientResolver', () => {
     await expect(make(rejecting).verifyKey('bad-key', 'live')).rejects.toMatchObject({
       code: 'TRADIER_KEY_INVALID',
     });
+    // Missing/blank keys are rejected before any network call.
+    await expect(make(ok).verifyKey(undefined, 'live')).rejects.toMatchObject({
+      code: 'INVALID_CREDENTIALS',
+    });
+    await expect(make(ok).verifyKey('  ', 'live')).rejects.toMatchObject({
+      code: 'INVALID_CREDENTIALS',
+    });
     // A Tradier outage must not block saving a possibly-valid key.
     await expect(make(flaky).verifyKey('maybe-key', 'live')).resolves.toBeUndefined();
     await expect(make(ok).verifyKey('good-key', 'live')).resolves.toBeUndefined();

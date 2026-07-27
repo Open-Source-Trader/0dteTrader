@@ -136,12 +136,17 @@ export class TradierClientResolver {
 
   /**
    * Probe a candidate key against Tradier before it is stored. Throws 400
+   * INVALID_CREDENTIALS when the key is missing/blank and 400
    * TRADIER_KEY_INVALID when Tradier rejects the token (401/403); any other
    * failure (Tradier outage, network) does NOT block saving — the key may be
    * fine and can be verified on first use.
    */
-  async verifyKey(apiKey: string, environment: TradingMode): Promise<void> {
-    const client = this.factory(apiKey, this.baseUrlFor(environment));
+  async verifyKey(apiKey: unknown, environment: TradingMode): Promise<void> {
+    const trimmed = typeof apiKey === 'string' ? apiKey.trim() : '';
+    if (trimmed === '') {
+      throw errors.badRequest('INVALID_CREDENTIALS', 'apiKey is required');
+    }
+    const client = this.factory(trimmed, this.baseUrlFor(environment));
     try {
       await client.getExpirations('SPY');
     } catch (err) {

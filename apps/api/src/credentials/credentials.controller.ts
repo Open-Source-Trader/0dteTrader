@@ -70,10 +70,9 @@ export class BrokerCredentialsController {
     if (provider === 'tradier') {
       // Probe the key before storing it: a typo'd/revoked token would
       // otherwise save with a 200 and then fail every market-data request.
-      const apiKey = (dto as TradierCredentialsInput).apiKey;
-      if (typeof apiKey === 'string' && apiKey.trim() !== '') {
-        await this.tradierResolver.verifyKey(apiKey.trim(), environment);
-      }
+      // verifyKey also rejects a missing/blank key, so this branch cannot
+      // be used to skip validation.
+      await this.tradierResolver.verifyKey((dto as TradierCredentialsInput).apiKey, environment);
     }
     await this.credentials.save(user.userId, dto, environment);
     return { provider, configured: true, environment };

@@ -22,7 +22,7 @@ export class MarketDataController {
       return this.crypto.getQuote(query.symbol);
     }
     if (this.index.isIndexSymbol(query.symbol)) {
-      return this.index.getQuote(query.symbol);
+      return this.index.getQuote(query.symbol, user.userId);
     }
     return this.broker.getQuote(user.userId, query.symbol);
   }
@@ -36,7 +36,7 @@ export class MarketDataController {
       return this.crypto.getCandles(query.symbol, query.interval, query.from, query.to);
     }
     if (this.index.isIndexSymbol(query.symbol)) {
-      return this.index.getCandles(query.symbol, query.interval, query.from, query.to);
+      return this.index.getCandles(query.symbol, query.interval, query.from, query.to, user.userId);
     }
     return this.broker.getCandles(user.userId, query.symbol, {
       interval: query.interval,
@@ -46,9 +46,13 @@ export class MarketDataController {
   }
 
   @Get('options-chain')
-  getOptionsChain(@Query() query: OptionsChainQueryDto): Promise<OptionsChain> {
+  getOptionsChain(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query: OptionsChainQueryDto,
+  ): Promise<OptionsChain> {
     // Options chain + Greeks are sourced from Tradier (the designated options
-    // market-data provider), independent of the user's trading broker.
-    return this.analytics.getOptionsChain(query.symbol, query.expiration);
+    // market-data provider), independent of the user's trading broker. The
+    // user's stored Tradier key is preferred; the shared token is the fallback.
+    return this.analytics.getOptionsChain(query.symbol, query.expiration, user.userId);
   }
 }

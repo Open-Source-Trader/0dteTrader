@@ -13,6 +13,7 @@
   --app-border: rgba(46, 143, 255, 0.45);
   --pnl-positive: #22e06a;
   --pnl-negative: #ff3b4e;
+  --app-warning: #ffc53d;
 
   /* AA-passing fills for white-text action buttons (bright hues above stay
      for text/borders on dark backgrounds). */

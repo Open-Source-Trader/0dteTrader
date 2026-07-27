@@ -3,6 +3,7 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  Optional,
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -22,6 +23,7 @@ import {
   type ValidatedAnalyticsContract,
 } from './options-analytics.engine';
 import { TradierClient, type TradierQuote } from './tradier.client';
+import { TradierClientResolver, type ResolvedTradier } from './tradier-client.resolver';
 
 /** Version 1 requires option quotes within one minute of the underlying quote. */
 export const OPTIONS_ANALYTICS_MAX_INPUT_SKEW_MS_V1 = 60_000;
@@ -43,6 +45,11 @@ interface NormalizedSnapshotInput {
 export interface OptionsAnalyticsSnapshotResult {
   snapshot: OptionsAnalyticsSnapshot;
   input: NormalizedSnapshotInput;
+  /** Tradier client scope that produced this snapshot ('shared' or a
+   *  per-user token). Capture must only persist 'shared' results — a
+   *  user-keyed (possibly sandbox) snapshot must not enter the global
+   *  history table. */
+  scope: string;
 }
 
 interface CacheEntry {
@@ -131,7 +138,17 @@ export class OptionsAnalyticsService {
   constructor(
     private readonly config: ConfigService,
     private readonly tradier: TradierClient,
+    @Optional() private readonly tradierResolver?: TradierClientResolver,
   ) {}
+
+  /** Per-user Tradier client when the caller has a user context and a stored
+   *  key; the shared env-token client otherwise. All caches below are keyed
+   *  by the returned scope so per-user (possibly sandbox) data never leaks
+   *  into another user's view. */
+  private async clientFor(userId?: string): Promise<ResolvedTradier> {
+    if (userId && this.tradierResolver) return this.tradierResolver.resolve(userId);
+    return { client: this.tradier, scope: 'shared' };
+  }
 
   get cacheEntryCount(): number {
     this.pruneExpiredCache(Date.now());
@@ -141,6 +158,7 @@ export class OptionsAnalyticsService {
   async getSnapshotResult(
     symbol: string,
     expiration?: string,
+    userId?: string,
   ): Promise<OptionsAnalyticsSnapshotResult> {
     this.metrics.requested += 1;
     const normalizedSymbol = symbol.trim().toUpperCase();
@@ -157,13 +175,14 @@ export class OptionsAnalyticsService {
       });
     }
 
+    const { client: tradier, scope } = await this.clientFor(userId);
     if (expiration) {
-      const cached = this.freshCache(`${normalizedSymbol}:${expiration}`);
+      const cached = this.freshCache(`${scope}:${normalizedSymbol}:${expiration}`);
       if (cached) return cached;
     }
     let selected: string;
     try {
-      const expirations = await this.getExpirations(normalizedSymbol);
+      const expirations = await this.getExpirations(normalizedSymbol, tradier, scope);
       if (expiration) {
         if (!expirations.includes(expiration)) {
           throw new NotFoundException({
@@ -184,26 +203,38 @@ export class OptionsAnalyticsService {
       }
     } catch (error) {
       if (error instanceof NotFoundException) throw error;
-      const fallback = expiration ? this.staleCache(`${normalizedSymbol}:${expiration}`) : null;
+      const fallback = expiration
+        ? this.staleCache(`${scope}:${normalizedSymbol}:${expiration}`)
+        : null;
       if (fallback) return fallback;
       return this.unavailable(normalizedSymbol, expiration, error);
     }
 
-    const exactKey = `${normalizedSymbol}:${selected}`;
+    const exactKey = `${scope}:${normalizedSymbol}:${selected}`;
     const newlyCached = this.freshCache(exactKey);
     if (newlyCached) return newlyCached;
     const existing = this.inFlight.get(exactKey);
     if (existing) return existing;
 
-    const calculation = this.calculateExact(normalizedSymbol, selected).finally(() => {
+    const calculation = this.calculateExact(
+      normalizedSymbol,
+      selected,
+      tradier,
+      scope,
+      exactKey,
+    ).finally(() => {
       this.inFlight.delete(exactKey);
     });
     this.inFlight.set(exactKey, calculation);
     return calculation;
   }
 
-  async getSnapshot(symbol: string, expiration?: string): Promise<OptionsAnalyticsSnapshot> {
-    return (await this.getSnapshotResult(symbol, expiration)).snapshot;
+  async getSnapshot(
+    symbol: string,
+    expiration?: string,
+    userId?: string,
+  ): Promise<OptionsAnalyticsSnapshot> {
+    return (await this.getSnapshotResult(symbol, expiration, userId)).snapshot;
   }
 
   /**
@@ -212,7 +243,11 @@ export class OptionsAnalyticsService {
    * data provider — so it works regardless of the user's trading broker
    * (Webull/Alpaca). Reuses the same Tradier calls as the analytics path.
    */
-  async getOptionsChain(symbol: string, expiration?: string): Promise<OptionsChain> {
+  async getOptionsChain(
+    symbol: string,
+    expiration?: string,
+    userId?: string,
+  ): Promise<OptionsChain> {
     const normalizedSymbol = symbol.trim().toUpperCase();
     if (!/^[A-Z0-9.-]{1,12}$/.test(normalizedSymbol)) {
       throw new BadRequestException({
@@ -220,7 +255,8 @@ export class OptionsAnalyticsService {
         message: 'A valid symbol is required (for example, SPY)',
       });
     }
-    const expirations = await this.getExpirations(normalizedSymbol);
+    const { client: tradier, scope } = await this.clientFor(userId);
+    const expirations = await this.getExpirations(normalizedSymbol, tradier, scope);
     const selected = expiration && expirations.includes(expiration) ? expiration : expirations[0];
     if (!selected) {
       throw new NotFoundException({
@@ -229,8 +265,8 @@ export class OptionsAnalyticsService {
       });
     }
     const [quote, chain] = await Promise.all([
-      this.tradier.getQuote(normalizedSymbol),
-      this.tradier.getChain(normalizedSymbol, selected),
+      tradier.getQuote(normalizedSymbol),
+      tradier.getChain(normalizedSymbol, selected),
     ]);
     const contracts: OptionContract[] = chain.contracts.map((c) => ({
       symbol: c.symbol,
@@ -253,13 +289,14 @@ export class OptionsAnalyticsService {
   private async calculateExact(
     symbol: string,
     selected: string,
+    tradier: TradierClient,
+    scope: string,
+    exactKey: string,
   ): Promise<OptionsAnalyticsSnapshotResult> {
-    const exactKey = `${symbol}:${selected}`;
-
     try {
       const [quote, chain] = await Promise.all([
-        this.tradier.getQuote(symbol),
-        this.tradier.getChain(symbol, selected),
+        tradier.getQuote(symbol),
+        tradier.getChain(symbol, selected),
       ]);
       if (chain.contracts.length === 0) {
         throw new Error(`No validated contracts for ${symbol} ${selected}`);
@@ -358,7 +395,7 @@ export class OptionsAnalyticsService {
         contracts: synchronizedContracts,
         warnings,
       };
-      const result = { snapshot, input };
+      const result = { snapshot, input, scope };
       this.storeCache(exactKey, result);
       this.metrics.calculated += 1;
       if (snapshot.quality.status === 'partial') this.metrics.partial += 1;
@@ -372,8 +409,8 @@ export class OptionsAnalyticsService {
           status: snapshot.quality.status,
           coverage: snapshot.quality.coverage,
           warnings: snapshot.quality.warnings,
-          availableRequests: this.tradier.availableRequests,
-          rateLimitExpiry: this.tradier.rateLimitExpiry,
+          availableRequests: tradier.availableRequests,
+          rateLimitExpiry: tradier.rateLimitExpiry,
         }),
       );
       return result;
@@ -426,6 +463,7 @@ export class OptionsAnalyticsService {
   ): OptionsAnalyticsSnapshotResult {
     return {
       input: result.input,
+      scope: result.scope,
       snapshot: {
         ...result.snapshot,
         quality: { ...result.snapshot.quality, cacheStatus },
@@ -449,10 +487,25 @@ export class OptionsAnalyticsService {
   private storeCache(key: string, result: OptionsAnalyticsSnapshotResult): void {
     this.cache.delete(key);
     this.cache.set(key, { storedAt: Date.now(), result });
-    while (this.cache.size > this.cacheMaxEntries) {
-      const oldest = this.cache.keys().next().value as string | undefined;
-      if (oldest === undefined) break;
-      this.cache.delete(oldest);
+    this.evictOverBudget(this.cache);
+  }
+
+  /** Evict oldest-first, but prefer user-scoped victims: the `shared:`
+   *  entries back every keyless user, the capture cron, and the stale-
+   *  fallback outage safety net, so per-user churn must not push them out
+   *  of the budget. */
+  private evictOverBudget(map: Map<string, unknown>): void {
+    while (map.size > this.cacheMaxEntries) {
+      let victim: string | undefined;
+      for (const key of map.keys()) {
+        if (!key.startsWith('shared:')) {
+          victim = key;
+          break;
+        }
+      }
+      victim ??= map.keys().next().value as string | undefined;
+      if (victim === undefined) break;
+      map.delete(victim);
     }
   }
 
@@ -480,32 +533,33 @@ export class OptionsAnalyticsService {
     );
   }
 
-  private async getExpirations(symbol: string): Promise<string[]> {
+  private async getExpirations(
+    symbol: string,
+    tradier: TradierClient,
+    scope: string,
+  ): Promise<string[]> {
+    const key = `${scope}:${symbol}`;
     const now = Date.now();
-    const cached = this.expirationCache.get(symbol);
+    const cached = this.expirationCache.get(key);
     if (cached && now - cached.storedAt <= this.expirationCacheTtlMs) {
-      this.expirationCache.delete(symbol);
-      this.expirationCache.set(symbol, cached);
+      this.expirationCache.delete(key);
+      this.expirationCache.set(key, cached);
       return cached.expirations;
     }
-    if (cached) this.expirationCache.delete(symbol);
-    const existing = this.expirationInFlight.get(symbol);
+    if (cached) this.expirationCache.delete(key);
+    const existing = this.expirationInFlight.get(key);
     if (existing) return existing;
-    const request = this.tradier
+    const request = tradier
       .getExpirations(symbol)
       .then((expirations) => {
-        this.expirationCache.set(symbol, { storedAt: Date.now(), expirations });
-        while (this.expirationCache.size > this.cacheMaxEntries) {
-          const oldest = this.expirationCache.keys().next().value as string | undefined;
-          if (oldest === undefined) break;
-          this.expirationCache.delete(oldest);
-        }
+        this.expirationCache.set(key, { storedAt: Date.now(), expirations });
+        this.evictOverBudget(this.expirationCache);
         return expirations;
       })
       .finally(() => {
-        this.expirationInFlight.delete(symbol);
+        this.expirationInFlight.delete(key);
       });
-    this.expirationInFlight.set(symbol, request);
+    this.expirationInFlight.set(key, request);
     return request;
   }
 

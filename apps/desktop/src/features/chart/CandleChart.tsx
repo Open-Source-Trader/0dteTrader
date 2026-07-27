@@ -15,18 +15,30 @@ import {
   type LineWidth,
   type UTCTimestamp,
 } from 'lightweight-charts';
-import type { ChartInterval, OptionsAnalyticsSnapshot, Position } from '@0dtetrader/shared-types';
+import type {
+  ChartInterval,
+  ChartOrder,
+  OptionContract,
+  OptionsAnalyticsSnapshot,
+  ChartOrderType,
+  Position,
+} from '@0dtetrader/shared-types';
 import { useStore } from '../../core/observable';
 import { Format } from '../../design/format';
 import { chartPalette } from './chartColors';
+import { CORNER_CONTROL_INSET, CORNER_CONTROL_RADIUS, CORNER_CONTROL_SIZE } from './cornerSeat';
 import type { ChartCandle } from './ChartStore';
 import { intervalSeconds } from './ChartStore';
+import type { ChartOrdersStore } from './chartOrders';
+import type { ChartTradingSettings } from './chartTradingSettings';
 import { DrawingLayer } from './DrawingLayer';
+import { FloatingAxes } from './FloatingAxes';
 import type { DrawingsStore } from './drawings';
+import { OrderLineLayer } from './OrderLineLayer';
 import { sameColorsExceptLast } from './candleRepaint';
 import { OptionsAnalyticsOverlay } from './optionsAnalytics/OptionsAnalyticsOverlay';
+import { optionsAnalyticsRailWidth } from './optionsAnalytics/optionsAnalyticsGeometry';
 import type { OptionsAnalyticsSettings } from './optionsAnalytics/optionsAnalyticsSettings';
-import { PositionLineOverlay } from './PositionLineOverlay';
 import { TwcOverlay } from './TwcOverlay';
 import type { TwcRenderModel } from './twc/twcTypes';
 
@@ -55,34 +67,35 @@ interface CandleChartProps {
   optionsAnalyticsSnapshot?: OptionsAnalyticsSnapshot | null;
   optionsAnalyticsSettings?: OptionsAnalyticsSettings | null;
   optionsAnalyticsRetained?: boolean;
-  /** Open positions whose contract's underlying is this chart's symbol
-   *  (caller filters — see positionsForUnderlying). Desktop grid only. */
-  positionsForSymbol?: Position[];
-  onFlattenPosition?: (position: Position) => void;
-  positionsLocked?: boolean;
   /** Live underlying bid/ask (TradingView convention: bid/ask lines pinned
    *  to the price axis). Desktop grid only; null hides both lines. */
   bid?: number | null;
   ask?: number | null;
+  /** Chart trading: everything the order-line overlay needs, or null when off. */
+  chartTrading?: ChartTradingProps | null;
+}
+
+/** Inputs for the order-line overlay, passed through from the trade screen. */
+export interface ChartTradingProps {
+  store: ChartOrdersStore;
+  settings: ChartTradingSettings;
+  positions: Position[];
+  resolveContract: (contractSymbol: string) => OptionContract | null;
+  selectedContract: OptionContract | null;
+  defaultOrderType: ChartOrderType;
+  onFlatten: (position: Position) => void;
+  /** Confirms cancelling a working line — the desktop half of the alert iOS
+   *  shows in ChartTradingCoordinator. */
+  onCancelOrder: (order: ChartOrder) => void;
 }
 
 const VISIBLE_CANDLES = 120;
 
-function formatTick(timeSeconds: number, interval: ChartInterval): string {
-  const date = new Date(timeSeconds * 1000);
-  if (interval === '1d') {
-    return `${date.getMonth() + 1}/${date.getDate()}`;
-  }
-  const h = String(date.getHours()).padStart(2, '0');
-  const m = String(date.getMinutes()).padStart(2, '0');
-  return `${h}:${m}`;
-}
-
 /**
  * Candlestick chart with indicator overlays (CandleChartRepresentable analog).
- * Left price axis like the iOS chart; pan/zoom enabled. On data-length change
- * the view snaps to the last 120 bars; in-place tick updates leave the user's
- * pan/zoom alone.
+ * Both scales float over the plot like the iOS chart; pan/zoom enabled. On a
+ * data-length change the view snaps to the last 120 bars; in-place tick updates
+ * leave the user's pan/zoom alone.
  */
 export function CandleChart({
   candles,
@@ -96,11 +109,9 @@ export function CandleChart({
   optionsAnalyticsSnapshot = null,
   optionsAnalyticsSettings = null,
   optionsAnalyticsRetained = false,
-  positionsForSymbol = [],
-  onFlattenPosition,
-  positionsLocked = false,
   bid = null,
   ask = null,
+  chartTrading = null,
 }: CandleChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -118,8 +129,6 @@ export function CandleChart({
   const lastFirstTimeRef = useRef<number | null>(null);
   const lastBarRef = useRef<ChartCandle | null>(null);
   const prevSymbolRef = useRef(symbol);
-  const intervalRef = useRef(interval);
-  intervalRef.current = interval;
   const [apis, setApis] = useState<{
     chart: IChartApi;
     series: ISeriesApi<'Candlestick'>;
@@ -139,31 +148,36 @@ export function CandleChart({
         fontFamily:
           "'JetBrains Mono', ui-monospace, 'SF Mono', 'Cascadia Mono', 'DejaVu Sans Mono', Menlo, monospace",
       },
-      leftPriceScale: { visible: true, borderColor: colors.border },
+      // Both scales are hidden and `FloatingAxes` draws them over the candles
+      // instead: lightweight-charts has no inside-label mode, and a visible
+      // scale reserves a strip of the card no matter how it is styled. The
+      // grid goes with them, because the library only exposes its tick marks
+      // by drawing them — the labels and the lines have to come from one place
+      // or they disagree.
+      leftPriceScale: { visible: false },
       rightPriceScale: { visible: false },
       timeScale: {
-        borderColor: colors.border,
-        timeVisible: true,
-        secondsVisible: false,
-        tickMarkFormatter: (time: UTCTimestamp) => formatTick(time, intervalRef.current),
+        visible: false,
         rightOffset: 12,
         shiftVisibleRangeOnNewBar: true,
       },
       grid: {
-        vertLines: { color: colors.grid },
-        horzLines: { color: colors.grid },
+        vertLines: { visible: false },
+        horzLines: { visible: false },
       },
       crosshair: {
         vertLine: {
           visible: true,
-          labelVisible: true,
+          // Same reason as the last-price tag: crosshair labels print on the
+          // scales, and there are no scales to print on.
+          labelVisible: false,
           color: colors.crosshair,
           style: 3,
           width: 1,
         },
         horzLine: {
           visible: true,
-          labelVisible: true,
+          labelVisible: false,
           color: colors.crosshair,
           style: 3,
           width: 1,
@@ -179,13 +193,14 @@ export function CandleChart({
       borderUpColor: colors.candleUp,
       borderDownColor: colors.candleDown,
       priceScaleId: 'left',
-      // Dashed accent line at the last price + axis tag (mockup's glowing
-      // price tag; canvas-drawn, so a bright tag stands in for true glow).
+      // Dashed accent line at the last price, matching the iOS limit line.
+      // The tag that used to ride it is off: a scale-drawn label has nowhere
+      // to print now that the scales are hidden, so it would just vanish.
       priceLineVisible: true,
       priceLineColor: colors.accent,
       priceLineStyle: 2,
       priceLineWidth: 1,
-      lastValueVisible: true,
+      lastValueVisible: false,
     });
     chartRef.current = chart;
     candleSeriesRef.current = candleSeries;
@@ -472,8 +487,10 @@ export function CandleChart({
   return (
     <div
       ref={containerRef}
-      // 4px top inset keeps the topmost price label clear of the card edge.
-      style={{ position: 'absolute', inset: '4px 0 0 0' }}
+      // 4px top inset keeps the topmost price label clear of the card edge;
+      // 6px on the left does the same for the first digit of every price
+      // label, which lightweight-charts otherwise draws hard against it.
+      style={{ position: 'absolute', inset: '4px 0 0 6px' }}
       role="img"
       aria-label={
         lastBar
@@ -484,29 +501,40 @@ export function CandleChart({
       <button
         onClick={resetView}
         aria-label="Reset chart view"
+        // Seated in the card's bottom-right corner cut rather than parked above
+        // the time axis, with the seat derived in `cornerSeat` — the same
+        // module the placement guide's `+` measures from, which is what puts
+        // the two in one column.
         style={{
           position: 'absolute',
-          bottom: 28,
-          right: 8,
+          bottom: CORNER_CONTROL_INSET,
+          right: CORNER_CONTROL_INSET,
           zIndex: 5,
-          width: 24,
-          height: 24,
+          width: CORNER_CONTROL_SIZE,
+          height: CORNER_CONTROL_SIZE,
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
           border: '1px solid var(--hud-stroke-dim)',
-          borderRadius: 4,
+          borderRadius: CORNER_CONTROL_RADIUS,
           background: 'var(--app-surface)',
           color: 'var(--label-secondary)',
           fontSize: 11,
           fontWeight: 600,
           fontFamily: 'var(--font-mono)',
           cursor: 'pointer',
-          opacity: 0.7,
         }}
       >
         A
       </button>
+      {apis && candles.length > 0 ? (
+        <FloatingAxes
+          chart={apis.chart}
+          series={apis.series}
+          candles={candles}
+          interval={interval}
+        />
+      ) : null}
       {apis && candles.length > 0 && twcModel ? (
         <TwcOverlay chart={apis.chart} series={apis.series} model={twcModel} candles={candles} />
       ) : null}
@@ -529,13 +557,28 @@ export function CandleChart({
           intervalSec={intervalSeconds(interval)}
         />
       ) : null}
-      {apis && candles.length > 0 && positionsForSymbol.length > 0 && onFlattenPosition ? (
-        <PositionLineOverlay
+      {apis && candles.length > 0 && chartTrading?.settings.enabled ? (
+        <OrderLineLayer
           chart={apis.chart}
           series={apis.series}
-          positions={positionsForSymbol}
-          onFlatten={onFlattenPosition}
-          locked={positionsLocked}
+          store={chartTrading.store}
+          settings={chartTrading.settings}
+          symbol={symbol}
+          positions={chartTrading.positions}
+          resolveContract={chartTrading.resolveContract}
+          selectedContract={chartTrading.selectedContract}
+          defaultOrderType={chartTrading.defaultOrderType}
+          onFlatten={chartTrading.onFlatten}
+          onCancelOrder={chartTrading.onCancelOrder}
+          candles={candles}
+          // Keep the button rows and the `+` clear of the analytics rail —
+          // guarded on the same condition the rail itself renders under, since
+          // a cached snapshot outlives the setting being switched off.
+          rightInset={
+            optionsAnalyticsSnapshot && optionsAnalyticsSettings
+              ? optionsAnalyticsRailWidth(apis.chart.paneSize().width)
+              : 0
+          }
         />
       ) : null}
     </div>

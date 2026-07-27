@@ -58,13 +58,21 @@ export function RootView() {
   // Foreground/visibility: re-establish the stream if it dropped.
   useEffect(() => {
     const onVisibilityChange = () => {
+      // Both of these need a session. On the login screen they would open a
+      // socket nobody is authorised for and issue a GET that 401s, surfacing a
+      // stale error from the previous session.
+      if (state !== 'authenticated') return;
       if (document.visibilityState === 'visible') {
         container.quoteSocket.reconnectIfNeeded();
+        // A backgrounded tab can have its socket killed without a close event
+        // ever arriving, so reconnectIfNeeded may see nothing to do. Re-read
+        // the order lines regardless — they arm real orders.
+        void container.chartOrdersStore.load();
       }
     };
     document.addEventListener('visibilitychange', onVisibilityChange);
     return () => document.removeEventListener('visibilitychange', onVisibilityChange);
-  }, [container]);
+  }, [container, state]);
 
   let content: ReactNode;
   if (state === 'checking') {
@@ -108,7 +116,17 @@ export function RootView() {
   } else if (state === 'unauthenticated') {
     content = <LoginView store={container.authStore} />;
   } else {
-    content = <TradeScreen onLogout={() => container.authStore.logout()} />;
+    content = (
+      <TradeScreen
+        onLogout={() => {
+          // AppContainer outlives the screen, so per-account state has to be
+          // dropped explicitly — otherwise the next sign-in draws the previous
+          // account's order lines.
+          container.chartOrdersStore.reset();
+          return container.authStore.logout();
+        }}
+      />
+    );
   }
 
   return (

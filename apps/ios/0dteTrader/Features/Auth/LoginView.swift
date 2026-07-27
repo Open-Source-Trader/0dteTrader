@@ -1,15 +1,43 @@
 import SwiftUI
 
+// Saving a new server URL rebuilds the app container, which re-identities the
+// whole view tree (ZeroDTETraderApp keys RootView on the container) and wipes
+// this screen's @State — including any presented sheet. This file-scope flag
+// carries the "continue to Register after picking a server" intent across that
+// remount; the remounted LoginView consumes it in onAppear. Mirrors the
+// module-level flag in `apps/desktop/src/features/auth/LoginView.tsx`.
+@MainActor private var resumeRegisterAfterRebuild = false
+
 struct LoginView: View {
     @ObservedObject var viewModel: AuthViewModel
+    @EnvironmentObject private var serverConfig: ServerConfigStore
 
     @State private var email = ""
     @State private var password = ""
-    @State private var showRegister = false
+    @State private var activeSheet: AuthSheet?
     @FocusState private var focusedField: LoginField?
 
     private enum LoginField: Hashable {
         case email, password
+    }
+
+    /// Why the server picker is open: creating an account, or the footer link.
+    private enum ServerSelectIntent {
+        case register, change
+    }
+
+    /// One `sheet(item:)` for both steps so "server chosen → register" swaps
+    /// the sheet's content in place instead of racing a dismiss + present.
+    private enum AuthSheet: Identifiable {
+        case serverSelect(ServerSelectIntent)
+        case register
+
+        var id: String {
+            switch self {
+            case .serverSelect: return "serverSelect"
+            case .register: return "register"
+            }
+        }
     }
 
     private var isFormValid: Bool {
@@ -26,7 +54,7 @@ struct LoginView: View {
                         .font(.custom("Orbitron-Bold", size: 30, relativeTo: .largeTitle))
                         .foregroundStyle(Color.appAccent)
                         .shadow(color: .hudGlow, radius: 10)
-                    Text("Rapid options trading")
+                    Text("Open Source Trader")
                         .font(.panelLabel)
                         .foregroundStyle(.secondary)
                 }
@@ -74,7 +102,8 @@ struct LoginView: View {
                 }
 
                 Button("Create an account") {
-                    showRegister = true
+                    viewModel.errorMessage = nil
+                    activeSheet = .serverSelect(.register)
                 }
                 .font(.subheadline)
                 .foregroundStyle(Color.appAccent)
@@ -82,6 +111,12 @@ struct LoginView: View {
                 .contentShape(Rectangle())
 
                 Spacer()
+
+                // Footer backend indicator: status light + Change, opening the
+                // same server picker without entering the create-account flow.
+                BackendStatusView(baseURL: serverConfig.baseURL) {
+                    activeSheet = .serverSelect(.change)
+                }
             }
             .padding(AppSpacing.xxl)
             .frame(maxWidth: .infinity)
@@ -94,8 +129,44 @@ struct LoginView: View {
                 Haptics.error()
             }
         }
-        .sheet(isPresented: $showRegister) {
-            RegisterView(viewModel: viewModel)
+        .onAppear {
+            // Consume the resume flag left by finishServerSelect before the
+            // container rebuild remounted this screen.
+            if resumeRegisterAfterRebuild {
+                resumeRegisterAfterRebuild = false
+                activeSheet = .register
+            }
+        }
+        .sheet(item: $activeSheet) { sheet in
+            Group {
+                switch sheet {
+                case .serverSelect(let intent):
+                    ServerSelectView { serverChanged in
+                        finishServerSelect(intent: intent, serverChanged: serverChanged)
+                    }
+                case .register:
+                    RegisterView(viewModel: viewModel)
+                }
+            }
+            // Sheets sit outside the root window's tree, so `RootView`'s
+            // tap/swipe keyboard dismissal does not reach them — each
+            // sheet with a field carries its own.
+            .dismissKeyboardOnInteraction()
+        }
+    }
+
+    private func finishServerSelect(intent: ServerSelectIntent, serverChanged: Bool) {
+        guard intent == .register else {
+            activeSheet = nil
+            return
+        }
+        if serverChanged {
+            // The container rebuild is about to remount this screen (tearing
+            // down the sheet with it); resume the register flow there.
+            resumeRegisterAfterRebuild = true
+        } else {
+            // Same server: swap the sheet's content to RegisterView in place.
+            activeSheet = .register
         }
     }
 

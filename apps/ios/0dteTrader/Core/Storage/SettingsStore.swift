@@ -25,6 +25,7 @@ final class SettingsStore: @unchecked Sendable {
         static let indicatorSettings = "settings.indicatorSettings"
         static let twcSettings = "settings.twcSettings"
         static let optionsAnalyticsSettings = "settings.optionsAnalytics.v1"
+        static let chartTradingSettings = "settings.chartTrading.v1"
         static let riskDisclaimerAccepted = "settings.riskDisclaimerAccepted"
         static let lastSymbol = "settings.lastSymbol"
         static let appLockEnabled = "settings.appLockEnabled"
@@ -96,6 +97,23 @@ final class SettingsStore: @unchecked Sendable {
         set {
             if let data = try? encoder.encode(newValue) {
                 defaults.set(data, forKey: Keys.optionsAnalyticsSettings)
+            }
+        }
+    }
+
+    /// Chart trading (order lines drawn directly on the candles).
+    var chartTradingSettings: ChartTradingSettings {
+        get {
+            guard let data = defaults.data(forKey: Keys.chartTradingSettings),
+                  let settings = try? decoder.decode(ChartTradingSettings.self, from: data)
+            else {
+                return .default
+            }
+            return settings
+        }
+        set {
+            if let data = try? encoder.encode(newValue) {
+                defaults.set(data, forKey: Keys.chartTradingSettings)
             }
         }
     }

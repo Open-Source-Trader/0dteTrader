@@ -57,14 +57,28 @@
     0 0 18px var(--hud-glow);
 }
 
-/* Mode badge (PRACTICE amber / LIVE green). */
+/* Mode badge (PRACTICE amber / LIVE green).
+
+   Its border is the diameter of the profile glyph's circle — the ring drawn
+   inside that button, not the 36px frame the button reserves for the pointer.
+   It briefly stood at 36px on a misreading of which of the two was meant, and
+   at that height it was half the header. 20px matches `ChartHeader.badgeHeight`
+   on iOS, measured off the running app, so the two keep the same header.
+
+   A fixed `height`, unusually, and only because the type is so much shorter
+   than the box: display caps at 11px fill about 8px of it, so there is nothing
+   for a smaller box to clip. */
 .hud-badge {
   font-family: var(--font-display);
   font-weight: 700;
   font-size: var(--fs-caption2);
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  padding: 3px 8px 2px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 20px;
+  padding: 0 8px;
   color: var(--hud-amber);
   border: 1px solid currentColor;
   background: var(--hud-panel-fill);
@@ -152,11 +166,17 @@
   cursor: default;
 }
 
-/* Decorative side chevrons inside SELL/BUY (mockup detail). */
+/* Decorative side chevrons inside SELL/BUY: a stacked pair pointing down on
+   SELL and up on BUY. Overlapped by a pixel so the two read as one stack. */
 .hud-btn .hud-chevrons {
-  font-size: 10px;
-  letter-spacing: -1px;
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+  margin: 0 -1px;
   opacity: 0.55;
+}
+.hud-btn .hud-chevrons > svg + svg {
+  margin-left: -1px;
 }
 
 /* AUTO chip: chamfered toggle, accent glow when on. Height matches the
@@ -180,6 +200,19 @@
   color: var(--app-accent-text);
   border-image-source: var(--hud-src-accent);
   text-shadow: 0 0 6px var(--hud-glow);
+}
+/* Trading lock: the same chip in the refusal color, because locked is the
+   state that turns orders away rather than a setting that is merely on. The
+   padlock carries the label on its own, so the chip goes square instead of
+   collapsing to the glyph's width once the text is gone. */
+.hud-toggle-chip--lock {
+  min-width: 36px;
+  padding: 0;
+}
+.hud-toggle-chip--lock.on {
+  color: var(--sell-red);
+  border-image-source: var(--hud-src-sell);
+  text-shadow: 0 0 6px rgba(255, 59, 78, 0.5);
 }
 
 /* ── Accent variants (generated data-URIs) ─────────────────────────────── */

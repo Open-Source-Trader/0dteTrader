@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { BrokerProvider, TradingMode } from '@0dtetrader/shared-types';
+import type { BrokerProvider, CredentialProvider, TradingMode } from '@0dtetrader/shared-types';
 import { useContainer } from '../../app/container';
 import { useStore } from '../../core/observable';
 import { AlertDialog } from '../../design/components/AlertDialog';
@@ -12,6 +12,7 @@ import { Toggle } from '../../design/components/Toggle';
 import { CheckCircleFillIcon, WarningFillIcon } from '../../design/icons';
 import { ProfileStore } from './ProfileStore';
 import { AlpacaCredentialsForm } from './AlpacaCredentialsForm';
+import { TradierCredentialsForm } from './TradierCredentialsForm';
 import { WebullCredentialsForm } from './WebullCredentialsForm';
 import './profile.css';
 
@@ -36,7 +37,7 @@ export function ProfileView({
   const store = useMemo(() => new ProfileStore(container.apiClient), [container]);
   const state = useStore(store);
   const [deleteTarget, setDeleteTarget] = useState<{
-    provider: BrokerProvider;
+    provider: CredentialProvider;
     environment: TradingMode;
   } | null>(null);
   const [showLogoutConfirmation, setShowLogoutConfirmation] = useState(false);
@@ -63,9 +64,12 @@ export function ProfileView({
   }, [store]);
 
   const deleteCredentialsMessage = (target: {
-    provider: BrokerProvider;
+    provider: CredentialProvider;
     environment: TradingMode;
   }) => {
+    if (target.provider === 'tradier') {
+      return "Index and options market data will fall back to the server's shared Tradier key.";
+    }
     if (target.provider !== 'webull') {
       return 'Trading with this provider will stop working until new credentials are saved.';
     }
@@ -111,6 +115,30 @@ export function ProfileView({
       </>
     );
   };
+
+  /** Success/error rows for one section. Keyed by provider AND environment —
+   *  the Tradier sections render alongside the Webull ones, so the
+   *  environment alone no longer identifies a section. */
+  const renderSectionMessages = (provider: CredentialProvider, environment: TradingMode) => (
+    <>
+      {state.messageProvider === provider &&
+      state.messageEnv === environment &&
+      state.successMessage ? (
+        <div className="grouped-row footnote positive" role="status">
+          <CheckCircleFillIcon size={14} />
+          <span>{state.successMessage}</span>
+        </div>
+      ) : null}
+      {state.messageProvider === provider &&
+      state.messageEnv === environment &&
+      state.errorMessage ? (
+        <div className="grouped-row footnote negative" role="alert">
+          <WarningFillIcon size={14} />
+          <span>{state.errorMessage}</span>
+        </div>
+      ) : null}
+    </>
+  );
 
   const renderCredentialsSection = (environment: TradingMode, configured: boolean) => {
     const env = state[environment];
@@ -205,18 +233,7 @@ export function ProfileView({
             </>
           )}
 
-          {state.messageEnv === environment && state.successMessage ? (
-            <div className="grouped-row footnote positive" role="status">
-              <CheckCircleFillIcon size={14} />
-              <span>{state.successMessage}</span>
-            </div>
-          ) : null}
-          {state.messageEnv === environment && state.errorMessage ? (
-            <div className="grouped-row footnote negative" role="alert">
-              <WarningFillIcon size={14} />
-              <span>{state.errorMessage}</span>
-            </div>
-          ) : null}
+          {renderSectionMessages('webull', environment)}
         </div>
         <div className="section-footer">
           {environment === 'live'
@@ -279,23 +296,68 @@ export function ProfileView({
             </>
           )}
 
-          {state.messageEnv === environment && state.successMessage ? (
-            <div className="grouped-row footnote positive" role="status">
-              <CheckCircleFillIcon size={14} />
-              <span>{state.successMessage}</span>
-            </div>
-          ) : null}
-          {state.messageEnv === environment && state.errorMessage ? (
-            <div className="grouped-row footnote negative" role="alert">
-              <WarningFillIcon size={14} />
-              <span>{state.errorMessage}</span>
-            </div>
-          ) : null}
+          {renderSectionMessages('alpaca', environment)}
         </div>
         <div className="section-footer">
           {environment === 'live'
             ? 'Your API Key and Secret come from the Alpaca dashboard (use the matching live or paper key).'
             : 'Optional paper-trading key/secret.'}
+        </div>
+      </div>
+    );
+  };
+
+  const renderTradierSection = (environment: TradingMode, configured: boolean) => {
+    const env = state.tradier[environment];
+    const title =
+      environment === 'live' ? 'Tradier API — Live' : 'Tradier API — Practice (sandbox)';
+    return (
+      <div className="grouped-section" key={`tradier-${environment}`}>
+        <div className="section-header">{title}</div>
+        <div className="section-card">
+          {configured && !env.isEditing ? (
+            <>
+              <div className="grouped-row positive">
+                <CheckCircleFillIcon size={14} />
+                <span>Configured</span>
+              </div>
+              <div className="grouped-row footnote text-secondary">
+                The key is stored encrypted on the server and is never displayed here.
+              </div>
+              <button
+                className="grouped-row button-row"
+                onClick={() => store.setTradierEditing(environment, true)}
+              >
+                Update API Key
+              </button>
+              <button
+                className="grouped-row destructive"
+                disabled={env.isDeleting}
+                onClick={() => setDeleteTarget({ provider: 'tradier', environment })}
+              >
+                {env.isDeleting ? <Spinner size={14} /> : 'Delete API Key'}
+              </button>
+            </>
+          ) : (
+            <>
+              <TradierCredentialsForm store={store} environment={environment} />
+              {configured ? (
+                <button
+                  className="grouped-row button-row"
+                  onClick={() => store.setTradierEditing(environment, false)}
+                >
+                  Cancel Update
+                </button>
+              ) : null}
+            </>
+          )}
+
+          {renderSectionMessages('tradier', environment)}
+        </div>
+        <div className="section-footer">
+          {environment === 'live'
+            ? 'Optional. Tradier supplies index and options market data alongside Webull; your access token comes from the Tradier dashboard.'
+            : 'Optional sandbox access token for practice mode.'}
         </div>
       </div>
     );
@@ -338,6 +400,10 @@ export function ProfileView({
           <>
             {renderCredentialsSection('live', state.me?.webullConfigured === true)}
             {renderCredentialsSection('practice', state.me?.webullPracticeConfigured === true)}
+            {/* Tradier market-data key rides along with Webull only —
+                Alpaca supplies its own data, so no key is needed there. */}
+            {renderTradierSection('live', state.me?.tradierConfigured === true)}
+            {renderTradierSection('practice', state.me?.tradierPracticeConfigured === true)}
           </>
         ) : (
           <>
@@ -399,17 +465,22 @@ export function ProfileView({
       {deleteTarget ? (
         <AlertDialog
           title={`Remove ${deleteTarget.environment === 'live' ? 'Live' : 'Practice'} ${
-            deleteTarget.provider === 'webull' ? 'Webull' : 'Alpaca'
-          } credentials?`}
+            { webull: 'Webull', alpaca: 'Alpaca', tradier: 'Tradier' }[deleteTarget.provider]
+          } ${deleteTarget.provider === 'tradier' ? 'API key' : 'credentials'}?`}
           message={deleteCredentialsMessage(deleteTarget)}
           actions={[
             {
-              label: 'Delete Credentials',
+              label: deleteTarget.provider === 'tradier' ? 'Delete API Key' : 'Delete Credentials',
               role: 'destructive',
-              onSelect: () =>
-                deleteTarget.provider === 'webull'
-                  ? void store.deleteCredentials(deleteTarget.environment)
-                  : void store.deleteAlpacaCredentials(deleteTarget.environment),
+              onSelect: () => {
+                if (deleteTarget.provider === 'webull') {
+                  void store.deleteCredentials(deleteTarget.environment);
+                } else if (deleteTarget.provider === 'alpaca') {
+                  void store.deleteAlpacaCredentials(deleteTarget.environment);
+                } else {
+                  void store.deleteTradierCredentials(deleteTarget.environment);
+                }
+              },
             },
             { label: 'Cancel', role: 'cancel' },
           ]}

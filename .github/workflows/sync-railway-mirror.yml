@@ -1,0 +1,27 @@
+name: Sync Railway template mirror
+
+# The Railway "Deploy on Railway" template deploys from the
+# TradeWithCash2025/0dteTrader mirror (the Railway account's GitHub
+# connection cannot see this org). Keep the mirror's main in lockstep
+# so one-click deploys always build the latest release.
+#
+# Requires a repo secret MIRROR_PUSH_TOKEN: a fine-grained PAT with
+# contents:write on TradeWithCash2025/0dteTrader.
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          # checkout persists GITHUB_TOKEN as an auth header that overrides
+          # the URL credentials on push; the mirror needs MIRROR_PUSH_TOKEN.
+          persist-credentials: false
+      - name: Push main to TradeWithCash2025/0dteTrader
+        run: |
+          git push "https://TradeWithCash2025:${{ secrets.MIRROR_PUSH_TOKEN }}@github.com/TradeWithCash2025/0dteTrader.git" main:main

@@ -175,6 +175,13 @@ struct APIClient: @unchecked Sendable {
         return try await request(endpoint, body: encode(credentials))
     }
 
+    /// Save the Tradier market-data API key via the generic broker-credentials endpoint.
+    @discardableResult
+    func putTradierCredentials(_ credentials: TradierCredentialsInputDTO) async throws -> BrokerCredentialsSavedDTO {
+        let endpoint = Endpoint(method: .put, path: "v1/me/broker-credentials")
+        return try await request(endpoint, body: encode(credentials))
+    }
+
     /// Delete stored broker credentials by provider (defaults to live env).
     func deleteBrokerCredentials(provider: BrokerProvider, environment: TradingMode = .live) async throws {
         var query = [URLQueryItem(name: "provider", value: provider.rawValue)]
@@ -265,5 +272,32 @@ struct APIClient: @unchecked Sendable {
 
     func positions() async throws -> [PositionDTO] {
         try await request(Endpoint(method: .get, path: "v1/positions"))
+    }
+
+    // MARK: - Chart trading
+
+    func chartOrders() async throws -> [ChartOrderDTO] {
+        try await request(Endpoint(method: .get, path: "v1/chart-orders"))
+    }
+
+    func createChartOrder(_ draft: ChartOrderDraftDTO) async throws -> ChartOrderDTO {
+        let endpoint = Endpoint(method: .post, path: "v1/chart-orders")
+        return try await request(endpoint, body: encode(draft))
+    }
+
+    /// Fire a line now: the app saw the crossing and will not wait for the
+    /// server-side watcher's next poll. Idempotent — racing the watcher yields
+    /// one broker order, not two.
+    func triggerChartOrder(id: String) async throws -> ChartOrderDTO {
+        try await request(Endpoint(method: .post, path: "v1/chart-orders/\(id)/trigger"))
+    }
+
+    func updateChartOrder(id: String, patch: ChartOrderPatchDTO) async throws -> ChartOrderDTO {
+        let endpoint = Endpoint(method: .patch, path: "v1/chart-orders/\(id)")
+        return try await request(endpoint, body: encode(patch))
+    }
+
+    func cancelChartOrder(id: String) async throws {
+        try await requestVoid(Endpoint(method: .delete, path: "v1/chart-orders/\(id)"))
     }
 }

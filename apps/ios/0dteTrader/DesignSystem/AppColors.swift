@@ -106,4 +106,7 @@ extension UIColor {
     static let appWarning = UIColor(Color.appWarning)
     static let hudStroke = UIColor(Color.hudStroke)
     static let hudAxisLabel = UIColor(red: 0.549, green: 0.706, blue: 0.922, alpha: 0.7)
+    /// Canonical P&L pair, for the chart's entry and bracket lines.
+    static let appPnlPositive = UIColor(Color.pnlPositive)
+    static let appPnlNegative = UIColor(Color.pnlNegative)
 }

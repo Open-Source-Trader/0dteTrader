@@ -15,11 +15,65 @@ enum OrderSide: String, Codable, Sendable {
     var displayName: String { rawValue.uppercased() }
 }
 
-enum OrderType: String, Codable, CaseIterable, Sendable {
+/// Execution types a resting chart-order line may carry.
+///
+/// Deliberately narrower than `OrderType`: a line is fired by the server's
+/// watcher with nobody watching and nothing on screen to type a price into, so
+/// the variants that need a human-supplied number cannot reach it. Mirrors
+/// `ChartOrderType` in `packages/shared-types`.
+enum ChartOrderType: String, Codable, CaseIterable, Sendable {
     case mid
     case market
 
     var displayName: String { self == .mid ? "Mid" : "Market" }
+    /// The label the order line's pill prints.
+    var shortLabel: String { self == .market ? "MKT" : "MID" }
+}
+
+/// How the trade panel prices an order.
+///
+/// Only `custom` carries a client-supplied price; `bid`, `mid` and `ask` are
+/// resolved server-side from the server's own quote at execution time, exactly
+/// as `mid` always was. `mid` and `market` keep their raw values, so anything
+/// already persisted or in flight as either still decodes.
+enum OrderType: String, Codable, CaseIterable, Sendable {
+    case custom
+    case bid
+    case mid
+    case ask
+    case market
+
+    /// Short name for a list — the history row, the positions strip.
+    var displayName: String {
+        switch self {
+        case .custom: return "Custom"
+        case .bid: return "Bid"
+        case .mid: return "Mid"
+        case .ask: return "Ask"
+        case .market: return "Market"
+        }
+    }
+
+    /// How the order is priced, spelled out — the confirm sheet's phrasing,
+    /// where "Ask" alone would not say whether it is a limit or a market order.
+    var pricingDescription: String {
+        switch self {
+        case .custom: return "Limit at your price"
+        case .bid: return "Limit at bid"
+        case .mid: return "Limit at mid"
+        case .ask: return "Limit at ask"
+        case .market: return "Market"
+        }
+    }
+
+    /// The chart line's execution type for this panel selection.
+    ///
+    /// The three price-carrying variants collapse onto `.mid` — the
+    /// server-computed limit — because a line fires unattended: a bid or ask
+    /// read at arming time would be stale by the time the level is crossed, and
+    /// a custom price belongs to the contract and the moment it was typed for.
+    /// Mirrors `narrowToChartOrderType` in `packages/shared-types`.
+    var chartOrderType: ChartOrderType { self == .market ? .market : .mid }
 }
 
 enum OptionType: String, Codable, CaseIterable, Sendable {
@@ -163,6 +217,9 @@ struct OrderPreview: Equatable, Sendable {
     let contractSymbol: String
     let price: Double
     let estBuyingPower: Double
+    /// The quote the server priced against; nil from a server that predates it.
+    let bid: Double?
+    let ask: Double?
     let warnings: [String]
 }
 
@@ -172,6 +229,8 @@ extension OrderPreview {
             contractSymbol: dto.resolved.contractSymbol,
             price: dto.resolved.price,
             estBuyingPower: dto.resolved.estBuyingPower,
+            bid: dto.resolved.bid,
+            ask: dto.resolved.ask,
             warnings: dto.warnings
         )
     }
@@ -216,6 +275,9 @@ struct Position: Equatable, Sendable, Identifiable {
     var unrealizedPnl: Double
     /// Contract multiplier (options: 100) for live P/L math.
     let multiplier: Double
+    /// Underlying price the position was opened at — the level the chart's
+    /// entry line sits at. Nil when the server has no record of it.
+    var underlyingEntryPrice: Double?
 }
 
 extension Position {
@@ -230,7 +292,8 @@ extension Position {
             avgPrice: dto.avgPrice,
             markPrice: dto.markPrice,
             unrealizedPnl: dto.unrealizedPnl,
-            multiplier: dto.multiplier
+            multiplier: dto.multiplier,
+            underlyingEntryPrice: dto.underlyingEntryPrice
         )
     }
 }

@@ -13,7 +13,7 @@ struct WebullCredentialsForm: View {
     @FocusState private var focused: Field?
 
     private var canSave: Bool {
-        !appKey.trimmingCharacters(in: .whitespaces).isEmpty && !appSecret.isEmpty
+        !appKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !appSecret.isEmpty
     }
     private var isSaving: Bool {
         viewModel.savingWebull.contains(environment)

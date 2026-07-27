@@ -14,13 +14,13 @@ import {
 } from '@0dtetrader/shared-types';
 import { BrokerGateway } from '../src/broker/broker-gateway.interface';
 import {
-  computeMid,
   estimateBuyingPower,
   findExplicitOption,
   formatOccSymbol,
   OPTION_MULTIPLIER,
   resolveAutoOtm,
 } from '../src/broker/contract-resolution';
+import { customPriceWarning, resolveLimitPrice } from '../src/broker/order-pricing';
 import { optionExpirations } from '../src/broker/expiration-calendar';
 import { brokerErrors } from '../src/common/broker-error';
 
@@ -43,6 +43,10 @@ interface PositionAgg {
  * the BROKER_GATEWAY token with this). Deterministic: fixed underlying price,
  * chain from the real expiration calendar, market fills at last, mid fills at
  * mid after 200 ms, positions aggregate on fills. Never leaves the process.
+ *
+ * `price`, `quoteTimestamp`, and `placeError` are writable so the chart-order
+ * tests can walk the underlying across a trigger level, serve a deliberately
+ * stale quote, or make a fire fail.
  */
 export const STUB_WEBULL_ACCOUNTS = [
   { accountId: 'stub-acct-1', accountType: 'margin', accountName: 'Stub Margin Account' },
@@ -52,12 +56,19 @@ export const STUB_WEBULL_ACCOUNTS = [
 export class StubBrokerGateway implements BrokerGateway {
   static readonly PRICE = 100;
 
+  /** Current underlying price; move it to walk price across a trigger. */
+  price = StubBrokerGateway.PRICE;
+  /** Overrides the quote timestamp — set it into the past to test staleness. */
+  quoteTimestamp: string | null = null;
+  /** When set, placeOrder throws it instead of accepting the order. */
+  placeError: Error | null = null;
+
   private readonly orders = new Map<string, Map<string, StoredOrder>>();
   private readonly positions = new Map<string, Map<string, PositionAgg>>();
   private counter = 0;
 
   async getQuote(_userId: string, symbol: string): Promise<Quote> {
-    const last = StubBrokerGateway.PRICE;
+    const last = this.price;
     return {
       symbol,
       bid: round2(last - 0.02),
@@ -66,7 +77,7 @@ export class StubBrokerGateway implements BrokerGateway {
       bidSize: 10,
       askSize: 10,
       volume: 1_000_000,
-      timestamp: new Date().toISOString(),
+      timestamp: this.quoteTimestamp ?? new Date().toISOString(),
     };
   }
 
@@ -95,7 +106,7 @@ export class StubBrokerGateway implements BrokerGateway {
     const lastBucket = Math.floor(Date.now() / intervalMs);
     const candles: Candle[] = [];
     for (let b = lastBucket - 50; b < lastBucket; b++) {
-      const level = StubBrokerGateway.PRICE + Math.sin(b / 7) * 2;
+      const level = this.price + Math.sin(b / 7) * 2;
       candles.push({
         time: new Date(b * intervalMs).toISOString(),
         open: round2(level - 0.1),
@@ -120,7 +131,7 @@ export class StubBrokerGateway implements BrokerGateway {
         `No chain for expiration ${chosen}. Available: ${expirations.join(', ')}`,
       );
     }
-    const price = StubBrokerGateway.PRICE;
+    const price = this.price;
     const contracts: OptionContract[] = [];
     for (let k = -24; k <= 24; k++) {
       const strike = price + k;
@@ -150,15 +161,17 @@ export class StubBrokerGateway implements BrokerGateway {
 
   async previewOrder(userId: string, order: OrderRequest): Promise<OrderPreview> {
     const resolved = await this.resolveContract(userId, order);
-    const price =
-      order.orderType === 'market' ? resolved.last : computeMid(resolved.bid, resolved.ask);
+    const price = resolveLimitPrice(order.orderType, resolved, order.limitPrice) ?? resolved.last;
+    const warning = customPriceWarning(order.orderType, resolved, order.limitPrice);
     return {
       resolved: {
         contractSymbol: resolved.contractSymbol,
         price,
         estBuyingPower: round2(estimateBuyingPower(order.quantity, price)),
+        bid: resolved.bid,
+        ask: resolved.ask,
       },
-      warnings: [],
+      warnings: warning ? [warning] : [],
     };
   }
 
@@ -167,6 +180,7 @@ export class StubBrokerGateway implements BrokerGateway {
     order: OrderRequest,
     _idempotencyKey: string,
   ): Promise<OrderResult> {
+    if (this.placeError) throw this.placeError;
     const resolved = await this.resolveContract(userId, order);
     const record: StoredOrder = {
       orderId: `STUB-${String(++this.counter).padStart(6, '0')}`,
@@ -186,7 +200,7 @@ export class StubBrokerGateway implements BrokerGateway {
       return this.publicOrder(record);
     }
 
-    record.limitPrice = computeMid(resolved.bid, resolved.ask);
+    record.limitPrice = resolveLimitPrice(order.orderType, resolved, order.limitPrice);
     record.timer = setTimeout(() => {
       record.timer = undefined;
       if (record.status !== 'submitted') return;
@@ -229,7 +243,7 @@ export class StubBrokerGateway implements BrokerGateway {
     const out: Position[] = [];
     for (const [symbol, agg] of positions) {
       if (agg.quantity === 0) continue;
-      const last = StubBrokerGateway.PRICE;
+      const last = this.price;
       out.push({
         symbol,
         assetClass: 'option',

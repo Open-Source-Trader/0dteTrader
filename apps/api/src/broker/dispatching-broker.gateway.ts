@@ -65,8 +65,9 @@ export class DispatchingBrokerGateway implements BrokerGateway {
     userId: string,
     order: OrderRequest,
     idempotencyKey: string,
+    expectedMode?: TradingMode,
   ): Promise<OrderResult> {
-    return (await this.gatewayFor(userId)).placeOrder(userId, order, idempotencyKey);
+    return (await this.gatewayFor(userId)).placeOrder(userId, order, idempotencyKey, expectedMode);
   }
 
   async cancelOrder(userId: string, orderId: string): Promise<void> {

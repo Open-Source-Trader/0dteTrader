@@ -1,3 +1,5 @@
+import { ChevronDownIcon, ChevronUpIcon } from '../icons';
+
 interface TradeActionButtonProps {
   title: string;
   color: string;
@@ -21,6 +23,16 @@ export function TradeActionButton({
 }: TradeActionButtonProps) {
   const variant = variantClass(color);
   const sell = variant === 'hud-btn--sell';
+  // Down on SELL, up on BUY: the direction the button bets on is vertical, and
+  // the sideways pair inherited from the mockup said nothing. SVG rather than
+  // `⌄`/`⌃`, which the display font has no glyph for and would substitute.
+  const Chevron = sell ? ChevronDownIcon : ChevronUpIcon;
+  const chevrons = (
+    <span className="hud-chevrons" aria-hidden="true">
+      <Chevron size={11} />
+      <Chevron size={11} />
+    </span>
+  );
   return (
     <button
       className={`trade-action-button hud-btn ${variant}`}
@@ -29,17 +41,9 @@ export function TradeActionButton({
       onClick={onClick}
       aria-label={title}
     >
-      {sell ? (
-        <span className="hud-chevrons" aria-hidden="true">
-          ❮❮
-        </span>
-      ) : null}
+      {sell ? chevrons : null}
       <span>{title}</span>
-      {!sell ? (
-        <span className="hud-chevrons" aria-hidden="true">
-          ❯❯
-        </span>
-      ) : null}
+      {!sell ? chevrons : null}
     </button>
   );
 }

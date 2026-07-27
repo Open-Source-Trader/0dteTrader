@@ -1,3 +1,4 @@
+import { DEFAULT_CHART_TRADING_SETTINGS } from './chartTradingSettings';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
@@ -27,6 +28,8 @@ describe('IndicatorSettingsView options structure controls', () => {
           profileStrikeCount: 12,
           showDiagnostics: false,
         },
+        chartTrading: DEFAULT_CHART_TRADING_SETTINGS,
+        onChangeChartTrading: vi.fn(),
         onChangeOptionsAnalytics: vi.fn(),
       }),
     );

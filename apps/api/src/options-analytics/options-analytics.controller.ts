@@ -1,6 +1,7 @@
 import { Controller, Get, Logger, Query } from '@nestjs/common';
 import { IsDateString, IsString, Matches } from 'class-validator';
 import type { OptionsAnalyticsSnapshot } from '@0dtetrader/shared-types';
+import { AuthenticatedUser, CurrentUser } from '../common/current-user.decorator';
 import { OptionsAnalyticsCaptureService } from './options-analytics.capture';
 import { OptionsAnalyticsService } from './options-analytics.service';
 
@@ -25,8 +26,20 @@ export class OptionsAnalyticsController {
   ) {}
 
   @Get('options-analytics')
-  async getSnapshot(@Query() query: OptionsAnalyticsQueryDto): Promise<OptionsAnalyticsSnapshot> {
-    const result = await this.analytics.getSnapshotResult(query.symbol, query.expiration);
+  async getSnapshot(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query: OptionsAnalyticsQueryDto,
+  ): Promise<OptionsAnalyticsSnapshot> {
+    const result = await this.analytics.getSnapshotResult(
+      query.symbol,
+      query.expiration,
+      user.userId,
+    );
+    // Only shared-client snapshots enter the global capture history: a
+    // per-user-key result (possibly sandbox-quality) would claim the
+    // symbol/expiration/bucket slot and silently displace the production
+    // row the capture cron writes.
+    if (result.scope !== 'shared') return result.snapshot;
     // Persistence failures are swallowed and logged by the capture service so
     // a valid interactive market-data response remains available.
     void this.capture.persist(result, 'viewed').catch((error: unknown) => {

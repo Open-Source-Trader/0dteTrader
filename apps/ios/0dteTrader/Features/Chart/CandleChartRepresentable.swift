@@ -19,6 +19,20 @@ struct CandleChartRepresentable: UIViewRepresentable {
     /// Current options structure snapshot for the right-edge profile.
     var optionsAnalyticsSnapshot: OptionsAnalyticsSnapshotDTO?
     var optionsAnalyticsSettings: OptionsAnalyticsSettings = .default
+    /// Chart trading: the order-line model, its settings, and the open
+    /// positions whose entry lines are drawn.
+    var chartOrdersModel: ChartOrdersModel?
+    var chartTradingSettings: ChartTradingSettings = .default
+    var entryLines: [EntryLineModel] = []
+    /// Whether a contract is selected for a new line to trade; the placement
+    /// guide is suppressed entirely without one.
+    var hasSelectedContract: Bool = false
+    /// Level the open placement card refers to; nil when it is closed. This
+    /// only says who owns the guide's level, not whether one is showing.
+    var placementPrice: Double?
+    weak var orderLineDelegate: OrderLineOverlayDelegate?
+    /// Three taps on the chart toggle the fullscreen/split layout.
+    var onTripleTap: (() -> Void)?
     var resetToken: Int = 0
 
     /// CombinedChartView that reports the end of each draw pass. DGCharts
@@ -35,6 +49,80 @@ struct CandleChartRepresentable: UIViewRepresentable {
         }
     }
 
+    /// Axis renderers that lay a tight drop shadow under their labels.
+    ///
+    /// The scales float over the candles now instead of sitting in gutters of
+    /// their own, so a label can land on a wick. DGCharts draws axis text with
+    /// a font and a color and nothing else — there is no shadow attribute to
+    /// pass — but a `CGContext` shadow set before the super call covers every
+    /// glyph it draws. Same treatment the quote readout uses over the same
+    /// candles, and it costs no opaque plate.
+    final class ShadowedYAxisRenderer: YAxisRenderer {
+        /// The x-axis whose labels float along the bottom of the same plot.
+        weak var timeAxis: XAxis?
+
+        override func renderAxisLabels(context: CGContext) {
+            context.saveGState()
+            context.setShadow(offset: .zero, blur: ChartMetrics.axisLabelShadowBlur, color: UIColor.black.cgColor)
+            super.renderAxisLabels(context: context)
+            context.restoreGState()
+        }
+
+        /// Both scales print inside the plot, so the bottom-left corner is
+        /// claimed twice: the lowest price label and the leftmost time label
+        /// were drawing over each other ("738.0" through "15:20").
+        ///
+        /// The price label yields, because the time strip's position is fixed
+        /// while the price scale's is not — the levels move under every tick,
+        /// so insetting the strip to clear them would mean insetting it by the
+        /// worst case forever. Only the label goes; its grid line stays, so the
+        /// level is still legible from its neighbours.
+        ///
+        /// Conditionally, via the axis's own `drawBottomYLabelEntryEnabled`
+        /// rather than by reimplementing the label loop: the bottom entry can
+        /// sit a long way up the plot, and dropping it unconditionally would
+        /// cost a reading that was never in the way.
+        override func drawYLabels(
+            context: CGContext,
+            fixedPosition: CGFloat,
+            positions: [CGPoint],
+            offset: CGFloat,
+            // Spelled out: DGCharts' `TextAlignment` is an alias for this, and
+            // SwiftUI's same-named enum is also in scope in this file.
+            textAlign: NSTextAlignment
+        ) {
+            let wasEnabled = axis.drawBottomYLabelEntryEnabled
+            defer { axis.drawBottomYLabelEntryEnabled = wasEnabled }
+            // `positions` runs in entry order, and entries ascend in value —
+            // so the first is the lowest price, the one nearest the strip.
+            if let timeAxis, let lowest = positions.first {
+                let stripTop = viewPortHandler.contentBottom
+                    - timeAxis.yOffset
+                    - timeAxis.labelRotatedHeight
+                if lowest.y + offset + axis.labelFont.lineHeight > stripTop {
+                    axis.drawBottomYLabelEntryEnabled = false
+                }
+            }
+            super.drawYLabels(
+                context: context,
+                fixedPosition: fixedPosition,
+                positions: positions,
+                offset: offset,
+                textAlign: textAlign
+            )
+        }
+    }
+
+    /// The x-axis twin of `ShadowedYAxisRenderer`; see its note.
+    final class ShadowedXAxisRenderer: XAxisRenderer {
+        override func renderAxisLabels(context: CGContext) {
+            context.saveGState()
+            context.setShadow(offset: .zero, blur: ChartMetrics.axisLabelShadowBlur, color: UIColor.black.cgColor)
+            super.renderAxisLabels(context: context)
+            context.restoreGState()
+        }
+    }
+
     /// Hosts the chart plus the annotation overlay at identical frames so the
     /// overlay can reuse the chart's pixel coordinate space directly.
     final class ContainerView: UIView {
@@ -42,6 +130,11 @@ struct CandleChartRepresentable: UIViewRepresentable {
         let twcOverlay = TwcOverlayView()
         let optionsAnalyticsOverlay = OptionsAnalyticsOverlayView()
         let overlay = DrawingOverlayView()
+        /// Topmost: an order line must win the touch over a drawing, because
+        /// mis-grabbing a trend line when you meant to move a stop is the
+        /// expensive mistake.
+        let orderLineOverlay = OrderLineOverlayView()
+        var onTripleTap: (() -> Void)?
 
         override init(frame: CGRect) {
             super.init(frame: frame)
@@ -50,20 +143,66 @@ struct CandleChartRepresentable: UIViewRepresentable {
             addSubview(twcOverlay)
             addSubview(optionsAnalyticsOverlay)
             addSubview(overlay)
+            addSubview(orderLineOverlay)
             twcOverlay.chart = chart
             optionsAnalyticsOverlay.chart = chart
             overlay.chart = chart
+            orderLineOverlay.chart = chart
             chart.onPostDraw = { [weak self] in
                 guard let self else { return }
                 self.twcOverlay.setNeedsDisplay()
                 self.optionsAnalyticsOverlay.setNeedsDisplay()
                 self.overlay.setNeedsDisplay()
+                self.orderLineOverlay.setNeedsDisplay()
             }
+
+            // A tap on empty chart space summons the placement guide at that
+            // level, and the next one dismisses it. It hangs off the chart
+            // rather than the order overlay because the overlay's
+            // `point(inside:)` deliberately refuses empty space so the chart
+            // keeps pan and zoom — which makes the chart exactly the view a tap
+            // reaches when no order line, pill, handle or drawing wanted it.
+            // `cancelsTouchesInView` stays on so DGCharts still sees the touch.
+            let placementTap = UITapGestureRecognizer(
+                target: self,
+                action: #selector(handlePlacementTap(_:))
+            )
+            placementTap.delegate = self
+            placementTap.cancelsTouchesInView = false
+            chart.addGestureRecognizer(placementTap)
+
+            // Three taps toggle the fullscreen layout — the only way in and out
+            // of it now that the toolbar button is gone. It shares the chart
+            // with the guide's single tap, so the guide has to wait to find out
+            // whether a second tap is coming: `require(toFail:)` costs every
+            // summon the double-tap interval (~0.35s). Paid deliberately, on the
+            // grounds that a guide that appears a beat late is recoverable and a
+            // guide that flickers on, off and on again under a layout change is
+            // an order control the user did not ask for.
+            let fullscreenTap = UITapGestureRecognizer(
+                target: self,
+                action: #selector(handleFullscreenTap)
+            )
+            fullscreenTap.numberOfTapsRequired = 3
+            fullscreenTap.delegate = self
+            fullscreenTap.cancelsTouchesInView = false
+            chart.addGestureRecognizer(fullscreenTap)
+            placementTap.require(toFail: fullscreenTap)
         }
 
         @available(*, unavailable)
         required init?(coder: NSCoder) {
             fatalError("init(coder:) is not supported")
+        }
+
+        @objc private func handlePlacementTap(_ recognizer: UITapGestureRecognizer) {
+            orderLineOverlay.toggleGuide(at: recognizer.location(in: orderLineOverlay))
+        }
+
+        /// Internal rather than private so the wiring can be asserted: a real
+        /// triple tap cannot be injected into a simulator from a test.
+        @objc func handleFullscreenTap() {
+            onTripleTap?()
         }
 
         override func layoutSubviews() {
@@ -72,13 +211,29 @@ struct CandleChartRepresentable: UIViewRepresentable {
             twcOverlay.frame = bounds
             optionsAnalyticsOverlay.frame = bounds
             overlay.frame = bounds
+            orderLineOverlay.frame = bounds
             // TradingView-style over-scroll: allow dragging the newest candle
             // well past mid-screen into empty space (and slightly past the
             // oldest on the left).
             chart.setDragOffsetX(bounds.width * 0.45)
         }
     }
+}
 
+extension CandleChartRepresentable.ContainerView: UIGestureRecognizerDelegate {
+    /// The placement tap only observes: it must run alongside DGCharts' own
+    /// recognizers and the gesture controller's pinch/pan, never instead of
+    /// them. A chart that stopped panning because a `+` might be summoned would
+    /// be a bad trade.
+    func gestureRecognizer(
+        _ gestureRecognizer: UIGestureRecognizer,
+        shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer
+    ) -> Bool {
+        true
+    }
+}
+
+extension CandleChartRepresentable {
     /// Keeps the annotation overlays' time/price-anchored shapes redrawn in
     /// sync with the chart viewport on pan/zoom.
     final class Coordinator: NSObject, ChartViewDelegate {
@@ -138,6 +293,7 @@ struct CandleChartRepresentable: UIViewRepresentable {
             container?.overlay.setNeedsDisplay()
             container?.twcOverlay.setNeedsDisplay()
             container?.optionsAnalyticsOverlay.setNeedsDisplay()
+            container?.orderLineOverlay.setNeedsDisplay()
         }
         context.coordinator.onTransform = redrawOverlays
         chart.delegate = context.coordinator
@@ -146,8 +302,32 @@ struct CandleChartRepresentable: UIViewRepresentable {
         context.coordinator.gestures.onTransform = redrawOverlays
         context.coordinator.gestures.attach(to: chart)
 
+        // Both scales print inside the plot rather than in reserved gutters, so
+        // the candles run the full width and height of the card and the chrome
+        // seated in its corners lines up with a real border instead of with the
+        // inside edge of an axis strip. `needsOffset` is false for both inside
+        // positions, which is what actually gives the space back; what is left
+        // is `minOffset`, an even 10pt on all four sides.
+        let priceAxisRenderer = ShadowedYAxisRenderer(
+            viewPortHandler: chart.viewPortHandler,
+            axis: chart.leftAxis,
+            transformer: chart.getTransformer(forAxis: .left)
+        )
+        // So the price scale knows where the time strip starts and can stand
+        // its lowest label down when the two want the same corner.
+        priceAxisRenderer.timeAxis = chart.xAxis
+        chart.leftYAxisRenderer = priceAxisRenderer
+        chart.xAxisRenderer = ShadowedXAxisRenderer(
+            viewPortHandler: chart.viewPortHandler,
+            axis: chart.xAxis,
+            transformer: chart.getTransformer(forAxis: .left)
+        )
+
         let xAxis = chart.xAxis
-        xAxis.labelPosition = .bottom
+        xAxis.labelPosition = .bottomInside
+        // The axis line would now be drawn 10pt inboard of the card's bottom
+        // border, where it reads as a stray rule rather than as the axis.
+        xAxis.drawAxisLineEnabled = false
         xAxis.labelTextColor = .hudAxisLabel
         xAxis.labelFont = UIFont(name: "JetBrainsMono-Regular", size: 10) ?? .monospacedDigitSystemFont(ofSize: 10, weight: .regular)
         xAxis.gridColor = UIColor.hudStroke.withAlphaComponent(0.1)
@@ -165,6 +345,7 @@ struct CandleChartRepresentable: UIViewRepresentable {
         rightAxis.axisMinimum = 0
 
         let leftAxis = chart.leftAxis
+        leftAxis.labelPosition = .insideChart
         leftAxis.labelTextColor = .hudAxisLabel
         leftAxis.labelFont = UIFont(name: "JetBrainsMono-Regular", size: 10) ?? .monospacedDigitSystemFont(ofSize: 10, weight: .regular)
         leftAxis.gridColor = UIColor.hudStroke.withAlphaComponent(0.1)
@@ -183,6 +364,23 @@ struct CandleChartRepresentable: UIViewRepresentable {
         container.twcOverlay.candles = candles
         container.optionsAnalyticsOverlay.snapshot = optionsAnalyticsSnapshot
         container.optionsAnalyticsOverlay.settings = optionsAnalyticsSettings
+        container.orderLineOverlay.model = chartOrdersModel
+        container.orderLineOverlay.settings = chartTradingSettings
+        container.orderLineOverlay.entryLines = entryLines
+        container.orderLineOverlay.hasSelectedContract = hasSelectedContract
+        container.orderLineOverlay.placementPrice = placementPrice
+        container.orderLineOverlay.delegate = orderLineDelegate
+        container.onTripleTap = onTripleTap
+        // Keep the button rows clear of the analytics rail when it is on. The
+        // rail sizes itself from the chart's content rect, not the view bounds,
+        // so measuring from bounds would drift by the axis gutter and leave the
+        // rows either overlapping the rail or short of it.
+        let analyticsContent = container.chart.viewPortHandler.contentRect
+        container.orderLineOverlay.rightInset = optionsAnalyticsSnapshot != nil
+            && optionsAnalyticsSettings.enabled
+            ? (container.bounds.width - analyticsContent.maxX)
+                + CGFloat(OptionsAnalyticsPresentation.railWidth(for: analyticsContent.width))
+            : 0
 
         guard !candles.isEmpty else {
             chart.data = nil
@@ -190,6 +388,7 @@ struct CandleChartRepresentable: UIViewRepresentable {
             chart.accessibilityValue = nil
             container.overlay.setNeedsDisplay()
             container.optionsAnalyticsOverlay.setNeedsDisplay()
+            container.orderLineOverlay.setNeedsDisplay()
             return
         }
         let previousCount = (chart.data as? CombinedChartData)?.candleData?.entryCount ?? 0

@@ -1,6 +1,14 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Group, Panel, Separator, useDefaultLayout } from 'react-resizable-panels';
-import type { Me, OptionContract, OrderSide, TradingMode } from '@0dtetrader/shared-types';
+import type {
+  ChartOrder,
+  Me,
+  OptionContract,
+  OrderSide,
+  Position,
+  TradingMode,
+} from '@0dtetrader/shared-types';
+import { narrowToChartOrderType } from '@0dtetrader/shared-types';
 import { useContainer } from '../../app/container';
 import { useLayoutBreakpoint } from '../../app/useLayoutBreakpoint';
 import { useStore } from '../../core/observable';
@@ -19,8 +27,9 @@ import {
 import { DesktopSettingsPanel } from '../../design/components/DesktopSettingsPanel';
 import type { TradeLayout } from '../../core/storage/SettingsStore';
 import { enabledSubPanes } from '../chart/indicatorSettings';
+import type { ChartTradingProps } from '../chart/CandleChart';
 import { ChartView } from '../chart/ChartView';
-import { positionsForUnderlying } from '../chart/positionsForUnderlying';
+import { kindLabel } from '../chart/chartOrders';
 import { IndicatorSettingsView } from '../chart/IndicatorSettingsView';
 import { IndicatorSettingsDesktop } from '../chart/IndicatorSettingsDesktop';
 import { SymbolSearchView } from '../chart/SymbolSearchView';
@@ -31,7 +40,7 @@ import { DesktopChartTopBar } from './DesktopTopBar';
 import { DesktopTradeTicket } from './DesktopTradeTicket';
 import { FloatingTradeButtons } from './FloatingTradeButtons';
 import { HistoryView } from './HistoryView';
-import { OrderConfirmSheet } from './OrderConfirmSheet';
+import { OrderConfirmPopup } from './OrderConfirmPopup';
 import { PositionsStrip } from './PositionsStrip';
 import { ToastView } from './ToastView';
 import { TradePanel } from './TradePanel';
@@ -57,6 +66,7 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
     settingsStore,
     quoteSocket,
     drawingsStore,
+    chartOrdersStore,
   } = container;
 
   const chart = useStore(chartStore);
@@ -73,6 +83,17 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
   // 'practice' is only the pre-fetch placeholder; the server value wins.
   const [tradingMode, setTradingMode] = useState<TradingMode>('practice');
   const [showModeConfirmation, setShowModeConfirmation] = useState(false);
+  const [chartTradingSettings, setChartTradingSettings] = useState(
+    () => settingsStore.chartTrading,
+  );
+  // The entry line's ✕ sends a market order to close a real position, so it
+  // confirms first — same gate as flattening from the positions strip.
+  const [positionPendingChartFlatten, setPositionPendingChartFlatten] = useState<Position | null>(
+    null,
+  );
+  // A working line's ✕ throws away a resting order the user set up deliberately,
+  // so it confirms — matching the iOS alert rather than cancelling on one click.
+  const [orderPendingCancel, setOrderPendingCancel] = useState<ChartOrder | null>(null);
   const [me, setMe] = useState<Me | null>(null);
   const nextMode: TradingMode = tradingMode === 'live' ? 'practice' : 'live';
 
@@ -102,10 +123,14 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
     void apiClient
       .me()
       .then((m) => {
-        if (!cancelled) {
-          setTradingMode(m.tradingMode);
-          setMe(m);
-        }
+        if (cancelled) return;
+        setTradingMode(m.tradingMode);
+        setMe(m);
+        // Session proven valid: if the initial candle load raced login and
+        // left the chart empty, reload the current symbol rather than making
+        // the user switch tickers to force it.
+        const { candles, isLoading } = chartStore.getState();
+        if (candles.length === 0 && !isLoading) void chartStore.start();
       })
       .catch(() => {
         // Keep the placeholder; profile/quote errors surface elsewhere.
@@ -113,7 +138,7 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
     return () => {
       cancelled = true;
     };
-  }, [apiClient]);
+  }, [apiClient, chartStore]);
 
   const confirmModeSwitch = async () => {
     await apiClient.updateTradingMode(nextMode);
@@ -143,13 +168,34 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
       chainStore
         .getState()
         .chain?.contracts.find((contract: OptionContract) => contract.symbol === symbol);
-    return quoteSocket.onOrderUpdate((update) => tradeStore.handleOrderUpdate(update));
-  }, [chartStore, tradeStore, chainStore, quoteSocket]);
+    void chartOrdersStore.load();
+    const offOrders = quoteSocket.onOrderUpdate((update) => tradeStore.handleOrderUpdate(update));
+    // The server-side watcher fires lines with the app closed or backgrounded;
+    // these pushes are how the chart learns about it.
+    const offChartOrders = quoteSocket.onChartOrder((order) => {
+      chartOrdersStore.applyServerUpdate(order);
+      // A fired line means a real order went out — refresh positions so the
+      // entry line appears without waiting for the next poll.
+      void tradeStore.refreshTradingData();
+    });
+    // Pushes that landed while the socket was down are gone; re-read on the
+    // way back rather than drawing a bracket that already fired.
+    const offReconnect = quoteSocket.onReconnect(() => {
+      void chartOrdersStore.load();
+      void tradeStore.refreshTradingData();
+    });
+    return () => {
+      offOrders();
+      offChartOrders();
+      offReconnect();
+    };
+  }, [chartStore, tradeStore, chainStore, chartOrdersStore, quoteSocket]);
 
   useEffect(() => {
     void chainStore.load(chart.symbol);
     drawingsStore.setSymbol(chart.symbol);
-  }, [chart.symbol, chainStore, drawingsStore]);
+    chartOrdersStore.setSymbol(chart.symbol);
+  }, [chart.symbol, chainStore, drawingsStore, chartOrdersStore]);
 
   // Stream live quotes for the selected contracts and all open positions.
   // The chart's own symbol is excluded: its subscription is owned by ChartStore.
@@ -211,8 +257,12 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
         }
       }
       prevLast = quote.last;
+      // Chart order lines fire off the same tick. The store nudges the server,
+      // which is also polling — the shared idempotency key makes that a race
+      // with one winner rather than two orders.
+      chartOrdersStore.applyQuote(symbol, quote.last);
     });
-  }, [quoteSocket, chartStore, chainStore, drawingsStore, tradeStore]);
+  }, [quoteSocket, chartStore, chainStore, drawingsStore, tradeStore, chartOrdersStore]);
 
   // Track the content area height for the split layout math.
   useLayoutEffect(() => {
@@ -293,6 +343,24 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
     chain.selectedExpiration,
   );
 
+  // Order-line overlay inputs. resolveContract reuses the same chain lookup the
+  // flatten path already depends on, so an entry line only draws for a contract
+  // whose chain is loaded — the same constraint, surfaced the same way.
+  const chartTrading: ChartTradingProps = {
+    store: chartOrdersStore,
+    settings: chartTradingSettings,
+    positions: trade.positions,
+    resolveContract: (contractSymbol) =>
+      chainStore.getState().chain?.contracts.find((c) => c.symbol === contractSymbol) ?? null,
+    selectedContract: chainStore.selectedContract,
+    // Narrowed here, at the one seam where the panel's five-way pricing meets
+    // the chart's two-way. A line fires unattended, so `custom`/`bid`/`ask`
+    // collapse onto the server-computed mid — see narrowToChartOrderType.
+    defaultOrderType: narrowToChartOrderType(trade.orderType),
+    onFlatten: (position) => setPositionPendingChartFlatten(position),
+    onCancelOrder: (order) => setOrderPendingCancel(order),
+  };
+
   const positionsStrip = (
     <PositionsStrip
       positions={trade.positions}
@@ -348,14 +416,10 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
               onIndicatorSettings={() => setShowIndicatorSettings(true)}
               tradingMode={tradingMode}
               onToggleMode={() => setShowModeConfirmation(true)}
+              onToggleFullscreen={toggleLayout}
               optionsAnalyticsExpiration={optionsAnalyticsExpiration}
+              chartTrading={chartTrading}
               dense
-              positionsForSymbol={positionsForUnderlying(
-                trade.positions,
-                chart.symbol,
-                chain.chain?.contracts ?? [],
-              )}
-              onFlattenPosition={(position) => void tradeStore.flatten(position)}
               positionsLocked={locked}
               onToggleLock={toggleLock}
               onShowHistory={() => setShowHistory(true)}
@@ -413,7 +477,9 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
           onIndicatorSettings={() => setShowIndicatorSettings(true)}
           tradingMode={tradingMode}
           onToggleMode={() => setShowModeConfirmation(true)}
+          onToggleFullscreen={toggleLayout}
           optionsAnalyticsExpiration={optionsAnalyticsExpiration}
+          chartTrading={chartTrading}
         />
         {/* Scrim so the dock never lets chart content bleed through the buttons */}
         <div
@@ -464,7 +530,9 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
             onIndicatorSettings={() => setShowIndicatorSettings(true)}
             tradingMode={tradingMode}
             onToggleMode={() => setShowModeConfirmation(true)}
+            onToggleFullscreen={toggleLayout}
             optionsAnalyticsExpiration={optionsAnalyticsExpiration}
+            chartTrading={chartTrading}
           />
         </div>
 
@@ -488,6 +556,7 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
             onArm={arm}
             density={panelDensity}
             locked={locked}
+            onToggleLock={toggleLock}
           />
         </div>
       </div>
@@ -590,9 +659,11 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
         <ToastView toast={trade.toast} onDismiss={() => tradeStore.dismissToast()} />
       ) : null}
 
-      {/* Sheets */}
+      {/* The order confirmation is an anchored popup over the SELL/BUY row,
+          not a sheet — but it is still driven by the armed ticket, which is
+          what makes Cancel, the scrim and a successful submit one path. */}
       {trade.armedTicket ? (
-        <OrderConfirmSheet tradeStore={tradeStore} ticket={trade.armedTicket} />
+        <OrderConfirmPopup tradeStore={tradeStore} ticket={trade.armedTicket} />
       ) : null}
       {showSymbolSearch && isDesktopGrid ? (
         <SymbolSpotlight
@@ -657,6 +728,11 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
           onChangeTwcSettings={(settings) => chartStore.setTwcSettings(settings)}
           optionsAnalytics={chart.optionsAnalytics}
           onChangeOptionsAnalytics={(settings) => chartStore.setOptionsAnalytics(settings)}
+          chartTrading={chartTradingSettings}
+          onChangeChartTrading={(settings) => {
+            settingsStore.chartTrading = settings;
+            setChartTradingSettings(settings);
+          }}
         />
       ) : null}
       {!isDesktopGrid && showProfile ? (
@@ -682,6 +758,38 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
             { label: 'Cancel', role: 'cancel' },
           ]}
           onDismiss={() => setShowModeConfirmation(false)}
+        />
+      ) : null}
+      {positionPendingChartFlatten ? (
+        <AlertDialog
+          title="Close position?"
+          message={`Sends a market order to close ${positionPendingChartFlatten.symbol}. Only this contract is closed.`}
+          actions={[
+            {
+              label: 'Close position',
+              role: 'destructive',
+              onSelect: () => void tradeStore.flatten(positionPendingChartFlatten),
+            },
+            { label: 'Cancel', role: 'cancel' },
+          ]}
+          onDismiss={() => setPositionPendingChartFlatten(null)}
+        />
+      ) : null}
+      {orderPendingCancel ? (
+        <AlertDialog
+          title="Cancel order line?"
+          message={`Removes the ${kindLabel(orderPendingCancel.kind)} line at ${Format.price(
+            orderPendingCancel.triggerPrice,
+          )}. Nothing was sent to the broker.`}
+          actions={[
+            {
+              label: 'Cancel line',
+              role: 'destructive',
+              onSelect: () => void chartOrdersStore.cancel(orderPendingCancel.id),
+            },
+            { label: 'Keep', role: 'cancel' },
+          ]}
+          onDismiss={() => setOrderPendingCancel(null)}
         />
       ) : null}
     </div>

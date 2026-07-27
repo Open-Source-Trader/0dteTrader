@@ -4,10 +4,13 @@ import {
   BrokerCredentialsInput,
   BrokerProvider,
   BrokerSecrets,
+  CredentialProvider,
+  TradierCredentialsInput,
   TradingMode,
   WebullCredentialsInput,
   WebullSecrets,
 } from '@0dtetrader/shared-types';
+import { errors } from '../common/api-exception';
 import { PrismaService } from '../prisma/prisma.service';
 import { CryptoService } from './crypto.service';
 
@@ -17,7 +20,8 @@ const WEBULL_PROVIDER: BrokerProvider = 'webull';
  * Persists broker credentials encrypted at rest in the provider-agnostic
  * `broker_credentials` table. `encSecrets` is one AES-256-GCM blob of the
  * provider-specific secret JSON (Webull: {appKey, appSecret, accountId};
- * Alpaca: {apiKey, apiSecret}). Plaintext only exists in memory for the
+ * Alpaca: {apiKey, apiSecret}; Tradier: {apiKey} — a market-data key, not a
+ * trading provider). Plaintext only exists in memory for the
  * duration of the request and is never logged. One set per (user, provider,
  * environment) (live / practice).
  *
@@ -93,7 +97,7 @@ export class CredentialsService {
 
   async remove(
     userId: string,
-    provider: BrokerProvider = WEBULL_PROVIDER,
+    provider: CredentialProvider = WEBULL_PROVIDER,
     environment: TradingMode = 'live',
   ): Promise<void> {
     try {
@@ -115,7 +119,7 @@ export class CredentialsService {
    */
   async getDecrypted(
     userId: string,
-    provider: BrokerProvider = WEBULL_PROVIDER,
+    provider: CredentialProvider = WEBULL_PROVIDER,
     environment: TradingMode = 'live',
   ): Promise<BrokerSecrets | null> {
     await this.ensureMigrated(userId, environment);
@@ -126,6 +130,24 @@ export class CredentialsService {
     return this.decryptSecrets(row.encSecrets);
   }
 
+  /**
+   * All of one provider's decrypted rows, keyed by environment, in a single
+   * query. Skips the legacy-Webull migration shim (`ensureMigrated`) — the
+   * legacy table only ever held Webull secrets, so for any other provider
+   * the shim is pure wasted I/O on the market-data hot path.
+   */
+  async getDecryptedProviderRows(
+    userId: string,
+    provider: CredentialProvider,
+  ): Promise<Partial<Record<TradingMode, BrokerSecrets>>> {
+    const rows = await this.prisma.brokerCredential.findMany({ where: { userId, provider } });
+    const byEnvironment: Partial<Record<TradingMode, BrokerSecrets>> = {};
+    for (const row of rows) {
+      byEnvironment[row.environment as TradingMode] = this.decryptSecrets(row.encSecrets);
+    }
+    return byEnvironment;
+  }
+
   private decryptSecrets(blob: Uint8Array): BrokerSecrets {
     try {
       return JSON.parse(this.crypto.decrypt(blob)) as BrokerSecrets;
@@ -134,18 +156,45 @@ export class CredentialsService {
     }
   }
 
-  private toSecrets(input: BrokerCredentialsInput, provider: BrokerProvider): BrokerSecrets {
+  private toSecrets(input: BrokerCredentialsInput, provider: CredentialProvider): BrokerSecrets {
     if (provider === 'alpaca') {
       const a = input as AlpacaCredentialsInput;
-      return { provider: 'alpaca', apiKey: a.apiKey, apiSecret: a.apiSecret };
+      return {
+        provider: 'alpaca',
+        apiKey: this.requireSecret(a.apiKey, 'apiKey'),
+        apiSecret: this.requireSecret(a.apiSecret, 'apiSecret'),
+      };
+    }
+    if (provider === 'tradier') {
+      const t = input as TradierCredentialsInput;
+      return { provider: 'tradier', apiKey: this.requireSecret(t.apiKey, 'apiKey') };
     }
     const w = input as WebullCredentialsInput;
-    return { provider: 'webull', appKey: w.appKey, appSecret: w.appSecret, accountId: w.accountId };
+    return {
+      provider: 'webull',
+      appKey: this.requireSecret(w.appKey, 'appKey'),
+      appSecret: this.requireSecret(w.appSecret, 'appSecret'),
+      accountId: typeof w.accountId === 'string' ? w.accountId.trim() || undefined : undefined,
+    };
+  }
+
+  /** The generic broker-credentials body is a TS union, not a class-validator
+   *  DTO, so nothing upstream guarantees the provider's secret fields exist.
+   *  Without this, `{provider}` alone would store a garbage blob and flip the
+   *  /me configured flag to true. Returns the TRIMMED value: a key pasted
+   *  with a trailing newline would otherwise be stored verbatim and make
+   *  every `Authorization: Bearer <key>\n` header throw at request time. */
+  private requireSecret(value: unknown, field: string): string {
+    const trimmed = typeof value === 'string' ? value.trim() : '';
+    if (trimmed === '') {
+      throw errors.badRequest('INVALID_CREDENTIALS', `${field} is required`);
+    }
+    return trimmed;
   }
 
   private async upsertSecrets(
     userId: string,
-    provider: BrokerProvider,
+    provider: CredentialProvider,
     environment: TradingMode,
     secrets: BrokerSecrets,
   ): Promise<void> {

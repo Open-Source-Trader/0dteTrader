@@ -3,8 +3,12 @@ import type {
   BrokerCredentialsInput,
   BrokerCredentialsSaved,
   BrokerProvider,
+  CredentialProvider,
   Candle,
   CandleInterval,
+  ChartOrder,
+  ChartOrderDraft,
+  ChartOrderPatch,
   Me,
   OptionsChain,
   OrderPreview,
@@ -198,7 +202,7 @@ export class ApiClient {
   }
 
   deleteBrokerCredentials(
-    provider: BrokerProvider,
+    provider: CredentialProvider,
     environment: TradingMode = 'live',
   ): Promise<void> {
     return this.requestVoid({
@@ -266,5 +270,30 @@ export class ApiClient {
 
   orderHistory(): Promise<TradeHistory> {
     return this.request({ method: 'GET', path: 'v1/orders/history' });
+  }
+
+  // MARK: - Chart trading
+
+  chartOrders(): Promise<ChartOrder[]> {
+    return this.request({ method: 'GET', path: 'v1/chart-orders' });
+  }
+
+  createChartOrder(draft: ChartOrderDraft): Promise<ChartOrder> {
+    return this.request({ method: 'POST', path: 'v1/chart-orders', body: draft });
+  }
+
+  /** Fire a line now: the app saw the crossing and will not wait for the
+   *  server-side watcher's next poll. Idempotent — racing the watcher yields
+   *  one broker order, not two. */
+  triggerChartOrder(id: string): Promise<ChartOrder> {
+    return this.request({ method: 'POST', path: `v1/chart-orders/${id}/trigger` });
+  }
+
+  updateChartOrder(id: string, patch: ChartOrderPatch): Promise<ChartOrder> {
+    return this.request({ method: 'PATCH', path: `v1/chart-orders/${id}`, body: patch });
+  }
+
+  cancelChartOrder(id: string): Promise<void> {
+    return this.requestVoid({ method: 'DELETE', path: `v1/chart-orders/${id}` });
   }
 }

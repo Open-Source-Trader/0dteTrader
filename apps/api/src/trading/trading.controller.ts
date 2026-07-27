@@ -47,7 +47,12 @@ export class TradingController {
         'The Idempotency-Key header is required on POST /v1/orders',
       );
     }
-    return this.trading.place(user.userId, dto, idempotencyKey.trim());
+    // Namespaced away from server-minted keys. `(userId, idempotencyKey)` is one
+    // unique space shared with the chart-order fire path, which mints
+    // `chartorder:{id}`. An unprefixed client key colliding with one of those
+    // would make the line's later fire replay this order's result and never
+    // reach the broker — a stop that reports as fired with nothing behind it.
+    return this.trading.place(user.userId, dto, `client:${idempotencyKey.trim()}`);
   }
 
   @Get('orders')

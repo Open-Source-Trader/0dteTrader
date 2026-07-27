@@ -1,6 +1,4 @@
 import { useEffect, useMemo, useState } from 'react';
-import { NavBar } from '../../design/components/NavBar';
-import { Sheet } from '../../design/components/Sheet';
 import { CheckmarkIcon, MagnifierIcon, TextCursorIcon } from '../../design/icons';
 import { resolveEnterSelection, SYMBOL_SECTIONS } from './symbolSections';
 
@@ -10,7 +8,15 @@ interface SymbolSearchViewProps {
   onDismiss: () => void;
 }
 
-/** Symbol switcher: curated watchlist plus arbitrary free-text symbols. */
+/**
+ * Symbol switcher: curated watchlist plus arbitrary free-text symbols.
+ *
+ * The body of the ticker chip's dropdown, which is where this used to be a
+ * sheet. Every capability the sheet had is still here — the search field, the
+ * curated sections, the keyboard cursor, the "use this ticker anyway" row — and
+ * it is the search field that sets the width, so this is the one anchored popup
+ * that does not shrink to its widest row.
+ */
 export function SymbolSearchView({ currentSymbol, onSelect, onDismiss }: SymbolSearchViewProps) {
   const [query, setQuery] = useState('');
   const [activeIndex, setActiveIndex] = useState(0);
@@ -64,104 +70,61 @@ export function SymbolSearchView({ currentSymbol, onSelect, onDismiss }: SymbolS
     rowIndex.get(symbol) === activeIndex ? { background: 'rgba(46, 143, 255, 0.12)' } : undefined;
 
   return (
-    <Sheet detent="large" onDismiss={onDismiss}>
-      <div
-        style={{
-          background: 'var(--app-background)',
-          flex: 1,
-          minHeight: 0,
-          display: 'flex',
-          flexDirection: 'column',
-        }}
-      >
-        <NavBar
-          title="Symbol"
-          trailing={
-            <button className="navbar-text-button" onClick={onDismiss}>
-              Close
-            </button>
-          }
+    <div className="symbol-dropdown">
+      <div className="symbol-dropdown-search">
+        <MagnifierIcon size={14} style={{ color: 'var(--label-secondary)' }} />
+        <input
+          placeholder="Search"
+          aria-label="Search symbols"
+          autoComplete="off"
+          spellCheck={false}
+          style={{ flex: 1, textTransform: 'uppercase', minWidth: 0 }}
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          onKeyDown={onSearchKeyDown}
         />
-        <div style={{ padding: '4px 16px 8px' }}>
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 8,
-              height: 36,
-              padding: '0 12px',
-              background: 'var(--app-surface-elevated)',
-              borderRadius: 'var(--radius-input)',
-            }}
-          >
-            <MagnifierIcon size={14} style={{ color: 'var(--label-secondary)' }} />
-            <input
-              placeholder="Symbol"
-              aria-label="Search symbols"
-              autoComplete="off"
-              autoFocus
-              spellCheck={false}
-              style={{ flex: 1, textTransform: 'uppercase' }}
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              onKeyDown={onSearchKeyDown}
-            />
-          </div>
-        </div>
-
-        <div className="sheet-body grouped-list hide-scrollbar">
-          {showsCustomSymbol ? (
-            <div className="grouped-section">
-              <div className="section-card">
-                <button
-                  className="grouped-row"
-                  style={activeStyle(normalizedQuery)}
-                  onClick={() => select(normalizedQuery)}
-                >
-                  <TextCursorIcon size={15} style={{ color: 'var(--app-accent)' }} />
-                  <span>Use &quot;{normalizedQuery}&quot;</span>
-                </button>
-              </div>
-            </div>
-          ) : null}
-
-          {SYMBOL_SECTIONS.map((section) => {
-            const symbols = filtered(section.symbols);
-            if (symbols.length === 0) return null;
-            return (
-              <div className="grouped-section" key={section.title}>
-                <div className="section-header">{section.title}</div>
-                <div className="section-card">
-                  {symbols.map((symbol) => (
-                    <button
-                      className="grouped-row"
-                      key={symbol}
-                      style={activeStyle(symbol)}
-                      aria-current={symbol === currentSymbol ? 'true' : undefined}
-                      onClick={() => select(symbol)}
-                    >
-                      <span>{symbol}</span>
-                      {symbol === currentSymbol ? (
-                        <span
-                          className="row-value"
-                          aria-hidden="true"
-                          style={{
-                            color: 'var(--app-accent)',
-                            display: 'flex',
-                            alignItems: 'center',
-                          }}
-                        >
-                          <CheckmarkIcon size={17} />
-                        </span>
-                      ) : null}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            );
-          })}
-        </div>
       </div>
-    </Sheet>
+
+      <div className="symbol-dropdown-list">
+        {showsCustomSymbol ? (
+          <button
+            className="menu-item"
+            style={{ color: 'var(--app-accent)', ...activeStyle(normalizedQuery) }}
+            onClick={() => select(normalizedQuery)}
+          >
+            <span className="menu-item-label">
+              <TextCursorIcon size={13} />
+              Use &quot;{normalizedQuery}&quot;
+            </span>
+          </button>
+        ) : null}
+
+        {SYMBOL_SECTIONS.map((section) => {
+          const symbols = filtered(section.symbols);
+          if (symbols.length === 0) return null;
+          return (
+            <div key={section.title}>
+              <div className="symbol-dropdown-header">{section.title}</div>
+              {symbols.map((symbol) => (
+                <button
+                  className="menu-item"
+                  key={symbol}
+                  style={activeStyle(symbol)}
+                  aria-current={symbol === currentSymbol ? 'true' : undefined}
+                  onClick={() => select(symbol)}
+                >
+                  <span className="menu-item-label">{symbol}</span>
+                  {symbol === currentSymbol ? (
+                    <span className="menu-item-check" aria-hidden="true">
+                      <CheckmarkIcon size={13} />
+                    </span>
+                  ) : null}
+                </button>
+              ))}
+            </div>
+          );
+        })}
+      </div>
+    </div>
   );
 }

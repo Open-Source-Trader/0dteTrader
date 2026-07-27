@@ -3,3 +3,8 @@ node_modules/
 coverage/
 apps/ios/
 *.swift
+.claude/settings.local.json
+
+# Scratch repro specs (see .gitignore) — never formatted, never committed.
+**/zz-*.spec.ts
+**/__tmp*

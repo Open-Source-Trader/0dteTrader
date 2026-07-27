@@ -1,5 +1,5 @@
 import { useEffect, useMemo } from 'react';
-import type { ChartInterval, Position, TradingMode } from '@0dtetrader/shared-types';
+import type { ChartInterval, TradingMode } from '@0dtetrader/shared-types';
 import type { ApiClient } from '../../core/api/ApiClient';
 import { useStore } from '../../core/observable';
 import { Menu } from '../../design/components/Menu';
@@ -8,7 +8,7 @@ import { Format } from '../../design/format';
 import { ChevronDownIcon, SlidersIcon } from '../../design/icons';
 import type { ChartStore } from './ChartStore';
 import { CHART_INTERVALS, INTERVAL_HINTS } from './ChartStore';
-import { CandleChart, type OverlaySeries } from './CandleChart';
+import { CandleChart, type ChartTradingProps, type OverlaySeries } from './CandleChart';
 import { overlayPalette, panePalette } from './chartColors';
 import { DrawToolsMenu, DrawToolsRail } from './DrawingToolbar';
 import type { DrawingsStore } from './drawings';
@@ -26,21 +26,21 @@ interface ChartViewProps {
   store: ChartStore;
   drawingsStore: DrawingsStore;
   apiClient: ApiClient;
+  /** Opens the symbol-search sheet (compact header) or spotlight (desktop grid). */
   onSymbolSearch: () => void;
+  /** Opens the indicator settings sheet/panel. */
   onIndicatorSettings: () => void;
   tradingMode: TradingMode;
   onToggleMode: () => void;
+  /** Three clicks on the chart surface toggle the fullscreen/split layout. */
+  onToggleFullscreen: () => void;
   /** Trade-ticket expiration for the exact options snapshot; null pauses shadow capture. */
   optionsAnalyticsExpiration: string | null;
   /** Desktop-grid terminal chrome: persistent left drawing-tool rail instead
    *  of a header dropdown, decluttered header. Compact/phone layout omits
    *  this and keeps its existing single-row header untouched. */
   dense?: boolean;
-  /** Open positions whose contract's underlying is this chart's symbol —
-   *  caller resolves the filter (needs the loaded option chain). Desktop
-   *  grid only; draws an on-chart entry/P&L line with a close button. */
-  positionsForSymbol?: Position[];
-  onFlattenPosition?: (position: Position) => void;
+  /** Trading-lock flag; drives the rail's lock icon (desktop grid only). */
   positionsLocked?: boolean;
   /** Global app actions rendered at the bottom of the left drawing-tool
    *  rail (desktop grid only, when `dense`). Lock icon state reuses
@@ -48,6 +48,8 @@ interface ChartViewProps {
   onToggleLock?: () => void;
   onShowHistory?: () => void;
   onShowProfile?: () => void;
+  /** Order-line overlay inputs; null when chart trading is off. */
+  chartTrading: ChartTradingProps | null;
 }
 
 // Interval hotkeys. 'H'/'D' are uppercase (shift held) so they don't collide
@@ -77,14 +79,14 @@ export function ChartView({
   onIndicatorSettings,
   tradingMode,
   onToggleMode,
+  onToggleFullscreen,
   optionsAnalyticsExpiration,
   dense = false,
-  positionsForSymbol = [],
-  onFlattenPosition,
   positionsLocked = false,
   onToggleLock,
   onShowHistory,
   onShowProfile,
+  chartTrading,
 }: ChartViewProps) {
   const {
     symbol,
@@ -417,7 +419,18 @@ export function ChartView({
           className="hud-card hud-card--flat"
           style={{ flex: 1, minHeight: 100, margin: '3px 8px', padding: 0, display: 'flex' }}
         >
-          <div className="hud-clip" style={{ flex: 1, minHeight: 0, position: 'relative' }}>
+          <div
+            className="hud-clip"
+            style={{ flex: 1, minHeight: 0, position: 'relative' }}
+            onClick={(event) => {
+              // Three clicks toggle fullscreen — chrome that lives on this same
+              // surface (the reset button, the placement window) answers for
+              // its own clicks and is excluded here.
+              if (event.detail !== 3) return;
+              if ((event.target as Element).closest('button, [data-chart-placement]')) return;
+              onToggleFullscreen();
+            }}
+          >
             <CandleChart
               candles={candles}
               overlays={twcLineOverlays.length > 0 ? [...overlays, ...twcLineOverlays] : overlays}
@@ -430,11 +443,9 @@ export function ChartView({
               optionsAnalyticsSnapshot={optionsAnalyticsSnapshot}
               optionsAnalyticsSettings={optionsAnalytics.enabled ? optionsAnalytics : null}
               optionsAnalyticsRetained={optionsAnalyticsState.retained}
-              positionsForSymbol={positionsForSymbol}
-              onFlattenPosition={onFlattenPosition}
-              positionsLocked={positionsLocked}
               bid={dense ? (quote?.bid ?? null) : null}
               ask={dense ? (quote?.ask ?? null) : null}
+              chartTrading={chartTrading}
             />
             {twcModel?.banner ? <TwcBiasBanner banner={twcModel.banner} /> : null}
             {optionsAnalytics.enabled && optionsAnalyticsState.errorMessage ? (

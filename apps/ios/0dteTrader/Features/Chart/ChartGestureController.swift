@@ -208,6 +208,11 @@ final class ChartGestureController: NSObject, UIGestureRecognizerDelegate {
         _ gestureRecognizer: UIGestureRecognizer,
         shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
     ) -> Bool {
-        true
+        // The order-line overlay's drags are exclusive: UIKit allows
+        // simultaneous recognition when EITHER delegate agrees, so the overlay
+        // refusing is not enough — dragging a stop would pan the chart out from
+        // under it at the same time.
+        if otherGestureRecognizer.view is OrderLineOverlayView { return false }
+        return true
     }
 }

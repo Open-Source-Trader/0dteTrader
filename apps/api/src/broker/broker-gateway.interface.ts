@@ -24,7 +24,19 @@ export interface BrokerGateway {
   getCandles(userId: string, symbol: string, req: CandleRequest): Promise<Candle[]>;
   getOptionsChain(userId: string, symbol: string, expiration?: string): Promise<OptionsChain>;
   previewOrder(userId: string, order: OrderRequest): Promise<OrderPreview>;
-  placeOrder(userId: string, order: OrderRequest, idempotencyKey: string): Promise<OrderResult>;
+  /**
+   * `expectedMode` pins live vs practice for this one placement. Every gateway
+   * otherwise re-derives the mode from the database each time it builds a
+   * client, so a mode flip between the caller's check and the send would route
+   * the order to the other environment. Passing it makes the gateway refuse
+   * rather than silently re-decide.
+   */
+  placeOrder(
+    userId: string,
+    order: OrderRequest,
+    idempotencyKey: string,
+    expectedMode?: TradingMode,
+  ): Promise<OrderResult>;
   cancelOrder(userId: string, orderId: string): Promise<void>;
   getPositions(userId: string): Promise<Position[]>;
   getOpenOrders(userId: string): Promise<OrderResult[]>;

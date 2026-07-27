@@ -134,7 +134,7 @@ paths:
         - {
             name: provider,
             in: query,
-            schema: { type: string, enum: [webull, alpaca], default: webull },
+            schema: { type: string, enum: [webull, alpaca, tradier], default: webull },
           }
         - {
             name: environment,
@@ -326,6 +326,87 @@ paths:
                   { schema: { type: array, items: { $ref: '#/components/schemas/Position' } } },
               },
           }
+  /chart-orders:
+    get:
+      tags: [chart-trading]
+      security: [{ bearerAuth: [] }]
+      description: Working lines for the caller's current trading environment, plus recently terminal ones so a failed fire stays visible on the chart.
+      responses:
+        '200':
+          {
+            description: OK,
+            content:
+              {
+                application/json:
+                  { schema: { type: array, items: { $ref: '#/components/schemas/ChartOrder' } } },
+              },
+          }
+    post:
+      tags: [chart-trading]
+      security: [{ bearerAuth: [] }]
+      description: Arms a line. The contract is re-resolved from live chain data (a client strike is advisory) and `armPrice` is read from a live quote. Max 20 working lines per user.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ChartOrderDraft' }
+      responses:
+        '201':
+          {
+            description: Created,
+            content: { application/json: { schema: { $ref: '#/components/schemas/ChartOrder' } } },
+          }
+        '400':
+          {
+            description: Unknown strike,
+            settled expiration,
+            working-line cap reached,
+            or a trigger sitting exactly on the current price,
+          }
+        '403': { description: Trading disabled (kill switch) }
+  /chart-orders/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    patch:
+      tags: [chart-trading]
+      security: [{ bearerAuth: [] }]
+      description: Moves, resizes, or flips the execution type of a working line. Changing `triggerPrice` re-arms it from the live quote.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ChartOrderPatch' }
+      responses:
+        '200':
+          {
+            description: OK,
+            content: { application/json: { schema: { $ref: '#/components/schemas/ChartOrder' } } },
+          }
+        '404': { description: No such chart order }
+        '409': { description: CHART_ORDER_NOT_WORKING — the line already fired or was retired }
+    delete:
+      tags: [chart-trading]
+      security: [{ bearerAuth: [] }]
+      description: Cancels a working line. Nothing was ever sent to the broker.
+      responses:
+        '204': { description: Cancelled }
+        '404': { description: No such chart order }
+        '409': { description: CHART_ORDER_NOT_WORKING — the line already fired }
+  /chart-orders/{id}/trigger:
+    post:
+      tags: [chart-trading]
+      security: [{ bearerAuth: [] }]
+      description: The client saw the crossing on its own quote stream and does not want to wait for the watcher's next poll. Shares the deterministic idempotency key `chartorder:{id}` with the server-side watcher, so the two racing produces exactly one broker order.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          {
+            description: OK — the resulting state,
+            whichever way it went,
+            content: { application/json: { schema: { $ref: '#/components/schemas/ChartOrder' } } },
+          }
+        '404': { description: No such chart order }
 components:
   securitySchemes:
     bearerAuth: { type: http, scheme: bearer, bearerFormat: JWT }
@@ -376,6 +457,10 @@ components:
             description: 'Alpaca v2 is key-scoped: no account id is stored',
           }
         alpacaPracticeAccountId: { type: string, nullable: true }
+        tradierConfigured:
+          { type: boolean, nullable: true, description: Live Tradier market-data API key stored }
+        tradierPracticeConfigured:
+          { type: boolean, nullable: true, description: Sandbox Tradier market-data API key stored }
     WebullCredentialsInput:
       type: object
       required: [appKey, appSecret]
@@ -392,10 +477,10 @@ components:
       type: object
       required: [provider]
       properties:
-        provider: { type: string, enum: [webull, alpaca] }
+        provider: { type: string, enum: [webull, alpaca, tradier] }
         appKey: { type: string, description: Webull app key (provider=webull) }
         appSecret: { type: string, description: Webull app secret (provider=webull) }
-        apiKey: { type: string, description: Alpaca API key (provider=alpaca) }
+        apiKey: { type: string, description: API key (provider=alpaca or provider=tradier) }
         apiSecret: { type: string, description: Alpaca API secret (provider=alpaca) }
         environment: { type: string, enum: [live, practice], default: live }
     AlpacaCredentialsInput:
@@ -405,6 +490,13 @@ components:
         provider: { type: string, enum: [alpaca] }
         apiKey: { type: string }
         apiSecret: { type: string }
+        environment: { type: string, enum: [live, practice], default: live }
+    TradierCredentialsInput:
+      type: object
+      required: [provider, apiKey]
+      properties:
+        provider: { type: string, enum: [tradier] }
+        apiKey: { type: string, description: Tradier access token (single bearer token) }
         environment: { type: string, enum: [live, practice], default: live }
     Quote:
       type: object
@@ -508,6 +600,101 @@ components:
             description: Newest first,
           }
         totalRealizedPnl: { type: number }
+    ChartOrder:
+      type: object
+      description: A resting order line drawn on the candle chart. The broker never sees it — the level is watched against the UNDERLYING's price, and a crossing fires an ordinary mid/market option order through the normal order path.
+      required:
+        [
+          id,
+          underlying,
+          triggerPrice,
+          armPrice,
+          side,
+          quantity,
+          orderType,
+          kind,
+          optionType,
+          expiration,
+          strike,
+          contractSymbol,
+          ocoGroupId,
+          status,
+          createdAt,
+          expiresAt,
+          triggeredAt,
+          brokerOrderId,
+          lastError,
+        ]
+      properties:
+        id: { type: string, format: uuid }
+        underlying:
+          { type: string, description: Chart symbol whose price arms the trigger, not the contract }
+        triggerPrice: { type: number, description: Level on the underlying that fires the order }
+        armPrice:
+          {
+            type: number,
+            description: The underlying's price when the line was armed. Firing tests the segment armPrice → last,
+            so a gap or a watcher failover cannot step over a level unnoticed. Never equal to triggerPrice,
+          }
+        side: { type: string, enum: [buy, sell] }
+        quantity: { type: integer, minimum: 1, maximum: 1000 }
+        orderType: { type: string, enum: [mid, market] }
+        kind: { type: string, enum: [limit, target, stop] }
+        optionType: { type: string, enum: [call, put] }
+        expiration: { type: string, format: date }
+        strike: { type: number }
+        contractSymbol: { type: string }
+        ocoGroupId:
+          {
+            type: [string, 'null'],
+            format: uuid,
+            description: Shared by a position's target and stop; firing either retires the other,
+          }
+        status: { type: string, enum: [working, triggered, filled, cancelled, failed, expired] }
+        createdAt: { type: string, format: date-time }
+        expiresAt:
+          {
+            type: string,
+            format: date-time,
+            description: The contract's expiration close; past this the line expires unfilled,
+          }
+        triggeredAt: { type: [string, 'null'], format: date-time }
+        brokerOrderId: { type: [string, 'null'] }
+        lastError:
+          {
+            type: [string, 'null'],
+            description: Why the fire attempt failed,
+            so the line can show it,
+          }
+    ChartOrderDraft:
+      type: object
+      required:
+        [underlying, triggerPrice, side, quantity, orderType, kind, optionType, expiration, strike]
+      properties:
+        underlying: { type: string, pattern: '^[A-Za-z0-9.]{1,12}$' }
+        triggerPrice: { type: number, exclusiveMinimum: 0 }
+        side: { type: string, enum: [buy, sell] }
+        quantity: { type: integer, minimum: 1, maximum: 1000 }
+        orderType: { type: string, enum: [mid, market] }
+        kind: { type: string, enum: [limit, target, stop] }
+        optionType: { type: string, enum: [call, put] }
+        expiration: { type: string, format: date }
+        strike:
+          { type: number, exclusiveMinimum: 0, description: Advisory — the server re-resolves it }
+        ocoGroupId:
+          {
+            type: [string, 'null'],
+            format: uuid,
+            description: Set to bracket this line with an existing one (target ↔ stop),
+          }
+    ChartOrderPatch:
+      type: object
+      description: Every field optional; only `working` lines accept it.
+      properties:
+        triggerPrice:
+          { type: number, exclusiveMinimum: 0, description: Re-arms the line from the live quote }
+        quantity: { type: integer, minimum: 1, maximum: 1000 }
+        orderType: { type: string, enum: [mid, market] }
     Position:
       type: object
       properties:
@@ -521,6 +708,11 @@ components:
           {
             type: number,
             description: 'Contract multiplier (options: 100) for client-side live P/L',
+          }
+        underlyingEntryPrice:
+          {
+            type: number,
+            description: Quantity-weighted price of the UNDERLYING across the fills that opened this position — where the chart draws the entry line. Absent for positions opened before it was recorded or outside the app,
           }
     OptionsAnalyticsCoverage:
       type: object

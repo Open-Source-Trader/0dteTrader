@@ -2,14 +2,44 @@ import 'reflect-metadata';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import { WsAdapter } from '@nestjs/platform-ws';
+import { PrismaPg } from '@prisma/adapter-pg';
+import { PrismaClient } from '@prisma/client';
 import helmet from 'helmet';
-import { AppModule } from './app.module';
 import { AppLogger } from './common/app-logger';
+import { bootstrapSecrets } from './config/secret-bootstrap';
 import { setupOpenApi } from './openapi';
 
+/**
+ * Fill unset security env vars from (or into) the database before the config
+ * module's fail-fast validation runs. Skipped when DATABASE_URL is unset
+ * (unit-test contexts). Uses a throwaway client: the app's PrismaService does
+ * not exist until Nest constructs it, which is after env validation.
+ */
+async function bootstrapSecretsFromDb(logger: AppLogger): Promise<void> {
+  if (!process.env.DATABASE_URL) return;
+  const prisma = new PrismaClient({
+    adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL }),
+  });
+  try {
+    const generated = await bootstrapSecrets(prisma);
+    if (generated.length > 0) {
+      logger.log(`Generated and persisted fallback secrets: ${generated.join(', ')}`, 'Bootstrap');
+    }
+  } finally {
+    await prisma.$disconnect();
+  }
+}
+
 async function bootstrap(): Promise<void> {
+  const logger = new AppLogger();
+  await bootstrapSecretsFromDb(logger);
+
+  // app.module calls ConfigModule.forRoot() — and its fail-fast validateEnv —
+  // at module-evaluation time, so it must not be imported until the secret
+  // bootstrap has filled process.env.
+  const { AppModule } = await import('./app.module.js');
   const app = await NestFactory.create(AppModule, {
-    logger: new AppLogger(),
+    logger,
   });
 
   app.use(helmet());

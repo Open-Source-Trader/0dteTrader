@@ -69,8 +69,12 @@ describe('ChartView options analytics rendering', () => {
         apiClient: {} as ApiClient,
         onSymbolSearch: vi.fn(),
         onIndicatorSettings: vi.fn(),
+        onShowProfile: vi.fn(),
+        onShowHistory: vi.fn(),
         tradingMode: 'practice',
         onToggleMode: vi.fn(),
+        onToggleFullscreen: vi.fn(),
+        chartTrading: null,
         optionsAnalyticsExpiration: '2026-07-19',
       }),
     );

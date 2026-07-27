@@ -32,10 +32,7 @@ enum AppEnvironment {
     }
 
     var streamURL: URL {
-        var components = URLComponents(url: apiBaseURL, resolvingAgainstBaseURL: false)!
-        components.scheme = apiBaseURL.scheme == "https" ? "wss" : "ws"
-        components.path = "/v1/stream"
-        return components.url!
+        ServerConfigStore.streamURL(for: apiBaseURL)
     }
 
     // MARK: - Security

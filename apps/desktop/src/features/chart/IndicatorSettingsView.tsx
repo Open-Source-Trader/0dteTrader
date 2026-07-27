@@ -8,6 +8,8 @@ import { Format } from '../../design/format';
 import { ChevronDownIcon } from '../../design/icons';
 import type { IndicatorSettings } from './indicatorSettings';
 import { DEFAULT_INDICATOR_SETTINGS, enabledSubPanes, MAX_SUB_PANES } from './indicatorSettings';
+import type { ChartTradingSettings } from './chartTradingSettings';
+import { CHART_TRADING_QUANTITY_MAX, CHART_TRADING_QUANTITY_MIN } from './chartTradingSettings';
 import type { OptionsAnalyticsSettings } from './optionsAnalytics/optionsAnalyticsSettings';
 import { TwcSettingsBody } from './TwcSettingsView';
 import type { TwcHeatmapSettings } from './twc/twcSettings';
@@ -21,6 +23,8 @@ interface IndicatorSettingsViewProps {
   twcSettings: TwcHeatmapSettings;
   onChangeTwcSettings: (settings: TwcHeatmapSettings) => void;
   optionsAnalytics: OptionsAnalyticsSettings;
+  chartTrading: ChartTradingSettings;
+  onChangeChartTrading: (settings: ChartTradingSettings) => void;
   onChangeOptionsAnalytics: (settings: OptionsAnalyticsSettings) => void;
   /** Desktop grid: centered floating panel instead of an iOS bottom sheet. */
   dense?: boolean;
@@ -51,6 +55,8 @@ interface IndicatorSettingsBodyProps {
   twcSettings: TwcHeatmapSettings;
   onChangeTwcSettings: (settings: TwcHeatmapSettings) => void;
   optionsAnalytics: OptionsAnalyticsSettings;
+  chartTrading: ChartTradingSettings;
+  onChangeChartTrading: (settings: ChartTradingSettings) => void;
   onChangeOptionsAnalytics: (settings: OptionsAnalyticsSettings) => void;
 }
 
@@ -64,12 +70,16 @@ export function IndicatorSettingsBody({
   twcSettings,
   onChangeTwcSettings,
   optionsAnalytics,
+  chartTrading,
+  onChangeChartTrading,
   onChangeOptionsAnalytics,
 }: IndicatorSettingsBodyProps) {
   const [twcExpanded, setTwcExpanded] = useState(false);
   const patch = (partial: Partial<IndicatorSettings>) => onChange({ ...settings, ...partial });
   const patchOptionsAnalytics = (partial: Partial<OptionsAnalyticsSettings>) =>
     onChangeOptionsAnalytics({ ...optionsAnalytics, ...partial });
+  const patchChartTrading = (partial: Partial<ChartTradingSettings>) =>
+    onChangeChartTrading({ ...chartTrading, ...partial });
 
   // Sub-panes are capped: at the cap, toggles for the remaining panes are
   // disabled until one is turned off.
@@ -481,6 +491,54 @@ export function IndicatorSettingsBody({
       </div>
 
       <div className="grouped-section">
+        <div className="section-header">Chart Trading</div>
+        <div className="section-card">
+          <div className="grouped-row">
+            <span>
+              <SeriesDot color="var(--app-accent)" />
+              Order Lines
+            </span>
+            <span className="row-value">
+              <Toggle
+                on={chartTrading.enabled}
+                onChange={(on) => patchChartTrading({ enabled: on })}
+              />
+            </span>
+          </div>
+          {chartTrading.enabled ? (
+            <>
+              <div className="grouped-row param-row">
+                <span>Bracket from Entry Line</span>
+                <span className="row-value">
+                  <Toggle
+                    on={chartTrading.bracketDrag}
+                    onChange={(on) => patchChartTrading({ bracketDrag: on })}
+                  />
+                </span>
+              </div>
+              <div className="grouped-row param-row">
+                <span>Default Quantity: {chartTrading.defaultQuantity}</span>
+                <span className="row-value">
+                  <Stepper
+                    value={chartTrading.defaultQuantity}
+                    min={CHART_TRADING_QUANTITY_MIN}
+                    max={CHART_TRADING_QUANTITY_MAX}
+                    onChange={(value) => patchChartTrading({ defaultQuantity: value })}
+                  />
+                </span>
+              </div>
+              <div className="grouped-row param-row">
+                <span className="row-note">
+                  Order lines are watched by 0dteTrader, not resting at the broker. A crossed level
+                  fires a mid or market order — flip MID/MKT on the line itself.
+                </span>
+              </div>
+            </>
+          ) : null}
+        </div>
+      </div>
+
+      <div className="grouped-section">
         <div className="section-card">
           <button
             className="grouped-row button-row"
@@ -506,6 +564,8 @@ export function IndicatorSettingsView({
   twcSettings,
   onChangeTwcSettings,
   optionsAnalytics,
+  chartTrading,
+  onChangeChartTrading,
   onChangeOptionsAnalytics,
   dense = false,
 }: IndicatorSettingsViewProps) {
@@ -536,6 +596,8 @@ export function IndicatorSettingsView({
           twcSettings={twcSettings}
           onChangeTwcSettings={onChangeTwcSettings}
           optionsAnalytics={optionsAnalytics}
+          chartTrading={chartTrading}
+          onChangeChartTrading={onChangeChartTrading}
           onChangeOptionsAnalytics={onChangeOptionsAnalytics}
         />
       </div>

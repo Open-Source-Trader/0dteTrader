@@ -19,6 +19,8 @@ struct FloatingTradeButtons: View {
                 }
             }
             .padding(.horizontal, AppSpacing.xl)
+            // The box the order confirmation opens out of.
+            .tradeActionsAnchorSource()
 
             if !isEnabled {
                 Text("Select a contract in split view to trade")

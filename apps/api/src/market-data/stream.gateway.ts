@@ -4,9 +4,13 @@ import { JwtService } from '@nestjs/jwt';
 import { OnGatewayConnection, OnGatewayDisconnect, WebSocketGateway } from '@nestjs/websockets';
 import { IncomingMessage } from 'node:http';
 import { WebSocket } from 'ws';
-import { StreamServerMessage } from '@0dtetrader/shared-types';
+import { Quote, StreamServerMessage } from '@0dtetrader/shared-types';
 import { BROKER_GATEWAY, BrokerGateway } from '../broker/broker-gateway.interface';
 import { OrderEventsService, OrderUpdateEvent } from '../broker/order-events.service';
+import {
+  ChartOrderEventsService,
+  ChartOrderUpdateEvent,
+} from '../chart-orders/chart-order-events.service';
 import { Subscription } from 'rxjs';
 import { CryptoDataService } from './crypto-data.service';
 import { IndexDataService } from './index-data.service';
@@ -46,6 +50,7 @@ export class StreamGateway implements OnGatewayConnection, OnGatewayDisconnect, 
   /** Last logged quote-tick warning per key — identical failures log once. */
   private readonly tickWarnings = new Map<string, string>();
   private readonly orderEventsSub: Subscription;
+  private readonly chartOrderEventsSub: Subscription;
 
   constructor(
     @Inject(BROKER_GATEWAY) private readonly broker: BrokerGateway,
@@ -54,12 +59,17 @@ export class StreamGateway implements OnGatewayConnection, OnGatewayDisconnect, 
     private readonly jwt: JwtService,
     private readonly config: ConfigService,
     orderEvents: OrderEventsService,
+    chartOrderEvents: ChartOrderEventsService,
   ) {
     this.orderEventsSub = orderEvents.events$.subscribe((event) => this.pushOrderUpdate(event));
+    this.chartOrderEventsSub = chartOrderEvents.events$.subscribe((event) =>
+      this.pushChartOrderUpdate(event),
+    );
   }
 
   onModuleDestroy(): void {
     this.orderEventsSub.unsubscribe();
+    this.chartOrderEventsSub.unsubscribe();
     for (const timer of this.timers.values()) clearInterval(timer);
     this.timers.clear();
   }
@@ -211,40 +221,19 @@ export class StreamGateway implements OnGatewayConnection, OnGatewayDisconnect, 
         return;
       }
 
-      // Index quotes (Tradier) are likewise user-independent.
+      // Index quotes (Tradier) are fetched per user like broker quotes: a
+      // user with a stored Tradier key streams from the same client their
+      // REST candles come from, so the chart never mixes two feeds. Users
+      // sharing a client scope collapse to one Tradier call via
+      // IndexDataService's scope-keyed quote cache.
       if (this.index.isIndexSymbol(symbol)) {
-        try {
-          this.broadcast(set, { type: 'quote', data: await this.index.getQuote(symbol) });
-          this.tickWarnings.delete(symbol);
-        } catch (err) {
-          this.warnTickOnce(symbol, `quote tick failed for ${symbol}: ${(err as Error).message}`);
-        }
+        await this.fanOutPerUser(set, symbol, (userId) => this.index.getQuote(symbol, userId));
         return;
       }
 
       // Broker quotes are fetched per user: gateways use per-user credentials,
       // so one subscriber's quote must never be served under another's account.
-      const byUser = new Map<string, WebSocket[]>();
-      for (const client of set) {
-        const state = this.clients.get(client);
-        if (!state) continue;
-        const list = byUser.get(state.userId);
-        if (list) list.push(client);
-        else byUser.set(state.userId, [client]);
-      }
-      for (const [userId, clients] of byUser) {
-        const key = `${userId}:${symbol}`;
-        try {
-          const quote = await this.broker.getQuote(userId, symbol);
-          for (const client of clients) this.send(client, { type: 'quote', data: quote });
-          this.tickWarnings.delete(key);
-        } catch (err) {
-          this.warnTickOnce(
-            key,
-            `quote tick failed for ${symbol} (user ${userId}): ${(err as Error).message}`,
-          );
-        }
-      }
+      await this.fanOutPerUser(set, symbol, (userId) => this.broker.getQuote(userId, symbol));
     } finally {
       this.inFlightTicks.delete(symbol);
     }
@@ -252,6 +241,38 @@ export class StreamGateway implements OnGatewayConnection, OnGatewayDisconnect, 
 
   /** Logs a quote-tick warning only when it differs from the last one logged
    *  for the same key — a persistent failure logs once, not every second. */
+  /** Group a symbol's subscribers by user, fetch once per user (per-scope
+   *  caches downstream dedupe same-credential users), and fan the quote out
+   *  to each user's sockets. Failures are per-user so one broken credential
+   *  never blanks the tick for everyone else. */
+  private async fanOutPerUser(
+    set: Set<WebSocket>,
+    symbol: string,
+    fetchQuote: (userId: string) => Promise<Quote>,
+  ): Promise<void> {
+    const byUser = new Map<string, WebSocket[]>();
+    for (const client of set) {
+      const state = this.clients.get(client);
+      if (!state) continue;
+      const list = byUser.get(state.userId);
+      if (list) list.push(client);
+      else byUser.set(state.userId, [client]);
+    }
+    for (const [userId, clients] of byUser) {
+      const key = `${userId}:${symbol}`;
+      try {
+        const quote = await fetchQuote(userId);
+        for (const client of clients) this.send(client, { type: 'quote', data: quote });
+        this.tickWarnings.delete(key);
+      } catch (err) {
+        this.warnTickOnce(
+          key,
+          `quote tick failed for ${symbol} (user ${userId}): ${(err as Error).message}`,
+        );
+      }
+    }
+  }
+
   private warnTickOnce(key: string, message: string): void {
     if (this.tickWarnings.get(key) === message) return;
     this.tickWarnings.set(key, message);
@@ -262,6 +283,16 @@ export class StreamGateway implements OnGatewayConnection, OnGatewayDisconnect, 
     for (const [client, state] of this.clients) {
       if (state.userId === event.userId) {
         this.send(client, { type: 'orderUpdate', data: event.order });
+      }
+    }
+  }
+
+  /** The server-side watcher fired, failed, or retired one of the user's chart
+   *  order lines — the chart must reflect it without waiting for a poll. */
+  private pushChartOrderUpdate(event: ChartOrderUpdateEvent): void {
+    for (const [client, state] of this.clients) {
+      if (state.userId === event.userId) {
+        this.send(client, { type: 'chartOrder', data: event.order });
       }
     }
   }

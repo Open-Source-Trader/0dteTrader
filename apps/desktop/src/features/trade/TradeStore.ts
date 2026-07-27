@@ -12,6 +12,7 @@ import type {
 import type { ApiClient } from '../../core/api/ApiClient';
 import { errorMessage } from '../../core/api/ApiError';
 import { orderStatusDisplayName, sideDisplayName } from '../../core/models/domain';
+import { roundToTick } from '../../core/models/priceInput';
 import { Store } from '../../core/observable';
 import { Format } from '../../design/format';
 import type { ChainStore } from './ChainStore';
@@ -41,6 +42,14 @@ export interface ArmedOrderTicket {
 interface TradeStoreState {
   quantity: number;
   orderType: OrderType;
+  /**
+   * The price a `custom` order works at, or null while none has been entered.
+   *
+   * Held here rather than in the field so the confirm sheet and the arm guard
+   * read the same settled number, and so it can be cleared from outside when
+   * the contract it was typed for changes — see `clearCustomLimitPrice`.
+   */
+  customLimitPrice: number | null;
 
   positions: Position[];
   openOrders: OrderResult[];
@@ -88,6 +97,7 @@ export class TradeStore extends Store<TradeStoreState> {
     super({
       quantity: 1,
       orderType: 'mid',
+      customLimitPrice: null,
       positions: [],
       openOrders: [],
       workingSymbols: [],
@@ -102,6 +112,36 @@ export class TradeStore extends Store<TradeStoreState> {
 
   setOrderType(orderType: OrderType): void {
     this.set({ orderType });
+  }
+
+  /** The settled custom limit, or null while the field does not name a price. */
+  setCustomLimitPrice(price: number | null): void {
+    this.set({ customLimitPrice: price === null ? null : roundToTick(price) });
+  }
+
+  /**
+   * Drops a custom price and the selection that would send it, called when the
+   * contract underneath changes.
+   *
+   * A premium is only meaningful for the contract it was typed against — 2.45
+   * is near the money on one strike and ten times the ask on the next — so
+   * carrying it silently onto a different contract is the one way this feature
+   * could fill an order nobody meant. Falling back to `mid` rather than merely
+   * blanking the field also moves the highlight, so the change is visible.
+   */
+  clearCustomLimitPrice(): void {
+    const { customLimitPrice, orderType } = this.getState();
+    if (customLimitPrice === null && orderType !== 'custom') return;
+    this.set({
+      customLimitPrice: null,
+      orderType: orderType === 'custom' ? 'mid' : orderType,
+    });
+  }
+
+  /** Whether the current pricing selection is complete enough to arm. */
+  get canArm(): boolean {
+    const { orderType, customLimitPrice } = this.getState();
+    return orderType !== 'custom' || customLimitPrice !== null;
   }
 
   // MARK: - Quantity
@@ -156,12 +196,63 @@ export class TradeStore extends Store<TradeStoreState> {
     chainStore: ChainStore,
     bypassConfirmation = false,
   ): void {
-    const { quantity, orderType } = this.getState();
+    const { quantity, orderType, customLimitPrice } = this.getState();
+    // Sent only for `custom`; the server rejects it alongside any other
+    // variant, because those four are priced from its own quote.
+    const limitPrice = orderType === 'custom' ? (customLimitPrice ?? undefined) : undefined;
+    if (orderType === 'custom' && limitPrice === undefined) {
+      this.showToast('Enter a limit price first.', 'error');
+      return;
+    }
     let selection: OrderSelection;
     let summary: string;
 
     const chainState = chainStore.getState();
     const optionType = chainState.optionType;
+
+    // Selling the contract you are already long closes (part of) that position
+    // rather than opening a short. The ticket quantity is honored but capped at
+    // the position size — the cap is what stops a large ticket from flipping
+    // through zero into a short nobody asked for, while a smaller ticket still
+    // scales out partially. The summary says exactly what will happen.
+    const selected = chainStore.selectedContract;
+    const held =
+      side === 'sell' && selected
+        ? this.getState().positions.find((p) => p.symbol === selected.symbol && p.quantity > 0)
+        : undefined;
+    if (selected && held) {
+      const closeQuantity = Math.min(quantity, held.quantity);
+      const shortName = selected.optionType === 'call' ? 'C' : 'P';
+      const sizeLabel =
+        closeQuantity < held.quantity ? `${closeQuantity} of ${held.quantity}` : `${closeQuantity}`;
+      this.set({
+        armedTicket: {
+          id: nextId++,
+          request: {
+            underlying,
+            assetClass: 'option',
+            side,
+            quantity: closeQuantity,
+            orderType,
+            limitPrice,
+            selection: {
+              mode: 'explicit',
+              optionType: selected.optionType,
+              expiration: selected.expiration,
+              strike: selected.strike,
+            },
+          },
+          idempotencyKey: newIdempotencyKey(),
+          side,
+          summary: `CLOSE ${sizeLabel} · ${underlying} ${Format.strike(selected.strike)}${shortName}`,
+        },
+        preview: null,
+        previewError: null,
+      });
+      void this.loadPreview();
+      return;
+    }
+
     if (chainState.isAutoMode) {
       selection = {
         mode: 'auto_otm',
@@ -189,6 +280,7 @@ export class TradeStore extends Store<TradeStoreState> {
       side,
       quantity,
       orderType,
+      limitPrice,
       selection,
     };
     const idempotencyKey = newIdempotencyKey();

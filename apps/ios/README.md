@@ -28,10 +28,15 @@ then register an account (e.g. `dev@example.com` / `password123`).
 Run the unit tests:
 
 ```bash
-xcodebuild test -scheme 0dteTrader -destination 'platform=iOS Simulator,name=iPhone 16'
+xcodebuild test -scheme 0dteTrader -destination "platform=iOS Simulator,id=$(xcrun simctl list devices available -j | python3 -c 'import json,sys;print(next(d["udid"] for v in json.load(sys.stdin)["devices"].values() for d in v))')"
 ```
 
 (or Cmd+U in Xcode.)
+
+Tests need a real simulator, so the destination is resolved from whatever is
+installed rather than hard-coded. A pinned name like `name=iPhone 16` is
+matched against `OS:latest` and fails when that model exists only on an older
+runtime — `xcrun simctl list devices available` shows what you actually have.
 
 ## Linting
 
@@ -93,7 +98,7 @@ Follows docs/ARCHITECTURE.md §4:
     Chart/              ChartView, ChartViewModel, CandleChartRepresentable, IndicatorPaneRepresentable,
                         IndicatorEngine (pure functions), IndicatorSettingsView, SymbolSearchView,
                         Twc/ (TWC Heatmap V5 indicator), OptionsAnalytics/ (Options Structure snapshot overlay)
-    Trade/              TradeScreenView (Layout A/B + drag divider), TradePanelView, OrderConfirmSheet,
+    Trade/              TradeScreenView (Layout A/B + drag divider), TradePanelView, OrderConfirmPopup,
                         PositionsStripView, TradeViewModel, OptionsChainViewModel, AutoContractSelector,
                         PriceMath, FloatingTradeButtons, ToastView
 0dteTraderTests/        IndicatorEngine, AutoContractSelector, mid-price, DTO decoding, Options Structure contract/presentation tests

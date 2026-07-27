@@ -182,7 +182,7 @@ struct AIAnalysisSheet: View {
 
     private func buildSnapshot() -> AIAnalysisSnapshot {
         var indicators = AIAnalysisSnapshot.Indicators()
-        indicators.overlays = chartViewModel.priceOverlays.map {
+        indicators.overlays = AIAnalysisSheet.cappedPriceOverlays(chartViewModel.priceOverlays).map {
             .init(name: $0.name, values: $0.values)
         }
         indicators.rsi = chartViewModel.rsiSeries?.values
@@ -218,6 +218,10 @@ struct AIAnalysisSheet: View {
                 )
             }
         )
+    }
+
+    static func cappedPriceOverlays(_ overlays: [IndicatorSeries]) -> [IndicatorSeries] {
+        Array(overlays.prefix(3))
     }
 
     private func runAnalysis() async {

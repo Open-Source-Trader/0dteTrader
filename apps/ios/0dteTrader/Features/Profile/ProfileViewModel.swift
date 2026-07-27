@@ -112,7 +112,7 @@ final class ProfileViewModel: ObservableObject {
 
     func saveWebull(environment: TradingMode, appKey: String, appSecret: String) async {
         guard !savingWebull.contains(environment),
-              !appKey.trimmingCharacters(in: .whitespaces).isEmpty,
+              !appKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               !appSecret.isEmpty else { return }
         savingWebull.insert(environment)
         errorMessage = nil
@@ -125,7 +125,7 @@ final class ProfileViewModel: ObservableObject {
             // Webull's account/list once the token is approved.
             try await apiClient.putWebullCredentials(
                 WebullCredentialsInputDTO(
-                    appKey: appKey.trimmingCharacters(in: .whitespaces),
+                    appKey: appKey.trimmingCharacters(in: .whitespacesAndNewlines),
                     appSecret: appSecret,
                     environment: environment
                 )
@@ -212,7 +212,7 @@ final class ProfileViewModel: ObservableObject {
 
     func saveAlpaca(environment: TradingMode, apiKey: String, apiSecret: String) async {
         guard !savingAlpaca.contains(environment),
-              !apiKey.trimmingCharacters(in: .whitespaces).isEmpty,
+              !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               !apiSecret.isEmpty else { return }
         savingAlpaca.insert(environment)
         errorMessage = nil
@@ -223,7 +223,7 @@ final class ProfileViewModel: ObservableObject {
         do {
             try await apiClient.putAlpacaCredentials(
                 AlpacaCredentialsInputDTO(
-                    apiKey: apiKey.trimmingCharacters(in: .whitespaces),
+                    apiKey: apiKey.trimmingCharacters(in: .whitespacesAndNewlines),
                     apiSecret: apiSecret,
                     environment: environment
                 )
@@ -274,7 +274,7 @@ final class ProfileViewModel: ObservableObject {
 
     func saveTradier(environment: TradingMode, apiKey: String) async {
         guard !savingTradier.contains(environment),
-              !apiKey.trimmingCharacters(in: .whitespaces).isEmpty else { return }
+              !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         savingTradier.insert(environment)
         errorMessage = nil
         successMessage = nil
@@ -284,7 +284,7 @@ final class ProfileViewModel: ObservableObject {
         do {
             try await apiClient.putTradierCredentials(
                 TradierCredentialsInputDTO(
-                    apiKey: apiKey.trimmingCharacters(in: .whitespaces),
+                    apiKey: apiKey.trimmingCharacters(in: .whitespacesAndNewlines),
                     environment: environment
                 )
             )

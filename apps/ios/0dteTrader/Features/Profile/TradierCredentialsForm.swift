@@ -11,7 +11,7 @@ struct TradierCredentialsForm: View {
     @FocusState private var focused: Bool
 
     private var canSave: Bool {
-        !apiKey.trimmingCharacters(in: .whitespaces).isEmpty
+        !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
     private var isSaving: Bool {
         viewModel.savingTradier.contains(environment)

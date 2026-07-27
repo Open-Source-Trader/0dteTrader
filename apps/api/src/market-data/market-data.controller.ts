@@ -17,7 +17,7 @@ export class MarketDataController {
   ) {}
 
   @Get('quote')
-  getQuote(@CurrentUser() _user: AuthenticatedUser, @Query() query: QuoteQueryDto): Promise<Quote> {
+  getQuote(@CurrentUser() user: AuthenticatedUser, @Query() query: QuoteQueryDto): Promise<Quote> {
     if (this.crypto.isCryptoSymbol(query.symbol)) {
       return this.crypto.getQuote(query.symbol);
     }
@@ -33,7 +33,7 @@ export class MarketDataController {
 
   @Get('candles')
   getCandles(
-    @CurrentUser() _user: AuthenticatedUser,
+    @CurrentUser() user: AuthenticatedUser,
     @Query() query: CandlesQueryDto,
   ): Promise<Candle[]> {
     if (this.crypto.isCryptoSymbol(query.symbol)) {

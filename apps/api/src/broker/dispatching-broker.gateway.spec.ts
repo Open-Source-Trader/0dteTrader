@@ -76,7 +76,7 @@ describe('DispatchingBrokerGateway', () => {
     expect(snaptrade.getQuote).toHaveBeenCalledWith('u1', 'SPY');
     expect(snaptrade.getCandles).toHaveBeenCalledWith('u1', 'SPY', { interval: '1m' });
     expect(snaptrade.getOptionsChain).toHaveBeenCalledWith('u1', 'SPY', undefined);
-    expect(snaptrade.placeOrder).toHaveBeenCalledWith('u1', {} as never, 'key');
+    expect(snaptrade.placeOrder).toHaveBeenCalledWith('u1', {} as never, 'key', undefined);
     expect(webull.getQuote).not.toHaveBeenCalled();
     expect(alpaca.getQuote).not.toHaveBeenCalled();
   });

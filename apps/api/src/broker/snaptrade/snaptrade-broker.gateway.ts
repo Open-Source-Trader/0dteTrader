@@ -131,6 +131,10 @@ export class SnapTradeBrokerGateway implements BrokerGateway {
         contractSymbol: this.occSymbol(order),
         price: limitPrice ?? 0,
         estBuyingPower: Math.round(impact.estBuyingPower * 100) / 100,
+        // SnapTrade's preview endpoint returns an impact cost, not a quote —
+        // there is no live bid/ask to report here (see estimatedMid above).
+        bid: limitPrice ?? 0,
+        ask: limitPrice ?? 0,
       },
       warnings: impact.warnings,
     };
@@ -140,8 +144,16 @@ export class SnapTradeBrokerGateway implements BrokerGateway {
     userId: string,
     order: OrderRequest,
     idempotencyKey: string,
+    expectedMode?: TradingMode,
   ): Promise<OrderResult> {
     const { mode, clientId, consumerKey, accountId } = await this.credentialsFor(userId);
+    // See the Webull gateway: the mode read here selects paper vs live, so it
+    // must agree with the one the caller validated against.
+    if (expectedMode && mode !== expectedMode) {
+      throw brokerErrors.orderRejected(
+        `Account switched to ${mode} while this ${expectedMode} order was being placed — nothing was sent`,
+      );
+    }
     const limitPrice = order.orderType === 'market' ? undefined : this.estimatedMid(order);
 
     if (order.assetClass === 'option') {

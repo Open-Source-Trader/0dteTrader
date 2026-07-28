@@ -1,6 +1,7 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { Prisma, type User } from '@prisma/client';
 import {
+  OptionContract,
   OrderPreview,
   OrderRequest,
   OrderResult,
@@ -83,6 +84,7 @@ export class TradingService {
         request: normalized,
         underlyingPrice,
         contractSymbol,
+        contract,
       } = await this.resolveAndValidate(userId, dto);
       const { order: capped, heldQuantity } = await this.capToPosition(
         userId,
@@ -95,6 +97,7 @@ export class TradingService {
         idempotencyKey,
         mode,
         heldQuantity,
+        contract,
       );
       // The broker has accepted. Nothing from here may throw: the catch below
       // deletes the idempotency claim so the caller can retry, which after a
@@ -268,6 +271,10 @@ export class TradingService {
     request: OrderRequest;
     underlyingPrice: number | undefined;
     contractSymbol: string;
+    /** The contract this chain fetch already resolved — handed to the
+     *  gateway so it need not re-resolve (re-fetch a chain/quote) seconds
+     *  later for the same symbol. */
+    contract: OptionContract;
   }> {
     const { selection } = dto;
 
@@ -293,6 +300,7 @@ export class TradingService {
         // The quote that chose the strike is the honest anchor for this fill.
         underlyingPrice: usablePrice(quote.last) ?? usablePrice(chain.underlyingPrice),
         contractSymbol: contract.symbol,
+        contract,
       };
     }
 
@@ -318,6 +326,7 @@ export class TradingService {
       },
       underlyingPrice: usablePrice(chain.underlyingPrice),
       contractSymbol: contract.symbol,
+      contract,
     };
   }
 

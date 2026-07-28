@@ -1,6 +1,7 @@
 import {
   Candle,
   CandleRequest,
+  OptionContract,
   OptionsChain,
   OrderPreview,
   OrderRequest,
@@ -13,6 +14,15 @@ import {
 
 /** Injection token for the BrokerGateway (Webull OpenAPI). */
 export const BROKER_GATEWAY = 'BROKER_GATEWAY';
+
+/**
+ * The contract `TradingService.resolveAndValidate` already resolved from a
+ * live chain fetch, handed to `placeOrder` so a gateway that resolves
+ * contracts via its own chain/quote call (Webull) can skip repeating that
+ * work seconds later for the same symbol. Optional: gateways that resolve
+ * differently (or not at all) are free to ignore it.
+ */
+export type ResolvedContractHint = OptionContract;
 
 /**
  * The key seam (docs/ARCHITECTURE.md §2). All iOS-facing endpoints depend only
@@ -35,6 +45,11 @@ export interface BrokerGateway {
    * caller has just read it (`TradingService.capToPosition` always has):
    * lets the gateway skip its own positions fetch when deciding open vs close
    * intent. Omitted, the gateway looks it up itself.
+   *
+   * `resolvedContract` is the contract `TradingService.resolveAndValidate`
+   * already resolved from a live chain fetch moments earlier. A gateway that
+   * would otherwise re-resolve via its own chain/quote call may reuse it
+   * instead. Omitted, the gateway resolves it itself.
    */
   placeOrder(
     userId: string,
@@ -42,6 +57,7 @@ export interface BrokerGateway {
     idempotencyKey: string,
     expectedMode?: TradingMode,
     heldQuantity?: number,
+    resolvedContract?: ResolvedContractHint,
   ): Promise<OrderResult>;
   cancelOrder(userId: string, orderId: string): Promise<void>;
   getPositions(userId: string): Promise<Position[]>;

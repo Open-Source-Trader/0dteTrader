@@ -8,6 +8,7 @@ import type { SettingsStore } from '../../core/storage/SettingsStore';
 import {
   loadTickState,
   saveTickState,
+  type StoredTickState,
   type TickAccumulatorState,
 } from '../../core/storage/tickStorage';
 import type { IndicatorSettings } from './indicatorSettings';
@@ -152,6 +153,11 @@ export function chartChromeSlice(state: ChartStoreState) {
 /** Upper bound on rendered candles so live appends stay cheap. */
 const MAX_CANDLES = 600;
 
+/** Tick-state persistence debounce: coalesces bursty in-progress-candle
+ *  writes without risking more than this much accumulator state on an
+ *  unclean exit. */
+const TICK_SAVE_DEBOUNCE_MS = 2_000;
+
 /**
  * Owns the chart (ChartViewModel.swift analog): candle history via REST, live
  * quotes via the socket, symbol/interval switching, indicator settings.
@@ -168,6 +174,18 @@ export class ChartStore extends Store<ChartStoreState> {
    *  expensive work that has no reason to run more than once per paint. */
   private pendingCandlePatch: Partial<ChartStoreState> | null = null;
   private candleFlushHandle: number | null = null;
+  /** Debounces tick-state persistence: `handleTickQuote` fires up to once a
+   *  second, and each save opens an IndexedDB connection and serializes up
+   *  to 600 candles — no reason to pay that on every quote when only the
+   *  in-progress accumulator changed. A completed candle (the write that
+   *  actually matters for "resume where the chart left off") flushes
+   *  immediately instead of waiting out the debounce. */
+  private tickSaveTimer: ReturnType<typeof setTimeout> | null = null;
+  private pendingTickSave: {
+    symbol: string;
+    interval: TickInterval;
+    state: StoredTickState;
+  } | null = null;
 
   constructor(
     private readonly apiClient: ApiClient,
@@ -211,6 +229,11 @@ export class ChartStore extends Store<ChartStoreState> {
   async loadCandles(): Promise<void> {
     const generation = ++this.loadGeneration;
     this.cancelPendingCandlePatch();
+    // A debounced tick-state save for the chart being left behind must not
+    // be silently dropped — it's still the most recent accumulator state
+    // for that symbol/interval, and the debounce only exists to reduce
+    // write frequency, not to discard writes.
+    this.flushTickSave();
     const { symbol, interval } = this.getState();
 
     if (isTickInterval(interval)) {
@@ -326,6 +349,28 @@ export class ChartStore extends Store<ChartStoreState> {
     this.pendingCandlePatch = null;
   }
 
+  /** Debounces `saveTickState`: replaces whatever write was pending (only
+   *  the latest state is worth persisting) and restarts the timer, so a
+   *  burst of same-second quotes collapses into one IndexedDB write. */
+  private scheduleTickSave(symbol: string, interval: TickInterval, state: StoredTickState): void {
+    this.pendingTickSave = { symbol, interval, state };
+    if (this.tickSaveTimer !== null) clearTimeout(this.tickSaveTimer);
+    this.tickSaveTimer = setTimeout(() => this.flushTickSave(), TICK_SAVE_DEBOUNCE_MS);
+  }
+
+  /** Writes the pending tick-state save now, bypassing the debounce — used
+   *  when a candle just completed (the write that actually matters) and
+   *  when switching away from a tick-interval chart. */
+  private flushTickSave(): void {
+    if (this.tickSaveTimer !== null) {
+      clearTimeout(this.tickSaveTimer);
+      this.tickSaveTimer = null;
+    }
+    const pending = this.pendingTickSave;
+    this.pendingTickSave = null;
+    if (pending) void saveTickState(pending.symbol, pending.interval, pending.state);
+  }
+
   private handleLiveQuote(quote: Quote): void {
     const { symbol, interval } = this.getState();
     if (quote.symbol !== symbol) return;
@@ -417,11 +462,18 @@ export class ChartStore extends Store<ChartStoreState> {
       }
       this.tickAccumulator = null;
       this.setCandlePatch({ candles: next, tickProgress: { count: 0, size } });
+      // A completed candle is the write that actually matters for "resume
+      // where the chart left off" — flush immediately rather than waiting
+      // out the debounce below, which exists only for the in-progress
+      // accumulator churning on every quote.
+      this.scheduleTickSave(symbol, interval, { candles: next, accumulator: this.tickAccumulator });
+      this.flushTickSave();
     } else {
       this.set({ tickProgress: { count: this.tickAccumulator.count, size } });
+      // In-progress accumulator only: debounced, so a burst of same-second
+      // quotes doesn't open an IndexedDB connection and serialize up to 600
+      // candles on every one of them.
+      this.scheduleTickSave(symbol, interval, { candles: next, accumulator: this.tickAccumulator });
     }
-    // Persist candles and the in-progress accumulator on every quote (≤1/sec)
-    // so a restart resumes the partial candle instead of losing it.
-    void saveTickState(symbol, interval, { candles: next, accumulator: this.tickAccumulator });
   }
 }

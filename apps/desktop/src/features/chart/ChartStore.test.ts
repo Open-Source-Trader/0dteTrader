@@ -190,7 +190,8 @@ describe('tick charts', () => {
     expect(state.candles).toHaveLength(2);
     expect(state.candles.at(-1)!.close).toBe(502);
     expect(state.tickProgress).toEqual({ count: 0, size: 10 });
-    // Every quote persists the state so a restart resumes mid-candle.
+    // A completed candle flushes its save immediately (bypassing the
+    // debounce) so a restart resumes with the freshly reset accumulator.
     expect(saveTickState).toHaveBeenCalledWith(
       'SPY',
       '10t',
@@ -213,6 +214,63 @@ describe('tick charts', () => {
     expect(candles).toHaveLength(2);
     // Strictly ascending: the collision with the seed candle is bumped by 1s.
     expect(candles.at(-1)!.time).toBe(seedTime + 1);
+  });
+
+  it('debounces an in-progress accumulator save instead of writing every quote', async () => {
+    (loadTickState as Mock).mockResolvedValueOnce({ candles: [], accumulator: null });
+    vi.useFakeTimers();
+    try {
+      const store = makeStore();
+      (store as unknown as { set(patch: object): void }).set({ interval: '10t', candles: [] });
+      await store.loadCandles();
+      const callsBefore = (saveTickState as Mock).mock.calls.length;
+
+      // Three ticks in quick succession, none completing the (size 10)
+      // candle — each should restart the debounce, not write immediately.
+      liveQuote(store, quote('2026-07-17T14:30:01Z', 501));
+      liveQuote(store, quote('2026-07-17T14:30:02Z', 502));
+      liveQuote(store, quote('2026-07-17T14:30:03Z', 503));
+      expect((saveTickState as Mock).mock.calls.length).toBe(callsBefore);
+
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect((saveTickState as Mock).mock.calls.length).toBe(callsBefore + 1);
+      expect(saveTickState).toHaveBeenLastCalledWith(
+        'SPY',
+        '10t',
+        expect.objectContaining({ accumulator: expect.objectContaining({ count: 3, close: 503 }) }),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('flushes a pending tick save immediately when switching symbols', async () => {
+    (loadTickState as Mock).mockResolvedValueOnce({ candles: [], accumulator: null });
+    vi.useFakeTimers();
+    try {
+      const store = makeStore();
+      (store as unknown as { set(patch: object): void }).set({ interval: '10t', candles: [] });
+      await store.loadCandles();
+      const callsBefore = (saveTickState as Mock).mock.calls.length;
+
+      liveQuote(store, quote('2026-07-17T14:30:01Z', 501));
+      expect((saveTickState as Mock).mock.calls.length).toBe(callsBefore);
+
+      (loadTickState as Mock).mockResolvedValueOnce({ candles: [], accumulator: null });
+      store.selectSymbol('QQQ');
+      await vi.runOnlyPendingTimersAsync();
+
+      // The debounced write for SPY landed even though the 2s window never
+      // elapsed — a symbol switch must not silently drop it.
+      expect((saveTickState as Mock).mock.calls.length).toBeGreaterThan(callsBefore);
+      expect(saveTickState).toHaveBeenCalledWith(
+        'SPY',
+        '10t',
+        expect.objectContaining({ accumulator: expect.objectContaining({ count: 1 }) }),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('seeds an empty tick chart from recent 1m history', async () => {

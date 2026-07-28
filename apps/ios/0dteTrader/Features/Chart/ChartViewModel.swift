@@ -174,6 +174,15 @@ final class ChartViewModel: ObservableObject {
 
     private var tickAccumulator: TickAccumulatorState?
 
+    /// Bumped by every `loadCandles()` call; a load bails after each await
+    /// once a newer one has started, so a slow response (e.g. a stale
+    /// symbol's request outliving a rapid follow-up switch) can't clobber
+    /// state a newer load already set. `selectSymbol`/`selectInterval` fire
+    /// `loadCandles()` in an untracked `Task { ... }` with nothing else to
+    /// order them, so this is the only thing that does (ChartStore.ts's
+    /// `loadGeneration` analog).
+    private var loadGeneration = 0
+
     init(
         apiClient: APIClient,
         socket: QuoteSocketClient,
@@ -216,14 +225,17 @@ final class ChartViewModel: ObservableObject {
     }
 
     func loadCandles() async {
+        loadGeneration += 1
+        let generation = loadGeneration
         isLoading = true
         errorMessage = nil
-        defer { isLoading = false }
+        defer { if generation == loadGeneration { isLoading = false } }
 
         if case .tick(let tickInterval) = interval {
             tickAccumulator = nil
             tickProgress = nil
             let stored = await TickStorage.shared.load(symbol: symbol, interval: tickInterval)
+            guard generation == loadGeneration else { return }
             tickAccumulator = stored.accumulator
             var loaded = stored.candles
             if loaded.isEmpty {
@@ -233,9 +245,11 @@ final class ChartViewModel: ObservableObject {
                 if let dtos = try? await apiClient.candles(
                     symbol: symbol, interval: "1m", from: from
                 ) {
+                    guard generation == loadGeneration else { return }
                     loaded = dtos.map(Candle.init(dto:))
                 }
             }
+            guard generation == loadGeneration else { return }
             candles = loaded
             tickProgress = TickProgress(
                 count: stored.accumulator?.count ?? 0,
@@ -247,8 +261,10 @@ final class ChartViewModel: ObservableObject {
         do {
             let from = Date().addingTimeInterval(-interval.seconds * 400)
             let dtos = try await apiClient.candles(symbol: symbol, interval: interval.rawValue, from: from)
+            guard generation == loadGeneration else { return }
             candles = dtos.map(Candle.init(dto:))
         } catch let error as APIError {
+            guard generation == loadGeneration else { return }
             if case let .server(_, message, _) = error,
                message.lowercased().contains("credentials") {
                 alertNotice = ChartAlertNotice(id: UUID(), message: message)
@@ -257,6 +273,7 @@ final class ChartViewModel: ObservableObject {
             }
             Haptics.error()
         } catch {
+            guard generation == loadGeneration else { return }
             errorMessage = error.localizedDescription
             Haptics.error()
         }

@@ -137,6 +137,9 @@ final class OptionsChainViewModel: ObservableObject {
               let index = chain.contracts.firstIndex(where: { $0.symbol == quote.symbol })
         else { return }
         let old = chain.contracts[index]
+        // Duplicate ticks (unchanged bid/ask/last) are common on a busy stream;
+        // skipping them avoids both the array copy below and a @Published
+        // notification/SwiftUI re-render for a value that hasn't moved.
         guard old.bid != quote.bid || old.ask != quote.ask || old.last != quote.last else { return }
         chain.contracts[index] = OptionContract(
             symbol: old.symbol,

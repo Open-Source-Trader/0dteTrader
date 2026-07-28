@@ -84,8 +84,18 @@ export class TradingService {
         underlyingPrice,
         contractSymbol,
       } = await this.resolveAndValidate(userId, dto);
-      const capped = await this.capToPosition(userId, normalized, contractSymbol);
-      const result = await this.gateway.placeOrder(userId, capped, idempotencyKey, mode);
+      const { order: capped, heldQuantity } = await this.capToPosition(
+        userId,
+        normalized,
+        contractSymbol,
+      );
+      const result = await this.gateway.placeOrder(
+        userId,
+        capped,
+        idempotencyKey,
+        mode,
+        heldQuantity,
+      );
       // The broker has accepted. Nothing from here may throw: the catch below
       // deletes the idempotency claim so the caller can retry, which after a
       // real placement would submit the order a SECOND time. Bookkeeping
@@ -325,12 +335,16 @@ export class TradingService {
    * opening order from a closing one, and refusing every order during a broker
    * blip would trade a rare wrong-size fill for a total loss of trading. The
    * residual needs a scale-out AND a positions outage in the same moment.
+   *
+   * Also returns the held quantity it just read, so `place` can pass it to
+   * the gateway and save it from reading positions a second time to decide
+   * open vs close intent.
    */
   private async capToPosition(
     userId: string,
     order: OrderRequest,
     contractSymbol: string,
-  ): Promise<OrderRequest> {
+  ): Promise<{ order: OrderRequest; heldQuantity: number | undefined }> {
     let held: Position | undefined;
     try {
       held = (await this.gateway.getPositions(userId)).find(
@@ -341,21 +355,22 @@ export class TradingService {
         `could not read positions to size-check ${contractSymbol}; ` +
           `placing ${order.quantity} uncapped: ${(err as Error).message}`,
       );
-      return order;
+      return { order, heldQuantity: undefined };
     }
-    if (!held || held.quantity === 0) return order;
+    const heldQuantity = held?.quantity ?? 0;
+    if (!held || held.quantity === 0) return { order, heldQuantity };
 
     // Closing means trading against the sign of what is held.
     const closing = order.side === 'sell' ? held.quantity > 0 : held.quantity < 0;
-    if (!closing) return order;
+    if (!closing) return { order, heldQuantity };
 
     const closable = Math.abs(held.quantity);
-    if (order.quantity <= closable) return order;
+    if (order.quantity <= closable) return { order, heldQuantity };
     this.logger.warn(
       `capping ${order.side} ${order.quantity} ${contractSymbol} to ${closable} ` +
         `— that is the whole position`,
     );
-    return { ...order, quantity: closable };
+    return { order: { ...order, quantity: closable }, heldQuantity };
   }
 
   /**

@@ -300,6 +300,108 @@ describe('TradeStore.arm confirmation bypass', () => {
   });
 });
 
+describe('TradeStore — refresh after placement does not stack on the WS push', () => {
+  it('skips its own refresh when the order-update socket is connected', async () => {
+    const placeOrder = vi.fn(async () => placedOrder);
+    const positions = vi.fn(async () => []);
+    const openOrders = vi.fn(async () => []);
+    const apiClient = { placeOrder, positions, openOrders } as unknown as ApiClient;
+    const store = new TradeStore(apiClient);
+    store.isSocketConnected = () => true;
+
+    store.arm('buy', 'SPY', autoModeChainStore(), true);
+    await vi.waitFor(() => expect(store.getState().armedTicket).toBeNull());
+
+    // The placement's own orderUpdate push is what refreshes when connected —
+    // submitOrder must not also call positions/openOrders directly.
+    expect(positions).not.toHaveBeenCalled();
+    expect(openOrders).not.toHaveBeenCalled();
+  });
+
+  it('falls back to a direct refresh when the socket is disconnected', async () => {
+    const placeOrder = vi.fn(async () => placedOrder);
+    const positions = vi.fn(async () => []);
+    const openOrders = vi.fn(async () => []);
+    const apiClient = { placeOrder, positions, openOrders } as unknown as ApiClient;
+    const store = new TradeStore(apiClient);
+    store.isSocketConnected = () => false;
+
+    store.arm('buy', 'SPY', autoModeChainStore(), true);
+    await vi.waitFor(() => expect(store.getState().armedTicket).toBeNull());
+
+    await vi.waitFor(() => {
+      expect(positions).toHaveBeenCalledTimes(1);
+      expect(openOrders).toHaveBeenCalledTimes(1);
+    });
+  });
+});
+
+describe('TradeStore.refreshTradingData — concurrent calls coalesce', () => {
+  it('collapses overlapping refreshes into one in-flight run plus one queued', async () => {
+    let resolvePositions!: () => void;
+    const positions = vi.fn(
+      () =>
+        new Promise<Position[]>((resolve) => {
+          resolvePositions = () => resolve([]);
+        }),
+    );
+    const openOrders = vi.fn(async () => []);
+    const apiClient = { positions, openOrders } as unknown as ApiClient;
+    const store = new TradeStore(apiClient);
+
+    // Simulates the submitted + terminal-status WS pushes both landing while
+    // the first refresh they triggered is still in flight.
+    const first = store.refreshTradingData();
+    const second = store.refreshTradingData();
+    const third = store.refreshTradingData();
+
+    expect(positions).toHaveBeenCalledTimes(1);
+    resolvePositions();
+    await Promise.all([first, second, third]);
+
+    // One run for the first call, one more to pick up what the queued
+    // callers might have missed — never three.
+    expect(positions).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('TradeStore.refreshTradingData — positions and open orders run in parallel', () => {
+  it('starts the openOrders request without waiting for positions to resolve', async () => {
+    let resolvePositions!: () => void;
+    const positions = vi.fn(
+      () =>
+        new Promise<Position[]>((resolve) => {
+          resolvePositions = () => resolve([]);
+        }),
+    );
+    const openOrders = vi.fn(async () => []);
+    const apiClient = { positions, openOrders } as unknown as ApiClient;
+    const store = new TradeStore(apiClient);
+
+    const refresh = store.refreshTradingData();
+    // positions() is still pending, but openOrders() must already have fired —
+    // a serialized refresh would not call it until positions() resolved.
+    expect(openOrders).toHaveBeenCalledTimes(1);
+
+    resolvePositions();
+    await refresh;
+  });
+
+  it('surfaces the positions failure even when open orders succeeds', async () => {
+    const positions = vi.fn(async () => {
+      throw new Error('positions unavailable');
+    });
+    const openOrders = vi.fn(async () => []);
+    const apiClient = { positions, openOrders } as unknown as ApiClient;
+    const store = new TradeStore(apiClient);
+
+    await store.refreshTradingData();
+
+    expect(store.getState().toast?.message).toBe('positions unavailable');
+    expect(store.getState().openOrders).toEqual([]);
+  });
+});
+
 describe('TradeStore.cancelArmedOrder — the confirm popup dismissed', () => {
   it('cancels rather than confirms, and submits nothing', () => {
     const placeOrder = vi.fn(async () => placedOrder);

@@ -164,7 +164,7 @@ function buildGateway() {
     user: { findUnique: jest.fn(async () => ({ tradingMode: 'live' })) },
   } as unknown as PrismaService;
   const gateway = new AlpacaBrokerGateway(credentials, events, prisma, alpacaFactory);
-  return { gateway, calls, events };
+  return { gateway, calls, events, client };
 }
 
 const ORDER: OrderRequest = {
@@ -253,7 +253,14 @@ describe('AlpacaBrokerGateway (SDK-backed)', () => {
     expect(res.orderType).toBe('mid');
   });
 
-  it('cancelOrder resolves client id then deletes the server order', async () => {
+  it('placeOrder resolves an explicit-mode order from a single quote, without probing the chain', async () => {
+    env = buildGateway();
+    await env.gateway.placeOrder('user-1', ORDER, 'test-key-2');
+    expect(env.calls.find((c) => c.method === 'collectOptionChainBySymbol')).toBeUndefined();
+    expect(env.calls.filter((c) => c.method === 'collectOptionSnapshotsBySymbol')).toHaveLength(1);
+  });
+
+  it('cancelOrder resolves client id then deletes the server order, without listing all open orders', async () => {
     env = buildGateway();
     await env.gateway.cancelOrder('user-1', 'abc');
     const byId = env.calls.find((c) => c.method === 'getOrderByClientOrderId');
@@ -262,6 +269,19 @@ describe('AlpacaBrokerGateway (SDK-backed)', () => {
     expect((byId!.params as { clientOrderId: string }).clientOrderId).toBe('abc');
     expect(del).toBeDefined();
     expect((del!.params as { orderId: string }).orderId).toBe('ord-server-1');
+    expect(env.calls.find((c) => c.method === 'getAllOrders')).toBeUndefined();
+  });
+
+  it('cancelOrder maps an unknown client order id to ORDER_NOT_FOUND', async () => {
+    env = buildGateway();
+    env.client.trading.orders.getOrderByClientOrderId = async () => {
+      const err = new Error('order not found') as Error & { status?: number };
+      err.status = 404;
+      throw err;
+    };
+    await expect(env.gateway.cancelOrder('user-1', 'missing')).rejects.toMatchObject({
+      code: 'ORDER_NOT_FOUND',
+    });
   });
 
   it('reauthenticate returns the stored trading mode', async () => {

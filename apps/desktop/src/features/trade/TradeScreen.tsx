@@ -168,6 +168,7 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
       chainStore
         .getState()
         .chain?.contracts.find((contract: OptionContract) => contract.symbol === symbol);
+    tradeStore.isSocketConnected = () => quoteSocket.getState().connectionState === 'connected';
     void chartOrdersStore.load();
     const offOrders = quoteSocket.onOrderUpdate((update) => tradeStore.handleOrderUpdate(update));
     // The server-side watcher fires lines with the app closed or backgrounded;

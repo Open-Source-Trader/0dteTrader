@@ -93,6 +93,16 @@ export class TradeStore extends Store<TradeStoreState> {
   /** Resolves an option position's symbol to chain data for flattening. */
   optionContractResolver: ((symbol: string) => OptionContract | undefined) | null = null;
 
+  /**
+   * Reports whether the order-update socket is currently connected. An order
+   * placement's own `orderUpdate` push (submitted, then the terminal status)
+   * drives `handleOrderUpdate` → `refreshTradingData` already, so a direct
+   * refresh after placing/cancelling is only needed as a fallback for when
+   * that push has nowhere to arrive. Wired from TradeScreen; null (treated as
+   * disconnected) only in tests that construct a bare TradeStore.
+   */
+  isSocketConnected: (() => boolean) | null = null;
+
   constructor(private readonly apiClient: ApiClient) {
     super({
       quantity: 1,
@@ -370,9 +380,16 @@ export class TradeStore extends Store<TradeStoreState> {
   // MARK: - Confirm (step 2)
 
   /**
-   * Places the order, clears the armed ticket, toasts the result, and refreshes
-   * positions/orders. Throws on failure so callers surface the error their own
-   * way (sheet preview error vs. toast). Shared by the confirm and bypass paths.
+   * Places the order, clears the armed ticket, and toasts the result. Throws
+   * on failure so callers surface the error their own way (sheet preview
+   * error vs. toast). Shared by the confirm and bypass paths.
+   *
+   * Skips its own refresh when the socket is connected: the placement's own
+   * `orderUpdate` push (submitted, then the terminal fill/reject) arrives over
+   * the same socket and drives `handleOrderUpdate` → `refreshTradingData`
+   * already, so refreshing here too only stacked a redundant reload on top of
+   * it. Falls back to a direct refresh when the socket is down and that push
+   * has nowhere to arrive.
    */
   private async submitOrder(
     request: OrderRequest,
@@ -385,7 +402,7 @@ export class TradeStore extends Store<TradeStoreState> {
       `${sideDisplayName(side)} ${result.contractSymbol} — ${orderStatusDisplayName(result.status)}`,
       result.status === 'rejected' ? 'error' : 'success',
     );
-    await this.refreshTradingData();
+    if (!this.isSocketConnected?.()) await this.refreshTradingData();
   }
 
   /** Submits the armed order, reusing the same idempotency key on retries. */
@@ -411,16 +428,47 @@ export class TradeStore extends Store<TradeStoreState> {
 
   // MARK: - Positions & open orders
 
+  private refreshInFlight: Promise<void> | null = null;
+  /** Set when a refresh is requested while one is already running. */
+  private refreshQueued = false;
+
+  /**
+   * A single order placement can emit a submitted push and a terminal
+   * fill/reject push in quick succession, each wired to call this — so calls
+   * collapse: one already running is awaited rather than duplicated, and at
+   * most one more runs after it to pick up anything that arrived meanwhile.
+   */
   async refreshTradingData(): Promise<void> {
-    try {
-      this.set({ positions: await this.apiClient.positions() });
-    } catch (error) {
-      this.showToast(errorMessage(error), 'error');
+    if (this.refreshInFlight) {
+      this.refreshQueued = true;
+      return this.refreshInFlight;
     }
+    this.refreshInFlight = this.runRefresh();
     try {
-      this.set({ openOrders: await this.apiClient.openOrders() });
-    } catch (error) {
-      this.showToast(errorMessage(error), 'error');
+      await this.refreshInFlight;
+    } finally {
+      this.refreshInFlight = null;
+      if (this.refreshQueued) {
+        this.refreshQueued = false;
+        void this.refreshTradingData();
+      }
+    }
+  }
+
+  private async runRefresh(): Promise<void> {
+    const [positions, openOrders] = await Promise.allSettled([
+      this.apiClient.positions(),
+      this.apiClient.openOrders(),
+    ]);
+    if (positions.status === 'fulfilled') {
+      this.set({ positions: positions.value });
+    } else {
+      this.showToast(errorMessage(positions.reason), 'error');
+    }
+    if (openOrders.status === 'fulfilled') {
+      this.set({ openOrders: openOrders.value });
+    } else {
+      this.showToast(errorMessage(openOrders.reason), 'error');
     }
   }
 
@@ -458,7 +506,9 @@ export class TradeStore extends Store<TradeStoreState> {
           `Flatten ${position.symbol} — ${orderStatusDisplayName(result.status)}`,
           result.status === 'rejected' ? 'error' : 'success',
         );
-        await this.refreshTradingData();
+        // See submitOrder: the placement's own orderUpdate push refreshes
+        // when the socket is up; fall back to a direct refresh when it's not.
+        if (!this.isSocketConnected?.()) await this.refreshTradingData();
       } catch (error) {
         this.showToast(errorMessage(error), 'error');
       }
@@ -473,7 +523,9 @@ export class TradeStore extends Store<TradeStoreState> {
     try {
       await this.apiClient.cancelOrder(order.orderId);
       this.showToast('Order cancelled.', 'info');
-      await this.refreshTradingData();
+      // See submitOrder: cancelOrder's own orderUpdate push refreshes when
+      // the socket is up; fall back to a direct refresh when it's not.
+      if (!this.isSocketConnected?.()) await this.refreshTradingData();
     } catch (error) {
       this.showToast(errorMessage(error), 'error');
     }

@@ -223,7 +223,7 @@ final class ChartViewModel: ObservableObject {
         if case .tick(let tickInterval) = interval {
             tickAccumulator = nil
             tickProgress = nil
-            let stored = TickStorage.load(symbol: symbol, interval: tickInterval)
+            let stored = await TickStorage.shared.load(symbol: symbol, interval: tickInterval)
             tickAccumulator = stored.accumulator
             var loaded = stored.candles
             if loaded.isEmpty {
@@ -557,12 +557,13 @@ final class ChartViewModel: ObservableObject {
             tickProgress = TickProgress(count: tickAccumulator?.count ?? 0, size: size)
         }
         // Persist candles and the in-progress accumulator on every quote
-        // (≤1/sec) so a restart resumes the partial candle instead of losing it.
-        TickStorage.save(
-            symbol: symbol,
-            interval: tickInterval,
-            state: StoredTickState(candles: candles, accumulator: tickAccumulator)
-        )
+        // (≤1/sec) so a restart resumes the partial candle instead of losing
+        // it. Fire-and-forget onto the TickStorage actor: the encode + atomic
+        // file write is blocking I/O that must not run on this (@MainActor)
+        // thread, and the actor serializes it against any write still in
+        // flight from a previous tick.
+        let snapshot = StoredTickState(candles: candles, accumulator: tickAccumulator)
+        Task { await TickStorage.shared.save(symbol: symbol, interval: tickInterval, state: snapshot) }
     }
 
     // MARK: - Indicator series for rendering

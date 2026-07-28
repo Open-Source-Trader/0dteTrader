@@ -133,7 +133,7 @@ export function CandleChart({
     chart: IChartApi;
     series: ISeriesApi<'Candlestick'>;
   } | null>(null);
-  const { tool } = useStore(drawingsStore);
+  const { draft } = useStore(drawingsStore);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -288,13 +288,17 @@ export function CandleChart({
     }
   }, [bid, ask]);
 
-  // Drawing tools take over the pointer: freeze pan/zoom while one is active.
+  // A drag-placed shape (trend/ray/rect) takes over the pointer mid-drag:
+  // freeze pan/zoom so the chart doesn't scroll under the draft. Tools stay
+  // armed after a placement (see drawings.ts), so gating on `tool` alone
+  // would leave pan/zoom disabled long after the drag ends; DrawingLayer's
+  // own canvas already blocks stray presses whenever a tool is armed.
   useEffect(() => {
     const chart = chartRef.current;
     if (!chart) return;
-    const interactive = tool === 'cursor';
+    const interactive = draft === null;
     chart.applyOptions({ handleScroll: interactive, handleScale: interactive });
-  }, [tool]);
+  }, [draft]);
 
   // Candle data: cheap update on ticks and on each new bar, full set only on a
   // genuine structural replacement. A NEW CANDLE starting (length grows, head

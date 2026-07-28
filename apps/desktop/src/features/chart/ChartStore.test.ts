@@ -4,7 +4,7 @@ import type { ApiClient } from '../../core/api/ApiClient';
 import type { QuoteSocket } from '../../core/api/QuoteSocket';
 import type { SettingsStore } from '../../core/storage/SettingsStore';
 import { loadTickState, saveTickState } from '../../core/storage/tickStorage';
-import { bucketStartSeconds, ChartStore, type ChartCandle } from './ChartStore';
+import { bucketStartSeconds, chartChromeSlice, ChartStore, type ChartCandle } from './ChartStore';
 
 vi.mock('../../core/storage/tickStorage', () => ({
   loadTickState: vi.fn(async () => ({ candles: [], accumulator: null })),
@@ -243,6 +243,30 @@ describe('tick charts', () => {
 
     expect(apiClient.candles).not.toHaveBeenCalled();
     expect(store.getState().candles).toHaveLength(1);
+  });
+});
+
+describe('chartChromeSlice', () => {
+  it('omits candles/quote/tickProgress/isStale — the fields a live tick changes', () => {
+    const store = makeStore();
+    liveQuote(store, quote('2026-07-17T14:30:30Z', 501.9));
+
+    const before = chartChromeSlice(store.getState());
+    liveQuote(store, quote('2026-07-17T14:30:31Z', 502.5));
+    const after = chartChromeSlice(store.getState());
+
+    // The candle/quote genuinely changed on the underlying state...
+    expect(store.getState().quote?.last).toBe(502.5);
+    // ...but the slice a chrome-only subscriber reads did not.
+    expect(after).toEqual(before);
+  });
+
+  it('includes symbol/errorMessage/settings — what chart chrome actually renders', () => {
+    const store = makeStore();
+    const slice = chartChromeSlice(store.getState());
+    expect(Object.keys(slice).sort()).toEqual(
+      ['errorMessage', 'indicatorSettings', 'optionsAnalytics', 'symbol', 'twcSettings'].sort(),
+    );
   });
 });
 

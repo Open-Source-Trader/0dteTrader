@@ -1,13 +1,13 @@
 import type { ChartInterval, TradingMode } from '@0dtetrader/shared-types';
-import type { ChartStore, ChartStoreState } from '../chart/ChartStore';
+import type { ChartStore } from '../chart/ChartStore';
 import { CHART_INTERVALS, INTERVAL_HINTS } from '../chart/ChartStore';
+import { useStore } from '../../core/observable';
 import { Menu } from '../../design/components/Menu';
 import { Format } from '../../design/format';
 import { ChevronDownIcon, SlidersIcon } from '../../design/icons';
 
 interface DesktopChartTopBarProps {
   chartStore: ChartStore;
-  chart: ChartStoreState;
   onSymbolSearch: () => void;
   onIndicatorSettings: () => void;
   tradingMode: TradingMode;
@@ -21,16 +21,20 @@ interface DesktopChartTopBarProps {
  * always sits at the chart's actual right edge — including while the user
  * is live-dragging the chart/ticket split — instead of a fixed position
  * that only lined up at the default split ratio.
+ *
+ * Subscribes to `chartStore` itself (rather than taking a `chart` prop from
+ * a parent) since it's the one piece of chart chrome that legitimately needs
+ * the live quote every tick — isolating that subscription here keeps the
+ * much heavier `TradeScreen` off the live-tick render path.
  */
 export function DesktopChartTopBar({
   chartStore,
-  chart,
   onSymbolSearch,
   onIndicatorSettings,
   tradingMode,
   onToggleMode,
 }: DesktopChartTopBarProps) {
-  const { symbol, interval, quote, isStale, tickProgress } = chart;
+  const { symbol, interval, quote, isStale, tickProgress } = useStore(chartStore);
 
   return (
     <div className="desktop-top-bar">

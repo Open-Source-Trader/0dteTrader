@@ -18,6 +18,33 @@ const TRADIER_TIMESALES_INTERVAL: Record<string, '1min' | '5min' | '15min'> = {
   '15m': '15min',
 };
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Upper bound on requested lookback, per Tradier source call (1m/5m/15m
+ * time-sales or daily history — the two upstream shapes this service ever
+ * issues; 30m/1h/4h aggregate from the 1m cap since that's the call they
+ * actually make). `from`/`to` are client-controlled (CandlesQueryDto only
+ * validates they parse as dates), so without a cap a caller could ask for
+ * decades of 1-minute time-sales — a request Tradier would still spend real
+ * time serving before this class parses, sorts and aggregates every
+ * returned bar. The heaviest chart clients actually request is ~400 bars
+ * per interval (desktop's `ChartStore.loadCandles`); these caps hold
+ * several times that with margin for gaps/holidays.
+ */
+const MAX_LOOKBACK_MS: Record<'1m' | '5m' | '15m' | '1d', number> = {
+  '1m': 40 * DAY_MS,
+  '5m': 90 * DAY_MS,
+  '15m': 120 * DAY_MS,
+  '1d': 10 * 365 * DAY_MS,
+};
+
+/** Clamps `start` so `[start, end]` never exceeds the given cap. */
+function clampLookback(maxLookbackMs: number, start: Date, end: Date): Date {
+  const earliest = new Date(end.getTime() - maxLookbackMs);
+  return start.getTime() < earliest.getTime() ? earliest : start;
+}
+
 /**
  * Market-data provider backed by Tradier. Used by {@link MarketDataController}
  * for quotes, candles, and options-chain regardless of the user's selected
@@ -53,9 +80,10 @@ export class TradierMarketDataService {
     // 1) Native Tradier intraday: 1m / 5m / 15m via /markets/timesales.
     if (TRADIER_INTRADAY_INTERVALS.has(interval)) {
       const end = to ?? new Date();
-      // Tradier ~20/40-day lookback; if the caller asked further back, honor
-      // the request and let Tradier return what it can.
-      const start = from ?? new Date(end.getTime() - 40 * 24 * 60 * 60 * 1000);
+      const maxLookbackMs = MAX_LOOKBACK_MS[interval as '1m' | '5m' | '15m'];
+      // Default to the interval's max lookback when no range is requested.
+      const requested = from ?? new Date(end.getTime() - maxLookbackMs);
+      const start = clampLookback(maxLookbackMs, requested, end);
       return this.tradier.getTimeSales(symbol, TRADIER_TIMESALES_INTERVAL[interval], start, end);
     }
 
@@ -63,7 +91,8 @@ export class TradierMarketDataService {
     if (TRADIER_DAILY_INTERVALS.has(interval)) {
       const end = to ?? new Date();
       // Default to ~2 years of history when no range is requested.
-      const start = from ?? new Date(end.getTime() - 730 * 24 * 60 * 60 * 1000);
+      const requested = from ?? new Date(end.getTime() - 730 * DAY_MS);
+      const start = clampLookback(MAX_LOOKBACK_MS['1d'], requested, end);
       const daily = await this.tradier.getDailyHistory(
         symbol,
         this.tradierToDate(start),
@@ -74,9 +103,12 @@ export class TradierMarketDataService {
     }
 
     // 3) 30m / 1h / 4h: Tradier has no native bar. Aggregate from 1m
-    //    time-sales in a single upstream call.
+    //    time-sales in a single upstream call — bound by 1m's own cap (not
+    //    this target interval's, which would ask upstream for years of
+    //    1-minute bars for e.g. '4h').
     const end = to ?? new Date();
-    const start = from ?? new Date(end.getTime() - 40 * 24 * 60 * 60 * 1000);
+    const requested = from ?? new Date(end.getTime() - MAX_LOOKBACK_MS['1m']);
+    const start = clampLookback(MAX_LOOKBACK_MS['1m'], requested, end);
     const oneMin = await this.tradier.getTimeSales(symbol, '1min', start, end);
     if (oneMin.length === 0) return [];
     return aggregateCandles(oneMin, interval);

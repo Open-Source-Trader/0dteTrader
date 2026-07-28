@@ -432,15 +432,19 @@ export class TradeStore extends Store<TradeStoreState> {
   }
 
   private async runRefresh(): Promise<void> {
-    try {
-      this.set({ positions: await this.apiClient.positions() });
-    } catch (error) {
-      this.showToast(errorMessage(error), 'error');
+    const [positions, openOrders] = await Promise.allSettled([
+      this.apiClient.positions(),
+      this.apiClient.openOrders(),
+    ]);
+    if (positions.status === 'fulfilled') {
+      this.set({ positions: positions.value });
+    } else {
+      this.showToast(errorMessage(positions.reason), 'error');
     }
-    try {
-      this.set({ openOrders: await this.apiClient.openOrders() });
-    } catch (error) {
-      this.showToast(errorMessage(error), 'error');
+    if (openOrders.status === 'fulfilled') {
+      this.set({ openOrders: openOrders.value });
+    } else {
+      this.showToast(errorMessage(openOrders.reason), 'error');
     }
   }
 

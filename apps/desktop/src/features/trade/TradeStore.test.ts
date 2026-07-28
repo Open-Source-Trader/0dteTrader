@@ -257,6 +257,43 @@ describe('TradeStore.refreshTradingData — concurrent calls coalesce', () => {
   });
 });
 
+describe('TradeStore.refreshTradingData — positions and open orders run in parallel', () => {
+  it('starts the openOrders request without waiting for positions to resolve', async () => {
+    let resolvePositions!: () => void;
+    const positions = vi.fn(
+      () =>
+        new Promise<Position[]>((resolve) => {
+          resolvePositions = () => resolve([]);
+        }),
+    );
+    const openOrders = vi.fn(async () => []);
+    const apiClient = { positions, openOrders } as unknown as ApiClient;
+    const store = new TradeStore(apiClient);
+
+    const refresh = store.refreshTradingData();
+    // positions() is still pending, but openOrders() must already have fired —
+    // a serialized refresh would not call it until positions() resolved.
+    expect(openOrders).toHaveBeenCalledTimes(1);
+
+    resolvePositions();
+    await refresh;
+  });
+
+  it('surfaces the positions failure even when open orders succeeds', async () => {
+    const positions = vi.fn(async () => {
+      throw new Error('positions unavailable');
+    });
+    const openOrders = vi.fn(async () => []);
+    const apiClient = { positions, openOrders } as unknown as ApiClient;
+    const store = new TradeStore(apiClient);
+
+    await store.refreshTradingData();
+
+    expect(store.getState().toast?.message).toBe('positions unavailable');
+    expect(store.getState().openOrders).toEqual([]);
+  });
+});
+
 describe('TradeStore.cancelArmedOrder — the confirm popup dismissed', () => {
   it('cancels rather than confirms, and submits nothing', () => {
     const placeOrder = vi.fn(async () => placedOrder);

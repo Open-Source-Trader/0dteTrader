@@ -372,19 +372,35 @@ final class TradeViewModel: ObservableObject {
     }
 
     private func runRefresh() async {
-        do {
-            positions = try await apiClient.positions().compactMap(Position.init(dto:))
-        } catch let error as APIError {
+        async let positionsResult = catching { try await apiClient.positions() }
+        async let openOrdersResult = catching { try await apiClient.openOrders() }
+
+        switch await positionsResult {
+        case let .success(dtos):
+            positions = dtos.compactMap(Position.init(dto:))
+        case let .failure(error as APIError):
             showToast(error.userMessage, style: .error)
-        } catch {
+        case let .failure(error):
             showToast(error.localizedDescription, style: .error)
         }
-        do {
-            openOrders = try await apiClient.openOrders().map(OrderResult.init(dto:))
-        } catch let error as APIError {
+        switch await openOrdersResult {
+        case let .success(dtos):
+            openOrders = dtos.map(OrderResult.init(dto:))
+        case let .failure(error as APIError):
             showToast(error.userMessage, style: .error)
-        } catch {
+        case let .failure(error):
             showToast(error.localizedDescription, style: .error)
+        }
+    }
+
+    /// `Result.init(catching:)` has no `async` overload; this fills that gap
+    /// so `positions()`/`openOrders()` can run concurrently via `async let`
+    /// while each keeps its own independent success/failure outcome.
+    private func catching<T>(_ body: () async throws -> T) async -> Result<T, Error> {
+        do {
+            return .success(try await body())
+        } catch {
+            return .failure(error)
         }
     }
 

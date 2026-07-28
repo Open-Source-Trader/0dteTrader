@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import desktopIconUrl from '../../../electron/assets/icon.png';
 import { useContainer } from '../../app/container';
 import { Spinner } from '../../design/components/Spinner';
 import { useStore } from '../../core/observable';
@@ -95,21 +96,22 @@ export function LoginView({ store }: { store: AuthStore }) {
               animation: ENTRANCE,
             }}
           >
-            <div
+            <img
+              src={desktopIconUrl}
+              alt=""
               aria-hidden="true"
-              className="hud-clip"
               style={{
                 width: 56,
                 height: 56,
-                background: 'linear-gradient(135deg, var(--app-accent), var(--app-accent-fill))',
-                boxShadow: 'inset 0 0 12px rgba(5, 10, 20, 0.6)',
+                objectFit: 'contain',
+                filter: 'drop-shadow(0 6px 18px rgba(46, 143, 255, 0.25))',
               }}
             />
             <h1 className="hud-title" style={{ fontSize: 'var(--fs-title)' }}>
               0dteTrader
             </h1>
             <span className="text-secondary" style={{ fontSize: 'var(--fs-subheadline)' }}>
-              Open Source Trader
+              Desktop trading workstation
             </span>
           </div>
 

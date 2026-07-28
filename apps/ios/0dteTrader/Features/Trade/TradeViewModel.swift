@@ -67,6 +67,21 @@ final class TradeViewModel: ObservableObject {
     /// to the OptionsChainViewModel's loaded chain.
     var optionContractResolver: ((String) -> OptionContract?)?
 
+    /// Reports whether the order-update socket is currently connected. An
+    /// order placement's own `orderUpdate` push (submitted, then the terminal
+    /// status) drives `handleOrderUpdate` → `refreshTradingData` already, so a
+    /// direct refresh after placing/cancelling is only needed as a fallback
+    /// for when that push has nowhere to arrive. Wired from the trade screen;
+    /// nil (treated as disconnected) only in previews/tests.
+    var isSocketConnected: (() -> Bool)?
+
+    /// Coalesces concurrent refreshes: an order placement's submitted and
+    /// terminal-status pushes can each trigger one in quick succession, so a
+    /// call already running is awaited rather than duplicated, with at most
+    /// one more queued to pick up anything that arrived meanwhile.
+    private var refreshInFlight: Task<Void, Never>?
+    private var refreshQueued = false
+
     init(apiClient: APIClient) {
         self.apiClient = apiClient
     }
@@ -287,9 +302,16 @@ final class TradeViewModel: ObservableObject {
 
     // MARK: - Confirm (step 2 of FR-19)
 
-    /// Places the order, clears the armed ticket, toasts the result, and
-    /// refreshes positions/orders. Throws so callers surface the error their own
-    /// way (sheet submit error vs. toast). Shared by the confirm and bypass paths.
+    /// Places the order, clears the armed ticket, and toasts the result.
+    /// Throws so callers surface the error their own way (sheet submit error
+    /// vs. toast). Shared by the confirm and bypass paths.
+    ///
+    /// Skips its own refresh when the socket is connected: the placement's own
+    /// `orderUpdate` push (submitted, then the terminal fill/reject) arrives
+    /// over the same socket and drives `handleOrderUpdate` →
+    /// `refreshTradingData` already, so refreshing here too only stacked a
+    /// redundant reload on top of it. Falls back to a direct refresh when the
+    /// socket is down and that push has nowhere to arrive.
     private func submitOrder(_ request: OrderRequestDTO, idempotencyKey: String, side: OrderSide) async throws {
         let result = OrderResult(dto: try await apiClient.placeOrder(
             request,
@@ -300,7 +322,9 @@ final class TradeViewModel: ObservableObject {
             "\(side.displayName) \(result.contractSymbol) — \(result.status.displayName)",
             style: result.status == .rejected ? .error : .success
         )
-        await refreshTradingData()
+        if isSocketConnected?() != true {
+            await refreshTradingData()
+        }
     }
 
     /// Submits the armed order. The same idempotency key is reused across
@@ -327,7 +351,27 @@ final class TradeViewModel: ObservableObject {
 
     // MARK: - Positions & open orders (FR-23..25)
 
+    /// A single order placement can emit a submitted push and a terminal
+    /// fill/reject push in quick succession, each wired to call this — so
+    /// calls collapse: one already running is awaited rather than duplicated,
+    /// and at most one more runs after it to pick up anything that arrived
+    /// meanwhile.
     func refreshTradingData() async {
+        if let inFlight = refreshInFlight {
+            refreshQueued = true
+            return await inFlight.value
+        }
+        let task = Task { await runRefresh() }
+        refreshInFlight = task
+        await task.value
+        refreshInFlight = nil
+        if refreshQueued {
+            refreshQueued = false
+            await refreshTradingData()
+        }
+    }
+
+    private func runRefresh() async {
         do {
             positions = try await apiClient.positions().compactMap(Position.init(dto:))
         } catch let error as APIError {
@@ -380,7 +424,11 @@ final class TradeViewModel: ObservableObject {
                 "Flatten \(position.symbol) — \(result.status.displayName)",
                 style: result.status == .rejected ? .error : .success
             )
-            await refreshTradingData()
+            // See submitOrder: the placement's own orderUpdate push refreshes
+            // when the socket is up; fall back to a direct refresh when it's not.
+            if isSocketConnected?() != true {
+                await refreshTradingData()
+            }
         } catch let error as APIError {
             showToast(error.userMessage, style: .error)
         } catch {
@@ -392,7 +440,11 @@ final class TradeViewModel: ObservableObject {
         do {
             try await apiClient.cancelOrder(orderId: order.orderId)
             showToast("Order cancelled.", style: .info)
-            await refreshTradingData()
+            // See submitOrder: cancelOrder's own orderUpdate push refreshes
+            // when the socket is up; fall back to a direct refresh when it's not.
+            if isSocketConnected?() != true {
+                await refreshTradingData()
+            }
         } catch let error as APIError {
             showToast(error.userMessage, style: .error)
         } catch {

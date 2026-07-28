@@ -38,6 +38,17 @@ function chainStub(overrides: Partial<Record<string, unknown>> = {}): ChainStore
   } as unknown as ChainStore;
 }
 
+/**
+ * Wires `optionContractResolver` the way the trade screen does in
+ * production — close-detection resolves held positions through it rather
+ * than trusting `chainStore.selectedContract`, which can be a different,
+ * AUTO-drifted strike than what is actually held.
+ */
+function withResolver(store: TradeStore, contracts: OptionContract[]): TradeStore {
+  store.optionContractResolver = (symbol) => contracts.find((c) => c.symbol === symbol);
+  return store;
+}
+
 /** Minimal ChainStore double: arm() only reads getState(). Auto mode avoids
  *  the explicit strike/expiration guard. */
 function autoModeChainStore(): ChainStore {
@@ -90,7 +101,7 @@ describe('TradeStore.setQuantity', () => {
 
 describe('TradeStore.arm — selling into an open position', () => {
   it('closes the matching position instead of opening a short', () => {
-    const store = makeStore();
+    const store = withResolver(makeStore(), [CONTRACT]);
     seedPositions(store, [position(3)]);
     store.setQuantity(3);
 
@@ -103,7 +114,7 @@ describe('TradeStore.arm — selling into an open position', () => {
   });
 
   it('caps the ticket quantity at the position, so it never flips into a short', () => {
-    const store = makeStore();
+    const store = withResolver(makeStore(), [CONTRACT]);
     seedPositions(store, [position(2)]);
     store.setQuantity(10);
 
@@ -113,7 +124,7 @@ describe('TradeStore.arm — selling into an open position', () => {
   });
 
   it('honors a smaller ticket quantity as a partial scale-out', () => {
-    const store = makeStore();
+    const store = withResolver(makeStore(), [CONTRACT]);
     seedPositions(store, [position(10)]);
     store.setQuantity(3);
 
@@ -126,7 +137,7 @@ describe('TradeStore.arm — selling into an open position', () => {
   });
 
   it('leaves a buy alone', () => {
-    const store = makeStore();
+    const store = withResolver(makeStore(), [CONTRACT]);
     seedPositions(store, [position(3)]);
     store.setQuantity(1);
 
@@ -136,8 +147,8 @@ describe('TradeStore.arm — selling into an open position', () => {
     expect(store.getState().armedTicket?.summary).not.toContain('CLOSE');
   });
 
-  it('opens a short when the position is on a different contract', () => {
-    const store = makeStore();
+  it('opens a short when the held position is unresolvable (different/unknown contract)', () => {
+    const store = withResolver(makeStore(), [CONTRACT]);
     seedPositions(store, [{ ...position(3), symbol: 'SPY260727P00500000' }]);
     store.setQuantity(1);
 
@@ -148,13 +159,110 @@ describe('TradeStore.arm — selling into an open position', () => {
   });
 
   it('does not treat an existing short as something to close', () => {
-    const store = makeStore();
+    const store = withResolver(makeStore(), [CONTRACT]);
     seedPositions(store, [position(-3)]);
     store.setQuantity(1);
 
     store.arm('sell', 'SPY', chainStub());
 
     expect(store.getState().armedTicket?.request.quantity).toBe(1);
+  });
+
+  // Reproduces the reported incident: AUTO mode's live strike has drifted off
+  // the strike actually held (e.g. after a sharp move in the underlying), so
+  // the two contracts no longer share a symbol. Matching on underlying +
+  // expiration + right (ignoring strike) still finds the held put and closes
+  // it at ITS strike — not the drifted one the panel currently displays —
+  // instead of silently opening a new naked short.
+  it('closes the held position even when the AUTO strike has drifted', () => {
+    const heldPut: OptionContract = {
+      symbol: 'SPY260727P00500000',
+      underlying: 'SPY',
+      expiration: CONTRACT.expiration,
+      strike: 500,
+      optionType: 'put',
+      bid: 1.0,
+      ask: 1.02,
+      last: 1.01,
+    };
+    const driftedPut: OptionContract = {
+      symbol: 'SPY260727P00490000',
+      underlying: 'SPY',
+      expiration: CONTRACT.expiration,
+      strike: 490,
+      optionType: 'put',
+      bid: 0.5,
+      ask: 0.52,
+      last: 0.51,
+    };
+    const store = withResolver(makeStore(), [heldPut, driftedPut]);
+    seedPositions(store, [{ ...position(2), symbol: heldPut.symbol }]);
+    store.setQuantity(2);
+    // AUTO mode currently selects the drifted put, not the held strike.
+    const chain = {
+      selectedContract: driftedPut,
+      getState: () => ({
+        optionType: 'put' as const,
+        isAutoMode: true,
+        selectedExpiration: CONTRACT.expiration,
+        selectedStrike: null,
+      }),
+    } as unknown as ChainStore;
+
+    store.arm('sell', 'SPY', chain);
+
+    const ticket = store.getState().armedTicket;
+    expect(ticket?.request.selection).toMatchObject({ strike: 500 });
+    expect(ticket?.request.quantity).toBe(2);
+    expect(ticket?.summary).toContain('CLOSE 2');
+  });
+
+  // Two held legs at different strikes, same underlying/expiration/right
+  // (e.g. a put spread): the higher-P/L leg closes first, and the summary
+  // says "of <total>" so the user sees the other leg is still open.
+  it('closes the highest-P/L leg first when multiple legs match', () => {
+    const legA: OptionContract = {
+      symbol: 'SPY260727P00500000',
+      underlying: 'SPY',
+      expiration: CONTRACT.expiration,
+      strike: 500,
+      optionType: 'put',
+      bid: 1.0,
+      ask: 1.02,
+      last: 1.01,
+    };
+    const legB: OptionContract = {
+      symbol: 'SPY260727P00495000',
+      underlying: 'SPY',
+      expiration: CONTRACT.expiration,
+      strike: 495,
+      optionType: 'put',
+      bid: 0.5,
+      ask: 0.52,
+      last: 0.51,
+    };
+    const store = withResolver(makeStore(), [legA, legB]);
+    seedPositions(store, [
+      { ...position(2), symbol: legA.symbol, unrealizedPnl: 5 },
+      { ...position(3), symbol: legB.symbol, unrealizedPnl: 50 },
+    ]);
+    store.setQuantity(10);
+    const chain = {
+      selectedContract: legA,
+      getState: () => ({
+        optionType: 'put' as const,
+        isAutoMode: false,
+        selectedExpiration: CONTRACT.expiration,
+        selectedStrike: 500,
+      }),
+    } as unknown as ChainStore;
+
+    store.arm('sell', 'SPY', chain);
+
+    const ticket = store.getState().armedTicket;
+    expect(ticket?.request.selection).toMatchObject({ strike: 495 });
+    expect(ticket?.request.quantity).toBe(3);
+    expect(ticket?.summary).toContain('CLOSE 3 of 5');
   });
 });
 
@@ -189,6 +297,108 @@ describe('TradeStore.arm confirmation bypass', () => {
 
     expect(placeOrder).not.toHaveBeenCalled();
     expect(store.getState().armedTicket).not.toBeNull();
+  });
+});
+
+describe('TradeStore — refresh after placement does not stack on the WS push', () => {
+  it('skips its own refresh when the order-update socket is connected', async () => {
+    const placeOrder = vi.fn(async () => placedOrder);
+    const positions = vi.fn(async () => []);
+    const openOrders = vi.fn(async () => []);
+    const apiClient = { placeOrder, positions, openOrders } as unknown as ApiClient;
+    const store = new TradeStore(apiClient);
+    store.isSocketConnected = () => true;
+
+    store.arm('buy', 'SPY', autoModeChainStore(), true);
+    await vi.waitFor(() => expect(store.getState().armedTicket).toBeNull());
+
+    // The placement's own orderUpdate push is what refreshes when connected —
+    // submitOrder must not also call positions/openOrders directly.
+    expect(positions).not.toHaveBeenCalled();
+    expect(openOrders).not.toHaveBeenCalled();
+  });
+
+  it('falls back to a direct refresh when the socket is disconnected', async () => {
+    const placeOrder = vi.fn(async () => placedOrder);
+    const positions = vi.fn(async () => []);
+    const openOrders = vi.fn(async () => []);
+    const apiClient = { placeOrder, positions, openOrders } as unknown as ApiClient;
+    const store = new TradeStore(apiClient);
+    store.isSocketConnected = () => false;
+
+    store.arm('buy', 'SPY', autoModeChainStore(), true);
+    await vi.waitFor(() => expect(store.getState().armedTicket).toBeNull());
+
+    await vi.waitFor(() => {
+      expect(positions).toHaveBeenCalledTimes(1);
+      expect(openOrders).toHaveBeenCalledTimes(1);
+    });
+  });
+});
+
+describe('TradeStore.refreshTradingData — concurrent calls coalesce', () => {
+  it('collapses overlapping refreshes into one in-flight run plus one queued', async () => {
+    let resolvePositions!: () => void;
+    const positions = vi.fn(
+      () =>
+        new Promise<Position[]>((resolve) => {
+          resolvePositions = () => resolve([]);
+        }),
+    );
+    const openOrders = vi.fn(async () => []);
+    const apiClient = { positions, openOrders } as unknown as ApiClient;
+    const store = new TradeStore(apiClient);
+
+    // Simulates the submitted + terminal-status WS pushes both landing while
+    // the first refresh they triggered is still in flight.
+    const first = store.refreshTradingData();
+    const second = store.refreshTradingData();
+    const third = store.refreshTradingData();
+
+    expect(positions).toHaveBeenCalledTimes(1);
+    resolvePositions();
+    await Promise.all([first, second, third]);
+
+    // One run for the first call, one more to pick up what the queued
+    // callers might have missed — never three.
+    expect(positions).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('TradeStore.refreshTradingData — positions and open orders run in parallel', () => {
+  it('starts the openOrders request without waiting for positions to resolve', async () => {
+    let resolvePositions!: () => void;
+    const positions = vi.fn(
+      () =>
+        new Promise<Position[]>((resolve) => {
+          resolvePositions = () => resolve([]);
+        }),
+    );
+    const openOrders = vi.fn(async () => []);
+    const apiClient = { positions, openOrders } as unknown as ApiClient;
+    const store = new TradeStore(apiClient);
+
+    const refresh = store.refreshTradingData();
+    // positions() is still pending, but openOrders() must already have fired —
+    // a serialized refresh would not call it until positions() resolved.
+    expect(openOrders).toHaveBeenCalledTimes(1);
+
+    resolvePositions();
+    await refresh;
+  });
+
+  it('surfaces the positions failure even when open orders succeeds', async () => {
+    const positions = vi.fn(async () => {
+      throw new Error('positions unavailable');
+    });
+    const openOrders = vi.fn(async () => []);
+    const apiClient = { positions, openOrders } as unknown as ApiClient;
+    const store = new TradeStore(apiClient);
+
+    await store.refreshTradingData();
+
+    expect(store.getState().toast?.message).toBe('positions unavailable');
+    expect(store.getState().openOrders).toEqual([]);
   });
 });
 

@@ -93,6 +93,16 @@ export class TradeStore extends Store<TradeStoreState> {
   /** Resolves an option position's symbol to chain data for flattening. */
   optionContractResolver: ((symbol: string) => OptionContract | undefined) | null = null;
 
+  /**
+   * Reports whether the order-update socket is currently connected. An order
+   * placement's own `orderUpdate` push (submitted, then the terminal status)
+   * drives `handleOrderUpdate` → `refreshTradingData` already, so a direct
+   * refresh after placing/cancelling is only needed as a fallback for when
+   * that push has nowhere to arrive. Wired from TradeScreen; null (treated as
+   * disconnected) only in tests that construct a bare TradeStore.
+   */
+  isSocketConnected: (() => boolean) | null = null;
+
   constructor(private readonly apiClient: ApiClient) {
     super({
       quantity: 1,
@@ -210,21 +220,45 @@ export class TradeStore extends Store<TradeStoreState> {
     const chainState = chainStore.getState();
     const optionType = chainState.optionType;
 
-    // Selling the contract you are already long closes (part of) that position
-    // rather than opening a short. The ticket quantity is honored but capped at
-    // the position size — the cap is what stops a large ticket from flipping
-    // through zero into a short nobody asked for, while a smaller ticket still
-    // scales out partially. The summary says exactly what will happen.
-    const selected = chainStore.selectedContract;
-    const held =
-      side === 'sell' && selected
-        ? this.getState().positions.find((p) => p.symbol === selected.symbol && p.quantity > 0)
-        : undefined;
-    if (selected && held) {
-      const closeQuantity = Math.min(quantity, held.quantity);
-      const shortName = selected.optionType === 'call' ? 'C' : 'P';
+    // Selling closes (part of) a held position rather than opening a short
+    // when the panel's selected right (put/call) and expiration match a held
+    // position — regardless of which strike AUTO mode currently points at.
+    // Matching on strike would miss a held position whenever AUTO's live OTM
+    // pick has drifted off the strike actually held, silently falling through
+    // to the open-order branch below and stacking a naked position on top of
+    // the one the user meant to close. Legs are resolved through
+    // `optionContractResolver` rather than trusted from `chainStore.selectedContract`,
+    // since that is exactly the drifted AUTO pick we cannot use for the close's strike.
+    const expiration = chainState.selectedExpiration;
+    const heldLegs =
+      side === 'sell' && expiration
+        ? this.getState()
+            .positions.map((position) => {
+              const contract = this.optionContractResolver?.(position.symbol);
+              return contract &&
+                contract.underlying === underlying &&
+                contract.expiration === expiration &&
+                contract.optionType === optionType &&
+                position.quantity > 0
+                ? { position, contract }
+                : null;
+            })
+            .filter((leg): leg is { position: Position; contract: OptionContract } => leg !== null)
+        : [];
+
+    if (heldLegs.length > 0) {
+      // Highest unrealized P/L first: scale out of the most profitable leg
+      // before touching the rest when the ticket doesn't cover the full
+      // combined size.
+      const ordered = [...heldLegs].sort(
+        (a, b) => b.position.unrealizedPnl - a.position.unrealizedPnl,
+      );
+      const totalHeld = ordered.reduce((sum, leg) => sum + leg.position.quantity, 0);
+      const firstClose = ordered[0];
+      const closeQuantity = Math.min(quantity, totalHeld, firstClose.position.quantity);
+      const shortName = firstClose.contract.optionType === 'call' ? 'C' : 'P';
       const sizeLabel =
-        closeQuantity < held.quantity ? `${closeQuantity} of ${held.quantity}` : `${closeQuantity}`;
+        closeQuantity < totalHeld ? `${closeQuantity} of ${totalHeld}` : `${closeQuantity}`;
       this.set({
         armedTicket: {
           id: nextId++,
@@ -237,14 +271,14 @@ export class TradeStore extends Store<TradeStoreState> {
             limitPrice,
             selection: {
               mode: 'explicit',
-              optionType: selected.optionType,
-              expiration: selected.expiration,
-              strike: selected.strike,
+              optionType: firstClose.contract.optionType,
+              expiration: firstClose.contract.expiration,
+              strike: firstClose.contract.strike,
             },
           },
           idempotencyKey: newIdempotencyKey(),
           side,
-          summary: `CLOSE ${sizeLabel} · ${underlying} ${Format.strike(selected.strike)}${shortName}`,
+          summary: `CLOSE ${sizeLabel} · ${underlying} ${Format.strike(firstClose.contract.strike)}${shortName}`,
         },
         preview: null,
         previewError: null,
@@ -346,9 +380,16 @@ export class TradeStore extends Store<TradeStoreState> {
   // MARK: - Confirm (step 2)
 
   /**
-   * Places the order, clears the armed ticket, toasts the result, and refreshes
-   * positions/orders. Throws on failure so callers surface the error their own
-   * way (sheet preview error vs. toast). Shared by the confirm and bypass paths.
+   * Places the order, clears the armed ticket, and toasts the result. Throws
+   * on failure so callers surface the error their own way (sheet preview
+   * error vs. toast). Shared by the confirm and bypass paths.
+   *
+   * Skips its own refresh when the socket is connected: the placement's own
+   * `orderUpdate` push (submitted, then the terminal fill/reject) arrives over
+   * the same socket and drives `handleOrderUpdate` → `refreshTradingData`
+   * already, so refreshing here too only stacked a redundant reload on top of
+   * it. Falls back to a direct refresh when the socket is down and that push
+   * has nowhere to arrive.
    */
   private async submitOrder(
     request: OrderRequest,
@@ -361,7 +402,7 @@ export class TradeStore extends Store<TradeStoreState> {
       `${sideDisplayName(side)} ${result.contractSymbol} — ${orderStatusDisplayName(result.status)}`,
       result.status === 'rejected' ? 'error' : 'success',
     );
-    await this.refreshTradingData();
+    if (!this.isSocketConnected?.()) await this.refreshTradingData();
   }
 
   /** Submits the armed order, reusing the same idempotency key on retries. */
@@ -387,16 +428,47 @@ export class TradeStore extends Store<TradeStoreState> {
 
   // MARK: - Positions & open orders
 
+  private refreshInFlight: Promise<void> | null = null;
+  /** Set when a refresh is requested while one is already running. */
+  private refreshQueued = false;
+
+  /**
+   * A single order placement can emit a submitted push and a terminal
+   * fill/reject push in quick succession, each wired to call this — so calls
+   * collapse: one already running is awaited rather than duplicated, and at
+   * most one more runs after it to pick up anything that arrived meanwhile.
+   */
   async refreshTradingData(): Promise<void> {
-    try {
-      this.set({ positions: await this.apiClient.positions() });
-    } catch (error) {
-      this.showToast(errorMessage(error), 'error');
+    if (this.refreshInFlight) {
+      this.refreshQueued = true;
+      return this.refreshInFlight;
     }
+    this.refreshInFlight = this.runRefresh();
     try {
-      this.set({ openOrders: await this.apiClient.openOrders() });
-    } catch (error) {
-      this.showToast(errorMessage(error), 'error');
+      await this.refreshInFlight;
+    } finally {
+      this.refreshInFlight = null;
+      if (this.refreshQueued) {
+        this.refreshQueued = false;
+        void this.refreshTradingData();
+      }
+    }
+  }
+
+  private async runRefresh(): Promise<void> {
+    const [positions, openOrders] = await Promise.allSettled([
+      this.apiClient.positions(),
+      this.apiClient.openOrders(),
+    ]);
+    if (positions.status === 'fulfilled') {
+      this.set({ positions: positions.value });
+    } else {
+      this.showToast(errorMessage(positions.reason), 'error');
+    }
+    if (openOrders.status === 'fulfilled') {
+      this.set({ openOrders: openOrders.value });
+    } else {
+      this.showToast(errorMessage(openOrders.reason), 'error');
     }
   }
 
@@ -434,7 +506,9 @@ export class TradeStore extends Store<TradeStoreState> {
           `Flatten ${position.symbol} — ${orderStatusDisplayName(result.status)}`,
           result.status === 'rejected' ? 'error' : 'success',
         );
-        await this.refreshTradingData();
+        // See submitOrder: the placement's own orderUpdate push refreshes
+        // when the socket is up; fall back to a direct refresh when it's not.
+        if (!this.isSocketConnected?.()) await this.refreshTradingData();
       } catch (error) {
         this.showToast(errorMessage(error), 'error');
       }
@@ -449,7 +523,9 @@ export class TradeStore extends Store<TradeStoreState> {
     try {
       await this.apiClient.cancelOrder(order.orderId);
       this.showToast('Order cancelled.', 'info');
-      await this.refreshTradingData();
+      // See submitOrder: cancelOrder's own orderUpdate push refreshes when
+      // the socket is up; fall back to a direct refresh when it's not.
+      if (!this.isSocketConnected?.()) await this.refreshTradingData();
     } catch (error) {
       this.showToast(errorMessage(error), 'error');
     }

@@ -3,7 +3,9 @@ import type { BrokerProvider, CredentialProvider, TradingMode } from '@0dtetrade
 import { useContainer } from '../../app/container';
 import { useStore } from '../../core/observable';
 import { AlertDialog } from '../../design/components/AlertDialog';
+import { DesktopSheet } from '../../design/components/DesktopSheet';
 import { NavBar } from '../../design/components/NavBar';
+import { SegmentedControl } from '../../design/components/SegmentedControl';
 import { Sheet } from '../../design/components/Sheet';
 import { Spinner } from '../../design/components/Spinner';
 import { Toggle } from '../../design/components/Toggle';
@@ -20,6 +22,12 @@ import './profile.css';
 interface ProfileViewProps {
   onLogout: () => Promise<void>;
   onDismiss: () => void;
+  /** Desktop grid: centered floating panel instead of an iOS bottom sheet. */
+  dense?: boolean;
+  /** Render just the settings content, no NavBar/Sheet chrome — used when
+   *  embedded as a tab inside DesktopSettingsPanel, which supplies its own
+   *  window chrome and tab navigation. */
+  bodyOnly?: boolean;
 }
 
 type DeleteTarget = {
@@ -28,10 +36,10 @@ type DeleteTarget = {
   connectionId?: string;
 };
 
-function providerLabel(provider: BrokerProvider): string {
-  if (provider === 'webull') return 'Webull';
-  if (provider === 'alpaca') return 'Alpaca';
-  return 'SnapTrade';
+function deleteActionLabel(target: DeleteTarget): string {
+  if (target.connectionId) return 'Disconnect';
+  if (target.provider === 'tradier') return 'Delete API Key';
+  return 'Delete Credentials';
 }
 
 function deleteTargetTitle(target: DeleteTarget): string {
@@ -665,7 +673,12 @@ function ProviderCredentials({
   );
 }
 
-function ProfileViewContent({ onLogout, onDismiss }: ProfileViewProps) {
+function ProfileViewContent({
+  onLogout,
+  onDismiss,
+  dense = false,
+  bodyOnly = false,
+}: ProfileViewProps) {
   const container = useContainer();
   const store = useProfileStore();
   const state = useStore(store);
@@ -675,165 +688,204 @@ function ProfileViewContent({ onLogout, onDismiss }: ProfileViewProps) {
   const [bypassConfirmation, setBypassConfirmation] = useState(
     () => container.settingsStore.bypassOrderConfirmation,
   );
+  const [shortcutsEnabled, setShortcutsEnabled] = useState(
+    () => container.settingsStore.keyboardShortcutsEnabled,
+  );
 
   const handleBypassChange = (on: boolean) => {
     setBypassConfirmation(on);
     container.settingsStore.bypassOrderConfirmation = on;
   };
 
+  const handleShortcutsChange = (on: boolean) => {
+    setShortcutsEnabled(on);
+    container.settingsStore.keyboardShortcutsEnabled = on;
+  };
+
   useEffect(() => {
     void store.load();
   }, [store]);
 
-  return (
-    <Sheet detent="large" onDismiss={onDismiss}>
-      <div className="profile-view">
-        <NavBar
-          title="Profile"
-          trailing={
-            <button type="button" className="navbar-text-button" onClick={onDismiss}>
-              Done
-            </button>
-          }
-        />
-        <div className="sheet-body grouped-list hide-scrollbar">
-          {/* Account */}
-          <div className="grouped-section">
-            <div className="section-header">Account</div>
-            <div className="section-card">
-              <AccountSection />
-            </div>
-          </div>
-
-          {/* Trading provider selector (webull | alpaca | snaptrade). */}
-          <div className="grouped-section">
-            <div className="section-header">Trading Provider</div>
-            <div className="section-card">
-              <div className="segmented-control" role="group" aria-label="Trading provider">
-                {(['webull', 'alpaca', 'snaptrade'] as BrokerProvider[]).map((provider) => (
-                  <button
-                    key={provider}
-                    type="button"
-                    className={`segment${state.tradingProvider === provider ? ' active' : ''}`}
-                    aria-pressed={state.tradingProvider === provider}
-                    onClick={async () => {
-                      await store.setTradingProvider(provider);
-                      // Re-establish the market-data stream so live quotes use the
-                      // newly selected provider immediately (the subscription was
-                      // established under the previous provider).
-                      container.quoteSocket.reconnect();
-                    }}
-                  >
-                    {providerLabel(provider)}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div className="section-footer">
-              Switch providers any time. Credentials for the other provider stay saved.
-            </div>
-          </div>
-
-          <ProviderCredentials onRequestDelete={setDeleteTarget} />
-
-          {/* Trading */}
-          <div className="grouped-section">
-            <div className="section-header">Trading</div>
-            <div className="section-card">
-              <div className="grouped-row">
-                <span>Skip order confirmation</span>
-                <span style={{ marginLeft: 'auto' }}>
-                  <Toggle on={bypassConfirmation} onChange={handleBypassChange} />
-                </span>
-              </div>
-            </div>
-            <div className="section-footer">
-              When on, tapping Buy or Sell places the order immediately without the confirmation
-              step. This device only.
-            </div>
-          </div>
-
-          {/* Security section intentionally omitted: Face ID / AppLockManager is
-              iOS-only (ProfileView.swift securitySection). */}
-          {/* Session */}
-          <div className="grouped-section">
-            <div className="section-card">
-              <button
-                type="button"
-                className="grouped-row destructive"
-                disabled={isLoggingOut}
-                onClick={() => setShowLogoutConfirmation(true)}
-              >
-                {isLoggingOut ? <Spinner size={14} /> : 'Log Out'}
-              </button>
-            </div>
+  const settingsContent = (
+    <>
+      <div className={bodyOnly ? 'grouped-list' : 'sheet-body grouped-list hide-scrollbar'}>
+        {/* Account */}
+        <div className="grouped-section">
+          <div className="section-header">Account</div>
+          <div className="section-card">
+            <AccountSection />
           </div>
         </div>
 
-        {deleteTarget ? (
-          <AlertDialog
-            title={deleteTargetTitle(deleteTarget)}
-            message={deleteCredentialsMessage(deleteTarget)}
-            actions={[
-              {
-                label: deleteTarget.connectionId
-                  ? 'Disconnect'
-                  : deleteTarget.provider === 'tradier'
-                    ? 'Delete API Key'
-                    : 'Delete Credentials',
-                role: 'destructive',
-                onSelect: () => {
-                  if (deleteTarget.provider === 'webull') {
-                    void store.deleteCredentials(deleteTarget.environment);
-                  } else if (deleteTarget.provider === 'alpaca') {
-                    void store.deleteAlpacaCredentials(deleteTarget.environment);
-                  } else if (deleteTarget.provider === 'tradier') {
-                    void store.deleteTradierCredentials(deleteTarget.environment);
-                  } else if (deleteTarget.provider === 'snaptrade-key') {
-                    void store.deleteSnapTradeKey(deleteTarget.environment);
-                  } else if (deleteTarget.connectionId) {
-                    void store.disconnectSnapTrade(
-                      deleteTarget.environment,
-                      deleteTarget.connectionId,
-                    );
-                  }
-                },
-              },
-              { label: 'Cancel', role: 'cancel' },
-            ]}
-            onDismiss={() => setDeleteTarget(null)}
-          />
-        ) : null}
+        {/* Trading provider selector (webull | alpaca | snaptrade). */}
+        <div className="grouped-section">
+          <div className="section-header">Trading Provider</div>
+          <div className="section-card">
+            <SegmentedControl
+              options={[
+                { value: 'webull', label: 'Webull' },
+                { value: 'alpaca', label: 'Alpaca' },
+                { value: 'snaptrade', label: 'SnapTrade' },
+              ]}
+              value={state.tradingProvider}
+              onChange={async (provider: BrokerProvider) => {
+                await store.setTradingProvider(provider);
+                // Re-establish the market-data stream so live quotes use the
+                // newly selected provider immediately (the subscription was
+                // established under the previous provider).
+                container.quoteSocket.reconnect();
+              }}
+            />
+          </div>
+          <div className="section-footer">
+            Switch providers any time. Credentials for the other provider stay saved.
+          </div>
+        </div>
 
-        {showLogoutConfirmation ? (
-          <AlertDialog
-            title="Log out of 0dteTrader?"
-            message="Open positions are unaffected; live quotes will stop."
-            actions={[
-              {
-                label: 'Log Out',
-                role: 'destructive',
-                onSelect: () => {
-                  setIsLoggingOut(true);
-                  void onLogout().then(onDismiss);
-                },
-              },
-              { label: 'Cancel', role: 'cancel' },
-            ]}
-            onDismiss={() => setShowLogoutConfirmation(false)}
-          />
-        ) : null}
+        <ProviderCredentials onRequestDelete={setDeleteTarget} />
+
+        {/* Trading */}
+        <div className="grouped-section">
+          <div className="section-header">Trading</div>
+          <div className="section-card">
+            <div className="grouped-row">
+              <span>Skip order confirmation</span>
+              <span style={{ marginLeft: 'auto' }}>
+                <Toggle on={bypassConfirmation} onChange={handleBypassChange} />
+              </span>
+            </div>
+          </div>
+          <div className="section-footer">
+            When on, tapping Buy or Sell places the order immediately without the confirmation step.
+            This device only.
+          </div>
+        </div>
+
+        {/* Desktop-grid-only: hotkeys have no meaning on the phone layout. */}
+        <div className="grouped-section">
+          <div className="section-header">Desktop</div>
+          <div className="section-card">
+            <div className="grouped-row">
+              <span>Trading shortcuts</span>
+              <span style={{ marginLeft: 'auto' }}>
+                <Toggle on={shortcutsEnabled} onChange={handleShortcutsChange} />
+              </span>
+            </div>
+          </div>
+          <div className="section-footer">
+            B arms Buy, S arms Sell, L toggles the trading lock. Disabled while typing in any field.
+            Desktop grid layout only — ⌘K symbol search is unaffected by this setting.
+          </div>
+        </div>
+
+        {/* Security section intentionally omitted: Face ID / AppLockManager is
+              iOS-only (ProfileView.swift securitySection). */}
+        {/* Session */}
+        <div className="grouped-section">
+          <div className="section-card">
+            <button
+              type="button"
+              className="grouped-row destructive"
+              disabled={isLoggingOut}
+              onClick={() => setShowLogoutConfirmation(true)}
+            >
+              {isLoggingOut ? <Spinner size={14} /> : 'Log Out'}
+            </button>
+          </div>
+        </div>
       </div>
+
+      {deleteTarget ? (
+        <AlertDialog
+          title={deleteTargetTitle(deleteTarget)}
+          message={deleteCredentialsMessage(deleteTarget)}
+          actions={[
+            {
+              label: deleteActionLabel(deleteTarget),
+              role: 'destructive',
+              onSelect: () => {
+                if (deleteTarget.provider === 'webull') {
+                  void store.deleteCredentials(deleteTarget.environment);
+                } else if (deleteTarget.provider === 'alpaca') {
+                  void store.deleteAlpacaCredentials(deleteTarget.environment);
+                } else if (deleteTarget.provider === 'tradier') {
+                  void store.deleteTradierCredentials(deleteTarget.environment);
+                } else if (deleteTarget.provider === 'snaptrade-key') {
+                  void store.deleteSnapTradeKey(deleteTarget.environment);
+                } else if (deleteTarget.connectionId) {
+                  void store.disconnectSnapTrade(
+                    deleteTarget.environment,
+                    deleteTarget.connectionId,
+                  );
+                }
+              },
+            },
+            { label: 'Cancel', role: 'cancel' },
+          ]}
+          onDismiss={() => setDeleteTarget(null)}
+        />
+      ) : null}
+
+      {showLogoutConfirmation ? (
+        <AlertDialog
+          title="Log out of 0dteTrader?"
+          message="Open positions are unaffected; live quotes will stop."
+          actions={[
+            {
+              label: 'Log Out',
+              role: 'destructive',
+              onSelect: () => {
+                setIsLoggingOut(true);
+                void onLogout().then(onDismiss);
+              },
+            },
+            { label: 'Cancel', role: 'cancel' },
+          ]}
+          onDismiss={() => setShowLogoutConfirmation(false)}
+        />
+      ) : null}
+    </>
+  );
+
+  if (bodyOnly) {
+    return settingsContent;
+  }
+
+  const body = (
+    <div className="profile-view">
+      <NavBar
+        title="Profile"
+        trailing={
+          <button className="navbar-text-button" onClick={onDismiss}>
+            Done
+          </button>
+        }
+      />
+      {settingsContent}
+    </div>
+  );
+
+  if (dense) {
+    return <DesktopSheet onDismiss={onDismiss}>{body}</DesktopSheet>;
+  }
+  return (
+    <Sheet detent="large" onDismiss={onDismiss}>
+      {body}
     </Sheet>
   );
 }
 
-export function ProfileView({ onLogout, onDismiss }: ProfileViewProps) {
+export function ProfileView({ onLogout, onDismiss, dense, bodyOnly }: ProfileViewProps) {
   const container = useContainer();
   const store = useMemo(() => new ProfileStore(container.apiClient), [container]);
   return (
     <ProfileStoreProvider store={store}>
-      <ProfileViewContent onLogout={onLogout} onDismiss={onDismiss} />
+      <ProfileViewContent
+        onLogout={onLogout}
+        onDismiss={onDismiss}
+        dense={dense}
+        bodyOnly={bodyOnly}
+      />
     </ProfileStoreProvider>
   );
 }

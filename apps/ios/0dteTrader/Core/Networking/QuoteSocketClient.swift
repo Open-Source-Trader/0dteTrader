@@ -40,7 +40,6 @@ final class QuoteSocketClient: ObservableObject {
 
     private let streamURL: URL
     private let tokenProvider: () async throws -> String
-    private let decoder = JSONDecoder()
     private let encoder = JSONEncoder()
     private let urlSession: URLSession
 
@@ -160,18 +159,68 @@ final class QuoteSocketClient: ObservableObject {
     private func startReceiveLoop() {
         receiveTask?.cancel()
         receiveTask = Task { [weak self] in
+            guard let task = self?.webSocketTask else { return }
             while !Task.isCancelled {
-                guard let self, let task = self.webSocketTask else { return }
                 do {
                     let message = try await task.receive()
-                    self.handle(message)
+                    // Decoding runs off the main actor so a burst of quotes
+                    // can't queue up behind SwiftUI layout/gesture work; only
+                    // the resulting @Published writes hop back to it.
+                    guard let decoded = await Self.decode(message) else { continue }
+                    guard let self else { return }
+                    self.publish(decoded)
                 } catch {
                     if !Task.isCancelled {
-                        self.handleUnexpectedDisconnect()
+                        self?.handleUnexpectedDisconnect()
                     }
                     return
                 }
             }
+        }
+    }
+
+    private nonisolated static func decode(_ message: URLSessionWebSocketTask.Message) async -> DecodedSocketMessage? {
+        let data: Data
+        switch message {
+        case .string(let text):
+            data = Data(text.utf8)
+        case .data(let payload):
+            data = payload
+        @unknown default:
+            return nil
+        }
+        let decoder = JSONDecoder()
+        guard let envelope = try? decoder.decode(SocketEnvelope.self, from: data) else { return nil }
+        switch envelope.type {
+        case "quote":
+            guard let payload = try? decoder.decode(SocketQuoteMessage.self, from: data) else { return nil }
+            return .quote(Quote(dto: payload.data))
+        case "orderUpdate":
+            guard let payload = try? decoder.decode(SocketOrderUpdateMessage.self, from: data) else { return nil }
+            return .orderUpdate(OrderResult(dto: payload.data))
+        case "chartOrder":
+            guard let payload = try? decoder.decode(SocketChartOrderMessage.self, from: data),
+                  let order = ChartOrder(dto: payload.data) else { return nil }
+            return .chartOrder(order)
+        case "error":
+            guard let payload = try? decoder.decode(SocketErrorMessage.self, from: data) else { return nil }
+            return .error(payload.error.message)
+        default:
+            return nil
+        }
+    }
+
+    private func publish(_ decoded: DecodedSocketMessage) {
+        switch decoded {
+        case .quote(let quote):
+            quotes[quote.symbol] = quote
+            lastQuote = quote
+        case .orderUpdate(let result):
+            lastOrderUpdate = result
+        case .chartOrder(let order):
+            onChartOrder?(order)
+        case .error(let message):
+            lastErrorMessage = message
         }
     }
 
@@ -239,39 +288,11 @@ final class QuoteSocketClient: ObservableObject {
         }
     }
 
-    private func handle(_ message: URLSessionWebSocketTask.Message) {
-        let data: Data
-        switch message {
-        case .string(let text):
-            data = Data(text.utf8)
-        case .data(let payload):
-            data = payload
-        @unknown default:
-            return
-        }
-        guard let envelope = try? decoder.decode(SocketEnvelope.self, from: data) else { return }
-        switch envelope.type {
-        case "quote":
-            if let payload = try? decoder.decode(SocketQuoteMessage.self, from: data) {
-                let quote = Quote(dto: payload.data)
-                quotes[quote.symbol] = quote
-                lastQuote = quote
-            }
-        case "orderUpdate":
-            if let payload = try? decoder.decode(SocketOrderUpdateMessage.self, from: data) {
-                lastOrderUpdate = OrderResult(dto: payload.data)
-            }
-        case "chartOrder":
-            if let payload = try? decoder.decode(SocketChartOrderMessage.self, from: data),
-               let order = ChartOrder(dto: payload.data) {
-                onChartOrder?(order)
-            }
-        case "error":
-            if let payload = try? decoder.decode(SocketErrorMessage.self, from: data) {
-                lastErrorMessage = payload.error.message
-            }
-        default:
-            break
-        }
-    }
+}
+
+private enum DecodedSocketMessage {
+    case quote(Quote)
+    case orderUpdate(OrderResult)
+    case chartOrder(ChartOrder)
+    case error(String)
 }

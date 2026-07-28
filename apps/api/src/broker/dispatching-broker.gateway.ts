@@ -14,6 +14,9 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { BrokerGateway } from './broker-gateway.interface';
 
+/** How long a resolved provider is trusted before re-reading it from the DB. */
+const PROVIDER_CACHE_TTL_MS = 30_000;
+
 /**
  * Provider dispatch seam. Routes every call to the user's selected trading
  * provider based on their `tradingProvider`. SnapTrade users get the
@@ -22,6 +25,19 @@ import { BrokerGateway } from './broker-gateway.interface';
  */
 @Injectable()
 export class DispatchingBrokerGateway implements BrokerGateway {
+  /**
+   * Every call (quote streaming, the 1s order-status poll, ...) otherwise hit
+   * Prisma just to learn which provider a user is on — a value that changes
+   * only through a deliberate Profile action. Cached per user with a short TTL
+   * rather than invalidated on write: cheap, self-healing if a provider
+   * switch ever happens mid-flight, and needs no cross-module wiring into
+   * UsersService.setTradingProvider.
+   */
+  private readonly providerCache = new Map<
+    string,
+    { provider: string | null; expiresAt: number }
+  >();
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly webull: BrokerGateway,
@@ -31,12 +47,20 @@ export class DispatchingBrokerGateway implements BrokerGateway {
 
   /** Resolve the gateway for a user from their stored trading provider. */
   private async gatewayFor(userId: string): Promise<BrokerGateway> {
-    const user = await this.prisma.user.findUnique({
-      where: { id: userId },
-      select: { tradingProvider: true },
-    });
-    if (user?.tradingProvider === 'alpaca') return this.alpaca;
-    if (user?.tradingProvider === 'snaptrade') return this.snaptrade;
+    const cached = this.providerCache.get(userId);
+    let provider: string | null;
+    if (cached && cached.expiresAt > Date.now()) {
+      provider = cached.provider;
+    } else {
+      const user = await this.prisma.user.findUnique({
+        where: { id: userId },
+        select: { tradingProvider: true },
+      });
+      provider = user?.tradingProvider ?? null;
+      this.providerCache.set(userId, { provider, expiresAt: Date.now() + PROVIDER_CACHE_TTL_MS });
+    }
+    if (provider === 'alpaca') return this.alpaca;
+    if (provider === 'snaptrade') return this.snaptrade;
     return this.webull;
   }
 
@@ -65,8 +89,15 @@ export class DispatchingBrokerGateway implements BrokerGateway {
     order: OrderRequest,
     idempotencyKey: string,
     expectedMode?: TradingMode,
+    heldQuantity?: number,
   ): Promise<OrderResult> {
-    return (await this.gatewayFor(userId)).placeOrder(userId, order, idempotencyKey, expectedMode);
+    return (await this.gatewayFor(userId)).placeOrder(
+      userId,
+      order,
+      idempotencyKey,
+      expectedMode,
+      heldQuantity,
+    );
   }
 
   async cancelOrder(userId: string, orderId: string): Promise<void> {

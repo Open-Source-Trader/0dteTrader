@@ -4,7 +4,7 @@
 
 ## Project Quick Reference
 
-**What this is:** 0dteTrader — a rapid options trading app (iOS + desktop) backed by Webull OpenAPI and Tradier.
+**What this is:** 0dteTrader — a rapid options trading app backed by Webull OpenAPI and Tradier, shipped as two independent, first-class apps: iOS and desktop. They share a backend and API contract but are developed and designed independently — desktop is a standalone desktop-native trading app, not a clone of the iOS UI.
 
 **Build & verify:**
 
@@ -31,11 +31,11 @@ older runtime. To run or test, pick a device that actually exists:
 
 **Key facts:**
 
-- npm workspaces monorepo: `apps/api` (NestJS), `apps/desktop` (React+Vite), `packages/shared-types`
+- npm workspaces monorepo: `apps/api` (NestJS), `apps/desktop` (React+Vite+Electron), `packages/shared-types`
 - iOS is separate (XcodeGen + SwiftPM). Module name: `ZeroDTETrader`
 - Docker required (Postgres 16 + Redis 7): `npm run db:up`
 - Secrets in `.env` (gitignored) — never commit credentials
-- Desktop is the reference UI; iOS copies its layout behavior
+- iOS and desktop are independent apps with their own UX — a change to one does not imply a change to the other, except when it touches the shared backend/API contract
 - See `AGENTS.md` for full architecture and conventions
 
 ---
@@ -90,4 +90,4 @@ A few patterns recur often enough to name: the _Kitchen Sink_ (restructuring hal
 
 ---
 
-**Always update the IOS and Electron app as a pair, when needed. Never just one or the other**
+**iOS and desktop (Electron) are independent apps, developed and designed separately.** A fix or feature scoped to one does not need to be ported to the other. The one exception: changes to `apps/api` or `packages/shared-types` that affect the wire contract must be checked against both clients.

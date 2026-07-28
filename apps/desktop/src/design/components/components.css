@@ -1,57 +1,4 @@
-/* Shared iOS-look components. */
-
-/* --- Status bar + home indicator (cosmetic iPhone chrome) --- */
-.status-bar {
-  height: 59px;
-  flex: none;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 14px 28px 0;
-  position: relative;
-  z-index: var(--z-chrome);
-}
-
-.status-bar .time {
-  font-size: var(--fs-status-time);
-  font-weight: 600;
-  letter-spacing: 0.2px;
-  min-width: 54px;
-}
-
-.status-bar .island {
-  position: absolute;
-  left: 50%;
-  top: 11px;
-  transform: translateX(-50%);
-  width: 125px;
-  height: 36px;
-  background: #000;
-  border-radius: 20px;
-}
-
-.status-bar .glyphs {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-}
-
-.home-indicator {
-  height: 34px;
-  flex: none;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.home-indicator::after {
-  content: '';
-  width: 140px;
-  height: 5px;
-  border-radius: 3px;
-  background: var(--label-primary);
-  opacity: 0.9;
-}
+/* Shared HUD-look components. */
 
 /* --- NavBar (44px inline-title bar) --- */
 .navbar {
@@ -106,6 +53,18 @@
   min-height: 44px;
 }
 
+/* Desktop grid (standard/wide breakpoints): tighter chrome for mouse+keyboard
+   use — a scalper wants more vertical room for chart/chain, not touch targets. */
+.navbar-desktop {
+  height: var(--h-navbar-desktop);
+  padding: 0 var(--pad-screen-desktop);
+}
+
+.navbar-desktop .navbar-icon-button {
+  min-width: 28px;
+  min-height: 28px;
+}
+
 .navbar-icon-button:hover,
 .navbar-text-button:hover {
   opacity: 0.7;
@@ -114,6 +73,58 @@
 .navbar-icon-button:active,
 .navbar-text-button:active {
   opacity: 0.5;
+}
+
+/* --- Desktop grid top bar (features/trade/DesktopTopBar) ---
+   One row for the whole app: symbol/price (what you're trading), chart
+   controls, and global actions (profile/history/lock) together — not a
+   full-width app NavBar with a centered logo stacked above a second,
+   separate chart header. Solid fill, terminal convention. */
+/* Each resizable panel (chart, order ticket) gets its own top bar, rendered
+   inside that panel — so the bar's right edge always tracks the panel's
+   real width, including while the user is live-dragging the chart/ticket
+   split, instead of a single full-width bar with icons floating at a fixed
+   position that only lined up with the chart at the default split ratio.
+   Height is generous enough to clear the tallest child (the interval chip,
+   with its own chamfer border) without clipping — the chip needs real
+   headroom, not just its own min-height. */
+.desktop-top-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+  height: 40px;
+  padding: 0 8px;
+  background: var(--app-surface);
+  border-bottom: var(--border-hairline) solid var(--hud-stroke-dim);
+  font-size: var(--fs-caption-desktop);
+}
+
+.desktop-top-bar-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Interval selector: a plain flat chip, not the shared .quick-chip's
+   chamfered border-image — that border alone is 10px of vertical overhead
+   (5px top + bottom), which is what overflowed the bar in the first place. */
+.desktop-top-bar-chip {
+  display: flex;
+  align-items: center;
+  height: 26px;
+  padding: 0 10px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-caption-desktop);
+  font-weight: 600;
+  color: var(--app-accent-text);
+  background: var(--app-surface-elevated);
+  border: var(--border-hairline) solid var(--hud-stroke-dim);
+  border-radius: var(--radius-chip);
+}
+
+.desktop-top-bar-chip:hover {
+  border-color: var(--hud-stroke);
 }
 
 /* --- Spinner (ProgressView) --- */
@@ -554,6 +565,62 @@
   border-right: 1px solid var(--hud-stroke-dim);
 }
 
+/* --- Number field (desktop settings: typeable value + nudge buttons) --- */
+.number-field {
+  display: flex;
+  align-items: stretch;
+  height: 24px;
+  background: var(--app-surface);
+  border: var(--border-hairline) solid var(--hud-stroke-dim);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.number-field:focus-within {
+  border-color: var(--hud-stroke);
+}
+
+.number-field-input {
+  width: 64px;
+  min-width: 0;
+  padding: 0 6px;
+  background: transparent;
+  border: none;
+  outline: none;
+  font: inherit;
+  font-size: var(--fs-caption-desktop);
+  color: var(--label-primary);
+  text-align: right;
+}
+
+.number-field-buttons {
+  display: flex;
+  flex-direction: column;
+  flex: none;
+  border-left: var(--border-hairline) solid var(--hud-stroke-dim);
+}
+
+.number-field-buttons button {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  color: var(--app-accent-text);
+}
+
+.number-field-buttons button:first-child {
+  border-bottom: var(--border-hairline) solid var(--hud-stroke-dim);
+}
+
+.number-field-buttons button:hover:not(:disabled) {
+  background: rgba(46, 143, 255, 0.1);
+}
+
+.number-field-buttons button:disabled {
+  opacity: var(--disabled-opacity);
+}
+
 /* --- Trade action buttons --- */
 .trade-action-button {
   flex: 1;
@@ -743,6 +810,21 @@
   min-width: 0;
 }
 
+/* A script's full parameter set, expanded inline in place (disclosure
+   triangle) instead of navigating to a separate settings screen — desktop
+   settings read as one persistent window, not a stack of screens. Inset
+   background + accent rail mark it as nested under its parent row. */
+.indicator-nested-settings {
+  padding: var(--space-2) 0 var(--space-2) var(--space-3);
+  margin: 0 0 0 var(--space-2);
+  background: rgba(0, 0, 0, 0.15);
+  border-left: 2px solid var(--hud-stroke-dim);
+}
+
+.indicator-nested-settings .grouped-section:first-child .section-header {
+  padding-top: 0;
+}
+
 /* --- Toast --- */
 .toast {
   position: absolute;
@@ -918,4 +1000,752 @@
 
 .quote-column__label {
   font-size: var(--fs-caption2);
+}
+
+/* Desktop grid order ticket: terminal density (TWS Mosaic-style), not a
+   touch CTA — smaller controls, no chevron flourish on Buy/Sell, tighter
+   everything. Distinct from .compact/.dense above, which just shrink the
+   phone ticket for sub-pane pressure; this is a different density class
+   entirely, sized for a mouse. */
+.trade-panel.desktop .segmented {
+  height: var(--h-button-desktop);
+}
+
+.trade-panel.desktop .trade-action-button {
+  min-height: var(--h-trade-button-desktop);
+  font-size: var(--fs-headline);
+  gap: 4px;
+}
+
+.trade-panel.desktop .trade-action-button .hud-chevrons {
+  display: none;
+}
+
+.trade-panel.desktop .chip-button {
+  padding: 5px 9px;
+  font-size: var(--fs-caption-desktop);
+}
+
+.trade-panel.desktop .stepper {
+  height: var(--h-button-desktop);
+  width: 72px;
+}
+
+.trade-panel.desktop .quick-chip {
+  padding: 3px 8px;
+  font-size: var(--fs-caption2-desktop);
+}
+
+/* --- Option chain table (desktop grid only) ---
+   Calls | Strike | Puts, one row per strike. Replaces the phone ticket's
+   single-strike dropdown chips at the standard/wide breakpoints — a scalper
+   needs to scan the whole ladder for spread/liquidity before picking a
+   strike, not tap a menu to reveal one strike at a time. */
+.chain-table {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+  font-size: var(--fs-caption);
+}
+
+.chain-table-empty {
+  padding: var(--space-4);
+  text-align: center;
+}
+
+.chain-table-header {
+  display: grid;
+  grid-template-columns: 1fr 60px 1fr;
+  flex: none;
+  padding: 3px var(--space-2);
+  color: var(--label-secondary);
+  font-size: var(--fs-caption2);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  border-bottom: var(--border-hairline) solid var(--hud-stroke-dim);
+}
+
+.chain-table-header span:first-child {
+  text-align: left;
+  color: var(--buy-green);
+}
+
+.chain-table-header span:last-child {
+  text-align: right;
+  color: var(--sell-red);
+}
+
+.chain-table-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* Ladder rows: minimal height, hairline separators only — no card padding.
+   This is a scan surface, not a list of tappable cards. */
+.chain-row {
+  display: grid;
+  grid-template-columns: 1fr 60px 1fr;
+  align-items: center;
+  border-bottom: var(--border-hairline) solid rgba(46, 143, 255, 0.1);
+}
+
+/* ATM row: a solid pinned band (DOM "current price" convention), not a
+   translucent tint — it must read as a fixed reference line, not a hover. */
+.chain-row--atm {
+  background: var(--app-accent-fill);
+  box-shadow:
+    inset 0 var(--border-hairline) 0 var(--hud-stroke),
+    inset 0 calc(-1 * var(--border-hairline)) 0 var(--hud-stroke);
+}
+
+.chain-row--atm .chain-row-strike {
+  color: #fff;
+}
+
+.chain-row-strike {
+  text-align: center;
+  font-size: var(--fs-caption2);
+  font-weight: 700;
+  padding: 1px 0;
+}
+
+.chain-cell {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+  width: 100%;
+  padding: 2px var(--space-2);
+  border: none;
+  border-left: 2px solid transparent;
+  border-right: 2px solid transparent;
+  background: none;
+  cursor: pointer;
+}
+
+.chain-cell:disabled {
+  cursor: default;
+  opacity: var(--disabled-opacity);
+}
+
+.chain-cell--empty {
+  cursor: default;
+}
+
+.chain-cell--call .chain-cell-bid,
+.chain-cell--call .chain-cell-ask {
+  color: var(--buy-green);
+}
+
+.chain-cell--put .chain-cell-bid,
+.chain-cell--put .chain-cell-ask {
+  color: var(--sell-red);
+}
+
+/* Hover shows an "armed on click" edge accent in the leg's own color,
+   matching the DOM convention of color-coding the side you're about to act on. */
+.chain-cell--call:hover:not(:disabled) {
+  background: var(--app-surface-elevated);
+  border-left-color: var(--buy-green);
+}
+
+.chain-cell--put:hover:not(:disabled) {
+  background: var(--app-surface-elevated);
+  border-right-color: var(--sell-red);
+}
+
+.chain-cell.selected {
+  background: var(--app-surface-elevated);
+  box-shadow: inset 0 0 0 1px var(--hud-stroke);
+}
+
+.chain-cell--call.selected {
+  border-left-color: var(--buy-green);
+}
+
+.chain-cell--put.selected {
+  border-right-color: var(--sell-red);
+}
+
+/* AUTO mode: the chain stays fully readable — not the trading-locked
+   "faded/inert" look — since the point is to keep spread/liquidity info
+   visible while AUTO owns the pick. Only the cursor communicates
+   non-interactivity; the auto-picked cell reuses the same elevated-surface
+   + hairline-outline treatment as a manual selection (not the solid accent
+   fill) — that fill is already the ATM/current-price row's look, so reusing
+   it here made the auto-pick and the current price read as the same thing. */
+.chain-table--auto .chain-cell:disabled {
+  cursor: default;
+  opacity: 1;
+}
+
+/* AUTO's picked row: a small dot on the strike cell (the only column with
+   spare room) instead of a text badge inside a bid/ask cell — a badge
+   there had no room and covered the price it was meant to annotate. */
+.chain-row-strike--auto {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  font-weight: 700;
+}
+
+.chain-row-auto-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--app-accent);
+}
+
+/* --- Symbol spotlight (desktop Cmd+K command palette) ---
+   Rebuilt from scratch: no chamfer/HUD-card border (that decorative
+   language reads fine on chunky panels, but shrank to a single hairline
+   rectangle on this narrower, taller surface it just looked like a plain
+   box). Instead: a soft backdrop blur, a single glowing 1px edge, and a
+   generously-sized query row that's the visual anchor of the whole thing —
+   Spotlight/Raycast's actual proportions, not a shrunk-down settings dialog. */
+.spotlight-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(2, 6, 14, 0.55);
+  backdrop-filter: blur(3px);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 14vh;
+  animation: backdrop-in 120ms ease-out;
+  z-index: var(--z-alert);
+}
+
+.spotlight-card {
+  width: min(600px, 92%);
+  max-height: 56vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--app-surface-elevated);
+  border-radius: 12px;
+  box-shadow:
+    0 0 0 1px var(--hud-stroke-dim),
+    0 0 0 1px rgba(46, 143, 255, 0.2) inset,
+    0 24px 64px rgba(0, 0, 0, 0.55),
+    0 0 60px rgba(46, 143, 255, 0.1);
+  overflow: hidden;
+}
+
+.spotlight-input-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex: none;
+  padding: var(--space-4) var(--space-5);
+}
+
+.spotlight-input {
+  flex: 1;
+  height: 32px;
+  font-family: var(--font-sans);
+  font-size: 22px;
+  font-weight: 500;
+}
+
+/* Override the app-wide input:focus-visible box-shadow ring (base.css) —
+   the input is auto-focused for the palette's entire open duration, so that
+   ring would be permanently visible. The card's own edge glow already reads
+   as the focused surface; no second ring nested inside it. */
+.spotlight-input:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+
+.spotlight-results {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 var(--space-2) var(--space-2);
+  border-top: var(--border-hairline) solid var(--hud-stroke-dim);
+}
+
+.spotlight-section-header {
+  padding: var(--space-3) var(--space-3) 6px;
+  font-size: var(--fs-caption2-desktop);
+  color: var(--label-secondary);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.spotlight-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 10px var(--space-3);
+  margin: 0 var(--space-1);
+  width: calc(100% - 2 * var(--space-1));
+  border-radius: 8px;
+  font-size: var(--fs-subheadline-desktop);
+}
+
+.spotlight-row:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.spotlight-row.active {
+  background: var(--app-accent-fill);
+  color: #fff;
+}
+
+.spotlight-row-icon {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--app-accent);
+}
+
+.spotlight-row.active .spotlight-row-icon {
+  color: #fff;
+}
+
+.spotlight-row-label {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Clarifies the custom-symbol row isn't a dead end (it read as a "no
+   results" state without this) — it's a valid jump, just not one of the
+   curated watchlist symbols. */
+.spotlight-row-hint {
+  flex: none;
+  font-size: var(--fs-caption2-desktop);
+  color: var(--label-secondary);
+}
+
+.spotlight-row.active .spotlight-row-hint {
+  color: rgba(255, 255, 255, 0.75);
+}
+
+.spotlight-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-4);
+  flex: none;
+  padding: var(--space-2) var(--space-4);
+  border-top: var(--border-hairline) solid var(--hud-stroke-dim);
+}
+
+.spotlight-footer-hint {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: var(--fs-caption2-desktop);
+  color: var(--label-secondary);
+}
+
+.spotlight-footer-hint kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-caption2-desktop);
+  color: var(--label-primary);
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 5px;
+}
+
+/* --- Desktop settings/indicators/history panel (desktop grid only) ---
+   A centered floating window, not an iOS sheet sliding up full-height —
+   settings/indicators/history read as app panels on a desktop, matching
+   the spotlight/alert chrome already used elsewhere in the grid. */
+.desktop-sheet-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: backdrop-in 120ms ease-out;
+  z-index: var(--z-sheet);
+}
+
+.desktop-sheet-panel {
+  width: min(480px, 90%);
+  max-height: 82vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--hud-panel-fill);
+  border: 8px solid transparent;
+  border-image: var(--hud-src-accent) 28 fill / 24px / 6px stretch;
+  box-shadow: var(--shadow-overlay);
+  overflow: hidden;
+}
+
+/* --- Unified desktop settings window (Profile + Indicators) ---
+   Sidebar tabs + content pane, macOS System Settings / VS Code Settings
+   convention — one window instead of two separate iOS-style sheets, and
+   dense two-column form rows instead of 44px touch-target grouped lists. */
+.desktop-settings-panel {
+  width: min(920px, 94%);
+  height: min(720px, 88vh);
+  display: flex;
+  flex-direction: row;
+  background: var(--hud-panel-fill);
+  border: 8px solid transparent;
+  border-image: var(--hud-src-accent) 28 fill / 24px / 6px stretch;
+  box-shadow: var(--shadow-overlay);
+  overflow: hidden;
+}
+
+.desktop-settings-sidebar {
+  width: 168px;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--space-3) var(--space-2);
+  border-right: var(--border-hairline) solid var(--hud-stroke-dim);
+  overflow-y: auto;
+}
+
+.desktop-settings-sidebar-title {
+  padding: 4px 8px 8px;
+  font-family: var(--font-display);
+  font-size: var(--fs-caption-desktop);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--app-accent);
+}
+
+.desktop-settings-tab {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  border-radius: var(--radius-chip);
+  font-size: var(--fs-caption-desktop);
+  color: var(--label-secondary);
+  text-align: left;
+}
+
+.desktop-settings-tab:hover {
+  background: rgba(46, 143, 255, 0.08);
+  color: var(--label-primary);
+}
+
+.desktop-settings-tab.active {
+  background: var(--app-accent-fill);
+  color: #fff;
+}
+
+.desktop-settings-content {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.desktop-settings-content-header {
+  display: flex;
+  align-items: center;
+  flex: none;
+  height: 38px;
+  padding: 0 var(--space-3);
+  border-bottom: var(--border-hairline) solid var(--hud-stroke-dim);
+  font-size: var(--fs-subheadline-desktop);
+  font-weight: 700;
+}
+
+.desktop-settings-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* Dense two-column form rows, replacing the 44px touch-target grouped-list
+   for exactly the two views embedded in this panel. Scoped to this
+   container only — the standalone compact Sheet views (phone layout) keep
+   the original .grouped-row/.section-card styling untouched. */
+.desktop-settings-body .grouped-list {
+  max-width: 560px;
+  margin: 0 auto;
+  padding: var(--space-4);
+  gap: var(--space-5);
+}
+
+.desktop-settings-body .grouped-section .section-header {
+  padding: 0 2px 4px;
+  font-size: var(--fs-caption2-desktop);
+}
+
+.desktop-settings-body .grouped-section .section-footer {
+  padding: 4px 2px 0;
+  font-size: var(--fs-caption2-desktop);
+}
+
+.desktop-settings-body .grouped-section .section-card {
+  border: var(--border-hairline) solid var(--hud-stroke-dim);
+  background: var(--app-surface);
+}
+
+.desktop-settings-body .grouped-row {
+  min-height: 32px;
+  padding: 6px 10px;
+  font-size: var(--fs-caption-desktop);
+  gap: 8px;
+}
+
+.desktop-settings-body .grouped-row + .grouped-row {
+  border-top: var(--border-hairline) solid var(--app-border);
+}
+
+/* --- Indicator settings (desktop grid) ---
+   VS Code / macOS System Settings convention: a searchable category tree
+   on the left, a form pane on the right — replacing the single scrolling
+   grouped-list (iOS Settings.app pattern) that the compact/phone layout
+   still uses via IndicatorSettingsView/IndicatorSettingsBody, unchanged. */
+.indicator-settings-desktop {
+  display: flex;
+  height: 100%;
+  min-height: 0;
+}
+
+.indicator-settings-tree-pane {
+  width: 200px;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-right: var(--border-hairline) solid var(--hud-stroke-dim);
+}
+
+.indicator-settings-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  height: 30px;
+  padding: 0 var(--space-2);
+  border-bottom: var(--border-hairline) solid var(--hud-stroke-dim);
+}
+
+.indicator-settings-search-input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  background: transparent;
+  border: none;
+  outline: none;
+  font: inherit;
+  font-size: var(--fs-caption-desktop);
+  color: var(--label-primary);
+}
+
+.indicator-settings-tree {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--space-2) 0;
+}
+
+.indicator-tree-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 6px var(--space-3);
+  font-size: var(--fs-caption-desktop);
+  color: var(--label-secondary);
+  text-align: left;
+}
+
+.indicator-tree-row:hover {
+  background: rgba(46, 143, 255, 0.08);
+  color: var(--label-primary);
+}
+
+.indicator-tree-row.active {
+  background: var(--app-accent-fill);
+  color: #fff;
+}
+
+.indicator-tree-row--child {
+  padding-left: calc(var(--space-3) + 17px);
+  font-size: var(--fs-caption2-desktop);
+}
+
+.indicator-tree-disclosure {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 11px;
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+
+.indicator-settings-detail {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  padding: var(--space-4);
+}
+
+/* No border/background here — the floating settings window already frames
+   the whole pane; a second border around every category's content read as
+   a box nested inside a box. Just a legend divider (below) separates the
+   title from its fields. */
+.settings-fieldset {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  max-width: 420px;
+}
+
+.settings-fieldset-legend {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: var(--space-2);
+  border-bottom: var(--border-hairline) solid var(--hud-stroke-dim);
+  font-size: var(--fs-subheadline-desktop);
+  font-weight: 700;
+}
+
+.settings-fieldset-hint {
+  font-size: var(--fs-caption2-desktop);
+  color: var(--label-secondary);
+}
+
+.settings-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.settings-field-label {
+  font-size: var(--fs-caption-desktop);
+  color: var(--label-secondary);
+}
+
+.settings-field--row {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.settings-field--row .settings-field-label {
+  color: var(--label-primary);
+}
+
+.settings-reset-button {
+  align-self: flex-start;
+  margin-top: var(--space-2);
+  font-size: var(--fs-caption-desktop);
+  color: var(--app-accent-text);
+}
+
+.settings-reset-button:hover {
+  color: var(--app-accent);
+}
+
+/* --- Desktop positions/orders panel (desktop grid footer) ---
+   Tabbed dense table (TradingView Account Manager / ThinkOrSwim Monitor
+   convention) — replaces the phone strip's horizontally-scrolling chip row. */
+.desktop-positions-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+  background: var(--app-background);
+}
+
+.desktop-positions-tabs {
+  display: flex;
+  flex: none;
+  border-bottom: var(--border-hairline) solid var(--hud-stroke-dim);
+}
+
+.desktop-positions-tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px var(--space-3);
+  font-size: var(--fs-caption-desktop);
+  font-weight: 600;
+  color: var(--label-secondary);
+  border-bottom: 2px solid transparent;
+}
+
+.desktop-positions-tab.active {
+  color: var(--app-accent-text);
+  border-bottom-color: var(--hud-stroke);
+}
+
+.desktop-positions-tab-count {
+  font-size: var(--fs-caption2-desktop);
+  color: var(--label-secondary);
+  background: var(--app-surface-elevated);
+  border-radius: var(--radius-chip);
+  padding: 0 5px;
+}
+
+.desktop-positions-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.desktop-positions-empty {
+  padding: var(--space-3);
+  font-size: var(--fs-caption-desktop);
+  text-align: center;
+}
+
+.desktop-positions-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-caption-desktop);
+}
+
+.desktop-positions-table th {
+  position: sticky;
+  top: 0;
+  background: var(--app-background);
+  color: var(--label-secondary);
+  font-size: var(--fs-caption2-desktop);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 5px var(--space-2);
+  border-bottom: var(--border-hairline) solid var(--hud-stroke-dim);
+}
+
+.desktop-positions-table td {
+  padding: 4px var(--space-2);
+  border-bottom: var(--border-hairline) solid rgba(46, 143, 255, 0.08);
+  white-space: nowrap;
+}
+
+.desktop-positions-table tbody tr:hover {
+  background: var(--app-surface-elevated);
+}
+
+.desktop-positions-action {
+  font-size: var(--fs-caption2-desktop);
+  color: var(--app-accent-text);
+  padding: 2px 8px;
+  border: var(--border-hairline) solid var(--hud-stroke-dim);
+}
+
+.desktop-positions-action:hover:not(:disabled) {
+  border-color: var(--hud-stroke);
+  background: rgba(46, 143, 255, 0.1);
+}
+
+.desktop-positions-action:disabled {
+  opacity: var(--disabled-opacity);
 }

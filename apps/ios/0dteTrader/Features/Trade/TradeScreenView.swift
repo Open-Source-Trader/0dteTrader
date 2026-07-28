@@ -218,6 +218,7 @@ struct TradeScreenView: View {
             tradeViewModel.optionContractResolver = { symbol in
                 chainViewModel.chain?.contracts.first { $0.symbol == symbol }
             }
+            tradeViewModel.isSocketConnected = { container.quoteSocket.connectionState == .connected }
             // The overlay needs the same chain lookup the flatten path uses:
             // an entry line only draws for a contract the chain can identify.
             chartTrading.contractResolver = { symbol in

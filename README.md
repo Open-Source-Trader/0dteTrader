@@ -5,10 +5,10 @@
 [![iOS 17+](https://img.shields.io/badge/iOS-17%2B-black?logo=apple)](apps/ios)
 [![Node >= 22.12](https://img.shields.io/badge/node-%E2%89%A522.12-339933?logo=nodedotjs&logoColor=white)](package.json)
 
-Rapid options quick-trade iOS (and desktop) app backed by the official Webull OpenAPI for order execution and candlestick data, with options analytics (Greeks, open interest, etc.) sourced from Tradier.
+Rapid options quick-trade app backed by the official Webull OpenAPI for order execution and candlestick data, with options analytics (Greeks, open interest, etc.) sourced from Tradier. Ships as two independent, first-class apps — iOS and desktop — sharing a common backend and API contract.
 
 - `apps/ios` — SwiftUI iPhone app (iOS 17+)
-- `apps/desktop` — React + Electron desktop clone for local development on Linux/macOS/Windows
+- `apps/desktop` — React + Electron desktop trading app, with its own desktop-native UX
 - `apps/api` — NestJS + TypeScript backend (auth, encrypted credential vault, market data, trading proxy)
 - `packages/shared-types` — shared TypeScript contracts
 - `docs` — architecture, API spec, security model, Webull integration guide, runbook
@@ -121,13 +121,13 @@ Run on the iOS simulator (⌘+R). **Note:** the app ships pointing at the mainta
 
 ## Run the desktop app
 
-The desktop app is a web/Electron clone of the iOS UI, useful for testing the backend without Xcode.
+The desktop app is a standalone React + Electron trading app with its own desktop-native UX — not a clone of the iOS UI.
 
 ```bash
 npm run dev:desktop
 ```
 
-Then open the printed local URL (usually `http://localhost:5173`).
+Then open the printed local URL (usually `http://localhost:5173`). For the packaged Electron experience, see [Key npm scripts](#key-npm-scripts).
 
 ## Testing
 

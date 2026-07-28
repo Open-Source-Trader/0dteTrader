@@ -27,6 +27,7 @@ export class SettingsStore {
     lastSymbol: 'settings.lastSymbol',
     tradingLocked: 'settings.tradingLocked',
     bypassOrderConfirmation: 'settings.bypassOrderConfirmation',
+    keyboardShortcutsEnabled: 'settings.keyboardShortcutsEnabled',
   };
 
   get layoutMode(): TradeLayout {
@@ -119,6 +120,19 @@ export class SettingsStore {
 
   set bypassOrderConfirmation(value: boolean) {
     localStorage.setItem(SettingsStore.keys.bypassOrderConfirmation, String(value));
+  }
+
+  /** Desktop-grid trading hotkeys (B/S/L — Cmd+K symbol search is always on,
+   *  see useTradeShortcuts). Defaults off: arming a real order from a single
+   *  keystroke should be opt-in, not a surprise the first time a trader
+   *  types "b" somewhere unexpected. */
+  get keyboardShortcutsEnabled(): boolean {
+    const stored = localStorage.getItem(SettingsStore.keys.keyboardShortcutsEnabled);
+    return stored === null ? false : stored === 'true';
+  }
+
+  set keyboardShortcutsEnabled(value: boolean) {
+    localStorage.setItem(SettingsStore.keys.keyboardShortcutsEnabled, String(value));
   }
 
   get lastSymbol(): string | null {

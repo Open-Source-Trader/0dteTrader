@@ -127,6 +127,7 @@ class StubBrokerGateway implements BrokerGateway {
     order: OrderRequest,
     _idempotencyKey: string,
     _expectedMode?: TradingMode,
+    _heldQuantity?: number,
   ): Promise<OrderResult> {
     const resolved = await this.resolveContract(userId, order);
     const result: OrderResult = {
@@ -503,7 +504,7 @@ describe('TradingService', () => {
 
     it('caps a sell that exceeds the long position', async () => {
       const symbol = await resolvedSymbol();
-      jest.spyOn(gateway, 'getPositions').mockResolvedValue([
+      const positions = jest.spyOn(gateway, 'getPositions').mockResolvedValue([
         {
           symbol,
           assetClass: 'option',
@@ -519,6 +520,10 @@ describe('TradingService', () => {
       await trading.place(userId, autoOtmCall({ side: 'sell', quantity: 5 }), 'idem-cap-1');
 
       expect((place.mock.calls[0][1] as OrderRequest).quantity).toBe(2);
+      // The held quantity capToPosition just read travels to the gateway
+      // call, so it never has to read positions again to decide open/close.
+      expect(place.mock.calls[0][4]).toBe(2);
+      expect(positions).toHaveBeenCalledTimes(1);
     });
 
     it('leaves an opening order alone', async () => {
@@ -540,6 +545,7 @@ describe('TradingService', () => {
       await trading.place(userId, autoOtmCall({ side: 'buy', quantity: 5 }), 'idem-cap-2');
 
       expect((place.mock.calls[0][1] as OrderRequest).quantity).toBe(5);
+      expect(place.mock.calls[0][4]).toBe(2);
     });
 
     it('honours a partial scale-out rather than closing the whole position', async () => {
@@ -560,6 +566,7 @@ describe('TradingService', () => {
       await trading.place(userId, autoOtmCall({ side: 'sell', quantity: 4 }), 'idem-cap-3');
 
       expect((place.mock.calls[0][1] as OrderRequest).quantity).toBe(4);
+      expect(place.mock.calls[0][4]).toBe(10);
     });
 
     it('places uncapped rather than failing the order when positions cannot be read', async () => {
@@ -569,6 +576,9 @@ describe('TradingService', () => {
       await trading.place(userId, autoOtmCall({ side: 'sell', quantity: 3 }), 'idem-cap-4');
 
       expect((place.mock.calls[0][1] as OrderRequest).quantity).toBe(3);
+      // Positions couldn't be read at all, so there is no held quantity to
+      // hand the gateway — it falls back to its own lookup.
+      expect(place.mock.calls[0][4]).toBeUndefined();
     });
   });
 

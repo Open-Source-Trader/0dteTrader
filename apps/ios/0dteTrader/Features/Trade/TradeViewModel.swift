@@ -67,6 +67,21 @@ final class TradeViewModel: ObservableObject {
     /// to the OptionsChainViewModel's loaded chain.
     var optionContractResolver: ((String) -> OptionContract?)?
 
+    /// Reports whether the order-update socket is currently connected. An
+    /// order placement's own `orderUpdate` push (submitted, then the terminal
+    /// status) drives `handleOrderUpdate` → `refreshTradingData` already, so a
+    /// direct refresh after placing/cancelling is only needed as a fallback
+    /// for when that push has nowhere to arrive. Wired from the trade screen;
+    /// nil (treated as disconnected) only in previews/tests.
+    var isSocketConnected: (() -> Bool)?
+
+    /// Coalesces concurrent refreshes: an order placement's submitted and
+    /// terminal-status pushes can each trigger one in quick succession, so a
+    /// call already running is awaited rather than duplicated, with at most
+    /// one more queued to pick up anything that arrived meanwhile.
+    private var refreshInFlight: Task<Void, Never>?
+    private var refreshQueued = false
+
     init(apiClient: APIClient) {
         self.apiClient = apiClient
     }
@@ -156,17 +171,50 @@ final class TradeViewModel: ObservableObject {
             return
         }
 
-        // Selling the contract you are already long closes (part of) that
-        // position rather than opening a short. The ticket quantity is honored
-        // but capped at the position size — the cap stops a large ticket from
-        // flipping through zero into a short, while a smaller ticket still
-        // scales out partially. The summary says exactly what will happen.
+        // Selling closes (part of) a held position rather than opening a short
+        // when the UI's selected right (put/call) and expiration match a held
+        // position — regardless of which strike AUTO mode currently points at.
+        // Matching on strike would miss a held position whenever AUTO's live
+        // OTM pick has drifted off the strike actually held, silently routing
+        // the sell through the open-order path below and stacking a naked
+        // position on top of the one the user meant to close (the bug this
+        // guards against). Legs are resolved through `optionContractResolver`
+        // rather than trusted from the chain's `selectedContract`, since that
+        // is exactly the drifted AUTO pick we cannot use for the close's strike.
         if side == .sell,
-           let contract = chainViewModel.selectedContract,
-           let position = positions.first(where: { $0.symbol == contract.symbol && $0.quantity > 0 }) {
-            let closeQuantity = min(quantity, position.quantity)
-            let sizeLabel = closeQuantity < position.quantity
-                ? "\(closeQuantity) of \(position.quantity)"
+           let expiration = chainViewModel.selectedExpiration,
+           case let heldLegs = positions.compactMap({ position -> (Position, OptionContract)? in
+               guard position.quantity > 0,
+                     let contract = optionContractResolver?(position.symbol),
+                     contract.underlying == underlying,
+                     contract.expiration == expiration,
+                     contract.optionType == optionType
+               else { return nil }
+               return (position, contract)
+           }),
+           !heldLegs.isEmpty {
+            // Highest unrealized P/L first: scale out of the most profitable
+            // leg before touching the rest when the ticket doesn't cover the
+            // full combined size.
+            let ordered = heldLegs.sorted { $0.0.unrealizedPnl > $1.0.unrealizedPnl }
+            let totalHeld = ordered.reduce(0) { $0 + $1.0.quantity }
+            var remaining = min(quantity, totalHeld)
+            var closes: [(contract: OptionContract, quantity: Int)] = []
+            for (position, contract) in ordered where remaining > 0 {
+                let take = min(remaining, position.quantity)
+                closes.append((contract, take))
+                remaining -= take
+            }
+
+            // One order per arm: only the highest-P/L leg closes on this tap.
+            // When the ticket spans multiple strikes, the summary says "of
+            // <total>" so the user sees the remainder is untouched and can
+            // tap SELL again to work through the rest, rather than the ticket
+            // silently closing only part of the intended size.
+            guard let firstClose = closes.first else { return }
+            let closeQuantity = firstClose.quantity
+            let sizeLabel = closeQuantity < totalHeld
+                ? "\(closeQuantity) of \(totalHeld)"
                 : "\(closeQuantity)"
             let request = OrderRequestDTO(
                 underlying: underlying,
@@ -177,9 +225,9 @@ final class TradeViewModel: ObservableObject {
                 limitPrice: limitPrice,
                 selection: OrderSelectionDTO(
                     mode: "explicit",
-                    optionType: contract.optionType.rawValue,
-                    expiration: contract.expiration,
-                    strike: contract.strike
+                    optionType: firstClose.contract.optionType.rawValue,
+                    expiration: firstClose.contract.expiration,
+                    strike: firstClose.contract.strike
                 )
             )
             armedTicket = ArmedOrderTicket(
@@ -188,7 +236,7 @@ final class TradeViewModel: ObservableObject {
                 idempotencyKey: UUID().uuidString,
                 side: side,
                 summary: "CLOSE \(sizeLabel) · \(underlying) "
-                    + "\(Format.strike(contract.strike))\(contract.optionType.shortName)"
+                    + "\(Format.strike(firstClose.contract.strike))\(firstClose.contract.optionType.shortName)"
             )
             preview = nil
             previewError = nil
@@ -287,9 +335,16 @@ final class TradeViewModel: ObservableObject {
 
     // MARK: - Confirm (step 2 of FR-19)
 
-    /// Places the order, clears the armed ticket, toasts the result, and
-    /// refreshes positions/orders. Throws so callers surface the error their own
-    /// way (sheet submit error vs. toast). Shared by the confirm and bypass paths.
+    /// Places the order, clears the armed ticket, and toasts the result.
+    /// Throws so callers surface the error their own way (sheet submit error
+    /// vs. toast). Shared by the confirm and bypass paths.
+    ///
+    /// Skips its own refresh when the socket is connected: the placement's own
+    /// `orderUpdate` push (submitted, then the terminal fill/reject) arrives
+    /// over the same socket and drives `handleOrderUpdate` →
+    /// `refreshTradingData` already, so refreshing here too only stacked a
+    /// redundant reload on top of it. Falls back to a direct refresh when the
+    /// socket is down and that push has nowhere to arrive.
     private func submitOrder(_ request: OrderRequestDTO, idempotencyKey: String, side: OrderSide) async throws {
         let result = OrderResult(dto: try await apiClient.placeOrder(
             request,
@@ -300,7 +355,9 @@ final class TradeViewModel: ObservableObject {
             "\(side.displayName) \(result.contractSymbol) — \(result.status.displayName)",
             style: result.status == .rejected ? .error : .success
         )
-        await refreshTradingData()
+        if isSocketConnected?() != true {
+            await refreshTradingData()
+        }
     }
 
     /// Submits the armed order. The same idempotency key is reused across
@@ -327,20 +384,56 @@ final class TradeViewModel: ObservableObject {
 
     // MARK: - Positions & open orders (FR-23..25)
 
+    /// A single order placement can emit a submitted push and a terminal
+    /// fill/reject push in quick succession, each wired to call this — so
+    /// calls collapse: one already running is awaited rather than duplicated,
+    /// and at most one more runs after it to pick up anything that arrived
+    /// meanwhile.
     func refreshTradingData() async {
-        do {
-            positions = try await apiClient.positions().compactMap(Position.init(dto:))
-        } catch let error as APIError {
+        if let inFlight = refreshInFlight {
+            refreshQueued = true
+            return await inFlight.value
+        }
+        let task = Task { await runRefresh() }
+        refreshInFlight = task
+        await task.value
+        refreshInFlight = nil
+        if refreshQueued {
+            refreshQueued = false
+            await refreshTradingData()
+        }
+    }
+
+    private func runRefresh() async {
+        async let positionsResult = catching { try await apiClient.positions() }
+        async let openOrdersResult = catching { try await apiClient.openOrders() }
+
+        switch await positionsResult {
+        case let .success(dtos):
+            positions = dtos.compactMap(Position.init(dto:))
+        case let .failure(error as APIError):
             showToast(error.userMessage, style: .error)
-        } catch {
+        case let .failure(error):
             showToast(error.localizedDescription, style: .error)
         }
-        do {
-            openOrders = try await apiClient.openOrders().map(OrderResult.init(dto:))
-        } catch let error as APIError {
+        switch await openOrdersResult {
+        case let .success(dtos):
+            openOrders = dtos.map(OrderResult.init(dto:))
+        case let .failure(error as APIError):
             showToast(error.userMessage, style: .error)
-        } catch {
+        case let .failure(error):
             showToast(error.localizedDescription, style: .error)
+        }
+    }
+
+    /// `Result.init(catching:)` has no `async` overload; this fills that gap
+    /// so `positions()`/`openOrders()` can run concurrently via `async let`
+    /// while each keeps its own independent success/failure outcome.
+    private func catching<T>(_ body: () async throws -> T) async -> Result<T, Error> {
+        do {
+            return .success(try await body())
+        } catch {
+            return .failure(error)
         }
     }
 
@@ -380,7 +473,11 @@ final class TradeViewModel: ObservableObject {
                 "Flatten \(position.symbol) — \(result.status.displayName)",
                 style: result.status == .rejected ? .error : .success
             )
-            await refreshTradingData()
+            // See submitOrder: the placement's own orderUpdate push refreshes
+            // when the socket is up; fall back to a direct refresh when it's not.
+            if isSocketConnected?() != true {
+                await refreshTradingData()
+            }
         } catch let error as APIError {
             showToast(error.userMessage, style: .error)
         } catch {
@@ -392,7 +489,11 @@ final class TradeViewModel: ObservableObject {
         do {
             try await apiClient.cancelOrder(orderId: order.orderId)
             showToast("Order cancelled.", style: .info)
-            await refreshTradingData()
+            // See submitOrder: cancelOrder's own orderUpdate push refreshes
+            // when the socket is up; fall back to a direct refresh when it's not.
+            if isSocketConnected?() != true {
+                await refreshTradingData()
+            }
         } catch let error as APIError {
             showToast(error.userMessage, style: .error)
         } catch {

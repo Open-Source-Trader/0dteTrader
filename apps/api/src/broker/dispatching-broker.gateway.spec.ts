@@ -76,7 +76,13 @@ describe('DispatchingBrokerGateway', () => {
     expect(snaptrade.getQuote).toHaveBeenCalledWith('u1', 'SPY');
     expect(snaptrade.getCandles).toHaveBeenCalledWith('u1', 'SPY', { interval: '1m' });
     expect(snaptrade.getOptionsChain).toHaveBeenCalledWith('u1', 'SPY', undefined);
-    expect(snaptrade.placeOrder).toHaveBeenCalledWith('u1', {} as never, 'key', undefined);
+    expect(snaptrade.placeOrder).toHaveBeenCalledWith(
+      'u1',
+      {} as never,
+      'key',
+      undefined,
+      undefined,
+    );
     expect(webull.getQuote).not.toHaveBeenCalled();
     expect(alpaca.getQuote).not.toHaveBeenCalled();
   });
@@ -92,16 +98,18 @@ describe('DispatchingBrokerGateway', () => {
       selection: { mode: 'auto_otm', optionType: 'call' },
     } as never;
     await gw.placeOrder('u1', order, 'key');
-    expect(alpaca.placeOrder).toHaveBeenCalledWith('u1', order, 'key', undefined);
+    expect(alpaca.placeOrder).toHaveBeenCalledWith('u1', order, 'key', undefined, undefined);
     expect(webull.placeOrder).not.toHaveBeenCalled();
   });
 
   it('delegates reauthenticate (Webull = token reset, Alpaca = no-op)', async () => {
     await gw.reauthenticate('u1');
     expect(webull.reauthenticate).toHaveBeenCalledWith('u1');
+    // A distinct user so the provider cache (keyed per user) doesn't serve
+    // u1's already-cached 'webull' back for this alpaca assertion.
     provider = 'alpaca';
-    await gw.reauthenticate('u1');
-    expect(alpaca.reauthenticate).toHaveBeenCalledWith('u1');
+    await gw.reauthenticate('u2');
+    expect(alpaca.reauthenticate).toHaveBeenCalledWith('u2');
   });
 
   it('routes every method by provider for alpaca', async () => {
@@ -119,5 +127,45 @@ describe('DispatchingBrokerGateway', () => {
     expect(alpaca.getOpenOrders).toHaveBeenCalled();
     expect(alpaca.cancelOrder).toHaveBeenCalledWith('u1', 'oid');
     expect(webull.getCandles).not.toHaveBeenCalled();
+  });
+
+  describe('provider caching', () => {
+    it('reads the DB once and reuses the cached provider across calls', async () => {
+      await gw.getQuote('u1', 'SPY');
+      await gw.getPositions('u1');
+      await gw.getOpenOrders('u1');
+
+      expect(prisma.user.findUnique).toHaveBeenCalledTimes(1);
+      expect(webull.getQuote).toHaveBeenCalled();
+      expect(webull.getPositions).toHaveBeenCalled();
+      expect(webull.getOpenOrders).toHaveBeenCalled();
+    });
+
+    it("caches per user — a second user is not served from the first user's cache entry", async () => {
+      await gw.getQuote('u1', 'SPY');
+      provider = 'alpaca';
+      await gw.getQuote('u2', 'SPY');
+
+      expect(prisma.user.findUnique).toHaveBeenCalledTimes(2);
+      expect(webull.getQuote).toHaveBeenCalledWith('u1', 'SPY');
+      expect(alpaca.getQuote).toHaveBeenCalledWith('u2', 'SPY');
+    });
+
+    it('re-reads the DB after the cache entry expires, picking up a provider switch', async () => {
+      jest.useFakeTimers();
+      try {
+        await gw.getQuote('u1', 'SPY');
+        expect(webull.getQuote).toHaveBeenCalledTimes(1);
+
+        provider = 'alpaca';
+        jest.advanceTimersByTime(31_000);
+
+        await gw.getQuote('u1', 'SPY');
+        expect(alpaca.getQuote).toHaveBeenCalledTimes(1);
+        expect(prisma.user.findUnique).toHaveBeenCalledTimes(2);
+      } finally {
+        jest.useRealTimers();
+      }
+    });
   });
 });

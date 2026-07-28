@@ -541,6 +541,7 @@ export class WebullBrokerGateway implements BrokerGateway, OnModuleDestroy {
     order: OrderRequest,
     idempotencyKey: string,
     expectedMode?: TradingMode,
+    heldQuantity?: number,
   ): Promise<OrderResult> {
     // The mode decided here picks the live vs paper hosts, and it is read
     // independently of whatever the caller checked. Assert they agree before
@@ -557,7 +558,14 @@ export class WebullBrokerGateway implements BrokerGateway, OnModuleDestroy {
     const limitPrice = resolveLimitPrice(order.orderType, resolved, order.limitPrice);
 
     const clientOrderId = toClientOrderId(userId, idempotencyKey);
-    const newOrder = await this.buildNewOrder(userId, order, resolved, clientOrderId, limitPrice);
+    const newOrder = await this.buildNewOrder(
+      userId,
+      order,
+      resolved,
+      clientOrderId,
+      limitPrice,
+      heldQuantity,
+    );
     const raw = await client.request('orderPlace', {
       body: {
         account_id: await this.accountIdFor(userId, client),
@@ -626,63 +634,108 @@ export class WebullBrokerGateway implements BrokerGateway, OnModuleDestroy {
   // Internals
   // -------------------------------------------------------------------------
 
-  /** Builds the unified new_order object for preview/place. */
+  /**
+   * Builds the unified new_order object for preview/place.
+   *
+   * `heldQuantity` lets a caller that already knows the existing position
+   * (`TradingService.place` reads it to cap closing size) skip this
+   * method's own positions fetch; preview has no such caller and always
+   * looks it up itself.
+   */
   private async buildNewOrder(
     userId: string,
     order: OrderRequest,
     resolved: ResolvedContract,
     clientOrderId: string,
     limitPrice?: number,
+    heldQuantity?: number,
   ) {
     if (!resolved.optionTerms) {
       throw brokerErrors.orderRejected('Option contract terms were not resolved');
     }
-    const intent = await this.optionPositionIntent(userId, order, resolved.contractSymbol);
+    const existing =
+      heldQuantity ?? (await this.lookupHeldQuantity(userId, resolved.contractSymbol));
+    const intent = positionIntentFor(order.side, existing);
     return buildOptionOrder(order, resolved.optionTerms, clientOrderId, limitPrice, intent);
   }
 
-  /** BUY/SELL_TO_CLOSE when flattening an existing position, else *_TO_OPEN. */
-  private async optionPositionIntent(userId: string, order: OrderRequest, contractSymbol: string) {
-    let existing = 0;
+  private async lookupHeldQuantity(userId: string, contractSymbol: string): Promise<number> {
     try {
       const positions = await this.getPositions(userId);
-      existing = positions.find((p) => p.symbol === contractSymbol)?.quantity ?? 0;
+      return positions.find((p) => p.symbol === contractSymbol)?.quantity ?? 0;
     } catch (err) {
       this.logger.warn(
         `position lookup failed; defaulting intent to open: ${(err as Error).message}`,
       );
+      return 0;
     }
-    return positionIntentFor(order.side, existing);
   }
 
-  /** Resolves any OrderRequest to a concrete, live-quoted contract. */
+  /**
+   * Resolves any OrderRequest to a concrete, live-quoted contract.
+   *
+   * `TradingService.resolveAndValidate` has already turned every order into
+   * explicit mode with a concrete strike/expiration before it reaches a
+   * gateway, so the common case needs only a fresh quote for that one OCC
+   * symbol — not another full chain probe (the ±12-strike batch scan
+   * `getOptionsChain` does). `auto_otm` still falls back to the chain: it is
+   * not expected here post-normalization, but the type allows it.
+   */
   private async resolveContract(userId: string, order: OrderRequest): Promise<ResolvedContract> {
     const { optionType } = order.selection;
     if (!optionType) {
       throw brokerErrors.orderRejected('selection.optionType is required for option orders');
     }
-    const chain = await this.getOptionsChain(userId, order.underlying, order.selection.expiration);
-    const contract =
-      order.selection.mode === 'auto_otm'
-        ? resolveAutoOtm(chain.contracts, optionType, chain.underlyingPrice)
-        : chain.contracts.find(
-            (c) => c.optionType === optionType && c.strike === order.selection.strike,
-          );
-    if (!contract) {
-      throw brokerErrors.contractNotFound(
-        `No ${optionType} contract at strike ${order.selection.strike ?? '(auto)'} ` +
-          `for ${order.underlying} ${chain.expirations[0]}`,
+    if (order.selection.mode === 'auto_otm' || typeof order.selection.strike !== 'number') {
+      const chain = await this.getOptionsChain(
+        userId,
+        order.underlying,
+        order.selection.expiration,
       );
+      const contract =
+        order.selection.mode === 'auto_otm'
+          ? resolveAutoOtm(chain.contracts, optionType, chain.underlyingPrice)
+          : chain.contracts.find(
+              (c) => c.optionType === optionType && c.strike === order.selection.strike,
+            );
+      if (!contract) {
+        throw brokerErrors.contractNotFound(
+          `No ${optionType} contract at strike ${order.selection.strike ?? '(auto)'} ` +
+            `for ${order.underlying} ${chain.expirations[0]}`,
+        );
+      }
+      return {
+        contractSymbol: contract.symbol,
+        bid: contract.bid,
+        ask: contract.ask,
+        last: contract.last,
+        optionTerms: {
+          underlying: order.underlying.toUpperCase(),
+          expiration: contract.expiration,
+          strike: contract.strike,
+          optionType,
+        },
+      };
     }
+
+    const expiration =
+      order.selection.expiration ?? optionExpirations(order.underlying, new Date())[0];
+    const contractSymbol = formatOccSymbol(
+      order.underlying,
+      expiration,
+      optionType,
+      order.selection.strike,
+    );
+    const quote = await this.getQuote(userId, contractSymbol);
     return {
-      contractSymbol: contract.symbol,
-      bid: contract.bid,
-      ask: contract.ask,
-      last: contract.last,
+      contractSymbol,
+      bid: quote.bid,
+      ask: quote.ask,
+      last: quote.last,
       optionTerms: {
         underlying: order.underlying.toUpperCase(),
-        expiration: contract.expiration,
-        strike: contract.strike,
+        expiration,
+        strike: order.selection.strike,
         optionType,
       },
     };

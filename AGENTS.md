@@ -10,7 +10,7 @@ This file gives AI coding agents the project-specific context needed to build, t
 0dteTrader/
 ├── apps/
 │   ├── api/          NestJS + TypeScript backend (Prisma, PostgreSQL, Redis)
-│   ├── desktop/      React + Vite + Electron (iPhone-faithful web clone)
+│   ├── desktop/      React + Vite + Electron — standalone desktop trading app
 │   └── ios/          SwiftUI iOS app (XcodeGen, DGCharts, iOS 17+)
 ├── packages/
 │   └── shared-types/ TypeScript contracts shared between API and desktop
@@ -18,6 +18,8 @@ This file gives AI coding agents the project-specific context needed to build, t
 ├── docker-compose.yml  Postgres 16 + Redis 7
 └── scripts/setup.js    One-time environment bootstrap
 ```
+
+iOS and desktop are **independent apps** with their own UX, developed separately. They share the backend (`apps/api`) and its wire contract (`packages/shared-types`), and both implement the same underlying trading domain (options chain, order placement, positions) — but neither's UI or feature work implies a corresponding change in the other. A task scoped to one app stays scoped to that app unless it explicitly touches shared backend/API contract code.
 
 ## Build & Run Commands
 
@@ -55,8 +57,8 @@ xcodebuild test -scheme 0dteTrader -destination 'platform=iOS Simulator,name=iPh
 - **Backend proxies all broker calls** — Webull API credentials never leave the server. The iOS/desktop apps authenticate via JWT to our API.
 - **Hybrid data model**: Webull for orders + candles, Tradier for options chain + Greeks.
 - **iOS module name**: `ZeroDTETrader` (Swift modules can't start with a digit). Tests use `@testable import ZeroDTETrader`.
-- **Desktop uses a fixed 430x932 phone frame** that scales to fit the window (`--app-scale` CSS variable). No scrollbars — content adjusts based on indicator count.
-- **Indicator sub-panes capped at 2** (RSI, MACD, Stoch, ATR). Panel density auto-adjusts: roomy (0 panes) → compact (1) → dense (2).
+- **Desktop is a standalone, desktop-native trading app** — its own responsive layout, not a phone-frame clone of iOS. UI/UX decisions for desktop should suit a desktop trading workflow (larger canvas, keyboard shortcuts, multi-pane layouts), not mirror iOS's mobile constraints.
+- **Indicator sub-panes capped at 2** (RSI, MACD, Stoch, ATR) on both apps. Panel density auto-adjusts: roomy (0 panes) → compact (1) → dense (2).
 
 ## Conventions
 
@@ -79,9 +81,8 @@ xcodebuild test -scheme 0dteTrader -destination 'platform=iOS Simulator,name=iPh
 
 ### Shared Patterns
 
-- Both apps use the same indicator math (ported between TS and Swift)
-- Both apps have the same screen structure: fullscreen (chart + floating buttons) vs split (chart + trade panel)
-- Desktop is the reference implementation for layout behavior; iOS copies it
+- Both apps use the same indicator math (ported between TS and Swift) and the same underlying trading domain model (order arm/confirm flow, position close-detection, etc.) — but each owns its own UI/UX independently. A layout or interaction pattern introduced on one app does not need to be ported to the other unless the task calls for it.
+- Both apps talk to the same backend API and must stay compatible with its contract (`packages/shared-types`). Changes to the API request/response shape need checking against both clients.
 
 ## Environment
 
@@ -96,5 +97,4 @@ xcodebuild test -scheme 0dteTrader -destination 'platform=iOS Simulator,name=iPh
 - The desktop Electron mode requires the Vite dev server running first (`npm run dev:desktop`, then `npm run electron` in `apps/desktop/`).
 - Docker must be running before `npm run dev` (Postgres + Redis are required).
 - The options chain and GEX/DEX endpoints need a `TRADIER_API_TOKEN` in `.env` — without it, chart and order functionality still works but options analytics fail.
-
-**Always update the IOS and Electron app as a pair, when needed. Never just one or the other**
+- iOS and desktop are independent apps — a fix or feature scoped to one does not need to be ported to the other. Only changes to `apps/api` or `packages/shared-types` that affect the wire contract need checking against both clients.

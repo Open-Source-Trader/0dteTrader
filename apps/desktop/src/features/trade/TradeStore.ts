@@ -210,21 +210,45 @@ export class TradeStore extends Store<TradeStoreState> {
     const chainState = chainStore.getState();
     const optionType = chainState.optionType;
 
-    // Selling the contract you are already long closes (part of) that position
-    // rather than opening a short. The ticket quantity is honored but capped at
-    // the position size — the cap is what stops a large ticket from flipping
-    // through zero into a short nobody asked for, while a smaller ticket still
-    // scales out partially. The summary says exactly what will happen.
-    const selected = chainStore.selectedContract;
-    const held =
-      side === 'sell' && selected
-        ? this.getState().positions.find((p) => p.symbol === selected.symbol && p.quantity > 0)
-        : undefined;
-    if (selected && held) {
-      const closeQuantity = Math.min(quantity, held.quantity);
-      const shortName = selected.optionType === 'call' ? 'C' : 'P';
+    // Selling closes (part of) a held position rather than opening a short
+    // when the panel's selected right (put/call) and expiration match a held
+    // position — regardless of which strike AUTO mode currently points at.
+    // Matching on strike would miss a held position whenever AUTO's live OTM
+    // pick has drifted off the strike actually held, silently falling through
+    // to the open-order branch below and stacking a naked position on top of
+    // the one the user meant to close. Legs are resolved through
+    // `optionContractResolver` rather than trusted from `chainStore.selectedContract`,
+    // since that is exactly the drifted AUTO pick we cannot use for the close's strike.
+    const expiration = chainState.selectedExpiration;
+    const heldLegs =
+      side === 'sell' && expiration
+        ? this.getState()
+            .positions.map((position) => {
+              const contract = this.optionContractResolver?.(position.symbol);
+              return contract &&
+                contract.underlying === underlying &&
+                contract.expiration === expiration &&
+                contract.optionType === optionType &&
+                position.quantity > 0
+                ? { position, contract }
+                : null;
+            })
+            .filter((leg): leg is { position: Position; contract: OptionContract } => leg !== null)
+        : [];
+
+    if (heldLegs.length > 0) {
+      // Highest unrealized P/L first: scale out of the most profitable leg
+      // before touching the rest when the ticket doesn't cover the full
+      // combined size.
+      const ordered = [...heldLegs].sort(
+        (a, b) => b.position.unrealizedPnl - a.position.unrealizedPnl,
+      );
+      const totalHeld = ordered.reduce((sum, leg) => sum + leg.position.quantity, 0);
+      const firstClose = ordered[0];
+      const closeQuantity = Math.min(quantity, totalHeld, firstClose.position.quantity);
+      const shortName = firstClose.contract.optionType === 'call' ? 'C' : 'P';
       const sizeLabel =
-        closeQuantity < held.quantity ? `${closeQuantity} of ${held.quantity}` : `${closeQuantity}`;
+        closeQuantity < totalHeld ? `${closeQuantity} of ${totalHeld}` : `${closeQuantity}`;
       this.set({
         armedTicket: {
           id: nextId++,
@@ -237,14 +261,14 @@ export class TradeStore extends Store<TradeStoreState> {
             limitPrice,
             selection: {
               mode: 'explicit',
-              optionType: selected.optionType,
-              expiration: selected.expiration,
-              strike: selected.strike,
+              optionType: firstClose.contract.optionType,
+              expiration: firstClose.contract.expiration,
+              strike: firstClose.contract.strike,
             },
           },
           idempotencyKey: newIdempotencyKey(),
           side,
-          summary: `CLOSE ${sizeLabel} · ${underlying} ${Format.strike(selected.strike)}${shortName}`,
+          summary: `CLOSE ${sizeLabel} · ${underlying} ${Format.strike(firstClose.contract.strike)}${shortName}`,
         },
         preview: null,
         previewError: null,

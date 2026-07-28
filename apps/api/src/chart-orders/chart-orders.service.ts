@@ -140,7 +140,7 @@ export class ChartOrdersService {
     }
 
     const armPrice = await this.armPriceFor(userId, dto.underlying, dto.triggerPrice);
-    if (dto.ocoGroupId) await this.assertGroupJoinable(userId, dto.ocoGroupId);
+    if (dto.ocoGroupId) await this.assertGroupJoinable(userId, dto.ocoGroupId, dto.kind);
 
     const row = await this.prisma.chartOrder.create({
       data: {
@@ -667,14 +667,29 @@ export class ChartOrdersService {
    * — long enough for the first leg to fire in between. Without this check the
    * late leg lands `working` in a group that already fired, and firing it later
    * would close the position and then reverse it.
+   *
+   * A leg may also not join a group that already has one of its own kind — OCO
+   * cancels siblings by group membership, not by kind, so two targets sharing a
+   * group would silently retire one of them on fire instead of rejecting the
+   * duplicate up front.
    */
-  private async assertGroupJoinable(userId: string, ocoGroupId: string): Promise<void> {
+  private async assertGroupJoinable(
+    userId: string,
+    ocoGroupId: string,
+    kind: ChartOrderKind,
+  ): Promise<void> {
     const existing = await this.prisma.chartOrder.findMany({ where: { ocoGroupId } });
     if (existing.some((leg) => leg.userId !== userId)) {
       throw errors.notFound('CHART_ORDER_NOT_FOUND', 'No such bracket group');
     }
     if (existing.some((leg) => leg.status !== 'working')) {
       throw errors.conflict('OCO_GROUP_CLOSED', 'That bracket has already fired — draw a new one');
+    }
+    if (existing.some((leg) => leg.kind === kind)) {
+      throw errors.conflict(
+        'OCO_GROUP_DUPLICATE_KIND',
+        `That bracket already has a ${kind} — move it instead of adding another`,
+      );
     }
   }
 

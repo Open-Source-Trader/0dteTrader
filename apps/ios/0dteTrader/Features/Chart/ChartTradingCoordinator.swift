@@ -85,11 +85,22 @@ final class ChartTradingCoordinator: ObservableObject, OrderLineOverlayDelegate 
             entryPrice: entry.price,
             price: price
         )
-        // Both legs of one position share a group, so filling either retires the
-        // other. Reuse the group an existing leg already established.
-        let existing = chartOrders.orders.first {
+        let siblings = chartOrders.orders.filter {
             $0.contractSymbol == entry.position.symbol && $0.ocoGroupId != nil && $0.isWorking
         }
+        // A leg of the same kind already exists (e.g. a second drag above entry
+        // on a long call, both classified .target): move it to the new level
+        // rather than creating a second one. OCO cancels siblings by group
+        // membership, not by kind, so two targets sharing a group would
+        // silently retire one of them on fire — the user would lose whichever
+        // the market did not reach first with no warning.
+        if let sameKind = siblings.first(where: { $0.kind == kind }) {
+            Task { await chartOrders.move(id: sameKind.id, triggerPrice: rounded(price)) }
+            return
+        }
+        // Both legs of one position share a group, so filling either retires the
+        // other. Reuse the group an existing leg already established.
+        let existing = siblings.first
         let draft = ChartOrderDraftDTO(
             underlying: entry.contract.underlying,
             triggerPrice: rounded(price),

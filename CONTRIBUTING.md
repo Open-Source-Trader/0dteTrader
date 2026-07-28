@@ -149,8 +149,8 @@ lint/format (see below).
 ### Shared patterns
 
 - The same indicator math is ported between TS and Swift — keep them in sync.
-- Desktop is the reference UI for layout; iOS copies its behavior.
-- **When you change shared UI/layout behavior, update iOS and desktop together — never one without the other.**
+- iOS and desktop are independent apps with their own UX, developed separately — a UI/layout change on one does not need to be ported to the other.
+- Both apps share the backend and its API contract (`packages/shared-types`). **When you change the API request/response shape, check it against both clients.**
 
 ## Before submitting a pull request
 

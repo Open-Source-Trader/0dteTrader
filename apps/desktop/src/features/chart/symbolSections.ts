@@ -18,3 +18,18 @@ export const SYMBOL_SECTIONS: SymbolSection[] = [
     symbols: ['AAPL', 'MSFT', 'NVDA', 'TSLA', 'AMD', 'AMZN', 'META', 'GOOGL', 'AVGO', 'SMCI'],
   },
 ];
+
+/** Enter-key selection for the symbol switcher (SymbolSpotlight,
+ *  SymbolSearchView): prefer whichever row is keyboard-highlighted — this
+ *  works whether or not the user typed anything, since arrow keys alone can
+ *  move the highlight onto a curated symbol from an empty query. Falls back
+ *  to the raw typed text only when nothing is highlighted (empty results). */
+export function resolveEnterSelection(
+  visibleRows: string[],
+  activeIndex: number,
+  normalizedQuery: string,
+): string | null {
+  const highlighted = visibleRows[activeIndex];
+  if (highlighted) return highlighted;
+  return normalizedQuery || null;
+}

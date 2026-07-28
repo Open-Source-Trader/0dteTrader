@@ -50,24 +50,35 @@ final class TradeViewModelArmTests: XCTestCase {
         )
     }
 
-    /// Arms the chain on the fixed contract so `selectedContract` resolves.
-    private func selectContract(_ chainViewModel: OptionsChainViewModel) {
+    /// Arms the chain on the fixed contract so `selectedContract` resolves,
+    /// and wires `optionContractResolver` the way `TradeScreenView` does in
+    /// production — the close-detection path resolves held positions through
+    /// it rather than trusting `selectedContract`, which can be a different,
+    /// AUTO-drifted strike than what is actually held.
+    private func selectContract(
+        _ tradeViewModel: TradeViewModel,
+        _ chainViewModel: OptionsChainViewModel,
+        contracts: [OptionContract] = [TradeViewModelArmTests.contract]
+    ) {
         chainViewModel.optionType = .call
         chainViewModel.setChainForTesting(
             OptionsChain(
                 underlying: "SPY",
                 underlyingPrice: 505,
                 expirations: [Self.contract.expiration],
-                contracts: [Self.contract]
+                contracts: contracts
             ),
             expiration: Self.contract.expiration,
             strike: Self.contract.strike
         )
+        tradeViewModel.optionContractResolver = { symbol in
+            contracts.first { $0.symbol == symbol }
+        }
     }
 
     func testArm_sellWithMatchingLong_closesThePositionInstead() {
         let (tradeViewModel, chainViewModel) = makeViewModels()
-        selectContract(chainViewModel)
+        selectContract(tradeViewModel, chainViewModel)
         tradeViewModel.setPositionsForTesting([position(3)])
         tradeViewModel.setQuantity(3)
 
@@ -84,7 +95,7 @@ final class TradeViewModelArmTests: XCTestCase {
     /// asked for, so it is capped at the position size.
     func testArm_sellCapsTicketQuantityAtThePosition() {
         let (tradeViewModel, chainViewModel) = makeViewModels()
-        selectContract(chainViewModel)
+        selectContract(tradeViewModel, chainViewModel)
         tradeViewModel.setPositionsForTesting([position(2)])
         tradeViewModel.setQuantity(10)
 
@@ -96,7 +107,7 @@ final class TradeViewModelArmTests: XCTestCase {
     /// A smaller ticket quantity is a partial scale-out, and the summary says so.
     func testArm_sellHonorsSmallerTicketQuantityAsPartialClose() {
         let (tradeViewModel, chainViewModel) = makeViewModels()
-        selectContract(chainViewModel)
+        selectContract(tradeViewModel, chainViewModel)
         tradeViewModel.setPositionsForTesting([position(10)])
         tradeViewModel.setQuantity(3)
 
@@ -108,7 +119,7 @@ final class TradeViewModelArmTests: XCTestCase {
 
     func testArm_buyIsUnaffected() {
         let (tradeViewModel, chainViewModel) = makeViewModels()
-        selectContract(chainViewModel)
+        selectContract(tradeViewModel, chainViewModel)
         tradeViewModel.setPositionsForTesting([position(3)])
         tradeViewModel.setQuantity(1)
 
@@ -120,7 +131,7 @@ final class TradeViewModelArmTests: XCTestCase {
 
     func testArm_sellOpensAShortWhenThePositionIsADifferentContract() {
         let (tradeViewModel, chainViewModel) = makeViewModels()
-        selectContract(chainViewModel)
+        selectContract(tradeViewModel, chainViewModel)
         tradeViewModel.setPositionsForTesting([position(3, symbol: "SPY260727P00500000")])
         tradeViewModel.setQuantity(1)
 
@@ -130,9 +141,96 @@ final class TradeViewModelArmTests: XCTestCase {
         XCTAssertEqual(tradeViewModel.armedTicket?.summary.contains("CLOSE"), false)
     }
 
+    /// Reproduces the reported incident: AUTO mode's live strike has drifted
+    /// off the strike actually held (e.g. after a sharp move in the
+    /// underlying), so the two contracts no longer share a symbol. Matching
+    /// on underlying + expiration + right (ignoring strike) still finds the
+    /// held put and closes it at ITS strike — not the drifted one the panel
+    /// currently displays — instead of silently opening a new naked short.
+    func testArm_sellClosesHeldPositionEvenWhenAutoStrikeHasDrifted() {
+        let (tradeViewModel, chainViewModel) = makeViewModels()
+        let heldPut = OptionContract(
+            symbol: "SPY260727P00500000",
+            underlying: "SPY",
+            expiration: Self.contract.expiration,
+            strike: 500,
+            optionType: .put,
+            bid: 1.0,
+            ask: 1.02,
+            last: 1.01
+        )
+        let driftedPut = OptionContract(
+            symbol: "SPY260727P00490000",
+            underlying: "SPY",
+            expiration: Self.contract.expiration,
+            strike: 490,
+            optionType: .put,
+            bid: 0.5,
+            ask: 0.52,
+            last: 0.51
+        )
+        selectContract(tradeViewModel, chainViewModel, contracts: [heldPut, driftedPut])
+        chainViewModel.optionType = .put
+        chainViewModel.isAutoMode = true
+        chainViewModel.underlyingLast = 495 // puts AUTO's OTM pick at 490, not the held 500 strike
+        tradeViewModel.setPositionsForTesting([position(2, symbol: heldPut.symbol)])
+        tradeViewModel.setQuantity(2)
+
+        tradeViewModel.arm(side: .sell, underlying: "SPY", chainViewModel: chainViewModel)
+
+        let ticket = tradeViewModel.armedTicket
+        XCTAssertEqual(ticket?.request.selection.strike, 500, "must close the HELD strike, not AUTO's drifted pick")
+        XCTAssertEqual(ticket?.request.quantity, 2)
+        XCTAssertEqual(ticket?.summary.hasPrefix("CLOSE 2"), true)
+    }
+
+    /// Two held legs at different strikes, same underlying/expiration/right
+    /// (e.g. a put spread): the higher-P/L leg closes first, and the summary
+    /// says "of <total>" so the user sees the other leg is still open.
+    func testArm_sellWithMultipleMatchingLegs_closesHighestPnlLegFirst() {
+        let (tradeViewModel, chainViewModel) = makeViewModels()
+        let legA = OptionContract(
+            symbol: "SPY260727P00500000",
+            underlying: "SPY",
+            expiration: Self.contract.expiration,
+            strike: 500,
+            optionType: .put,
+            bid: 1.0,
+            ask: 1.02,
+            last: 1.01
+        )
+        let legB = OptionContract(
+            symbol: "SPY260727P00495000",
+            underlying: "SPY",
+            expiration: Self.contract.expiration,
+            strike: 495,
+            optionType: .put,
+            bid: 0.5,
+            ask: 0.52,
+            last: 0.51
+        )
+        selectContract(tradeViewModel, chainViewModel, contracts: [legA, legB])
+        chainViewModel.optionType = .put
+        chainViewModel.isAutoMode = false
+        chainViewModel.selectedStrike = 500
+        var lowPnlLeg = position(2, symbol: legA.symbol)
+        lowPnlLeg.unrealizedPnl = 5
+        var highPnlLeg = position(3, symbol: legB.symbol)
+        highPnlLeg.unrealizedPnl = 50
+        tradeViewModel.setPositionsForTesting([lowPnlLeg, highPnlLeg])
+        tradeViewModel.setQuantity(10)
+
+        tradeViewModel.arm(side: .sell, underlying: "SPY", chainViewModel: chainViewModel)
+
+        let ticket = tradeViewModel.armedTicket
+        XCTAssertEqual(ticket?.request.selection.strike, 495, "closes the higher-P/L leg first")
+        XCTAssertEqual(ticket?.request.quantity, 3)
+        XCTAssertEqual(ticket?.summary.hasPrefix("CLOSE 3 of 5"), true)
+    }
+
     func testArm_sellDoesNotTreatAnExistingShortAsSomethingToClose() {
         let (tradeViewModel, chainViewModel) = makeViewModels()
-        selectContract(chainViewModel)
+        selectContract(tradeViewModel, chainViewModel)
         tradeViewModel.setPositionsForTesting([position(-3)])
         tradeViewModel.setQuantity(1)
 

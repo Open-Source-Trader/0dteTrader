@@ -23,6 +23,7 @@ const MIME = {
   '.png': 'image/png',
   '.woff2': 'font/woff2',
 };
+const APP_ICON = path.resolve(path.join(__dirname, 'assets/icon.png'));
 
 /**
  * Serves the Vite build from ../dist on a loopback port. A FIXED port is
@@ -152,8 +153,8 @@ async function createWindow() {
   const { workAreaSize } = screen.getPrimaryDisplay();
   const scale = Math.min(1, (workAreaSize.height - 80) / 932, (workAreaSize.width - 40) / 430);
   const win = new BrowserWindow({
-    width: Math.round(430 * scale),
-    height: Math.round(932 * scale),
+    width: Math.round(1024 * scale),
+    height: Math.round(768 * scale),
     useContentSize: true,
     resizable: true,
     minWidth: 240,
@@ -163,6 +164,7 @@ async function createWindow() {
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
     },
+    icon: APP_ICON,
   });
   win.setAspectRatio(430 / 932);
   // External links (e.g. the "Deploy on Railway" link on the login screen)
@@ -184,6 +186,9 @@ async function createWindow() {
 }
 
 app.whenReady().then(async () => {
+  if (process.platform === 'darwin') {
+    app.dock.setIcon(APP_ICON);
+  }
   // Run in parallel, not sequentially: ensureBackend can poll for up to 15s
   // before giving up, and createWindow doesn't need the backend up to show
   // the renderer — the app already handles a not-yet-ready API gracefully

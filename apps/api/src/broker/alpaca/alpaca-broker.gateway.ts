@@ -294,13 +294,15 @@ export class AlpacaBrokerGateway implements BrokerGateway, OnModuleDestroy {
 
   async cancelOrder(userId: string, orderId: string): Promise<void> {
     const client = await this.clientFor(userId);
-    const open = await this.getOpenOrders(userId);
-    const target = open.find((o) => o.orderId === orderId);
-    if (!target) throw brokerErrors.orderNotFound(orderId);
-    const ord = await this.guard(() =>
-      client.trading.orders.getOrderByClientOrderId({ clientOrderId: orderId }),
-    );
+    let ord;
+    try {
+      ord = await client.trading.orders.getOrderByClientOrderId({ clientOrderId: orderId });
+    } catch (err) {
+      const mapped = mapSdkError(err);
+      throw mapped.code === 'CONTRACT_NOT_FOUND' ? brokerErrors.orderNotFound(orderId) : mapped;
+    }
     if (!ord.id) throw brokerErrors.orderNotFound(orderId);
+    const target = toOrderResult(ord);
     await this.guard(() => client.trading.orders.deleteOrderByOrderID({ orderId: ord.id! }));
     this.stopStatusPoll(userId, orderId);
     this.events.emit(userId, { ...target, status: 'cancelled' });

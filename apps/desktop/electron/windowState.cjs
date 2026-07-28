@@ -14,7 +14,10 @@ function clampState(state, displays) {
     return [{ left: x, top: y, right: x + width, bottom: y + height }];
   });
   const width = Math.max(DEFAULT_STATE.minWidth, Math.round(state.width || DEFAULT_STATE.width));
-  const height = Math.max(DEFAULT_STATE.minHeight, Math.round(state.height || DEFAULT_STATE.height));
+  const height = Math.max(
+    DEFAULT_STATE.minHeight,
+    Math.round(state.height || DEFAULT_STATE.height),
+  );
   const left = Number.isFinite(state.x) ? Math.round(state.x) : null;
   const top = Number.isFinite(state.y) ? Math.round(state.y) : null;
   if (left === null || top === null) return { width, height };

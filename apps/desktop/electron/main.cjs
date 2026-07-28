@@ -7,16 +7,7 @@
 // Production loads dist/ over a loopback HTTP server, not file:// — Chromium
 // blocks ES-module scripts and stylesheets on file:// origins (blank window),
 // and http keeps webSecurity intact (no CORS bypass needed).
-const {
-  app,
-  BrowserWindow,
-  ipcMain,
-  Menu,
-  nativeImage,
-  screen,
-  shell,
-  Tray,
-} = require('electron');
+const { app, BrowserWindow, ipcMain, Menu, nativeImage, screen, shell, Tray } = require('electron');
 const { spawn } = require('node:child_process');
 const path = require('node:path');
 const http = require('node:http');
@@ -275,51 +266,52 @@ function installApplicationMenu() {
     iconPath: APP_ICON,
   });
 
-  const template = process.platform === 'darwin'
-    ? [
-        {
-          label: APP_NAME,
-          submenu: [
-            { role: 'about', label: `About ${APP_NAME}` },
-            { type: 'separator' },
-            {
-              label: 'Change Server…',
-              click: () => queueDesktopCommand({ type: 'open-server-selector' }),
-            },
-            { type: 'separator' },
-            { role: 'services' },
-            { type: 'separator' },
-            { role: 'hide', label: `Hide ${APP_NAME}` },
-            { role: 'hideOthers' },
-            { role: 'unhide' },
-            { type: 'separator' },
-            { role: 'quit', label: `Quit ${APP_NAME}` },
-          ],
-        },
-      ]
-    : [
-        {
-          label: 'File',
-          submenu: [
-            {
-              label: `Show ${APP_NAME}`,
-              click: () => {
-                if (!mainWindow) {
-                  void createWindow();
-                  return;
-                }
-                focusMainWindow();
+  const template =
+    process.platform === 'darwin'
+      ? [
+          {
+            label: APP_NAME,
+            submenu: [
+              { role: 'about', label: `About ${APP_NAME}` },
+              { type: 'separator' },
+              {
+                label: 'Change Server…',
+                click: () => queueDesktopCommand({ type: 'open-server-selector' }),
               },
-            },
-            {
-              label: 'Change Server…',
-              click: () => queueDesktopCommand({ type: 'open-server-selector' }),
-            },
-            { type: 'separator' },
-            { role: 'quit', label: `Quit ${APP_NAME}` },
-          ],
-        },
-      ];
+              { type: 'separator' },
+              { role: 'services' },
+              { type: 'separator' },
+              { role: 'hide', label: `Hide ${APP_NAME}` },
+              { role: 'hideOthers' },
+              { role: 'unhide' },
+              { type: 'separator' },
+              { role: 'quit', label: `Quit ${APP_NAME}` },
+            ],
+          },
+        ]
+      : [
+          {
+            label: 'File',
+            submenu: [
+              {
+                label: `Show ${APP_NAME}`,
+                click: () => {
+                  if (!mainWindow) {
+                    void createWindow();
+                    return;
+                  }
+                  focusMainWindow();
+                },
+              },
+              {
+                label: 'Change Server…',
+                click: () => queueDesktopCommand({ type: 'open-server-selector' }),
+              },
+              { type: 'separator' },
+              { role: 'quit', label: `Quit ${APP_NAME}` },
+            ],
+          },
+        ];
 
   template.push(
     {

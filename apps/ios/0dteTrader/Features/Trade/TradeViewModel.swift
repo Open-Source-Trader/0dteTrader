@@ -171,17 +171,50 @@ final class TradeViewModel: ObservableObject {
             return
         }
 
-        // Selling the contract you are already long closes (part of) that
-        // position rather than opening a short. The ticket quantity is honored
-        // but capped at the position size — the cap stops a large ticket from
-        // flipping through zero into a short, while a smaller ticket still
-        // scales out partially. The summary says exactly what will happen.
+        // Selling closes (part of) a held position rather than opening a short
+        // when the UI's selected right (put/call) and expiration match a held
+        // position — regardless of which strike AUTO mode currently points at.
+        // Matching on strike would miss a held position whenever AUTO's live
+        // OTM pick has drifted off the strike actually held, silently routing
+        // the sell through the open-order path below and stacking a naked
+        // position on top of the one the user meant to close (the bug this
+        // guards against). Legs are resolved through `optionContractResolver`
+        // rather than trusted from the chain's `selectedContract`, since that
+        // is exactly the drifted AUTO pick we cannot use for the close's strike.
         if side == .sell,
-           let contract = chainViewModel.selectedContract,
-           let position = positions.first(where: { $0.symbol == contract.symbol && $0.quantity > 0 }) {
-            let closeQuantity = min(quantity, position.quantity)
-            let sizeLabel = closeQuantity < position.quantity
-                ? "\(closeQuantity) of \(position.quantity)"
+           let expiration = chainViewModel.selectedExpiration,
+           case let heldLegs = positions.compactMap({ position -> (Position, OptionContract)? in
+               guard position.quantity > 0,
+                     let contract = optionContractResolver?(position.symbol),
+                     contract.underlying == underlying,
+                     contract.expiration == expiration,
+                     contract.optionType == optionType
+               else { return nil }
+               return (position, contract)
+           }),
+           !heldLegs.isEmpty {
+            // Highest unrealized P/L first: scale out of the most profitable
+            // leg before touching the rest when the ticket doesn't cover the
+            // full combined size.
+            let ordered = heldLegs.sorted { $0.0.unrealizedPnl > $1.0.unrealizedPnl }
+            let totalHeld = ordered.reduce(0) { $0 + $1.0.quantity }
+            var remaining = min(quantity, totalHeld)
+            var closes: [(contract: OptionContract, quantity: Int)] = []
+            for (position, contract) in ordered where remaining > 0 {
+                let take = min(remaining, position.quantity)
+                closes.append((contract, take))
+                remaining -= take
+            }
+
+            // One order per arm: only the highest-P/L leg closes on this tap.
+            // When the ticket spans multiple strikes, the summary says "of
+            // <total>" so the user sees the remainder is untouched and can
+            // tap SELL again to work through the rest, rather than the ticket
+            // silently closing only part of the intended size.
+            guard let firstClose = closes.first else { return }
+            let closeQuantity = firstClose.quantity
+            let sizeLabel = closeQuantity < totalHeld
+                ? "\(closeQuantity) of \(totalHeld)"
                 : "\(closeQuantity)"
             let request = OrderRequestDTO(
                 underlying: underlying,
@@ -192,9 +225,9 @@ final class TradeViewModel: ObservableObject {
                 limitPrice: limitPrice,
                 selection: OrderSelectionDTO(
                     mode: "explicit",
-                    optionType: contract.optionType.rawValue,
-                    expiration: contract.expiration,
-                    strike: contract.strike
+                    optionType: firstClose.contract.optionType.rawValue,
+                    expiration: firstClose.contract.expiration,
+                    strike: firstClose.contract.strike
                 )
             )
             armedTicket = ArmedOrderTicket(
@@ -203,7 +236,7 @@ final class TradeViewModel: ObservableObject {
                 idempotencyKey: UUID().uuidString,
                 side: side,
                 summary: "CLOSE \(sizeLabel) · \(underlying) "
-                    + "\(Format.strike(contract.strike))\(contract.optionType.shortName)"
+                    + "\(Format.strike(firstClose.contract.strike))\(firstClose.contract.optionType.shortName)"
             )
             preview = nil
             previewError = nil

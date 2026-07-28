@@ -133,6 +133,22 @@ export interface ChartStoreState {
   optionsAnalytics: OptionsAnalyticsSettings;
 }
 
+/**
+ * Slice of ChartStoreState a screen that only needs chart chrome (symbol,
+ * settings, error banner) can subscribe to via `useStore(chartStore,
+ * chartChromeSlice, shallowEqual)` — skips a re-render on every live-quote
+ * tick, which only ever touches `candles`/`quote`/`tickProgress`/`isStale`.
+ */
+export function chartChromeSlice(state: ChartStoreState) {
+  return {
+    symbol: state.symbol,
+    errorMessage: state.errorMessage,
+    indicatorSettings: state.indicatorSettings,
+    twcSettings: state.twcSettings,
+    optionsAnalytics: state.optionsAnalytics,
+  };
+}
+
 /** Upper bound on rendered candles so live appends stay cheap. */
 const MAX_CANDLES = 600;
 

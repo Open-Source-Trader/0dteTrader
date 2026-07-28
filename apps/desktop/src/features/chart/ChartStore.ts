@@ -145,6 +145,13 @@ export class ChartStore extends Store<ChartStoreState> {
    *  generation guard ChainStore uses for chain loads. */
   private loadGeneration = 0;
   private tickAccumulator: TickAccumulatorState | null = null;
+  /** Coalesces live-quote candle updates to one `set` per animation frame.
+   *  A quote socket can push several ticks per frame; each `set` triggers a
+   *  React render and, downstream, a full indicator/TWC recompute over every
+   *  candle (ChartView's `useMemo`s key on the `candles` array identity) —
+   *  expensive work that has no reason to run more than once per paint. */
+  private pendingCandlePatch: Partial<ChartStoreState> | null = null;
+  private candleFlushHandle: number | null = null;
 
   constructor(
     private readonly apiClient: ApiClient,
@@ -187,6 +194,7 @@ export class ChartStore extends Store<ChartStoreState> {
 
   async loadCandles(): Promise<void> {
     const generation = ++this.loadGeneration;
+    this.cancelPendingCandlePatch();
     const { symbol, interval } = this.getState();
 
     if (isTickInterval(interval)) {
@@ -237,6 +245,7 @@ export class ChartStore extends Store<ChartStoreState> {
     this.socket.unsubscribeSymbols([symbol]);
     this.settingsStore.lastSymbol = normalized;
     this.tickAccumulator = null;
+    this.cancelPendingCandlePatch();
     this.set({ symbol: normalized, quote: null, candles: [], tickProgress: null });
     this.socket.subscribeSymbols([normalized]);
     void this.loadCandles();
@@ -267,8 +276,42 @@ export class ChartStore extends Store<ChartStoreState> {
 
   // MARK: - Live updates
 
+  /** Reads the candle array as of the last call, including any patch still
+   *  pending in this frame's coalesced flush — so per-tick logic (tick
+   *  accumulator, bucket boundaries) always sees the latest value even
+   *  though the React-visible `set` hasn't run yet. */
+  private get liveCandles(): ChartCandle[] {
+    const pending = this.pendingCandlePatch?.candles;
+    return pending ?? this.getState().candles;
+  }
+
+  /** Merges a patch into the pending frame instead of setting immediately;
+   *  `quote` updates (cheap: header price/bid/ask) still land right away. */
+  private setCandlePatch(patch: Partial<ChartStoreState>): void {
+    this.pendingCandlePatch = { ...this.pendingCandlePatch, ...patch };
+    if (this.candleFlushHandle !== null) return;
+    this.candleFlushHandle = requestAnimationFrame(() => {
+      this.candleFlushHandle = null;
+      const patchToApply = this.pendingCandlePatch;
+      this.pendingCandlePatch = null;
+      if (patchToApply) this.set(patchToApply);
+    });
+  }
+
+  /** Discards any coalesced live-quote patch not yet flushed — a symbol or
+   *  interval switch replaces `candles` outright, and a stale tick-derived
+   *  patch landing a frame later would clobber it with the old symbol's
+   *  data. */
+  private cancelPendingCandlePatch(): void {
+    if (this.candleFlushHandle !== null) {
+      cancelAnimationFrame(this.candleFlushHandle);
+      this.candleFlushHandle = null;
+    }
+    this.pendingCandlePatch = null;
+  }
+
   private handleLiveQuote(quote: Quote): void {
-    const { symbol, interval, candles } = this.getState();
+    const { symbol, interval } = this.getState();
     if (quote.symbol !== symbol) return;
     this.set({ quote });
 
@@ -277,6 +320,7 @@ export class ChartStore extends Store<ChartStoreState> {
       return;
     }
 
+    const candles = this.liveCandles;
     if (candles.length === 0) return;
 
     const timestampMs = parseDateTime(quote.timestamp);
@@ -291,7 +335,7 @@ export class ChartStore extends Store<ChartStoreState> {
         high: Math.max(last.high, quote.last),
         low: Math.min(last.low, quote.last),
       };
-      this.set({ candles: [...candles.slice(0, -1), updated] });
+      this.setCandlePatch({ candles: [...candles.slice(0, -1), updated] });
     } else if (bucketStart > last.time) {
       const appended: ChartCandle = {
         time: bucketStart,
@@ -305,13 +349,14 @@ export class ChartStore extends Store<ChartStoreState> {
       if (next.length > MAX_CANDLES) {
         next = next.slice(next.length - MAX_CANDLES);
       }
-      this.set({ candles: next });
+      this.setCandlePatch({ candles: next });
     }
   }
 
   private handleTickQuote(quote: Quote): void {
-    const { interval, candles, symbol } = this.getState();
+    const { interval, symbol } = this.getState();
     if (!isTickInterval(interval)) return;
+    const candles = this.liveCandles;
     const size = tickSize(interval);
     const price = quote.last;
     const timestampMs = parseDateTime(quote.timestamp);
@@ -355,7 +400,7 @@ export class ChartStore extends Store<ChartStoreState> {
         next = next.slice(next.length - MAX_CANDLES);
       }
       this.tickAccumulator = null;
-      this.set({ candles: next, tickProgress: { count: 0, size } });
+      this.setCandlePatch({ candles: next, tickProgress: { count: 0, size } });
     } else {
       this.set({ tickProgress: { count: this.tickAccumulator.count, size } });
     }

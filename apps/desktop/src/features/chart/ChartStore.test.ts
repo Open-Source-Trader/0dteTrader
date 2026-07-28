@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, type Mock } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 import type { Quote } from '@0dtetrader/shared-types';
 import type { ApiClient } from '../../core/api/ApiClient';
 import type { QuoteSocket } from '../../core/api/QuoteSocket';
@@ -10,6 +10,23 @@ vi.mock('../../core/storage/tickStorage', () => ({
   loadTickState: vi.fn(async () => ({ candles: [], accumulator: null })),
   saveTickState: vi.fn(async () => undefined),
 }));
+
+/** ChartStore coalesces live-quote candle updates via requestAnimationFrame,
+ *  absent in this suite's node test environment. Stub it to run the queued
+ *  callback synchronously so `handleLiveQuote` still applies its patch
+ *  within the same tick — the tests below assert on `getState()` right
+ *  after calling it. */
+let rafId = 0;
+beforeEach(() => {
+  vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => {
+    cb(0);
+    return ++rafId;
+  });
+  vi.stubGlobal('cancelAnimationFrame', () => undefined);
+});
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 const BUCKET = 1_784_298_600; // 2026-07-17T14:30:00Z, on a 1m boundary
 
@@ -78,6 +95,38 @@ describe('ChartStore.handleLiveQuote', () => {
     expect(candles).toHaveLength(2);
     expect(candles.at(-1)!.time).toBe(BUCKET + 60);
     expect(candles.at(-1)!.open).toBe(501.2);
+  });
+
+  it('coalesces several same-frame quotes into a single notify, applying only the latest', () => {
+    // Override the module-level synchronous rAF stub: queue callbacks and
+    // flush them by hand, so multiple quotes can land before a frame fires —
+    // the exact scenario a bursty quote socket produces.
+    const queued: FrameRequestCallback[] = [];
+    vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => {
+      queued.push(cb);
+      return queued.length;
+    });
+    const store = makeStore();
+    let notifications = 0;
+    store.subscribe(() => {
+      notifications += 1;
+    });
+
+    liveQuote(store, quote('2026-07-17T14:30:10Z', 501.6));
+    liveQuote(store, quote('2026-07-17T14:30:20Z', 501.7));
+    liveQuote(store, quote('2026-07-17T14:30:30Z', 501.9));
+    // `quote` (header price) still notifies immediately per tick; the
+    // candle-array patch itself has not flushed yet.
+    expect(notifications).toBe(3);
+    expect(store.getState().candles.at(-1)!.close).toBe(501.2);
+
+    expect(queued).toHaveLength(1); // one frame requested for all three ticks
+    queued[0](0);
+
+    expect(notifications).toBe(4);
+    const last = store.getState().candles.at(-1)!;
+    expect(last.close).toBe(501.9); // only the latest tick's values applied
+    expect(last.high).toBe(501.9);
   });
 });
 

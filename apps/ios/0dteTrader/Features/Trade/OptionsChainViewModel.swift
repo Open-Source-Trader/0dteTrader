@@ -5,7 +5,22 @@ import Foundation
 @MainActor
 final class OptionsChainViewModel: ObservableObject {
     @Published private(set) var underlying: String = ""
-    @Published private(set) var chain: OptionsChain?
+    /// Backing storage for `chain`, written directly (bypassing the
+    /// publishing setter below) when a tick updates a contract other than the
+    /// one on screen — see `applyContractQuote`.
+    private var chainStorage: OptionsChain?
+    /// `TradePanelView`/`OrderPricingRow` hold this view model as
+    /// `@ObservedObject` and re-render their whole body on any publish, and
+    /// the only chain data either displays is `selectedContract`. Publishing
+    /// on every tick would re-render the trade panel for a price nobody is
+    /// showing whenever a held position's contract isn't the selected one.
+    private(set) var chain: OptionsChain? {
+        get { chainStorage }
+        set {
+            objectWillChange.send()
+            chainStorage = newValue
+        }
+    }
     @Published private(set) var isLoading = false
     @Published var errorMessage: String?
 
@@ -151,7 +166,15 @@ final class OptionsChainViewModel: ObservableObject {
             ask: quote.ask,
             last: quote.last
         )
-        self.chain = chain
+        // A tick for anything other than the contract on screen changes
+        // nothing the trade panel shows — write it through without
+        // publishing so a held position's quote doesn't re-render the panel
+        // (see `chain`'s doc comment).
+        if quote.symbol == selectedContract?.symbol {
+            self.chain = chain
+        } else {
+            chainStorage = chain
+        }
     }
 
     /// Background re-fetch of the loaded chain's quotes (bid/ask/underlyingPrice)

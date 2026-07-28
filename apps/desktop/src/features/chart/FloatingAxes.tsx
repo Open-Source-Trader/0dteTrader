@@ -3,6 +3,7 @@ import type { ChartInterval } from '@0dtetrader/shared-types';
 import type { IChartApi, ISeriesApi, Logical } from 'lightweight-charts';
 import { formatTick, priceTicks, timeTickIndices } from './axisTicks';
 import { chartPalette } from './chartColors';
+import { claimPointer } from './chartPointerClaim';
 import type { ChartCandle } from './ChartStore';
 
 interface FloatingAxesProps {
@@ -23,6 +24,12 @@ const LABEL_HEIGHT = 11;
  * digits sit on the line rather than through it.
  */
 const PRICE_LABEL_LIFT = 4;
+/**
+ * Width of the invisible strip along the left edge that acts as the price
+ * axis for drag-to-rescale, mirroring TradingView's axis-drag gesture on the
+ * (hidden) scale the price labels are drawn over.
+ */
+const AXIS_DRAG_WIDTH = 44;
 
 /**
  * The price and time scales, drawn over the candles instead of in gutters of
@@ -151,6 +158,73 @@ export function FloatingAxes({ chart, series, candles, interval }: FloatingAxesP
   useEffect(() => {
     scheduleRef.current();
   }, [candles, interval]);
+
+  // Drag-to-rescale on the left edge, where the (hidden) price axis is drawn.
+  // lightweight-charts has no visible axis strip to grab here — see the class
+  // doc — so this reimplements the gesture: a vertical drag starting within
+  // AXIS_DRAG_WIDTH of the left edge stretches/compresses the visible price
+  // range around its start point, same feel as dragging TradingView's axis.
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    const containerEl = canvas?.parentElement;
+    if (!canvas || !containerEl) return;
+
+    const onPointerDown = (event: PointerEvent) => {
+      const rect = canvas.getBoundingClientRect();
+      const x = event.clientX - rect.left;
+      const y = event.clientY - rect.top;
+      if (x < 0 || x > AXIS_DRAG_WIDTH || y < 0 || y > rect.height) return;
+      const priceScale = chart.priceScale('left');
+      const startRange = priceScale.getVisibleRange();
+      if (!startRange) return;
+      const startY = event.clientY;
+      const startHeight = rect.height;
+      if (startHeight <= 0) return;
+      event.preventDefault();
+      // Ancestor capture-phase stopPropagation keeps the press from ever
+      // reaching the chart's own canvas (native panning) or DrawingLayer's
+      // capture listener, both descendants of this container.
+      event.stopPropagation();
+      claimPointer(event);
+      priceScale.setAutoScale(false);
+
+      const mid = (startRange.from + startRange.to) / 2;
+      const halfSpan = (startRange.to - startRange.from) / 2;
+
+      const onMove = (moveEvent: PointerEvent) => {
+        // Dragging down stretches the range (zoom out); up compresses it
+        // (zoom in) — matches TradingView's axis-drag direction.
+        const dy = moveEvent.clientY - startY;
+        const factor = Math.pow(2, dy / startHeight);
+        const newHalfSpan = halfSpan * factor;
+        priceScale.setVisibleRange({ from: mid - newHalfSpan, to: mid + newHalfSpan });
+      };
+      const onUp = () => {
+        window.removeEventListener('pointermove', onMove);
+        window.removeEventListener('pointerup', onUp);
+      };
+      window.addEventListener('pointermove', onMove);
+      window.addEventListener('pointerup', onUp);
+    };
+
+    const onPointerMove = (event: PointerEvent) => {
+      const rect = canvas.getBoundingClientRect();
+      const x = event.clientX - rect.left;
+      const y = event.clientY - rect.top;
+      const overAxis = x >= 0 && x <= AXIS_DRAG_WIDTH && y >= 0 && y <= rect.height;
+      containerEl.style.cursor = overAxis ? 'ns-resize' : '';
+    };
+
+    // Capture phase: claims the axis strip before DrawingLayer's own
+    // capture listener (or the chart's native panning) sees the press.
+    containerEl.addEventListener('pointerdown', onPointerDown, true);
+    containerEl.addEventListener('pointermove', onPointerMove);
+    return () => {
+      containerEl.removeEventListener('pointerdown', onPointerDown, true);
+      containerEl.removeEventListener('pointermove', onPointerMove);
+      containerEl.style.cursor = '';
+    };
+  }, [chart]);
 
   return (
     <canvas

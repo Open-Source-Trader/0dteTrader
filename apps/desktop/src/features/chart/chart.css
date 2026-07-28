@@ -96,6 +96,145 @@
   box-shadow: 0 0 8px var(--hud-glow);
 }
 
+/* Compact/phone chart header (symbol + last/bid/ask legend + controls). */
+.chart-header {
+  border: 7px solid transparent;
+  border-image: var(--hud-src-flat) 28 fill / 21px / 6px stretch;
+}
+
+.chart-header-symbol {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  padding: 3px 6px;
+  border-radius: var(--radius-chip);
+}
+
+.chart-header-symbol:hover {
+  background: rgba(46, 143, 255, 0.1);
+}
+
+.chart-header-symbol-text {
+  font-family: var(--font-display);
+  font-size: var(--fs-subheadline);
+  font-weight: 700;
+  letter-spacing: 0.03em;
+}
+
+/* Symbol/price sub-pieces reused by DesktopTopBar (features/trade) — the
+   desktop grid's single top row lives one level up now, merged with the
+   app's global actions instead of stacking a separate app NavBar above it. */
+.chart-strip-symbol {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  color: var(--app-accent-text);
+  font-family: var(--font-display);
+  font-size: var(--fs-caption-desktop);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.chart-strip-symbol:hover {
+  color: var(--app-accent);
+}
+
+.chart-strip-quote {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  font-size: var(--fs-caption-desktop);
+}
+
+.chart-strip-last {
+  font-size: var(--fs-subheadline-desktop);
+  font-weight: 700;
+  color: var(--label-primary);
+}
+
+.chart-strip-ticks {
+  font-size: var(--fs-caption2-desktop);
+  color: var(--label-secondary);
+}
+
+.chart-icon-button--sm {
+  width: 34px;
+  height: 34px;
+}
+
+/* Persistent left-edge drawing-tool rail (desktop grid only) — TradingView's
+   always-visible toolbar convention instead of a dropdown menu. */
+.draw-rail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  flex: none;
+  width: 44px;
+  padding: var(--space-2) 0;
+}
+
+.draw-rail-button {
+  width: 34px;
+  height: 34px;
+}
+
+.draw-rail-clear {
+  margin-top: auto;
+  color: var(--pnl-negative-text);
+}
+
+/* Global app actions (lock/history/profile), anchored to the rail's
+   bottom — separated from the drawing tools by a hairline since they're
+   an unrelated group. */
+.draw-rail-app-actions {
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  padding-top: var(--space-2);
+  border-top: var(--border-hairline) solid var(--hud-stroke-dim);
+}
+
+/* On-chart position marker (desktop grid) — TradingView convention: risk
+   lives at the price it affects, closeable in one click, no chart trip
+   required. */
+.position-line-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 4px 2px 8px;
+  background: var(--hud-panel-fill);
+  border: var(--border-hairline) solid currentColor;
+  font-size: var(--fs-caption2);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.position-line-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  color: inherit;
+  border-radius: 50%;
+  font-size: 12px;
+  line-height: 1;
+}
+
+.position-line-close:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.position-line-close:disabled {
+  opacity: var(--disabled-opacity);
+  cursor: default;
+}
+
 /* Empty-chart loading skeleton: chart-shaped bars instead of a bare spinner,
    so the layout pre-commits before data arrives. */
 .chart-skeleton {

@@ -3,7 +3,6 @@ import type { ReactNode } from 'react';
 import { useContainer } from './app/container';
 import { useStore } from './core/observable';
 import { Spinner } from './design/components/Spinner';
-import { StatusBar } from './design/components/StatusBar';
 import { LoginView } from './features/auth/LoginView';
 import { RiskDisclaimerView } from './features/auth/RiskDisclaimerView';
 import { TradeScreen } from './features/trade/TradeScreen';
@@ -37,7 +36,7 @@ function StateFade({ children }: { children: ReactNode }) {
 /**
  * Top-level coordinator (RootView.swift):
  * checking session → first-launch risk disclaimer → login/register → trade
- * screen, framed by the cosmetic iPhone status bar and home indicator.
+ * screen.
  */
 export function RootView() {
   const container = useContainer();
@@ -132,11 +131,9 @@ export function RootView() {
 
   return (
     <div className="phone-frame">
-      <StatusBar />
       <div className="phone-content">
         <StateFade key={state}>{content}</StateFade>
       </div>
-      <div className="home-indicator" />
     </div>
   );
 }

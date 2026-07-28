@@ -4,6 +4,7 @@
   "version": "0.1.0",
   "description": "0dteTrader Desktop app - a responsive trading-desk UI for 0DTE/scalp traders",
   "type": "module",
+  "main": "electron/main.cjs",
   "scripts": {
     "dev": "vite",
     "build": "tsc -p tsconfig.json --noEmit && vite build",
@@ -11,7 +12,8 @@
     "lint": "eslint \"src/**/*.{ts,tsx}\"",
     "preview": "vite preview",
     "electron": "ELECTRON_START_URL=${ELECTRON_START_URL:-http://localhost:5173} electron electron/main.cjs",
-    "electron:dist": "electron electron/main.cjs"
+    "electron:dist": "electron electron/main.cjs",
+    "dist:mac": "electron-builder --mac dmg --publish never"
   },
   "dependencies": {
     "@0dtetrader/shared-types": "*",
@@ -26,11 +28,33 @@
     "@typescript-eslint/parser": "^8.64.0",
     "@vitejs/plugin-react": "^6.0.4",
     "electron": "^43.2.0",
+    "electron-builder": "^26.15.3",
     "eslint": "^10.8.0",
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.3",
     "typescript": "~7.0.2",
     "vite": "^8.1.5",
     "vitest": "^4.1.10"
+  },
+  "build": {
+    "appId": "com.odtetrader.desktop",
+    "productName": "0dteTrader Desktop",
+    "electronVersion": "43.2.0",
+    "directories": {
+      "output": "release"
+    },
+    "artifactName": "0dteTrader-Desktop-${version}-${env.RELEASE_SHA}.${ext}",
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "package.json"
+    ],
+    "mac": {
+      "category": "public.app-category.finance",
+      "target": [
+        "dmg"
+      ],
+      "icon": "electron/assets/icon.icns"
+    }
   }
 }

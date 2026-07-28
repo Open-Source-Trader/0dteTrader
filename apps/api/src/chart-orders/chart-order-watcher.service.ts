@@ -16,6 +16,31 @@ const LEASE_RENEW_MS = 10_000;
 /** Expiry sweep and bracket-orphan reconciliation cadence. */
 const RECONCILE_MS = 30_000;
 
+/**
+ * Runs `fn` over `items` with at most `limit` calls in flight at once —
+ * `Promise.all(items.map(fn))` fans out every item at once, which for this
+ * watcher (a single leased singleton serving every user's armed chart-order
+ * lines) means one broker `getQuote` call per (user, underlying) group,
+ * unbounded, every tick. A worker-pool of `limit` pulls from a shared cursor
+ * rather than chunking, so a few slow groups can't stall ones behind them in
+ * the same chunk.
+ */
+export async function mapWithConcurrency<T>(
+  items: T[],
+  limit: number,
+  fn: (item: T) => Promise<void>,
+): Promise<void> {
+  let next = 0;
+  const worker = async (): Promise<void> => {
+    while (next < items.length) {
+      const item = items[next];
+      next += 1;
+      await fn(item);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+}
+
 interface Observation {
   price: number;
   /** Epoch ms this price was observed, used to decide whether a line's own arm
@@ -122,7 +147,10 @@ export class ChartOrderWatcherService implements OnModuleInit, OnModuleDestroy {
         else groups.set(key, [row]);
       }
 
-      await Promise.all([...groups].map(([key, group]) => this.checkGroup(key, group, now)));
+      const concurrency = this.config.get<number>('chartOrders.quoteConcurrency') ?? 20;
+      await mapWithConcurrency([...groups], concurrency, ([key, group]) =>
+        this.checkGroup(key, group, now),
+      );
     } catch (err) {
       this.logger.error(
         JSON.stringify({

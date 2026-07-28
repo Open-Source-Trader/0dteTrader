@@ -65,6 +65,11 @@ export interface AppConfig {
     tickMs: number;
     /** A quote older than this never fires an order (halt, weekend, dead feed). */
     staleQuoteMs: number;
+    /** Max concurrent broker getQuote calls per tick, across every (user,
+     *  underlying) group with a working line — a single leased watcher
+     *  serves the whole deployment, so an unbounded Promise.all fans out
+     *  with total platform usage, not one session. */
+    quoteConcurrency: number;
   };
 }
 
@@ -146,6 +151,7 @@ export default (): AppConfig => ({
     ),
     tickMs: int(process.env.CHART_ORDER_WATCHER_TICK_MS, 1_000),
     staleQuoteMs: int(process.env.CHART_ORDER_STALE_QUOTE_MS, 10_000),
+    quoteConcurrency: int(process.env.CHART_ORDER_WATCHER_QUOTE_CONCURRENCY, 20),
   },
 });
 

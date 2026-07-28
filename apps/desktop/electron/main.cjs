@@ -53,6 +53,7 @@ let startUrlPromise = null;
 let mainWindow = null;
 let tray = null;
 let allowedAppOrigin = null;
+let desktopBridgeReady = false;
 const pendingDesktopCommands = [];
 
 const singleInstance = app.requestSingleInstanceLock();
@@ -208,7 +209,7 @@ function focusMainWindow() {
 
 function queueDesktopCommand(command) {
   if (!command) return;
-  if (mainWindow?.webContents && !mainWindow.webContents.isLoading()) {
+  if (desktopBridgeReady && mainWindow?.webContents && !mainWindow.webContents.isLoading()) {
     mainWindow.webContents.send('desktop-command', command);
     return;
   }
@@ -216,7 +217,9 @@ function queueDesktopCommand(command) {
 }
 
 function flushDesktopCommands() {
-  if (!mainWindow?.webContents || pendingDesktopCommands.length === 0) return;
+  if (!desktopBridgeReady || !mainWindow?.webContents || pendingDesktopCommands.length === 0) {
+    return;
+  }
   const commands = pendingDesktopCommands.splice(0, pendingDesktopCommands.length);
   commands.forEach((command) => mainWindow.webContents.send('desktop-command', command));
 }
@@ -426,6 +429,8 @@ async function createWindow() {
   const shouldMaximize =
     state.maximized || workArea.width < targetWidth || workArea.height < targetHeight;
 
+  desktopBridgeReady = false;
+
   const win = new BrowserWindow({
     ...state,
     width: state.width,
@@ -489,7 +494,10 @@ async function createWindow() {
   return win;
 }
 
-ipcMain.handle('desktop-command:flush', () => pendingDesktopCommands.splice(0, pendingDesktopCommands.length));
+ipcMain.handle('desktop-command:flush', () => {
+  desktopBridgeReady = true;
+  return pendingDesktopCommands.splice(0, pendingDesktopCommands.length);
+});
 
 app.on('second-instance', (_event, argv) => {
   if (!mainWindow) {

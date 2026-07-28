@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { DEFAULT_API_BASE_URL } from '../../app/config';
 import { useContainer } from '../../app/container';
@@ -46,6 +46,10 @@ export function ServerSelectView({
 
   const isDefault = baseUrl === DEFAULT_API_BASE_URL;
   const currentHost = hostLabel(baseUrl);
+
+  useEffect(() => {
+    if (prefillUrl) setStep('connect');
+  }, [prefillUrl]);
 
   const useDefault = () => {
     const changed = !isDefault;
@@ -247,6 +251,12 @@ function ServerUrlForm({
   const [saveError, setSaveError] = useState<string | null>(null);
   const [isChecking, setIsChecking] = useState(false);
   const [health, setHealth] = useState<HealthCheckResult | null>(null);
+
+  useEffect(() => {
+    setDraft(initialDraft);
+    setSaveError(null);
+    setHealth(null);
+  }, [initialDraft]);
   const requiresPassingCheck = mode === 'setup' || draft.trim() !== baseUrl;
   const canContinue = draft.trim() !== '' && (!requiresPassingCheck || health?.ok === true);
 

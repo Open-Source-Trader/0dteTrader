@@ -138,6 +138,12 @@ describe('SettingsStore server setup preference', () => {
     new SettingsStore().hasCompletedServerSelection = true;
     expect(new SettingsStore().hasCompletedServerSelection).toBe(true);
   });
+
+  it('treats an existing install footprint as already configured', () => {
+    localStorage.setItem('settings.riskDisclaimerAccepted', 'true');
+    localStorage.setItem('settings.lastSymbol', 'SPY');
+    expect(new SettingsStore().hasCompletedServerSelection).toBe(true);
+  });
 });
 
 describe('SettingsStore boolean device preferences', () => {

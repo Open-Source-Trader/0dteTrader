@@ -105,7 +105,14 @@ export class SettingsStore {
   }
 
   get hasCompletedServerSelection(): boolean {
-    return localStorage.getItem(SettingsStore.keys.serverSelectionCompleted) === 'true';
+    if (localStorage.getItem(SettingsStore.keys.serverSelectionCompleted) === 'true') return true;
+    if (!this.hasAcceptedRiskDisclaimer) return false;
+    for (let index = 0; index < localStorage.length; index += 1) {
+      const key = localStorage.key(index);
+      if (!key || key === SettingsStore.keys.riskDisclaimerAccepted) continue;
+      return true;
+    }
+    return false;
   }
 
   set hasCompletedServerSelection(value: boolean) {

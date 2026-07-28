@@ -137,6 +137,7 @@ final class OptionsChainViewModel: ObservableObject {
               let index = chain.contracts.firstIndex(where: { $0.symbol == quote.symbol })
         else { return }
         let old = chain.contracts[index]
+        guard old.bid != quote.bid || old.ask != quote.ask || old.last != quote.last else { return }
         chain.contracts[index] = OptionContract(
             symbol: old.symbol,
             underlying: old.underlying,

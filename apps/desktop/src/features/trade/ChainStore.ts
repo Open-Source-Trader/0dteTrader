@@ -101,17 +101,16 @@ export class ChainStore extends Store<ChainStoreState> {
   /** Live tick for a subscribed option contract: updates its bid/ask/last in place. */
   applyContractQuote(quote: Quote): void {
     const { chain } = this.getState();
-    if (!chain || !chain.contracts.some((contract) => contract.symbol === quote.symbol)) return;
-    this.set({
-      chain: {
-        ...chain,
-        contracts: chain.contracts.map((contract) =>
-          contract.symbol === quote.symbol
-            ? { ...contract, bid: quote.bid, ask: quote.ask, last: quote.last }
-            : contract,
-        ),
-      },
-    });
+    if (!chain) return;
+    const index = chain.contracts.findIndex((contract) => contract.symbol === quote.symbol);
+    if (index === -1) return;
+    const contract = chain.contracts[index];
+    if (contract.bid === quote.bid && contract.ask === quote.ask && contract.last === quote.last) {
+      return;
+    }
+    const contracts = chain.contracts.slice();
+    contracts[index] = { ...contract, bid: quote.bid, ask: quote.ask, last: quote.last };
+    this.set({ chain: { ...chain, contracts } });
   }
 
   // MARK: - Loading

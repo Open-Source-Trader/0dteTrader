@@ -123,3 +123,54 @@ describe('ChainStore.load', () => {
     expect(state.selectedStrike).toBe(501);
   });
 });
+
+describe('ChainStore.applyContractQuote', () => {
+  it('updates only the matching contract, leaving other contract objects untouched', async () => {
+    const { store, pending } = makeDeferredStore();
+    const loading = store.load('SPY');
+    await flushMicrotasks();
+    pending.get('SPY')!.resolve(chainDto('SPY', [499, 501, 503]));
+    await loading;
+
+    const before = store.getState().chain!.contracts;
+    const target = before[1];
+    store.applyContractQuote({
+      symbol: target.symbol,
+      bid: 2.1,
+      ask: 2.2,
+      last: 2.15,
+      bidSize: 1,
+      askSize: 1,
+      volume: 1,
+      timestamp: new Date().toISOString(),
+    });
+
+    const after = store.getState().chain!.contracts;
+    expect(after[1]).toMatchObject({ bid: 2.1, ask: 2.2, last: 2.15 });
+    expect(after[0]).toBe(before[0]);
+    expect(after[2]).toBe(before[2]);
+  });
+
+  it('is a no-op when the quote matches the contract already stored', async () => {
+    const { store, pending } = makeDeferredStore();
+    const loading = store.load('SPY');
+    await flushMicrotasks();
+    pending.get('SPY')!.resolve(chainDto('SPY', [499, 501, 503]));
+    await loading;
+
+    const before = store.getState().chain!;
+    const target = before.contracts[1];
+    store.applyContractQuote({
+      symbol: target.symbol,
+      bid: target.bid,
+      ask: target.ask,
+      last: target.last,
+      bidSize: 1,
+      askSize: 1,
+      volume: 1,
+      timestamp: new Date().toISOString(),
+    });
+
+    expect(store.getState().chain).toBe(before);
+  });
+});

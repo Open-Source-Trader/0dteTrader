@@ -2,7 +2,7 @@
   "name": "@0dtetrader/desktop",
   "private": true,
   "version": "0.1.0",
-  "description": "iPhone-faithful web clone of the iOS app for testing the frontend against the backend on Linux",
+  "description": "0dteTrader Desktop app - a responsive trading-desk UI for 0DTE/scalp traders",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -16,7 +16,8 @@
     "@0dtetrader/shared-types": "*",
     "lightweight-charts": "^5.2.0",
     "react": "^19.2.8",
-    "react-dom": "^19.2.8"
+    "react-dom": "^19.2.8",
+    "react-resizable-panels": "^4.12.2"
   },
   "devDependencies": {
     "@types/react": "^19.2.17",

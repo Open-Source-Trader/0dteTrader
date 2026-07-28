@@ -584,6 +584,24 @@ describe('ChartOrdersService', () => {
     });
 
     /**
+     * OCO cancels siblings by group membership, not by kind — two targets (or
+     * two stops) sharing a group would silently retire one of them on fire
+     * instead of the client's drag-to-move updating the existing leg. Refusing
+     * the join is what makes that surface as an error instead of a silent loss.
+     */
+    it('refuses a second leg of the same kind in one bracket', async () => {
+      const groupId = '66666666-2222-3333-4444-555555555555';
+      await service.create(
+        userId,
+        draft({ kind: 'target', triggerPrice: 105, ocoGroupId: groupId }),
+      );
+
+      await expect(
+        service.create(userId, draft({ kind: 'target', triggerPrice: 106, ocoGroupId: groupId })),
+      ).rejects.toMatchObject({ status: 409, code: 'OCO_GROUP_DUPLICATE_KIND' });
+    });
+
+    /**
      * The watcher hands the same `now` to every fire in a tick, so the claim
      * mints its own stamp — otherwise a later fire could match an earlier
      * claim's rows by timestamp and retire a leg it never claimed.

@@ -5,9 +5,11 @@ import {
   createChart,
   HistogramSeries,
   LineSeries,
+  LineStyle,
   type CandlestickData,
   type HistogramData,
   type IChartApi,
+  type IPriceLine,
   type ISeriesApi,
   type LineData,
   type LineWidth,
@@ -65,6 +67,10 @@ interface CandleChartProps {
   optionsAnalyticsSnapshot?: OptionsAnalyticsSnapshot | null;
   optionsAnalyticsSettings?: OptionsAnalyticsSettings | null;
   optionsAnalyticsRetained?: boolean;
+  /** Live underlying bid/ask (TradingView convention: bid/ask lines pinned
+   *  to the price axis). Desktop grid only; null hides both lines. */
+  bid?: number | null;
+  ask?: number | null;
   /** Chart trading: everything the order-line overlay needs, or null when off. */
   chartTrading?: ChartTradingProps | null;
 }
@@ -103,12 +109,16 @@ export function CandleChart({
   optionsAnalyticsSnapshot = null,
   optionsAnalyticsSettings = null,
   optionsAnalyticsRetained = false,
+  bid = null,
+  ask = null,
   chartTrading = null,
 }: CandleChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const candleSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
   const volumeSeriesRef = useRef<ISeriesApi<'Histogram'> | null>(null);
+  const bidLineRef = useRef<IPriceLine | null>(null);
+  const askLineRef = useRef<IPriceLine | null>(null);
   const overlaySeriesRef = useRef<Map<string, ISeriesApi<'Line'>>>(new Map());
   const prevOverlaysRef = useRef<{
     ids: string[];
@@ -123,7 +133,7 @@ export function CandleChart({
     chart: IChartApi;
     series: ISeriesApi<'Candlestick'>;
   } | null>(null);
-  const { tool } = useStore(drawingsStore);
+  const { draft } = useStore(drawingsStore);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -201,6 +211,8 @@ export function CandleChart({
       chartRef.current = null;
       candleSeriesRef.current = null;
       volumeSeriesRef.current = null;
+      bidLineRef.current = null;
+      askLineRef.current = null;
       overlaySeriesRef.current = new Map();
       prevOverlaysRef.current = null;
       lastLengthRef.current = 0;
@@ -231,13 +243,62 @@ export function CandleChart({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showVolume]);
 
-  // Drawing tools take over the pointer: freeze pan/zoom while one is active.
+  // Live underlying bid/ask price lines pinned to the axis (TradingView
+  // convention) — desktop grid only; null bid/ask (compact layout, no
+  // quote yet) removes the lines rather than leaving stale ones behind.
+  useEffect(() => {
+    const series = candleSeriesRef.current;
+    if (!series) return;
+    const colors = chartPalette();
+
+    if (bid !== null) {
+      if (!bidLineRef.current) {
+        bidLineRef.current = series.createPriceLine({
+          price: bid,
+          color: colors.candleUp,
+          lineWidth: 1,
+          lineStyle: LineStyle.Dotted,
+          axisLabelVisible: true,
+          title: 'BID',
+        });
+      } else {
+        bidLineRef.current.applyOptions({ price: bid });
+      }
+    } else if (bidLineRef.current) {
+      series.removePriceLine(bidLineRef.current);
+      bidLineRef.current = null;
+    }
+
+    if (ask !== null) {
+      if (!askLineRef.current) {
+        askLineRef.current = series.createPriceLine({
+          price: ask,
+          color: colors.candleDown,
+          lineWidth: 1,
+          lineStyle: LineStyle.Dotted,
+          axisLabelVisible: true,
+          title: 'ASK',
+        });
+      } else {
+        askLineRef.current.applyOptions({ price: ask });
+      }
+    } else if (askLineRef.current) {
+      series.removePriceLine(askLineRef.current);
+      askLineRef.current = null;
+    }
+  }, [bid, ask]);
+
+  // A drag-placed shape (trend/ray/rect) takes over the pointer mid-drag:
+  // freeze pan/zoom so the chart doesn't scroll under the draft. Tools stay
+  // armed after a placement (see drawings.ts), so gating on `tool` alone
+  // would leave pan/zoom disabled long after the drag ends; DrawingLayer's
+  // own canvas already blocks stray presses whenever a tool is armed.
   useEffect(() => {
     const chart = chartRef.current;
     if (!chart) return;
-    const interactive = tool === 'cursor';
+    const interactive = draft === null;
     chart.applyOptions({ handleScroll: interactive, handleScale: interactive });
-  }, [tool]);
+  }, [draft]);
 
   // Candle data: cheap update on ticks and on each new bar, full set only on a
   // genuine structural replacement. A NEW CANDLE starting (length grows, head

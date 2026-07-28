@@ -31,6 +31,18 @@ export const CHART_INTERVALS: ChartInterval[] = [
   '250t',
 ];
 
+// Keyboard-hint labels shown next to each interval in its picker menu.
+export const INTERVAL_HINTS: Partial<Record<ChartInterval, string>> = {
+  '1m': '1',
+  '5m': '5',
+  '15m': '3',
+  '30m': '0',
+  '1h': '⇧H',
+  '4h': '4',
+  '1d': '⇧D',
+  '1w': '⇧W',
+};
+
 export const TICK_INTERVALS: TickInterval[] = ['10t', '25t', '50t', '100t', '250t'];
 
 export function isTickInterval(interval: ChartInterval): interval is TickInterval {
@@ -105,7 +117,7 @@ function toChartCandles(dtos: Candle[]): ChartCandle[] {
   return candles;
 }
 
-interface ChartStoreState {
+export interface ChartStoreState {
   symbol: string;
   interval: ChartInterval;
   candles: ChartCandle[];

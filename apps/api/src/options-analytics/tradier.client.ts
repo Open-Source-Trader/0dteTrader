@@ -13,6 +13,11 @@ const MAX_SOURCE_AGE_MS = 30 * 60_000;
 const MAX_FUTURE_SKEW_MS = 2 * 60_000;
 /** Provider Greeks are comparison-only and documented on an hourly cadence. */
 const MAX_PROVIDER_GREEKS_AGE_MS = 2 * 60 * 60_000;
+/** Backoff before the one retry on a network failure or 5xx (WebullClient's
+ *  BACKOFF_BASE_MS convention). Never applied to 4xx/429 — a malformed
+ *  request or exhausted rate limit won't succeed on an immediate retry, and
+ *  429 already has its own pre-emptive gate below. */
+const RETRY_BACKOFF_MS = 250;
 /** Version 1 quote-quality cutoff: (ask - bid) / midpoint may not exceed 100%. */
 export const OPTIONS_ANALYTICS_MAX_RELATIVE_SPREAD_V1 = 1;
 /** Version 1 never forms an NBBO midpoint from bid/ask timestamps over one minute apart. */
@@ -218,43 +223,74 @@ export class TradierClient {
     ) {
       throw new Error(`Tradier rate limit is exhausted until ${this.rateLimitExpiry}`);
     }
-    const response = await this.fetchImpl(`${this.baseUrl}/v1${path}`, {
-      headers: {
-        Authorization: `Bearer ${this.token}`,
-        Accept: 'application/json',
-      },
-      signal: AbortSignal.timeout(10_000),
-    });
-    const available = response.headers.get('X-Ratelimit-Available');
-    const parsedAvailable = available === null ? null : Number(available);
-    this.availableRequests =
-      parsedAvailable !== null && Number.isFinite(parsedAvailable) ? parsedAvailable : null;
-    const rawExpiry = response.headers.get('X-Ratelimit-Expiry');
-    const parsedExpiry = rawExpiry === null ? Number.NaN : Number(rawExpiry);
-    if (
-      rawExpiry !== null &&
-      Number.isSafeInteger(parsedExpiry) &&
-      parsedExpiry >= 1_000_000_000_000
-    ) {
-      const resetAt = new Date(parsedExpiry);
-      this.rateLimitResetAt = resetAt;
-      this.rateLimitExpiry = resetAt.toISOString();
-    } else {
-      this.rateLimitResetAt = null;
-      this.rateLimitExpiry = null;
-      if (rawExpiry !== null) {
-        this.logger.warn(`Tradier rate-limit expiry header is invalid: ${rawExpiry}`);
+
+    // One bounded retry for a network failure (fetch rejects) or a 5xx —
+    // both transient, and this is the sole market-data path for candles/
+    // quotes/chains, so a single blip shouldn't fail a cold-cache request
+    // outright. 4xx (a malformed request, bad auth) and 429 (handled by the
+    // pre-emptive gate above) are never retried: retrying won't change the
+    // outcome, only the latency.
+    let attempt = 0;
+    for (;;) {
+      let response: FetchResponse;
+      try {
+        response = await this.fetchImpl(`${this.baseUrl}/v1${path}`, {
+          headers: {
+            Authorization: `Bearer ${this.token}`,
+            Accept: 'application/json',
+          },
+          signal: AbortSignal.timeout(10_000),
+        });
+      } catch (err) {
+        if (attempt >= 1) throw err;
+        attempt += 1;
+        this.logger.warn(
+          `Tradier ${path} network error, retrying once: ${err instanceof Error ? err.message : String(err)}`,
+        );
+        await this.sleep(RETRY_BACKOFF_MS);
+        continue;
       }
-    }
-    if (this.availableRequests !== null && this.availableRequests < 10) {
-      this.logger.warn(
-        `Tradier rate limit nearly exhausted: ${this.availableRequests} available; expiry=${this.rateLimitExpiry ?? 'unknown'}`,
-      );
-    }
-    if (!response.ok) {
+
+      const available = response.headers.get('X-Ratelimit-Available');
+      const parsedAvailable = available === null ? null : Number(available);
+      this.availableRequests =
+        parsedAvailable !== null && Number.isFinite(parsedAvailable) ? parsedAvailable : null;
+      const rawExpiry = response.headers.get('X-Ratelimit-Expiry');
+      const parsedExpiry = rawExpiry === null ? Number.NaN : Number(rawExpiry);
+      if (
+        rawExpiry !== null &&
+        Number.isSafeInteger(parsedExpiry) &&
+        parsedExpiry >= 1_000_000_000_000
+      ) {
+        const resetAt = new Date(parsedExpiry);
+        this.rateLimitResetAt = resetAt;
+        this.rateLimitExpiry = resetAt.toISOString();
+      } else {
+        this.rateLimitResetAt = null;
+        this.rateLimitExpiry = null;
+        if (rawExpiry !== null) {
+          this.logger.warn(`Tradier rate-limit expiry header is invalid: ${rawExpiry}`);
+        }
+      }
+      if (this.availableRequests !== null && this.availableRequests < 10) {
+        this.logger.warn(
+          `Tradier rate limit nearly exhausted: ${this.availableRequests} available; expiry=${this.rateLimitExpiry ?? 'unknown'}`,
+        );
+      }
+
+      if (response.ok) return response.json();
+      if (response.status >= 500 && attempt < 1) {
+        attempt += 1;
+        this.logger.warn(`Tradier ${path} -> HTTP ${response.status}, retrying once`);
+        await this.sleep(RETRY_BACKOFF_MS);
+        continue;
+      }
       throw new Error(`Tradier ${path} -> HTTP ${response.status}`);
     }
-    return response.json();
+  }
+
+  private sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
   async getExpirations(symbol: string): Promise<string[]> {

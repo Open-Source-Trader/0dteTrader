@@ -150,8 +150,13 @@ final class OrderLineOverlayView: UIView {
         }
     }
 
+    /// `updateUIView` assigns this on every SwiftUI body evaluation — every
+    /// live quote tick — so without the identity guard, every tick tore down
+    /// and resubscribed 2 Combine publishers even though `chartOrdersModel`
+    /// is the same instance tick after tick.
     var model: ChartOrdersModel? {
         didSet {
+            guard model !== oldValue else { return }
             cancellables = []
             if let model {
                 model.$orders

@@ -534,6 +534,45 @@ describe('WebullBrokerGateway', () => {
       );
     });
 
+    it('skips resolution entirely when the caller supplies an already-resolved contract', async () => {
+      const explicitOrder: OrderRequest = {
+        underlying: 'SPY',
+        assetClass: 'option',
+        side: 'buy',
+        quantity: 1,
+        orderType: 'mid',
+        selection: {
+          mode: 'explicit',
+          optionType: 'call',
+          expiration: NEAREST_EXPIRATION,
+          strike: 505,
+        },
+      };
+      const result = await gateway.placeOrder(
+        'u1',
+        explicitOrder,
+        'idem-key-resolved',
+        undefined,
+        undefined,
+        {
+          symbol: `SPY${NEAREST_EXPIRATION.slice(2).replace(/-/g, '')}C00505000`,
+          underlying: 'SPY',
+          expiration: NEAREST_EXPIRATION,
+          strike: 505,
+          optionType: 'call',
+          bid: 2,
+          ask: 2.2,
+          last: 2.1,
+        },
+      );
+      expect(result.status).toBe('submitted');
+      // TradingService already resolved this contract from its own chain
+      // fetch; the gateway must not re-quote it.
+      expect(callsTo('/openapi/market-data/option/snapshot')).toHaveLength(0);
+      const place = callsTo('/openapi/trade/order/place')[0];
+      expect(place.body.new_orders[0].limit_price).toBe('2.1');
+    });
+
     it('reuses the caller-supplied heldQuantity instead of reading positions again', async () => {
       let positionsCalls = 0;
       handlers['GET /openapi/assets/positions'] = () => {

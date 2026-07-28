@@ -22,7 +22,7 @@ import { CredentialsService } from '../../credentials/credentials.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { estimateBuyingPower, parseOccSymbol, resolveAutoOtm } from '../contract-resolution';
 import { customPriceWarning, resolveLimitPrice } from '../order-pricing';
-import { BrokerGateway } from '../broker-gateway.interface';
+import { BrokerGateway, ResolvedContractHint } from '../broker-gateway.interface';
 import { optionExpirations } from '../expiration-calendar';
 import { OrderEventsService } from '../order-events.service';
 import {
@@ -542,6 +542,7 @@ export class WebullBrokerGateway implements BrokerGateway, OnModuleDestroy {
     idempotencyKey: string,
     expectedMode?: TradingMode,
     heldQuantity?: number,
+    resolvedContract?: ResolvedContractHint,
   ): Promise<OrderResult> {
     // The mode decided here picks the live vs paper hosts, and it is read
     // independently of whatever the caller checked. Assert they agree before
@@ -554,7 +555,12 @@ export class WebullBrokerGateway implements BrokerGateway, OnModuleDestroy {
       );
     }
     const client = await this.clientFor(userId, mode);
-    const resolved = await this.resolveContract(userId, order);
+    // TradingService.resolveAndValidate already resolved this contract from a
+    // live chain fetch moments earlier — reuse it rather than probing the
+    // chain (or re-quoting) again right before send.
+    const resolved = resolvedContract
+      ? this.toResolvedContract(resolvedContract)
+      : await this.resolveContract(userId, order);
     const limitPrice = resolveLimitPrice(order.orderType, resolved, order.limitPrice);
 
     const clientOrderId = toClientOrderId(userId, idempotencyKey);
@@ -681,6 +687,23 @@ export class WebullBrokerGateway implements BrokerGateway, OnModuleDestroy {
    * `getOptionsChain` does). `auto_otm` still falls back to the chain: it is
    * not expected here post-normalization, but the type allows it.
    */
+  /** Adapts the caller-supplied hint (an `OptionContract` from a chain fetch
+   *  it already made) to this gateway's internal `ResolvedContract` shape. */
+  private toResolvedContract(contract: ResolvedContractHint): ResolvedContract {
+    return {
+      contractSymbol: contract.symbol,
+      bid: contract.bid,
+      ask: contract.ask,
+      last: contract.last,
+      optionTerms: {
+        underlying: contract.underlying.toUpperCase(),
+        expiration: contract.expiration,
+        strike: contract.strike,
+        optionType: contract.optionType,
+      },
+    };
+  }
+
   private async resolveContract(userId: string, order: OrderRequest): Promise<ResolvedContract> {
     const { optionType } = order.selection;
     if (!optionType) {

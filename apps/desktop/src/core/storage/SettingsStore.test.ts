@@ -122,6 +122,24 @@ describe('SettingsStore options analytics settings', () => {
   });
 });
 
+describe('SettingsStore server setup preference', () => {
+  beforeEach(() => {
+    Object.defineProperty(globalThis, 'localStorage', {
+      configurable: true,
+      value: new MemoryStorage(),
+    });
+  });
+
+  it('defaults first-run server selection to incomplete', () => {
+    expect(new SettingsStore().hasCompletedServerSelection).toBe(false);
+  });
+
+  it('persists first-run server selection completion', () => {
+    new SettingsStore().hasCompletedServerSelection = true;
+    expect(new SettingsStore().hasCompletedServerSelection).toBe(true);
+  });
+});
+
 describe('SettingsStore boolean device preferences', () => {
   beforeEach(() => {
     Object.defineProperty(globalThis, 'localStorage', {

@@ -72,6 +72,7 @@ function normalizeServerUrl(input: string): string {
 export interface HealthCheckResult {
   ok: boolean;
   message: string;
+  baseUrl: string;
 }
 
 /** Probes `<baseUrl>/v1/health` so the user can verify a server before saving. */
@@ -79,22 +80,35 @@ export async function checkServerHealth(
   baseUrl: string,
   timeoutMs = 4000,
 ): Promise<HealthCheckResult> {
-  let url: string;
+  let normalizedBaseUrl: string;
   try {
-    url = `${normalizeServerUrl(baseUrl)}/v1/health`;
+    normalizedBaseUrl = normalizeServerUrl(baseUrl);
   } catch (error) {
-    return { ok: false, message: error instanceof Error ? error.message : String(error) };
+    return {
+      ok: false,
+      message: error instanceof Error ? error.message : String(error),
+      baseUrl: baseUrl.trim(),
+    };
   }
+  const url = `${normalizedBaseUrl}/v1/health`;
   try {
     const response = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) });
     if (!response.ok) {
-      return { ok: false, message: `Server responded with HTTP ${response.status}` };
+      return {
+        ok: false,
+        message: `Server responded with HTTP ${response.status}`,
+        baseUrl: normalizedBaseUrl,
+      };
     }
-    return { ok: true, message: 'Server reachable, API ok' };
+    return { ok: true, message: 'Server reachable, API ok', baseUrl: normalizedBaseUrl };
   } catch (error) {
     if (error instanceof DOMException && error.name === 'TimeoutError') {
-      return { ok: false, message: `Timed out after ${Math.round(timeoutMs / 1000)}s` };
+      return {
+        ok: false,
+        message: `Timed out after ${Math.round(timeoutMs / 1000)}s`,
+        baseUrl: normalizedBaseUrl,
+      };
     }
-    return { ok: false, message: 'Server unreachable — check the URL' };
+    return { ok: false, message: 'Server unreachable — check the URL', baseUrl: normalizedBaseUrl };
   }
 }

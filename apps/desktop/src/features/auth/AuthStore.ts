@@ -2,16 +2,28 @@ import type { AuthTokens } from '@0dtetrader/shared-types';
 import type { ApiClient } from '../../core/api/ApiClient';
 import { errorMessage } from '../../core/api/ApiError';
 import type { QuoteSocket } from '../../core/api/QuoteSocket';
-import type { SessionStore } from '../../core/api/SessionStore';
+import type { RestoreSessionResult, SessionStore } from '../../core/api/SessionStore';
 import { Store } from '../../core/observable';
 import type { SettingsStore } from '../../core/storage/SettingsStore';
 
-export type AuthState = 'checking' | 'disclaimer' | 'unauthenticated' | 'authenticated';
+export type AuthState =
+  | 'checking'
+  | 'disclaimer'
+  | 'serverSetup'
+  | 'unauthenticated'
+  | 'authenticated'
+  | 'startupRecovery';
+
+export interface StartupRecoveryState {
+  title: string;
+  message: string;
+}
 
 interface AuthStoreState {
   state: AuthState;
   isLoading: boolean;
   errorMessage: string | null;
+  startupRecovery: StartupRecoveryState | null;
 }
 
 /**
@@ -25,14 +37,18 @@ export class AuthStore extends Store<AuthStoreState> {
     private readonly settingsStore: SettingsStore,
     private readonly socket: QuoteSocket,
   ) {
-    super({ state: 'checking', isLoading: false, errorMessage: null });
+    super({ state: 'checking', isLoading: false, errorMessage: null, startupRecovery: null });
     sessionStore.onUnauthenticated(() => this.handleSessionExpired());
   }
 
   /** Entry point on app launch. */
   async start(): Promise<void> {
     if (!this.settingsStore.hasAcceptedRiskDisclaimer) {
-      this.set({ state: 'disclaimer' });
+      this.set({ state: 'disclaimer', startupRecovery: null });
+      return;
+    }
+    if (!this.settingsStore.hasCompletedServerSelection) {
+      this.set({ state: 'serverSetup', startupRecovery: null });
       return;
     }
     await this.restoreSession();
@@ -40,8 +56,12 @@ export class AuthStore extends Store<AuthStoreState> {
 
   acceptDisclaimer(): void {
     this.settingsStore.hasAcceptedRiskDisclaimer = true;
-    this.set({ state: 'checking' });
-    void this.restoreSession();
+    void this.start();
+  }
+
+  completeServerSelection(): void {
+    this.settingsStore.hasCompletedServerSelection = true;
+    void this.start();
   }
 
   async login(email: string, password: string): Promise<void> {
@@ -55,25 +75,34 @@ export class AuthStore extends Store<AuthStoreState> {
   async logout(): Promise<void> {
     this.socket.disconnect();
     await this.sessionStore.signOut();
-    this.set({ state: 'unauthenticated' });
+    this.set({ state: 'unauthenticated', startupRecovery: null });
   }
 
   clearError(): void {
     this.set({ errorMessage: null });
   }
 
+  clearStartupRecovery(): void {
+    this.set({ startupRecovery: null });
+  }
+
+  showServerSetup(): void {
+    this.set({ state: 'serverSetup', startupRecovery: null });
+  }
+
+  showLogin(): void {
+    this.set({ state: 'unauthenticated', startupRecovery: null });
+  }
+
   private async restoreSession(): Promise<void> {
-    this.set({ state: 'checking' });
-    if (await this.sessionStore.restoreSession()) {
-      this.becomeAuthenticated();
-    } else {
-      this.set({ state: 'unauthenticated' });
-    }
+    this.set({ state: 'checking', startupRecovery: null });
+    const result = await this.sessionStore.restoreSession();
+    this.handleRestoreResult(result);
   }
 
   private async authenticate(action: () => Promise<AuthTokens>): Promise<void> {
     if (this.getState().isLoading) return;
-    this.set({ isLoading: true, errorMessage: null });
+    this.set({ isLoading: true, errorMessage: null, startupRecovery: null });
     try {
       const tokens = await action();
       this.sessionStore.signIn(tokens);
@@ -87,7 +116,34 @@ export class AuthStore extends Store<AuthStoreState> {
 
   private becomeAuthenticated(): void {
     this.socket.connect();
-    this.set({ state: 'authenticated' });
+    this.set({ state: 'authenticated', startupRecovery: null });
+  }
+
+  private handleRestoreResult(result: RestoreSessionResult): void {
+    if (result.status === 'authenticated') {
+      this.becomeAuthenticated();
+      return;
+    }
+    if (result.status === 'no-session') {
+      this.set({ state: 'unauthenticated', startupRecovery: null });
+      return;
+    }
+    if (result.status === 'session-expired') {
+      this.set({
+        errorMessage: 'Session expired. Please log in again.',
+        state: 'unauthenticated',
+        startupRecovery: null,
+      });
+      return;
+    }
+    this.socket.disconnect();
+    this.set({
+      state: 'startupRecovery',
+      startupRecovery: {
+        title: 'Cannot reach your backend',
+        message: result.message,
+      },
+    });
   }
 
   private handleSessionExpired(): void {
@@ -95,6 +151,7 @@ export class AuthStore extends Store<AuthStoreState> {
     this.set({
       errorMessage: 'Session expired. Please log in again.',
       state: 'unauthenticated',
+      startupRecovery: null,
     });
   }
 }

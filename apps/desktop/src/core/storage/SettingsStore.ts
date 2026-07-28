@@ -24,6 +24,7 @@ export class SettingsStore {
     optionsAnalytics: 'settings.optionsAnalytics.v1',
     chartTrading: 'settings.chartTrading.v1',
     riskDisclaimerAccepted: 'settings.riskDisclaimerAccepted',
+    serverSelectionCompleted: 'settings.serverSelectionCompleted',
     lastSymbol: 'settings.lastSymbol',
     tradingLocked: 'settings.tradingLocked',
     bypassOrderConfirmation: 'settings.bypassOrderConfirmation',
@@ -101,6 +102,14 @@ export class SettingsStore {
 
   set hasAcceptedRiskDisclaimer(value: boolean) {
     localStorage.setItem(SettingsStore.keys.riskDisclaimerAccepted, String(value));
+  }
+
+  get hasCompletedServerSelection(): boolean {
+    return localStorage.getItem(SettingsStore.keys.serverSelectionCompleted) === 'true';
+  }
+
+  set hasCompletedServerSelection(value: boolean) {
+    localStorage.setItem(SettingsStore.keys.serverSelectionCompleted, String(value));
   }
 
   /** Trading lock: when true, every order-placing control is disabled. Persists

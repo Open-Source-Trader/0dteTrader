@@ -1,5 +1,5 @@
-// Desktop shell: a resizable window around the 430x932 iPhone-frame web app.
-// The web layer scales its content to fit the window, so any size works.
+// Desktop shell: a standard resizable desktop window around the trading app.
+// The renderer handles its own responsive layout inside the available space.
 // Launch (Linux/Wayland needs the X11 flag, VSCode shells leak RUN_AS_NODE):
 //   env -u ELECTRON_RUN_AS_NODE ELECTRON_START_URL=http://localhost:5173 \
 //     npx electron electron/main.cjs --ozone-platform=x11 --disable-gpu
@@ -151,22 +151,36 @@ function stopBackend() {
 
 async function createWindow() {
   const { workAreaSize } = screen.getPrimaryDisplay();
-  const scale = Math.min(1, (workAreaSize.height - 80) / 932, (workAreaSize.width - 40) / 430);
+  const targetWidth = 1440;
+  const targetHeight = 960;
+  const minWidth = 960;
+  const minHeight = 720;
+  const horizontalMargin = 80;
+  const verticalMargin = 80;
+  const availableWidth = Math.max(minWidth, workAreaSize.width - horizontalMargin);
+  const availableHeight = Math.max(minHeight, workAreaSize.height - verticalMargin);
+
   const win = new BrowserWindow({
-    width: Math.round(1024 * scale),
-    height: Math.round(768 * scale),
+    width: Math.min(targetWidth, availableWidth),
+    height: Math.min(targetHeight, availableHeight),
     useContentSize: true,
     resizable: true,
-    minWidth: 240,
-    minHeight: 520,
+    minWidth,
+    minHeight,
     autoHideMenuBar: true,
     backgroundColor: '#000000',
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
     },
     icon: APP_ICON,
+    show: false,
   });
-  win.setAspectRatio(430 / 932);
+  win.once('ready-to-show', () => {
+    win.show();
+    if (workAreaSize.width < targetWidth || workAreaSize.height < targetHeight) {
+      win.maximize();
+    }
+  });
   // External links (e.g. the "Deploy on Railway" link on the login screen)
   // belong in the OS browser, not a new Electron window.
   win.webContents.setWindowOpenHandler(({ url }) => {

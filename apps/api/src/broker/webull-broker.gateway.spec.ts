@@ -510,6 +510,42 @@ describe('WebullBrokerGateway', () => {
       expect(place.body.new_orders[0].position_intent).toBe('BUY_TO_CLOSE');
     });
 
+    it('resolves an explicit-mode order from a single quote, without probing the chain', async () => {
+      const explicitOrder: OrderRequest = {
+        underlying: 'SPY',
+        assetClass: 'option',
+        side: 'buy',
+        quantity: 1,
+        orderType: 'mid',
+        selection: {
+          mode: 'explicit',
+          optionType: 'call',
+          expiration: NEAREST_EXPIRATION,
+          strike: 505,
+        },
+      };
+      const result = await gateway.placeOrder('u1', explicitOrder, 'idem-key-explicit');
+      expect(result.status).toBe('submitted');
+      // A chain probe batches 50 symbols into option-snapshot calls; a
+      // single-symbol resolution issues exactly one.
+      expect(callsTo('/openapi/market-data/option/snapshot')).toHaveLength(1);
+      expect(callsTo('/openapi/market-data/option/snapshot')[0].url).toContain(
+        'symbols=SPY' + NEAREST_EXPIRATION.slice(2).replace(/-/g, '') + 'C00505000',
+      );
+    });
+
+    it('reuses the caller-supplied heldQuantity instead of reading positions again', async () => {
+      let positionsCalls = 0;
+      handlers['GET /openapi/assets/positions'] = () => {
+        positionsCalls += 1;
+        return { status: 200, body: [] };
+      };
+      await gateway.placeOrder('u1', order, 'idem-key-held', undefined, -3);
+      expect(positionsCalls).toBe(0);
+      const place = callsTo('/openapi/trade/order/place')[0];
+      expect(place.body.new_orders[0].position_intent).toBe('BUY_TO_CLOSE');
+    });
+
     it('emits an orderUpdate when the status poll sees a fill', async () => {
       jest.useFakeTimers();
       try {

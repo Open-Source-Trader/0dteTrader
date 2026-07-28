@@ -253,6 +253,13 @@ describe('AlpacaBrokerGateway (SDK-backed)', () => {
     expect(res.orderType).toBe('mid');
   });
 
+  it('placeOrder resolves an explicit-mode order from a single quote, without probing the chain', async () => {
+    env = buildGateway();
+    await env.gateway.placeOrder('user-1', ORDER, 'test-key-2');
+    expect(env.calls.find((c) => c.method === 'collectOptionChainBySymbol')).toBeUndefined();
+    expect(env.calls.filter((c) => c.method === 'collectOptionSnapshotsBySymbol')).toHaveLength(1);
+  });
+
   it('cancelOrder resolves client id then deletes the server order', async () => {
     env = buildGateway();
     await env.gateway.cancelOrder('user-1', 'abc');

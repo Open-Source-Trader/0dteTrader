@@ -30,12 +30,18 @@ export interface BrokerGateway {
    * client, so a mode flip between the caller's check and the send would route
    * the order to the other environment. Passing it makes the gateway refuse
    * rather than silently re-decide.
+   *
+   * `heldQuantity` is the position already held in this contract, when the
+   * caller has just read it (`TradingService.capToPosition` always has):
+   * lets the gateway skip its own positions fetch when deciding open vs close
+   * intent. Omitted, the gateway looks it up itself.
    */
   placeOrder(
     userId: string,
     order: OrderRequest,
     idempotencyKey: string,
     expectedMode?: TradingMode,
+    heldQuantity?: number,
   ): Promise<OrderResult>;
   cancelOrder(userId: string, orderId: string): Promise<void>;
   getPositions(userId: string): Promise<Position[]>;

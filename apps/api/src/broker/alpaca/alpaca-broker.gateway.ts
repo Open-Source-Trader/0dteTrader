@@ -225,6 +225,7 @@ export class AlpacaBrokerGateway implements BrokerGateway, MarketDataProvider {
       underlying: symbol.toUpperCase(),
       underlyingPrice: underlyingQuote.last,
       expirations,
+      contractsExpiration: chosen,
       contracts,
     };
   }

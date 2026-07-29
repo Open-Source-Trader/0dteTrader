@@ -140,7 +140,7 @@ extension ProfileView {
         .padding(AppSpacing.lg)
         .hudCard(glow: false)
         .animation(AppMotion.standard, value: viewModel.isLoading)
-        .animation(AppMotion.standard, value: viewModel.snapTradeStatus.configured)
+        .animation(AppMotion.standard, value: viewModel.snapTradeStatus)
         .sensoryFeedback(.success, trigger: viewModel.successMessage)
         .sensoryFeedback(.error, trigger: viewModel.errorMessage)
         .onChange(of: viewModel.successMessage) { _, message in
@@ -155,7 +155,6 @@ extension ProfileView {
     }
 
     func snaptradeSection(_ environment: TradingMode) -> some View {
-        let activeConnection = viewModel.snapTradeConnections.first { $0.status == "active" }
         let isConnecting = viewModel.connectingSnaptrade.contains(environment)
         let isReconnecting = viewModel.reconnectingSnaptrade.contains(environment)
         let isDisconnecting = viewModel.disconnectingSnaptrade.contains(environment)
@@ -163,6 +162,9 @@ extension ProfileView {
         let keyConfigured = environment == .live
             ? (viewModel.me?.snaptradeKeyConfigured ?? false)
             : (viewModel.me?.snaptradeKeyPracticeConfigured ?? false)
+        let activeConnection = keyConfigured
+            ? viewModel.snapTradeConnections[environment]?.first { $0.status == "active" }
+            : nil
 
         return VStack(alignment: .leading, spacing: AppSpacing.md) {
             sectionHeader(title, icon: "arrow.triangle.2.circlepath")
@@ -180,8 +182,8 @@ extension ProfileView {
                 .background(Color.pnlPositive.opacity(0.08), in: HudPanelShape(chamfer: 6))
                 .overlay(HudPanelShape(chamfer: 6).strokeBorder(Color.pnlPositive.opacity(0.35), lineWidth: 1))
 
-                let accounts = viewModel.snapTradeAccounts[connection.connectionId] ?? []
-                let selectedAccountId = viewModel.snapTradeStatus.selectedAccountId
+                let accounts = viewModel.snapTradeAccounts[environment]?[connection.connectionId] ?? []
+                let selectedAccountId = viewModel.snapTradeStatus[environment]?.selectedAccountId
 
                 if accounts.isEmpty {
                     HStack {

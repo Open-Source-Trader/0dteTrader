@@ -39,9 +39,18 @@ final class ProfileViewModel: ObservableObject {
     @Published private(set) var connectingSnaptrade: Set<TradingMode> = []
     @Published private(set) var disconnectingSnaptrade: Set<TradingMode> = []
     @Published private(set) var reconnectingSnaptrade: Set<TradingMode> = []
-    @Published private(set) var snapTradeConnections: [SnapTradeConnectionRecordDTO] = []
-    @Published private(set) var snapTradeAccounts: [String: [SnapTradeAccountDTO]] = [:]
-    @Published private(set) var snapTradeStatus: SnapTradeConnectionStatusDTO = .init(configured: false, selectedAccountId: nil)
+    @Published private(set) var snapTradeConnections: [TradingMode: [SnapTradeConnectionRecordDTO]] = [
+        .live: [],
+        .practice: []
+    ]
+    @Published private(set) var snapTradeAccounts: [TradingMode: [String: [SnapTradeAccountDTO]]] = [
+        .live: [:],
+        .practice: [:]
+    ]
+    @Published private(set) var snapTradeStatus: [TradingMode: SnapTradeConnectionStatusDTO] = [
+        .live: .init(configured: false, selectedAccountId: nil),
+        .practice: .init(configured: false, selectedAccountId: nil)
+    ]
     @Published var snapTradeRedirectURL: URL?
     @Published var snapTradePendingRefreshEnvironment: TradingMode?
 
@@ -383,6 +392,26 @@ final class ProfileViewModel: ObservableObject {
 
     // MARK: - SnapTrade connection lifecycle
 
+    func loadSnapTradeConnections() async {
+        if me?.snaptradeKeyConfigured == true {
+            await loadSnapTradeConnections(environment: .live)
+        } else {
+            clearSnapTradeConnections(environment: .live)
+        }
+
+        if me?.snaptradeKeyPracticeConfigured == true {
+            await loadSnapTradeConnections(environment: .practice)
+        } else {
+            clearSnapTradeConnections(environment: .practice)
+        }
+    }
+
+    private func clearSnapTradeConnections(environment: TradingMode) {
+        snapTradeConnections[environment] = []
+        snapTradeAccounts[environment] = [:]
+        snapTradeStatus[environment] = .init(configured: false, selectedAccountId: nil)
+    }
+
     func loadSnapTradeConnections(environment: TradingMode) async {
         let key = environment
         connectingSnaptrade.remove(key)
@@ -390,9 +419,9 @@ final class ProfileViewModel: ObservableObject {
         errorMessage = nil
         do {
             let response = try await apiClient.getSnapTradeConnections(environment: environment)
-            snapTradeConnections = response.connections
-            snapTradeAccounts = response.accounts
-            snapTradeStatus = response.status
+            snapTradeConnections[key] = response.connections
+            snapTradeAccounts[key] = response.accounts
+            snapTradeStatus[key] = response.status
         } catch {
             setError(error)
         }

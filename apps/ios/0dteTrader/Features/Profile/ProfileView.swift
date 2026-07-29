@@ -68,6 +68,9 @@ struct ProfileView: View {
                 if viewModel.me == nil {
                     await viewModel.load()
                 }
+                if viewModel.tradingProvider == .snaptrade {
+                    await viewModel.loadSnapTradeConnections()
+                }
             }
             .confirmationDialog(
                 "Remove Webull credentials?",

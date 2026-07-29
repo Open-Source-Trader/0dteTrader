@@ -1,8 +1,7 @@
-import { useCallback, useEffect, useLayoutEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useStore } from '../../core/observable';
 import { orderPricingDescription, sideDisplayName } from '../../core/models/domain';
-import { useAnchoredPanelPosition } from '../../design/components/anchoredPanel';
 import { Spinner } from '../../design/components/Spinner';
 import { Format } from '../../design/format';
 import { WarningIcon } from '../../design/icons';
@@ -12,18 +11,6 @@ interface OrderConfirmPopupProps {
   tradeStore: TradeStore;
   ticket: ArmedOrderTicket;
 }
-
-/**
- * The panel's height ceiling.
- *
- * The frame is 932pt tall and the SELL/BUY row sits 16pt off its floor in both
- * layouts, so the row starts around 864 and there is ~850 of room above it.
- * The populated panel — spread, typed limit, warning, actions — measures around
- * 420. 640 is the cap: comfortably above what the content needs, comfortably
- * below what the frame has, so neither the warning row nor the bid/ask rows can
- * be pushed out of view.
- */
-const PANEL_MAX_HEIGHT = 640;
 
 function DetailRow({ label, value }: { label: string; value: string }) {
   return (
@@ -37,9 +24,10 @@ function DetailRow({ label, value }: { label: string; value: string }) {
 /**
  * Arm-then-confirm popup: server-resolved preview, then submit.
  *
- * An anchored popup rather than a sheet, so it wears the same HUD chrome as the
- * ticker, timeframe, indicator, tools, strike and expiration popups. It is the
- * only one of them that is not a picker, and the difference is load-bearing:
+ * Wears the same HUD chrome as the ticker, timeframe, indicator, tools, strike
+ * and expiration popups, but centered on screen rather than anchored to a
+ * trigger — the only one of them that is not a picker, and the difference is
+ * load-bearing:
  *
  * - Nothing here confirms except the Confirm button. The scrim and Escape both
  *   route to `cancel`.
@@ -48,39 +36,21 @@ function DetailRow({ label, value }: { label: string; value: string }) {
  *   panel and Tab trapped inside it.
  * - Neither closes mid-submission. The order may still fill, and its result
  *   lands here.
- * - Anchored to the SELL/BUY row that armed it, opening upward. That is where
- *   the eye already is, and it covers the two buttons that must not be
- *   reachable while a ticket is armed.
+ * - Centered rather than anchored to the SELL/BUY row that armed it: it reads
+ *   as interrupting the whole screen, and it still covers the two buttons that
+ *   must not be reachable while a ticket is armed.
  */
 export function OrderConfirmPopup({ tradeStore, ticket }: OrderConfirmPopupProps) {
   const { preview, isPreviewLoading, previewError, isSubmitting } = useStore(tradeStore);
   const sideColor = ticket.side === 'buy' ? 'var(--buy-green-fill)' : 'var(--sell-red-fill)';
   const confirmEnabled = preview !== null && !isSubmitting && !isPreviewLoading;
 
-  const anchorRef = useRef<HTMLElement | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
-  const { pos, reposition } = useAnchoredPanelPosition(
-    anchorRef,
-    panelRef,
-    'up',
-    'leading',
-    PANEL_MAX_HEIGHT,
-  );
 
   /** Tapping away cancels; it never confirms, and it never interrupts a submit. */
   const cancel = useCallback(() => {
     if (!isSubmitting) tradeStore.cancelArmedOrder();
   }, [isSubmitting, tradeStore]);
-
-  useLayoutEffect(() => {
-    anchorRef.current = document.querySelector<HTMLElement>('[data-trade-actions]');
-    reposition();
-  }, [reposition]);
-
-  useEffect(() => {
-    window.addEventListener('resize', reposition);
-    return () => window.removeEventListener('resize', reposition);
-  }, [reposition]);
 
   // Focus lands on Cancel, not on Confirm: the destructive-by-default key press
   // on an order dialog should be the harmless one.
@@ -208,16 +178,10 @@ export function OrderConfirmPopup({ tradeStore, ticket }: OrderConfirmPopupProps
       />
       <div
         ref={panelRef}
-        className="menu-dropdown up order-confirm-panel"
+        className="menu-dropdown order-confirm-panel"
         role="dialog"
         aria-modal="true"
         aria-label={`Confirm ${sideDisplayName(ticket.side)}`}
-        style={{
-          position: 'absolute',
-          top: pos.top,
-          left: pos.left,
-          visibility: pos.visible ? 'visible' : 'hidden',
-        }}
       >
         <div
           style={{

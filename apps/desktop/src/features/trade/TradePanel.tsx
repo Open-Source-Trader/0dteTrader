@@ -434,8 +434,7 @@ export function TradePanel({
         </div>
 
         {/* Action row — pinned to the panel's bottom edge */}
-        {/* `data-trade-actions`: the box the order confirmation opens out of. */}
-        <div data-trade-actions style={{ display: 'flex', gap: 8, marginTop: 'auto' }}>
+        <div style={{ display: 'flex', gap: 8, marginTop: 'auto' }}>
           <TradeActionButton
             title="SELL"
             color="var(--sell-red)"

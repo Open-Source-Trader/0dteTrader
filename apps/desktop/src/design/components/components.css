@@ -265,24 +265,26 @@
   animation: hud-popup-drop 200ms cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
-/* The order confirmation wears the popups' chrome and animation, and none of
-   their sizing: a picker is as wide as its widest row, a decision surface is as
-   wide as the SELL/BUY row it is deciding about. The taller ceiling is what
-   keeps the warning row and the bid/ask rows out of a scroll — see
-   PANEL_MAX_HEIGHT in OrderConfirmPopup. It also sits one layer above the scrim
-   that blocks the buttons underneath it. */
+/* The order confirmation wears the popups' chrome, and none of their
+   positioning or sizing: it's centered on screen rather than anchored to a
+   trigger, sized to its own content rather than the widest row of a list. The
+   taller ceiling is a comfortable cap above what a populated panel needs —
+   spread, typed limit, warning, actions. It also sits one layer above the
+   scrim that blocks the buttons underneath it. Its own animation scales
+   in from its own center instead of the anchored popups' translateY, which
+   assumes a fixed edge to slide away from. */
 .menu-dropdown.order-confirm-panel {
-  width: calc(100% - 16px);
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: max-content;
+  max-width: calc(100% - 32px);
   max-height: 640px;
   z-index: calc(var(--z-menu) + 1);
   padding: 0;
-}
-
-.menu-dropdown.up {
-  top: auto;
-  bottom: calc(100% + 6px);
-  transform-origin: bottom;
-  animation-name: hud-popup-rise;
+  transform: translate(-50%, -50%);
+  transform-origin: center;
+  animation-name: hud-popup-center-in;
 }
 
 /* A short drop out of the chip rather than a fade in place. Deliberately not a
@@ -291,6 +293,13 @@
   from {
     opacity: 0;
     transform: translateY(-10px) scaleY(0.94);
+  }
+}
+
+@keyframes hud-popup-center-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.96);
   }
 }
 
@@ -303,7 +312,8 @@
 
 @media (prefers-reduced-motion: reduce) {
   .menu-dropdown,
-  .menu-dropdown.up {
+  .menu-dropdown.up,
+  .menu-dropdown.order-confirm-panel {
     animation: hud-popup-fade 120ms linear;
   }
 

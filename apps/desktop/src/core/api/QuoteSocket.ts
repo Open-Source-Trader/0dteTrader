@@ -1,5 +1,6 @@
 import type { ChartOrder, OrderResult, Quote, StreamServerMessage } from '@0dtetrader/shared-types';
 import { Store } from '../observable';
+import { timed } from '../timing';
 
 export type SocketConnectionState = 'disconnected' | 'connecting' | 'connected';
 
@@ -261,6 +262,10 @@ export class QuoteSocket extends Store<QuoteSocketState> {
   }
 
   private handleMessage(raw: string): void {
+    timed('QuoteSocket.handleMessage', () => this.processMessage(raw));
+  }
+
+  private processMessage(raw: string): void {
     let message: StreamServerMessage;
     try {
       message = JSON.parse(raw) as StreamServerMessage;

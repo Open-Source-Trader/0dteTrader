@@ -25,9 +25,8 @@ export function FloatingTradeButtons({
           {disabledReason}
         </span>
       ) : null}
-      {/* Glow is baked into the buttons' HUD frames — no shadow wrappers.
-          `data-trade-actions` is the box the order confirmation opens out of. */}
-      <div data-trade-actions style={{ display: 'flex', gap: 16, padding: '0 20px' }}>
+      {/* Glow is baked into the buttons' HUD frames — no shadow wrappers. */}
+      <div style={{ display: 'flex', gap: 16, padding: '0 20px' }}>
         <TradeActionButton
           title="SELL"
           color="var(--sell-red)"

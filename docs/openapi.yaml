@@ -87,7 +87,7 @@ paths:
               type: object
               properties:
                 tradingMode: { type: string, enum: [live, practice] }
-                tradingProvider: { type: string, enum: [webull, alpaca] }
+                tradingProvider: { type: string, enum: [webull, alpaca, snaptrade] }
       responses:
         '200':
           {
@@ -445,7 +445,7 @@ components:
             description: Practice account id auto-discovered via Webull account/list,
           }
         tradingProvider:
-          { type: string, enum: [webull, alpaca], description: Active trading provider }
+          { type: string, enum: [webull, alpaca, snaptrade], description: Active trading provider }
         alpacaConfigured:
           { type: boolean, nullable: true, description: Live Alpaca credentials stored }
         alpacaPracticeConfigured:
@@ -477,7 +477,7 @@ components:
       type: object
       required: [provider]
       properties:
-        provider: { type: string, enum: [webull, alpaca, tradier] }
+        provider: { type: string, enum: [webull, alpaca, snaptrade, tradier] }
         appKey: { type: string, description: Webull app key (provider=webull) }
         appSecret: { type: string, description: Webull app secret (provider=webull) }
         apiKey: { type: string, description: API key (provider=alpaca or provider=tradier) }

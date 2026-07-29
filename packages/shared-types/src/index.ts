@@ -9,13 +9,16 @@
 // ---------------------------------------------------------------------------
 
 export type AssetClass = 'option';
-export type TradingMode = 'live' | 'practice';
+export const TRADING_MODES = ['live', 'practice'] as const;
+export type TradingMode = (typeof TRADING_MODES)[number];
 /** Broker a user trades through. */
-export type BrokerProvider = 'webull' | 'alpaca' | 'snaptrade';
+export const BROKER_PROVIDERS = ['webull', 'alpaca', 'snaptrade'] as const;
+export type BrokerProvider = (typeof BROKER_PROVIDERS)[number];
 /** Providers a credential row can be stored for. Tradier is a market-data
  *  API key (needed alongside Webull, which has no index data), not a trading
  *  provider — it is storable but never selectable as `tradingProvider`. */
-export type CredentialProvider = BrokerProvider | 'tradier';
+export const CREDENTIAL_PROVIDERS = [...BROKER_PROVIDERS, 'tradier'] as const;
+export type CredentialProvider = (typeof CREDENTIAL_PROVIDERS)[number];
 export type OrderSide = 'buy' | 'sell';
 /**
  * Execution types a resting chart-order line may carry.

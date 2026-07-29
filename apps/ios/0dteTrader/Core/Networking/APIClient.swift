@@ -161,7 +161,7 @@ struct APIClient: @unchecked Sendable {
         try await requestVoid(Endpoint(method: .patch, path: "v1/me/webull-accounts"), body: body)
     }
 
-    /// Select the active trading provider (webull | alpaca).
+    /// Select the active trading provider (webull | alpaca | snaptrade).
     @discardableResult
     func updateTradingProvider(_ provider: BrokerProvider) async throws -> MeDTO {
         let endpoint = Endpoint(method: .patch, path: "v1/me")

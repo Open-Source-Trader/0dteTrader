@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Group, Panel, Separator, useDefaultLayout } from 'react-resizable-panels';
 import type {
   ChartOrder,
@@ -205,16 +205,20 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
 
   // Stream live quotes for the selected contracts and all open positions.
   // The chart's own symbol is excluded: its subscription is owned by ChartStore.
-  const watchedKey = [
-    ...new Set(
+  const watchedKey = useMemo(
+    () =>
       [
-        chainStore.selectedContract?.symbol,
-        ...trade.positions.map((position) => position.symbol),
-      ].filter((symbol): symbol is string => Boolean(symbol) && symbol !== chart.symbol),
-    ),
-  ]
-    .sort()
-    .join(',');
+        ...new Set(
+          [
+            chainStore.selectedContract?.symbol,
+            ...trade.positions.map((position) => position.symbol),
+          ].filter((symbol): symbol is string => Boolean(symbol) && symbol !== chart.symbol),
+        ),
+      ]
+        .sort()
+        .join(','),
+    [chainStore.selectedContract?.symbol, trade.positions, chart.symbol],
+  );
   useEffect(() => {
     if (!watchedKey) return;
     const symbols = watchedKey.split(',');

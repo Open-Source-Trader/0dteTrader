@@ -43,6 +43,12 @@ export interface AppConfig {
     /** Paper market-data host (https://paper-data.alpaca.markets). */
     paperDataBaseUrl: string;
   };
+  snaptrade: {
+    /** Production API base URL. Fixed host — not a secret. */
+    prodBaseUrl: string;
+    /** Sandbox (practice) API base URL. Fixed host — not a secret. */
+    sandboxBaseUrl: string;
+  };
   optionsAnalytics: {
     riskFreeRate: number;
     cacheTtlMs: number;
@@ -118,6 +124,10 @@ export default (): AppConfig => ({
       process.env.ALPACA_PAPER_TRADING_BASE_URL || 'https://paper-api.alpaca.markets',
     dataBaseUrl: process.env.ALPACA_DATA_BASE_URL || 'https://data.alpaca.markets',
     paperDataBaseUrl: process.env.ALPACA_PAPER_DATA_BASE_URL || 'https://paper-data.alpaca.markets',
+  },
+  snaptrade: {
+    prodBaseUrl: process.env.SNAPTRADE_PROD_BASE_URL || 'https://api.snaptrade.com',
+    sandboxBaseUrl: process.env.SNAPTRADE_SANDBOX_BASE_URL || 'https://api.sandbox.snaptrade.com',
   },
   optionsAnalytics: {
     riskFreeRate: float(process.env.OPTIONS_ANALYTICS_RISK_FREE_RATE, 0.043),

@@ -161,7 +161,7 @@ struct APIClient: @unchecked Sendable {
         try await requestVoid(Endpoint(method: .patch, path: "v1/me/webull-accounts"), body: body)
     }
 
-    /// Select the active trading provider (webull | alpaca).
+    /// Select the active trading provider (webull | alpaca | snaptrade).
     @discardableResult
     func updateTradingProvider(_ provider: BrokerProvider) async throws -> MeDTO {
         let endpoint = Endpoint(method: .patch, path: "v1/me")
@@ -178,6 +178,13 @@ struct APIClient: @unchecked Sendable {
     /// Save the Tradier market-data API key via the generic broker-credentials endpoint.
     @discardableResult
     func putTradierCredentials(_ credentials: TradierCredentialsInputDTO) async throws -> BrokerCredentialsSavedDTO {
+        let endpoint = Endpoint(method: .put, path: "v1/me/broker-credentials")
+        return try await request(endpoint, body: encode(credentials))
+    }
+
+    /// Save a SnapTrade Personal client ID/consumer key via the generic broker-credentials endpoint.
+    @discardableResult
+    func putSnapTradeCredentials(_ credentials: SnapTradeCredentialsInputDTO) async throws -> BrokerCredentialsSavedDTO {
         let endpoint = Endpoint(method: .put, path: "v1/me/broker-credentials")
         return try await request(endpoint, body: encode(credentials))
     }
@@ -299,5 +306,52 @@ struct APIClient: @unchecked Sendable {
 
     func cancelChartOrder(id: String) async throws {
         try await requestVoid(Endpoint(method: .delete, path: "v1/chart-orders/\(id)"))
+    }
+
+    // MARK: - SnapTrade connection lifecycle
+
+    func getSnapTradeConnections(environment: TradingMode) async throws -> SnapTradeConnectionsResponseDTO {
+        let query = [URLQueryItem(name: "environment", value: environment.rawValue)]
+        return try await request(Endpoint(method: .get, path: "v1/me/broker-connections/snaptrade", query: query))
+    }
+
+    func authorizeSnapTrade(
+        environment: TradingMode,
+        brokerage: String? = nil,
+        reconnect: String? = nil,
+        connectionType: String = "trade"
+    ) async throws -> SnapTradeAuthorizeResponseDTO {
+        var query: [URLQueryItem] = [URLQueryItem(name: "environment", value: environment.rawValue)]
+        if let brokerage { query.append(URLQueryItem(name: "brokerage", value: brokerage)) }
+        if let reconnect { query.append(URLQueryItem(name: "reconnect", value: reconnect)) }
+        query.append(URLQueryItem(name: "connectionType", value: connectionType))
+        return try await request(Endpoint(method: .post, path: "v1/me/broker-connections/snaptrade/authorize", query: query))
+    }
+
+    func reconnectSnapTrade(environment: TradingMode, connectionId: String) async throws -> SnapTradeAuthorizeResponseDTO {
+        let query = [
+            URLQueryItem(name: "connectionId", value: connectionId),
+            URLQueryItem(name: "environment", value: environment.rawValue),
+        ]
+        return try await request(Endpoint(method: .post, path: "v1/me/broker-connections/snaptrade/reconnect", query: query))
+    }
+
+    func selectSnapTradeAccount(
+        environment: TradingMode,
+        connectionId: String,
+        accountId: String
+    ) async throws -> SnapTradeSelectResponseDTO {
+        let query = [
+            URLQueryItem(name: "connectionId", value: connectionId),
+            URLQueryItem(name: "accountId", value: accountId),
+            URLQueryItem(name: "environment", value: environment.rawValue),
+        ]
+        return try await request(Endpoint(method: .post, path: "v1/me/broker-connections/snaptrade/select", query: query))
+    }
+
+    func deleteSnapTradeConnection(environment: TradingMode, connectionId: String? = nil) async throws {
+        var query: [URLQueryItem] = [URLQueryItem(name: "environment", value: environment.rawValue)]
+        if let connectionId { query.append(URLQueryItem(name: "connectionId", value: connectionId)) }
+        try await requestVoid(Endpoint(method: .delete, path: "v1/me/broker-connections/snaptrade", query: query))
     }
 }

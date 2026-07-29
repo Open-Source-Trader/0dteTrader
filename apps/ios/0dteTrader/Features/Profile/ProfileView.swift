@@ -6,7 +6,13 @@ struct ProfileView: View {
     @State private var showWebullDeleteConfirmation: TradingMode? = nil
     @State private var showAlpacaDeleteConfirmation: TradingMode? = nil
     @State private var showTradierDeleteConfirmation: TradingMode? = nil
+    // Internal (not private): read by the ProfileView+SnapTrade extension
+    // in a separate file, which keeps ProfileView.swift under SwiftLint's
+    // file-length limit.
+    @State var showSnapTradeKeyDeleteConfirmation: TradingMode? = nil
+    @State var showSnapTradeDeleteConfirmation: (mode: TradingMode, connectionId: String)? = nil
     @State private var showLogoutConfirmation = false
+    @State private var showSnapTradeSafari = false
 
     var body: some View {
         NavigationStack {
@@ -16,6 +22,9 @@ struct ProfileView: View {
                     providerCard
                     if viewModel.tradingProvider == .alpaca {
                         alpacaCard
+                    } else if viewModel.tradingProvider == .snaptrade {
+                        snaptradeKeyCard
+                        snaptradeCard
                     } else {
                         webullCard
                         // Tradier market-data key rides along with Webull only —
@@ -58,6 +67,9 @@ struct ProfileView: View {
             .task {
                 if viewModel.me == nil {
                     await viewModel.load()
+                }
+                if viewModel.tradingProvider == .snaptrade {
+                    await viewModel.loadSnapTradeConnections()
                 }
             }
             .confirmationDialog(
@@ -114,6 +126,57 @@ struct ProfileView: View {
                 Button("Cancel", role: .cancel) {}
             } message: {
                 Text("Index and options market data will fall back to the server's shared Tradier key.")
+            }
+            .confirmationDialog(
+                "Remove SnapTrade credentials?",
+                isPresented: Binding(
+                    get: { showSnapTradeKeyDeleteConfirmation != nil },
+                    set: { if !$0 { showSnapTradeKeyDeleteConfirmation = nil } }
+                ),
+                titleVisibility: .visible
+            ) {
+                Button("Delete Credentials", role: .destructive) {
+                    if let env = showSnapTradeKeyDeleteConfirmation {
+                        Task { await viewModel.deleteSnapTradeKey(environment: env) }
+                    }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Any connected SnapTrade brokerages will stop working until new credentials are saved.")
+            }
+            .confirmationDialog(
+                "Remove SnapTrade connection?",
+                isPresented: Binding(
+                    get: { showSnapTradeDeleteConfirmation != nil },
+                    set: { if !$0 { showSnapTradeDeleteConfirmation = nil } }
+                ),
+                titleVisibility: .visible
+            ) {
+                Button("Disconnect", role: .destructive) {
+                    if let target = showSnapTradeDeleteConfirmation {
+                        Task { await viewModel.disconnectSnapTrade(environment: target.mode, connectionId: target.connectionId) }
+                    }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Trading with SnapTrade will stop working until a new brokerage is connected.")
+            }
+            .sheet(isPresented: $showSnapTradeSafari) {
+                if let url = viewModel.snapTradeRedirectURL {
+                    SafariView(url: url)
+                        .onDisappear {
+                            let refreshEnvironment = viewModel.snapTradePendingRefreshEnvironment
+                            viewModel.snapTradeRedirectURL = nil
+                            viewModel.snapTradePendingRefreshEnvironment = nil
+                            showSnapTradeSafari = false
+                            if let refreshEnvironment {
+                                Task { await viewModel.loadSnapTradeConnections(environment: refreshEnvironment) }
+                            }
+                        }
+                }
+            }
+            .onChange(of: viewModel.snapTradeRedirectURL) { _, url in
+                showSnapTradeSafari = url != nil
             }
         }
     }
@@ -368,7 +431,8 @@ struct ProfileView: View {
     /// Keyed by provider AND environment — the Tradier sections render
     /// alongside the Webull ones, so the environment alone no longer
     /// identifies a section.
-    private func messageView(_ provider: BrokerProvider, _ environment: TradingMode) -> some View {
+    // Internal (not private): shared with the ProfileView+SnapTrade extension.
+    func messageView(_ provider: BrokerProvider, _ environment: TradingMode) -> some View {
         Group {
             if viewModel.messageProvider == provider,
                viewModel.messageEnv == environment,
@@ -401,6 +465,7 @@ struct ProfileView: View {
             HStack(spacing: AppSpacing.sm) {
                 providerButton(.webull, label: "Webull")
                 providerButton(.alpaca, label: "Alpaca")
+                providerButton(.snaptrade, label: "SnapTrade")
             }
             .padding(AppSpacing.md)
             .background(Color.appSurface, in: HudPanelShape(chamfer: 6))
@@ -757,7 +822,8 @@ struct ProfileView: View {
 
     // MARK: - Helpers
 
-    private func sectionHeader(_ title: String, icon: String) -> some View {
+    // Internal (not private): shared with the ProfileView+SnapTrade extension.
+    func sectionHeader(_ title: String, icon: String) -> some View {
         HStack(spacing: AppSpacing.sm) {
             Image(systemName: icon)
                 .font(.caption)

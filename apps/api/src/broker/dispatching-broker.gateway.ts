@@ -18,14 +18,10 @@ import { BrokerGateway } from './broker-gateway.interface';
 const PROVIDER_CACHE_TTL_MS = 30_000;
 
 /**
- * Provider dispatch seam (docs/plans/alpaca-provider-plan.md §Phase2).
- *
- * `BROKER_GATEWAY` is still a single `BrokerGateway` token — every
- * existing consumer (trading.service, market-data.controller, stream.gateway,
- * the session controllers) injects it and calls methods with `userId`, so the
- * dispatch is invisible to them. This class reads the user's `tradingProvider`
- * and delegates each call to the Webull or Alpaca gateway; both gateways
- * remain internally self-contained (each resolves `tradingMode` itself).
+ * Provider dispatch seam. Routes every call to the user's selected trading
+ * provider based on their `tradingProvider`. SnapTrade users get the
+ * SnapTrade gateway (which delegates market-data to the configured legacy
+ * provider and handles execution via the SnapTrade SDK).
  */
 @Injectable()
 export class DispatchingBrokerGateway implements BrokerGateway {
@@ -46,6 +42,7 @@ export class DispatchingBrokerGateway implements BrokerGateway {
     private readonly prisma: PrismaService,
     private readonly webull: BrokerGateway,
     private readonly alpaca: BrokerGateway,
+    private readonly snaptrade: BrokerGateway,
   ) {}
 
   /** Resolve the gateway for a user from their stored trading provider. */
@@ -62,7 +59,9 @@ export class DispatchingBrokerGateway implements BrokerGateway {
       provider = user?.tradingProvider ?? null;
       this.providerCache.set(userId, { provider, expiresAt: Date.now() + PROVIDER_CACHE_TTL_MS });
     }
-    return provider === 'alpaca' ? this.alpaca : this.webull;
+    if (provider === 'alpaca') return this.alpaca;
+    if (provider === 'snaptrade') return this.snaptrade;
+    return this.webull;
   }
 
   async getQuote(userId: string, symbol: string): Promise<Quote> {

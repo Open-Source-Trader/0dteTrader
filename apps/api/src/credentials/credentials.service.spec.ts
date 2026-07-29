@@ -2,6 +2,7 @@ import { ConfigService } from '@nestjs/config';
 import { InMemoryPrismaService } from '../../test/in-memory-prisma.service';
 import { CredentialsService } from './credentials.service';
 import { CryptoService } from './crypto.service';
+import { SnapTradeSecrets } from '@0dtetrader/shared-types';
 
 describe('CredentialsService', () => {
   let prisma: InMemoryPrismaService;
@@ -134,5 +135,40 @@ describe('CredentialsService', () => {
       service.save('u1', { provider: 'webull', appKey: 'k' } as never),
     ).rejects.toMatchObject({ code: 'INVALID_CREDENTIALS' });
     expect(prisma.brokerCredentials).toHaveLength(0);
+  });
+
+  it('round-trips SnapTrade credentials through the encrypted blob', async () => {
+    await service.save('u1', { provider: 'snaptrade', clientId: 'cid-1', consumerKey: 'ck-1' });
+    expect(prisma.brokerCredentials).toHaveLength(1);
+    expect(prisma.brokerCredentials[0].provider).toBe('snaptrade');
+    expect(await service.getDecrypted('u1', 'snaptrade')).toEqual<SnapTradeSecrets>({
+      provider: 'snaptrade',
+      clientId: 'cid-1',
+      consumerKey: 'ck-1',
+    });
+  });
+
+  it('SnapTrade credentials are environment-scoped', async () => {
+    await service.save('u1', {
+      provider: 'snaptrade',
+      clientId: 'cid-live',
+      consumerKey: 'ck-live',
+    });
+    await service.save(
+      'u1',
+      { provider: 'snaptrade', clientId: 'cid-prac', consumerKey: 'ck-prac' },
+      'practice',
+    );
+
+    expect(await service.getDecrypted('u1', 'snaptrade')).toEqual({
+      provider: 'snaptrade',
+      clientId: 'cid-live',
+      consumerKey: 'ck-live',
+    });
+    expect(await service.getDecrypted('u1', 'snaptrade', 'practice')).toEqual({
+      provider: 'snaptrade',
+      clientId: 'cid-prac',
+      consumerKey: 'ck-prac',
+    });
   });
 });

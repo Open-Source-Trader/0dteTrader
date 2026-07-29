@@ -84,6 +84,7 @@ export class InMemoryPrismaService {
   readonly scheduledJobLeases: any[] = [];
   readonly brokerCredentials: any[] = [];
   readonly brokerApiTokens: any[] = [];
+  readonly brokerConnections: any[] = [];
 
   readonly user = {
     findUnique: async ({ where }: any) => {
@@ -484,6 +485,79 @@ export class InMemoryPrismaService {
     },
   };
 
+  readonly brokerConnection = {
+    findUnique: async ({ where }: any) => {
+      const key = where.userId_provider_environment ??
+        where.userId_provider ?? { userId: where.userId, provider: where.provider };
+      return (
+        this.brokerConnections.find(
+          (c) =>
+            c.userId === key.userId &&
+            c.provider === key.provider &&
+            (key.environment === undefined || c.environment === key.environment),
+        ) ?? null
+      );
+    },
+    findMany: async ({ where }: any = {}) =>
+      this.brokerConnections.filter((c) => matches(c, where)),
+    updateMany: async ({ where, data }: any) => {
+      let count = 0;
+      for (const row of this.brokerConnections) {
+        if (!matches(row, where)) continue;
+        if (data.accountIds?.push !== undefined) {
+          row.accountIds = [...row.accountIds, data.accountIds.push];
+        }
+        if (data.status !== undefined) row.status = data.status;
+        row.updatedAt = new Date();
+        count += 1;
+      }
+      return { count };
+    },
+    upsert: async ({ where, create, update }: any) => {
+      const key = where.userId_provider_environment ??
+        where.userId_provider ?? { userId: where.userId, provider: where.provider };
+      const existing = this.brokerConnections.find(
+        (c) =>
+          c.userId === key.userId &&
+          c.provider === key.provider &&
+          (key.environment === undefined || c.environment === key.environment),
+      );
+      if (existing) {
+        Object.assign(existing, update, { updatedAt: new Date() });
+        return existing;
+      }
+      const now = new Date();
+      const row = { id: randomUUID(), createdAt: now, updatedAt: now, ...create };
+      this.brokerConnections.push(row);
+      return row;
+    },
+    delete: async ({ where }: any) => {
+      const key = where.userId_provider_environment ??
+        where.userId_provider ?? { userId: where.userId, provider: where.provider };
+      const idx = this.brokerConnections.findIndex(
+        (c) =>
+          c.userId === key.userId &&
+          c.provider === key.provider &&
+          (key.environment === undefined || c.environment === key.environment),
+      );
+      if (idx === -1) {
+        throw Object.assign(new Error('Record not found'), { code: 'P2025' });
+      }
+      const [row] = this.brokerConnections.splice(idx, 1);
+      return row;
+    },
+    deleteMany: async ({ where }: any) => {
+      let count = 0;
+      for (let i = this.brokerConnections.length - 1; i >= 0; i--) {
+        if (matches(this.brokerConnections[i], where)) {
+          this.brokerConnections.splice(i, 1);
+          count += 1;
+        }
+      }
+      return { count };
+    },
+  };
+
   // Prisma lifecycle no-ops.
   async $connect(): Promise<void> {}
   async $disconnect(): Promise<void> {}
@@ -502,6 +576,7 @@ export class InMemoryPrismaService {
     this.scheduledJobLeases.length = 0;
     this.brokerCredentials.length = 0;
     this.brokerApiTokens.length = 0;
+    this.brokerConnections.length = 0;
   }
 
   /** Test helper: flip the kill switch for a user. */

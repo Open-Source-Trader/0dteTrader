@@ -35,6 +35,7 @@ model User {
   webullApiTokens WebullApiToken[]
   brokerCredentials BrokerCredential[]
   brokerApiTokens   BrokerApiToken[]
+  brokerConnections BrokerConnection[]
   tradeOrders     TradeOrder[]
   chartOrders     ChartOrder[]
 
@@ -92,8 +93,18 @@ model BrokerCredential {
   encSecrets  Bytes
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+  /// SnapTrade Personal client ID, stored in plaintext (not a secret on its
+  /// own — the consumerKey is) so the webhook receiver can resolve which app
+  /// user a `clientId` in an inbound webhook payload belongs to without
+  /// decrypting every stored SnapTrade credential. Null for other providers.
+  snaptradeClientId String?
 
   @@unique([userId, provider, environment])
+  /// Postgres treats each NULL as distinct under a unique index, so this only
+  /// constrains rows that actually have a snaptradeClientId (i.e. SnapTrade
+  /// rows) — one clientId can't be saved under two different app users or two
+  /// environments, which the webhook receiver's findFirst lookup depends on.
+  @@unique([provider, snaptradeClientId])
   @@map("broker_credentials")
 }
 
@@ -113,6 +124,30 @@ model BrokerApiToken {
 
   @@unique([userId, provider, environment])
   @@map("broker_api_tokens")
+}
+
+// OAuth connection metadata for provider-agnostic brokerage connections.
+// **Per-user, per-environment:** one row per (userId, provider, environment)
+// — a SnapTrade user can have an independent live and practice connection.
+// Tracks the SnapTrade connection id and the account ids surfaced by that
+// connection so webhooks can update them and the UI can present an account
+// picker. The `userId` FK has `onDelete: Cascade` so removing a user removes
+// all their connections.
+model BrokerConnection {
+  id                String    @id @default(uuid()) @db.Uuid
+  userId            String    @db.Uuid
+  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider          String    @default("snaptrade")
+  environment       String    @default("live")
+  connectionId      String
+  accountIds        String[]
+  selectedAccountId String?
+  status            String    @default("active")
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  @@unique([userId, provider, environment])
+  @@map("broker_connections")
 }
 
 model RefreshToken {

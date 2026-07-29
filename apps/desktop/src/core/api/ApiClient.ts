@@ -24,6 +24,11 @@ import type {
   WebullAccount,
   WebullSessionRefreshed,
 } from '@0dtetrader/shared-types';
+import {
+  DesktopSnapTradeAuthorizeResponse,
+  DesktopSnapTradeConnectionsResponse,
+  DesktopSnapTradeSelectResponse,
+} from '../types/snaptrade';
 import { ApiError, parseErrorEnvelope } from './ApiError';
 import type { SessionStore } from './SessionStore';
 import { validateOptionsAnalyticsSnapshot } from '../../features/chart/optionsAnalytics/optionsAnalyticsValidation';
@@ -295,5 +300,67 @@ export class ApiClient {
 
   cancelChartOrder(id: string): Promise<void> {
     return this.requestVoid({ method: 'DELETE', path: `v1/chart-orders/${id}` });
+  }
+
+  // MARK: - SnapTrade connection lifecycle
+
+  getSnapTradeConnections(environment: TradingMode): Promise<DesktopSnapTradeConnectionsResponse> {
+    return this.request({
+      method: 'GET',
+      path: 'v1/me/broker-connections/snaptrade',
+      query: { environment },
+    });
+  }
+
+  authorizeSnapTrade(
+    environment: TradingMode,
+    params?: {
+      brokerage?: string;
+      reconnect?: string;
+      connectionType?: 'read' | 'trade' | 'trade-if-available';
+    },
+  ): Promise<DesktopSnapTradeAuthorizeResponse> {
+    const query: Record<string, string> = { environment };
+    if (params?.brokerage) query.brokerage = params.brokerage;
+    if (params?.reconnect) query.reconnect = params.reconnect;
+    if (params?.connectionType) query.connectionType = params.connectionType;
+    return this.request({
+      method: 'POST',
+      path: 'v1/me/broker-connections/snaptrade/authorize',
+      query,
+    });
+  }
+
+  reconnectSnapTrade(
+    environment: TradingMode,
+    connectionId: string,
+  ): Promise<DesktopSnapTradeAuthorizeResponse> {
+    return this.request({
+      method: 'POST',
+      path: 'v1/me/broker-connections/snaptrade/reconnect',
+      query: { connectionId, environment },
+    });
+  }
+
+  selectSnapTradeAccount(
+    environment: TradingMode,
+    connectionId: string,
+    accountId: string,
+  ): Promise<DesktopSnapTradeSelectResponse> {
+    return this.request({
+      method: 'POST',
+      path: 'v1/me/broker-connections/snaptrade/select',
+      query: { connectionId, accountId, environment },
+    });
+  }
+
+  deleteSnapTradeConnection(environment: TradingMode, connectionId?: string): Promise<void> {
+    const query: Record<string, string> = { environment };
+    if (connectionId) query.connectionId = connectionId;
+    return this.requestVoid({
+      method: 'DELETE',
+      path: 'v1/me/broker-connections/snaptrade',
+      query,
+    });
   }
 }

@@ -50,6 +50,23 @@ import { useTradeShortcuts } from './useTradeShortcuts';
 
 const DIVIDER_HEIGHT = 1;
 
+function providerDisplayName(provider: Me['tradingProvider']): string {
+  if (provider === 'alpaca') return 'Alpaca';
+  if (provider === 'snaptrade') return 'SnapTrade';
+  return 'Webull';
+}
+
+function isProviderConfigured(me: Me, provider: Me['tradingProvider'], mode: TradingMode): boolean {
+  const isPractice = mode === 'practice';
+  if (provider === 'alpaca') {
+    return Boolean(isPractice ? me.alpacaPracticeConfigured : me.alpacaConfigured);
+  }
+  if (provider === 'snaptrade') {
+    return Boolean(isPractice ? me.snaptradePracticeConfigured : me.snaptradeConfigured);
+  }
+  return Boolean(isPractice ? me.webullPracticeConfigured : me.webullConfigured);
+}
+
 /**
  * The main screen (TradeScreenView.swift):
  * Layout A (fullscreen) — chart fills the screen, floating Buy/Sell overlaid;
@@ -106,21 +123,10 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
   // stored for the current trading mode — drives the provider-aware copy and
   // the "configure provider" empty state.
   const tradingProvider = me?.tradingProvider ?? 'webull';
-  const providerName = tradingProvider === 'alpaca' ? 'Alpaca' : 'Webull';
-  let activeProviderConfigured = true;
-  if (me) {
-    if (tradingProvider === 'alpaca') {
-      activeProviderConfigured =
-        tradingMode === 'practice'
-          ? Boolean(me.alpacaPracticeConfigured)
-          : Boolean(me.alpacaConfigured);
-    } else {
-      activeProviderConfigured =
-        tradingMode === 'practice'
-          ? Boolean(me.webullPracticeConfigured)
-          : Boolean(me.webullConfigured);
-    }
-  }
+  const providerName = providerDisplayName(tradingProvider);
+  const activeProviderConfigured = me
+    ? isProviderConfigured(me, tradingProvider, tradingMode)
+    : true;
   const needsProviderConfig = me != null && !activeProviderConfigured;
 
   useEffect(() => {
@@ -283,6 +289,16 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
     setContentHeight(element.clientHeight);
     return () => observer.disconnect();
   }, []);
+
+  const refreshTradingContext = async () => {
+    try {
+      const nextMe = await apiClient.me();
+      setMe(nextMe);
+      await tradeStore.refreshTradingData();
+    } catch {
+      // Ignore: the profile sheet surfaces failures directly.
+    }
+  };
 
   const toggleLayout = () => {
     const next: TradeLayout = layout === 'fullscreen' ? 'split' : 'fullscreen';
@@ -693,7 +709,11 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
           initialTabKey={showProfile ? 'account' : 'indicators'}
           onDismiss={() => {
             setShowIndicatorSettings(false);
-            setShowProfile(false);
+            if (showProfile) {
+              setShowProfile(false);
+              quoteSocket.reconnect();
+              void refreshTradingContext();
+            }
           }}
           tabs={[
             {
@@ -701,7 +721,15 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
               label: 'Account',
               icon: <PersonCircleIcon size={18} />,
               content: (
-                <ProfileView onLogout={onLogout} onDismiss={() => setShowProfile(false)} bodyOnly />
+                <ProfileView
+                  onLogout={onLogout}
+                  onDismiss={() => {
+                    setShowProfile(false);
+                    quoteSocket.reconnect();
+                    void refreshTradingContext();
+                  }}
+                  bodyOnly
+                />
               ),
             },
             {
@@ -745,7 +773,14 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
         />
       ) : null}
       {!isDesktopGrid && showProfile ? (
-        <ProfileView onLogout={onLogout} onDismiss={() => setShowProfile(false)} />
+        <ProfileView
+          onLogout={onLogout}
+          onDismiss={() => {
+            setShowProfile(false);
+            quoteSocket.reconnect();
+            void refreshTradingContext();
+          }}
+        />
       ) : null}
       {showHistory ? (
         <HistoryView onDismiss={() => setShowHistory(false)} dense={isDesktopGrid} />

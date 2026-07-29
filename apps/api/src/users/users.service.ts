@@ -62,20 +62,62 @@ export class UsersService {
     return Boolean(broker);
   }
 
+  /** SnapTrade Personal clientId/consumerKey presence for /me, mirroring
+   *  alpacaCred(). Separate from connection status — a user can save their
+   *  key before ever connecting a brokerage through the Connection Portal. */
+  private async snapTradeKeyCred(
+    userId: string,
+    environment: TradingMode,
+  ): Promise<{ exists: boolean }> {
+    const broker = await this.prisma.brokerCredential.findUnique({
+      where: { userId_provider_environment: { userId, provider: 'snaptrade', environment } },
+    });
+    return { exists: Boolean(broker) };
+  }
+
+  /** SnapTrade brokerage-connection status for /me, scoped to one
+   *  environment — a user can have an independent live and practice
+   *  connection (see docs/plans/snaptrade-connection-environment-scoping.md). */
+  private async snapTradeConnectionCred(
+    userId: string,
+    environment: TradingMode,
+  ): Promise<{ exists: boolean; accountId: string | null }> {
+    const connections = await this.prisma.brokerConnection.findMany({
+      where: { userId, provider: 'snaptrade', environment },
+    });
+    const active = connections.find((connection) => connection.status === 'active') ?? null;
+    const accountId = active?.selectedAccountId ?? connections[0]?.selectedAccountId ?? null;
+    return { exists: Boolean(active), accountId };
+  }
+
   async getMe(userId: string): Promise<Me> {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user) {
       throw errors.unauthorized('USER_NOT_FOUND', 'User no longer exists');
     }
-    const [live, practice, alpacaLive, alpacaPractice, tradierLive, tradierPractice] =
-      await Promise.all([
-        this.webullCred(userId, 'live'),
-        this.webullCred(userId, 'practice'),
-        this.alpacaCred(userId, 'live'),
-        this.alpacaCred(userId, 'practice'),
-        this.tradierCred(userId, 'live'),
-        this.tradierCred(userId, 'practice'),
-      ]);
+    const [
+      live,
+      practice,
+      alpacaLive,
+      alpacaPractice,
+      tradierLive,
+      tradierPractice,
+      snaptradeKeyLive,
+      snaptradeKeyPractice,
+      snaptradeLive,
+      snaptradePractice,
+    ] = await Promise.all([
+      this.webullCred(userId, 'live'),
+      this.webullCred(userId, 'practice'),
+      this.alpacaCred(userId, 'live'),
+      this.alpacaCred(userId, 'practice'),
+      this.tradierCred(userId, 'live'),
+      this.tradierCred(userId, 'practice'),
+      this.snapTradeKeyCred(userId, 'live'),
+      this.snapTradeKeyCred(userId, 'practice'),
+      this.snapTradeConnectionCred(userId, 'live'),
+      this.snapTradeConnectionCred(userId, 'practice'),
+    ]);
     return {
       id: user.id,
       email: user.email,
@@ -98,6 +140,12 @@ export class UsersService {
       // on Webull's OpenAPI); the flags drive the profile page's key section.
       tradierConfigured: tradierLive,
       tradierPracticeConfigured: tradierPractice,
+      snaptradeKeyConfigured: snaptradeKeyLive.exists,
+      snaptradeKeyPracticeConfigured: snaptradeKeyPractice.exists,
+      snaptradeConfigured: snaptradeLive.exists,
+      snaptradePracticeConfigured: snaptradePractice.exists,
+      snaptradeAccountId: snaptradeLive.accountId,
+      snaptradePracticeAccountId: snaptradePractice.accountId,
     };
   }
 

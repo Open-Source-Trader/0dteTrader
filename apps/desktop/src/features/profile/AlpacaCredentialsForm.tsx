@@ -3,19 +3,14 @@ import type { TradingMode } from '@0dtetrader/shared-types';
 import { useStore } from '../../core/observable';
 import { Spinner } from '../../design/components/Spinner';
 import { XCircleFillIcon } from '../../design/icons';
-import type { ProfileStore } from './ProfileStore';
+import { useProfileStore } from './useProfileStore';
 
 type Field = 'apiKey' | 'apiSecret';
 
 /** Write-only Alpaca credential entry for one environment; stored values are never shown.
  *  Alpaca v2 is key-scoped, so there is no account id to discover. */
-export function AlpacaCredentialsForm({
-  store,
-  environment,
-}: {
-  store: ProfileStore;
-  environment: TradingMode;
-}) {
+export function AlpacaCredentialsForm({ environment }: { environment: TradingMode }) {
+  const store = useProfileStore();
   const state = useStore(store);
   const { apiKey, apiSecret, isSaving } = state.alpaca[environment];
   const canSave = store.canSaveAlpaca(environment) && !isSaving;

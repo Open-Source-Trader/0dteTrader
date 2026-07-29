@@ -141,6 +141,72 @@ describe('TradierClient normalization', () => {
     expect(exhausted.rateLimitExpiry).toBe(new Date(reset).toISOString());
   });
 
+  it('retries once on a network failure and succeeds on the second attempt', async () => {
+    jest.spyOn(Logger.prototype, 'warn').mockImplementation();
+    let calls = 0;
+    const fetchImpl = jest.fn().mockImplementation(async () => {
+      calls += 1;
+      if (calls === 1) throw new Error('ECONNRESET');
+      return response({ expirations: { date: ['2026-08-20'] } });
+    });
+    const client = new TradierClient('token', 'https://api.tradier.com', fetchImpl, () => NOW);
+
+    const expirations = await client.getExpirations('SPY');
+
+    expect(expirations).toEqual(['2026-08-20']);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it('gives up after a second network failure', async () => {
+    jest.spyOn(Logger.prototype, 'warn').mockImplementation();
+    const fetchImpl = jest.fn().mockRejectedValue(new Error('ECONNRESET'));
+    const client = new TradierClient('token', 'https://api.tradier.com', fetchImpl, () => NOW);
+
+    await expect(client.getExpirations('SPY')).rejects.toThrow('ECONNRESET');
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it('retries once on a 5xx and succeeds on the second attempt', async () => {
+    jest.spyOn(Logger.prototype, 'warn').mockImplementation();
+    let calls = 0;
+    const fetchImpl = jest.fn().mockImplementation(async () => {
+      calls += 1;
+      if (calls === 1) return { ...response({}), ok: false, status: 503 };
+      return response({ expirations: { date: ['2026-08-20'] } });
+    });
+    const client = new TradierClient('token', 'https://api.tradier.com', fetchImpl, () => NOW);
+
+    const expirations = await client.getExpirations('SPY');
+
+    expect(expirations).toEqual(['2026-08-20']);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it('gives up after a second consecutive 5xx', async () => {
+    jest.spyOn(Logger.prototype, 'warn').mockImplementation();
+    const fetchImpl = jest.fn().mockResolvedValue({ ...response({}), ok: false, status: 500 });
+    const client = new TradierClient('token', 'https://api.tradier.com', fetchImpl, () => NOW);
+
+    await expect(client.getExpirations('SPY')).rejects.toThrow('HTTP 500');
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it('never retries a 4xx', async () => {
+    const fetchImpl = jest.fn().mockResolvedValue({ ...response({}), ok: false, status: 404 });
+    const client = new TradierClient('token', 'https://api.tradier.com', fetchImpl, () => NOW);
+
+    await expect(client.getExpirations('SPY')).rejects.toThrow('HTTP 404');
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it('never retries a 429 (rate-limited, not transient)', async () => {
+    const fetchImpl = jest.fn().mockResolvedValue({ ...response({}), ok: false, status: 429 });
+    const client = new TradierClient('token', 'https://api.tradier.com', fetchImpl, () => NOW);
+
+    await expect(client.getExpirations('SPY')).rejects.toThrow('HTTP 429');
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
   it('excludes incomplete, crossed, stale, wrong-root, and wrong-expiration contracts', async () => {
     const fetchImpl = jest.fn().mockResolvedValue(
       response({

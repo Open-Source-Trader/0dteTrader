@@ -188,15 +188,33 @@ export function stochastic(
 ): StochasticValues {
   const raw: (number | null)[] = candles.map(() => null);
   if (kPeriod > 0 && candles.length >= kPeriod) {
-    for (let i = kPeriod - 1; i < candles.length; i++) {
-      let highest = -Infinity;
-      let lowest = Infinity;
-      for (let j = i - kPeriod + 1; j <= i; j++) {
-        highest = Math.max(highest, candles[j].high);
-        lowest = Math.min(lowest, candles[j].low);
+    // Monotonic deques of indices give the trailing window's high/low in
+    // amortized O(1) per bar instead of rescanning the last `kPeriod` bars.
+    const highDeque: number[] = [];
+    const lowDeque: number[] = [];
+    for (let i = 0; i < candles.length; i++) {
+      while (
+        highDeque.length > 0 &&
+        candles[highDeque[highDeque.length - 1]].high <= candles[i].high
+      ) {
+        highDeque.pop();
       }
-      const range = highest - lowest;
-      raw[i] = range === 0 ? 50 : ((candles[i].close - lowest) / range) * 100;
+      highDeque.push(i);
+      while (lowDeque.length > 0 && candles[lowDeque[lowDeque.length - 1]].low >= candles[i].low) {
+        lowDeque.pop();
+      }
+      lowDeque.push(i);
+
+      const windowStart = i - kPeriod + 1;
+      if (highDeque[0] < windowStart) highDeque.shift();
+      if (lowDeque[0] < windowStart) lowDeque.shift();
+
+      if (i >= kPeriod - 1) {
+        const highest = candles[highDeque[0]].high;
+        const lowest = candles[lowDeque[0]].low;
+        const range = highest - lowest;
+        raw[i] = range === 0 ? 50 : ((candles[i].close - lowest) / range) * 100;
+      }
     }
   }
   const k = smaNullable(raw, kSmooth);
@@ -241,10 +259,22 @@ export function bollingerBands(
   if (period <= 0 || closes.length < period) {
     return { upper, middle, lower };
   }
+  // Rolling sum/sum-of-squares: var = E[x^2] - E[x]^2, updated in O(1) per bar
+  // instead of re-slicing and re-scanning the trailing window every index.
+  let sum = 0;
+  let sumSquares = 0;
+  for (let i = 0; i < period; i++) {
+    sum += closes[i];
+    sumSquares += closes[i] * closes[i];
+  }
   for (let i = period - 1; i < closes.length; i++) {
-    const window = closes.slice(i - period + 1, i + 1);
-    const mean = window.reduce((sum, v) => sum + v, 0) / period;
-    const variance = window.reduce((sum, v) => sum + (v - mean) * (v - mean), 0) / period;
+    if (i >= period) {
+      const dropped = closes[i - period];
+      sum += closes[i] - dropped;
+      sumSquares += closes[i] * closes[i] - dropped * dropped;
+    }
+    const mean = sum / period;
+    const variance = Math.max(0, sumSquares / period - mean * mean);
     const standardDeviation = Math.sqrt(variance);
     middle[i] = mean;
     upper[i] = mean + multiplier * standardDeviation;

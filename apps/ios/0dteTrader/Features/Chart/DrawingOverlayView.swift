@@ -43,8 +43,16 @@ final class DrawingOverlayView: UIView {
     /// The annotations model. Redraws are change-driven: model publications
     /// plus chart-transform callbacks from CandleChartRepresentable's
     /// coordinator (no free-running display link).
+    ///
+    /// `updateUIView` assigns this on every SwiftUI body evaluation — every
+    /// live quote tick, not just on an actual model swap — so the identity
+    /// guard matters: without it, every tick tore down and resubscribed 3
+    /// Combine publishers and rebuilt every accessibility element via
+    /// `modelDidChange()`, even though `drawingsModel` is the same instance
+    /// tick after tick.
     var model: ChartDrawingsModel? {
         didSet {
+            guard model !== oldValue else { return }
             cancellables = []
             if let model {
                 model.$drawings

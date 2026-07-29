@@ -13,11 +13,16 @@ final class OptionsAnalyticsOverlayView: UIView {
     }
 
     weak var chart: CombinedChartView?
+    // `updateUIView` assigns these on every SwiftUI body evaluation (every
+    // live quote tick), but the snapshot itself only actually changes at its
+    // own refresh cadence — without the equality guard, every tick rebuilt
+    // the accessibility label string and called setNeedsDisplay() for data
+    // that hadn't moved.
     var snapshot: OptionsAnalyticsSnapshotDTO? {
-        didSet { refresh() }
+        didSet { if snapshot != oldValue { refresh() } }
     }
     var settings: OptionsAnalyticsSettings = .default {
-        didSet { refresh() }
+        didSet { if settings != oldValue { refresh() } }
     }
 
     override init(frame: CGRect) {

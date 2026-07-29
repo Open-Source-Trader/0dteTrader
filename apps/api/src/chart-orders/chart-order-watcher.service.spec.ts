@@ -8,7 +8,7 @@ import { optionExpirations, optionSettlementAt } from '../broker/expiration-cale
 import { OrdersService } from '../trading/orders.service';
 import { TradingService } from '../trading/trading.service';
 import { ChartOrderEventsService } from './chart-order-events.service';
-import { ChartOrderWatcherService } from './chart-order-watcher.service';
+import { ChartOrderWatcherService, mapWithConcurrency } from './chart-order-watcher.service';
 import { ChartOrdersService, idempotencyKeyFor } from './chart-orders.service';
 import { CreateChartOrderDto } from './dto/chart-order.dto';
 
@@ -461,5 +461,49 @@ describe('ChartOrderWatcherService', () => {
       expect(await statusOf(order.id)).toBe('triggered');
       standby.onModuleDestroy();
     });
+  });
+});
+
+describe('mapWithConcurrency', () => {
+  it('never runs more than `limit` calls at once', async () => {
+    const items = Array.from({ length: 25 }, (_, i) => i);
+    let inFlight = 0;
+    let maxInFlight = 0;
+    const started: number[] = [];
+
+    await mapWithConcurrency(items, 4, async (item) => {
+      inFlight += 1;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      started.push(item);
+      await new Promise((resolve) => setTimeout(resolve, 1));
+      inFlight -= 1;
+    });
+
+    expect(maxInFlight).toBeLessThanOrEqual(4);
+    expect(started.sort((a, b) => a - b)).toEqual(items);
+  });
+
+  it('runs every item even when limit exceeds the item count', async () => {
+    const seen: number[] = [];
+    await mapWithConcurrency([1, 2, 3], 10, async (item) => {
+      seen.push(item);
+    });
+    expect(seen.sort()).toEqual([1, 2, 3]);
+  });
+
+  it('propagates a rejection from any worker', async () => {
+    await expect(
+      mapWithConcurrency([1, 2, 3], 2, async (item) => {
+        if (item === 2) throw new Error('boom');
+      }),
+    ).rejects.toThrow('boom');
+  });
+
+  it('does nothing for an empty item list', async () => {
+    const calls: number[] = [];
+    await mapWithConcurrency([], 5, async (item: number) => {
+      calls.push(item);
+    });
+    expect(calls).toHaveLength(0);
   });
 });

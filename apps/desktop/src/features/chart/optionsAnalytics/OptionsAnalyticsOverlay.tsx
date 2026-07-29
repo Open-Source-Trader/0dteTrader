@@ -60,8 +60,14 @@ export function OptionsAnalyticsOverlay({
   nowMs,
 }: OptionsAnalyticsOverlayProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const hoverCanvasRef = useRef<HTMLCanvasElement>(null);
   const scheduleRef = useRef<() => void>(() => undefined);
+  const scheduleHoverRef = useRef<() => void>(() => undefined);
   const mouseRef = useRef<{ x: number; y: number } | null>(null);
+  // Populated by the static layer's draw() and read by the hover layer —
+  // hovering never needs to redo the price-line/strike-profile computation,
+  // only look up which cached bar the pointer is over.
+  const hoverBarsRef = useRef<HoverBar[]>([]);
   const model = useMemo(
     () => buildOptionsAnalyticsPresentation(snapshot, settings, nowMs ?? Date.now()),
     [snapshot, settings, nowMs],
@@ -69,6 +75,79 @@ export function OptionsAnalyticsOverlay({
   const modelRef = useRef(model);
   modelRef.current = model;
   const summaryId = `options-analytics-summary-${useId().replaceAll(':', '')}`;
+
+  // Hover layer: its own canvas, own RAF schedule, redrawn on mouse move —
+  // a mousemove no longer re-runs the full static draw() (price lines +
+  // every visible strike's gamma/OI/liquidity bars) just to reposition a
+  // tooltip. Reads only `hoverBarsRef`, cached by the static layer below.
+  useEffect(() => {
+    const canvas = hoverCanvasRef.current;
+    if (!canvas) return;
+    let frame = 0;
+
+    const draw = (): void => {
+      const pane = chart.paneSize();
+      const axisWidth = chart.priceScale('left').width();
+      const pixelRatio = window.devicePixelRatio || 1;
+      // Same offset as the static canvas: hoverBarsRef/mouseRef geometry is
+      // in that canvas's local (post-axis-offset) coordinate space, so this
+      // canvas must sit at the identical position for the two to line up.
+      canvas.style.left = `${axisWidth}px`;
+      canvas.style.width = `${pane.width}px`;
+      canvas.style.height = `${pane.height}px`;
+      if (canvas.width !== pane.width * pixelRatio || canvas.height !== pane.height * pixelRatio) {
+        canvas.width = pane.width * pixelRatio;
+        canvas.height = pane.height * pixelRatio;
+      }
+      const context = canvas.getContext('2d');
+      if (!context) return;
+      context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+      context.clearRect(0, 0, pane.width, pane.height);
+
+      const mouse = mouseRef.current;
+      if (!mouse) return;
+      const hit = hoverBarsRef.current.find(
+        (bar) =>
+          mouse.x >= bar.left &&
+          mouse.x <= bar.right &&
+          mouse.y >= bar.top &&
+          mouse.y <= bar.bottom,
+      );
+      if (!hit) return;
+
+      const lines = optionsAnalyticsHoverLines(hit.strike);
+      context.font = '9px "JetBrains Mono", ui-monospace, monospace';
+      const tooltipWidth = Math.max(...lines.map((line) => context.measureText(line).width)) + 14;
+      const tooltipHeight = lines.length * 13 + 8;
+      const tooltipX = Math.max(
+        4,
+        Math.min(mouse.x - tooltipWidth - 8, pane.width - tooltipWidth - 4),
+      );
+      const tooltipY = Math.max(4, Math.min(mouse.y + 9, pane.height - tooltipHeight - 4));
+      context.fillStyle = 'rgba(8, 16, 32, 0.94)';
+      context.fillRect(tooltipX, tooltipY, tooltipWidth, tooltipHeight);
+      context.strokeStyle = COLORS.wall;
+      context.strokeRect(tooltipX + 0.5, tooltipY + 0.5, tooltipWidth - 1, tooltipHeight - 1);
+      lines.forEach((line, index) => {
+        context.fillStyle = index === 0 ? COLORS.wall : 'rgba(220, 232, 248, 0.9)';
+        context.fillText(line, tooltipX + 7, tooltipY + 13 + index * 13);
+      });
+    };
+
+    const schedule = (): void => {
+      if (frame !== 0) return;
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        draw();
+      });
+    };
+    scheduleHoverRef.current = schedule;
+
+    return () => {
+      scheduleHoverRef.current = () => undefined;
+      if (frame !== 0) cancelAnimationFrame(frame);
+    };
+  }, [chart]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -293,35 +372,11 @@ export function OptionsAnalyticsOverlay({
         }
       }
 
-      const mouse = mouseRef.current;
-      const hit = mouse
-        ? hoverBars.find(
-            (bar) =>
-              mouse.x >= bar.left &&
-              mouse.x <= bar.right &&
-              mouse.y >= bar.top &&
-              mouse.y <= bar.bottom,
-          )
-        : undefined;
-      if (mouse && hit) {
-        const lines = optionsAnalyticsHoverLines(hit.strike);
-        context.font = '9px "JetBrains Mono", ui-monospace, monospace';
-        const tooltipWidth = Math.max(...lines.map((line) => context.measureText(line).width)) + 14;
-        const tooltipHeight = lines.length * 13 + 8;
-        const tooltipX = Math.max(
-          4,
-          Math.min(mouse.x - tooltipWidth - 8, pane.width - tooltipWidth - 4),
-        );
-        const tooltipY = Math.max(4, Math.min(mouse.y + 9, pane.height - tooltipHeight - 4));
-        context.fillStyle = 'rgba(8, 16, 32, 0.94)';
-        context.fillRect(tooltipX, tooltipY, tooltipWidth, tooltipHeight);
-        context.strokeStyle = COLORS.wall;
-        context.strokeRect(tooltipX + 0.5, tooltipY + 0.5, tooltipWidth - 1, tooltipHeight - 1);
-        lines.forEach((line, index) => {
-          context.fillStyle = index === 0 ? COLORS.wall : 'rgba(220, 232, 248, 0.9)';
-          context.fillText(line, tooltipX + 7, tooltipY + 13 + index * 13);
-        });
-      }
+      // Hand the freshly computed bar geometry to the hover layer and give
+      // it a chance to repaint — the mouse may already be sitting over a bar
+      // whose position just shifted (viewport pan/zoom, new snapshot).
+      hoverBarsRef.current = hoverBars;
+      scheduleHoverRef.current();
     };
 
     const schedule = (): void => {
@@ -338,6 +393,9 @@ export function OptionsAnalyticsOverlay({
     const interactionSurface = overlayRoot?.parentElement;
     if (overlayRoot) resizeObserver.observe(overlayRoot);
 
+    // Mouse move only needs to reposition the tooltip against geometry the
+    // static draw() already cached — it schedules the hover layer, not a
+    // full re-draw of every price line and strike-profile bar.
     const onMouseMove = (event: Event): void => {
       const bounds = canvas.getBoundingClientRect();
       const mouseEvent = event as MouseEvent;
@@ -349,11 +407,11 @@ export function OptionsAnalyticsOverlay({
       mouseRef.current = inside
         ? { x: mouseEvent.clientX - bounds.left, y: mouseEvent.clientY - bounds.top }
         : null;
-      schedule();
+      scheduleHoverRef.current();
     };
     const onMouseLeave = (): void => {
       mouseRef.current = null;
-      schedule();
+      scheduleHoverRef.current();
     };
     interactionSurface?.addEventListener('mousemove', onMouseMove);
     interactionSurface?.addEventListener('mouseleave', onMouseLeave);
@@ -383,6 +441,11 @@ export function OptionsAnalyticsOverlay({
     >
       <canvas
         ref={canvasRef}
+        aria-hidden="true"
+        style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}
+      />
+      <canvas
+        ref={hoverCanvasRef}
         aria-hidden="true"
         style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}
       />

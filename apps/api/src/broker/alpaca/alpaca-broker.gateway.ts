@@ -216,6 +216,7 @@ export class AlpacaBrokerGateway implements BrokerGateway, OnModuleDestroy {
       underlying: symbol.toUpperCase(),
       underlyingPrice: underlyingQuote.last,
       expirations,
+      contractsExpiration: chosen,
       contracts,
     };
   }

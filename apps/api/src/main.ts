@@ -2,6 +2,7 @@ import 'reflect-metadata';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import { WsAdapter } from '@nestjs/platform-ws';
+import type { LogLevel } from '@nestjs/common';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { PrismaClient } from '@prisma/client';
 import helmet from 'helmet';
@@ -30,8 +31,21 @@ async function bootstrapSecretsFromDb(logger: AppLogger): Promise<void> {
   }
 }
 
+/** Nest's ConsoleLogger defaults to every level including debug/verbose — the
+ *  timing spans in common/timing.ts print unless LOG_LEVEL narrows this. */
+function logLevelsFromEnv(): LogLevel[] | undefined {
+  const raw = process.env.LOG_LEVEL;
+  if (!raw) return undefined;
+  return raw
+    .split(',')
+    .map((level) => level.trim())
+    .filter((level): level is LogLevel =>
+      ['verbose', 'debug', 'log', 'warn', 'error', 'fatal'].includes(level),
+    );
+}
+
 async function bootstrap(): Promise<void> {
-  const logger = new AppLogger();
+  const logger = new AppLogger(undefined, logLevelsFromEnv());
   await bootstrapSecretsFromDb(logger);
 
   // app.module calls ConfigModule.forRoot() — and its fail-fast validateEnv —

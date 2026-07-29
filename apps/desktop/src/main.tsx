@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { AppContainer, ContainerProvider } from './app/container';
 import { ServerConfigStore } from './core/api/ServerConfigStore';
 import { useStore } from './core/observable';
+import { setTimingEnabled } from './core/timing';
 import { RootView } from './RootView';
 import './design/fonts.css';
 import './design/tokens.css';
@@ -11,6 +12,10 @@ import './design/components/components.css';
 import './design/hud.css';
 
 const serverConfigStore = new ServerConfigStore();
+
+// Devtools hook: `window.__setTimingEnabled(true)` to log hot-path timings.
+(window as unknown as { __setTimingEnabled: typeof setTimingEnabled }).__setTimingEnabled =
+  setTimingEnabled;
 
 /** Rebuilds the container when the server base URL changes, so saving a new
     server on the login screen takes effect without an app restart. */

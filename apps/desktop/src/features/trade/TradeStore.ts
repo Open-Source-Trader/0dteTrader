@@ -172,25 +172,20 @@ export class TradeStore extends Store<TradeStoreState> {
    */
   applyContractQuote(quote: Quote): void {
     const { positions } = this.getState();
-    if (positions.some((position) => position.symbol === quote.symbol)) {
-      this.set({
-        positions: positions.map((position) =>
-          position.symbol === quote.symbol
-            ? {
-                ...position,
-                markPrice: quote.last,
-                unrealizedPnl:
-                  Math.round(
-                    (quote.last - position.avgPrice) *
-                      position.quantity *
-                      position.multiplier *
-                      100,
-                  ) / 100,
-              }
-            : position,
-        ),
-      });
-    }
+    const index = positions.findIndex((position) => position.symbol === quote.symbol);
+    if (index === -1) return;
+    const position = positions[index];
+    const updated: Position = {
+      ...position,
+      markPrice: quote.last,
+      unrealizedPnl:
+        Math.round(
+          (quote.last - position.avgPrice) * position.quantity * position.multiplier * 100,
+        ) / 100,
+    };
+    const next = positions.slice();
+    next[index] = updated;
+    this.set({ positions: next });
   }
 
   // MARK: - Arm (step 1)

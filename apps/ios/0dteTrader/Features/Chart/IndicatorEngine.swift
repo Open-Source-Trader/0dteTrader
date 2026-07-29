@@ -185,12 +185,31 @@ enum IndicatorEngine {
     ) -> StochasticValues {
         var raw = [Double?](repeating: nil, count: candles.count)
         if kPeriod > 0, candles.count >= kPeriod {
-            for index in (kPeriod - 1)..<candles.count {
-                let window = candles[(index - kPeriod + 1)...index]
-                let highest = window.map(\.high).max() ?? 0
-                let lowest = window.map(\.low).min() ?? 0
-                let range = highest - lowest
-                raw[index] = range == 0 ? 50 : (candles[index].close - lowest) / range * 100
+            // Monotonic deques of indices give the trailing window's high/low
+            // in amortized O(1) per bar instead of rescanning the last
+            // `kPeriod` bars.
+            var highDeque: [Int] = []
+            var lowDeque: [Int] = []
+            for index in 0..<candles.count {
+                while let last = highDeque.last, candles[last].high <= candles[index].high {
+                    highDeque.removeLast()
+                }
+                highDeque.append(index)
+                while let last = lowDeque.last, candles[last].low >= candles[index].low {
+                    lowDeque.removeLast()
+                }
+                lowDeque.append(index)
+
+                let windowStart = index - kPeriod + 1
+                if highDeque[0] < windowStart { highDeque.removeFirst() }
+                if lowDeque[0] < windowStart { lowDeque.removeFirst() }
+
+                if index >= kPeriod - 1 {
+                    let highest = candles[highDeque[0]].high
+                    let lowest = candles[lowDeque[0]].low
+                    let range = highest - lowest
+                    raw[index] = range == 0 ? 50 : (candles[index].close - lowest) / range * 100
+                }
             }
         }
         let kLine = smaNullable(raw, period: kSmooth)
@@ -262,10 +281,22 @@ enum IndicatorEngine {
         guard period > 0, closes.count >= period else {
             return BollingerBands(upper: upper, middle: middle, lower: lower)
         }
+        // Rolling sum/sum-of-squares: var = E[x^2] - E[x]^2, updated in O(1)
+        // per bar instead of re-slicing and re-scanning the trailing window.
+        var sum = 0.0
+        var sumSquares = 0.0
+        for index in 0..<period {
+            sum += closes[index]
+            sumSquares += closes[index] * closes[index]
+        }
         for index in (period - 1)..<closes.count {
-            let window = closes[(index - period + 1)...index]
-            let mean = window.reduce(0, +) / Double(period)
-            let variance = window.map { ($0 - mean) * ($0 - mean) }.reduce(0, +) / Double(period)
+            if index >= period {
+                let dropped = closes[index - period]
+                sum += closes[index] - dropped
+                sumSquares += closes[index] * closes[index] - dropped * dropped
+            }
+            let mean = sum / Double(period)
+            let variance = max(0, sumSquares / Double(period) - mean * mean)
             let standardDeviation = variance.squareRoot()
             middle[index] = mean
             upper[index] = mean + multiplier * standardDeviation

@@ -181,8 +181,12 @@ async function createWindow() {
 }
 
 app.whenReady().then(async () => {
-  await ensureBackend();
-  await createWindow();
+  // Run in parallel, not sequentially: ensureBackend can poll for up to 15s
+  // before giving up, and createWindow doesn't need the backend up to show
+  // the renderer — the app already handles a not-yet-ready API gracefully
+  // (inline login errors, QuoteSocket's own reconnect-with-backoff). Cold
+  // start no longer looks frozen for the length of that poll.
+  await Promise.all([ensureBackend(), createWindow()]);
 });
 app.on('window-all-closed', () => app.quit());
 app.on('will-quit', stopBackend);

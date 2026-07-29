@@ -369,8 +369,14 @@ export interface OptionContract {
 export interface OptionsChain {
   underlying: string;
   underlyingPrice: number;
-  /** YYYY-MM-DD list, ascending (nearest first). */
+  /** YYYY-MM-DD list, ascending (nearest first) — every expiration listed
+   *  for this underlying, NOT all of which `contracts` covers. */
   expirations: string[];
+  /** Which expiration `contracts` actually holds (the requested one, or the
+   *  nearest when none was requested) — `contracts` covers exactly this one
+   *  date, never all of `expirations`. Optional only so older server
+   *  responses still decode; every current source populates it. */
+  contractsExpiration?: string;
   contracts: OptionContract[];
 }
 

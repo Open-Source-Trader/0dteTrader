@@ -436,7 +436,7 @@ export function CandleChart({
     }
     const firstTime = candles.length > 0 ? candles[0].time : null;
     const prev = prevOverlaysRef.current;
-    for (const entry of expanded) {
+    for (const [idx, entry] of expanded.entries()) {
       let series = existing.get(entry.id);
       if (!series) {
         series = chart.addSeries(LineSeries, {
@@ -451,7 +451,6 @@ export function CandleChart({
       } else {
         series.applyOptions({ color: entry.color, lineWidth: entry.lineWidth });
       }
-      const idx = expanded.indexOf(entry);
       // A structural change (series added/removed, run lengths changed, or the
       // data head moved on truncation) requires a full setData. Otherwise the
       // overlay's forming (last) point is the only thing that changed on this

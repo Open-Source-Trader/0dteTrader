@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Group, Panel, Separator, useDefaultLayout } from 'react-resizable-panels';
 import type {
   ChartOrder,
@@ -11,7 +11,7 @@ import type {
 import { narrowToChartOrderType } from '@0dtetrader/shared-types';
 import { useContainer } from '../../app/container';
 import { useLayoutBreakpoint } from '../../app/useLayoutBreakpoint';
-import { useStore } from '../../core/observable';
+import { shallowEqual, useStore } from '../../core/observable';
 import { AlertDialog } from '../../design/components/AlertDialog';
 import { NavBar } from '../../design/components/NavBar';
 import { Format } from '../../design/format';
@@ -28,6 +28,7 @@ import { DesktopSettingsPanel } from '../../design/components/DesktopSettingsPan
 import type { TradeLayout } from '../../core/storage/SettingsStore';
 import { enabledSubPanes } from '../chart/indicatorSettings';
 import type { ChartTradingProps } from '../chart/CandleChart';
+import { chartChromeSlice } from '../chart/ChartStore';
 import { ChartView } from '../chart/ChartView';
 import { kindLabel } from '../chart/chartOrders';
 import { IndicatorSettingsView } from '../chart/IndicatorSettingsView';
@@ -69,7 +70,11 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
     chartOrdersStore,
   } = container;
 
-  const chart = useStore(chartStore);
+  // Chrome-only slice: this screen never reads candles/quote/tickProgress,
+  // so it must not re-render on every live-quote tick the way the full
+  // store snapshot would (ChartView, the other chartStore subscriber, still
+  // gets those).
+  const chart = useStore(chartStore, chartChromeSlice, shallowEqual);
   const trade = useStore(tradeStore);
   const chain = useStore(chainStore); // Chain selection supplies the exact analytics expiration.
 
@@ -200,16 +205,20 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
 
   // Stream live quotes for the selected contracts and all open positions.
   // The chart's own symbol is excluded: its subscription is owned by ChartStore.
-  const watchedKey = [
-    ...new Set(
+  const watchedKey = useMemo(
+    () =>
       [
-        chainStore.selectedContract?.symbol,
-        ...trade.positions.map((position) => position.symbol),
-      ].filter((symbol): symbol is string => Boolean(symbol) && symbol !== chart.symbol),
-    ),
-  ]
-    .sort()
-    .join(',');
+        ...new Set(
+          [
+            chainStore.selectedContract?.symbol,
+            ...trade.positions.map((position) => position.symbol),
+          ].filter((symbol): symbol is string => Boolean(symbol) && symbol !== chart.symbol),
+        ),
+      ]
+        .sort()
+        .join(','),
+    [chainStore.selectedContract?.symbol, trade.positions, chart.symbol],
+  );
   useEffect(() => {
     if (!watchedKey) return;
     const symbols = watchedKey.split(',');
@@ -403,7 +412,6 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
           >
             <DesktopChartTopBar
               chartStore={chartStore}
-              chart={chart}
               onSymbolSearch={() => setShowSymbolSearch(true)}
               onIndicatorSettings={() => setShowIndicatorSettings(true)}
               tradingMode={tradingMode}

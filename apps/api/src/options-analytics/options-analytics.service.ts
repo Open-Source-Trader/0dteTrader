@@ -282,6 +282,7 @@ export class OptionsAnalyticsService {
       underlying: normalizedSymbol,
       underlyingPrice: quote.spot,
       expirations,
+      contractsExpiration: selected,
       contracts,
     };
   }

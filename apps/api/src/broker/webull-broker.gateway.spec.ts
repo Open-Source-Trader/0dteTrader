@@ -355,6 +355,9 @@ describe('WebullBrokerGateway', () => {
       expect(chain.underlying).toBe('SPY');
       expect(chain.underlyingPrice).toBe(500);
       expect(chain.expirations.length).toBeGreaterThan(0);
+      // `contracts` covers exactly one expiration, not every one listed —
+      // contractsExpiration says which so a caller need not assume.
+      expect(chain.contractsExpiration).toBe(chain.expirations[0]);
       // ±12 strikes × 2 types, all returned by the fake snapshot endpoint.
       expect(chain.contracts).toHaveLength(50);
       const strikes = [...new Set(chain.contracts.map((c) => c.strike))];

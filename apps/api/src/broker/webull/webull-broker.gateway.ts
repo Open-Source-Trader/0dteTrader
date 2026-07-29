@@ -464,6 +464,7 @@ export class WebullBrokerGateway implements BrokerGateway, OnModuleDestroy {
       underlying: symbol.toUpperCase(),
       underlyingPrice: price,
       expirations,
+      contractsExpiration: chosen,
       contracts,
     };
   }

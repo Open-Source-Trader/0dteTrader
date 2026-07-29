@@ -410,7 +410,7 @@ struct TradeScreenView: View {
                         underlying: chartViewModel.symbol,
                         positionsStrip: positionsStrip,
                         density: density,
-                        tradingLocked: tradingLocked,
+                        tradingLocked: tradingLocked || needsProviderConfig,
                         onArm: { side in
                             tradeViewModel.arm(
                                 side: side,
@@ -572,7 +572,7 @@ struct TradeScreenView: View {
     /// Same gate as the split-layout TradePanelView's Buy/Sell buttons; the lock
     /// disables every order-placing control while leaving the chart untouched.
     private var canTrade: Bool {
-        chainViewModel.selectedContract != nil && !tradingLocked
+        chainViewModel.selectedContract != nil && !tradingLocked && !needsProviderConfig
     }
 
     // MARK: - Provider-aware copy + empty state
@@ -583,6 +583,7 @@ struct TradeScreenView: View {
         case .alpaca: return "Alpaca"
         case .snaptrade: return "SnapTrade"
         case .webull: return "Webull"
+        case .tradier: return "Tradier"
         }
     }
     private var activeProviderConfigured: Bool {
@@ -594,24 +595,33 @@ struct TradeScreenView: View {
                 : (me.alpacaConfigured ?? false)
         case .snaptrade:
             return tradingMode == .practice
-                ? (me.snaptradePracticeConfigured ?? false)
-                : (me.snaptradeConfigured ?? false)
+                ? me.snaptradePracticeAccountId != nil
+                : me.snaptradeAccountId != nil
         case .webull:
             return tradingMode == .practice
                 ? (me.webullPracticeConfigured ?? false)
                 : (me.webullConfigured)
+        case .tradier:
+            // Not a selectable trading provider (see BrokerProvider doc comment);
+            // treat as configured so this branch never blocks trading.
+            return true
         }
     }
     private var needsProviderConfig: Bool { me != nil && !activeProviderConfigured }
+    private var providerConfigMessage: String {
+        tradingProvider == .snaptrade
+            ? "No SnapTrade trading account selected."
+            : "No \(providerName) credentials configured."
+    }
 
-    /// Shown at the top of the screen when the active provider has no saved
-    /// credentials for the current trading mode — a clear path to connect
-    /// instead of being stuck on the raw broker error at launch.
+    /// Shown at the top of the screen when the active provider is not ready
+    /// for the current trading mode — a clear path to configure it instead of
+    /// being stuck on the raw broker error at launch.
     private var providerConfigBanner: some View {
         HStack(spacing: 8) {
             Image(systemName: "exclamationmark.triangle.fill")
                 .foregroundStyle(Color.orange)
-            Text("No \(providerName) credentials configured.")
+            Text(providerConfigMessage)
                 .font(.footnote)
                 .foregroundStyle(Color.secondary)
             Button("Configure") { showProfile = true }

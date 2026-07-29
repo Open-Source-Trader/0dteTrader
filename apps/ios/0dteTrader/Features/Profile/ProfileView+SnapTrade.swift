@@ -161,8 +161,8 @@ extension ProfileView {
         let isDisconnecting = viewModel.disconnectingSnaptrade.contains(environment)
         let title = environment == .live ? "SnapTrade — Live" : "SnapTrade — Practice"
         let keyConfigured = environment == .live
-            ? (viewModel.me?.snaptradeConfigured ?? false)
-            : (viewModel.me?.snaptradePracticeConfigured ?? false)
+            ? (viewModel.me?.snaptradeKeyConfigured ?? false)
+            : (viewModel.me?.snaptradeKeyPracticeConfigured ?? false)
 
         return VStack(alignment: .leading, spacing: AppSpacing.md) {
             sectionHeader(title, icon: "arrow.triangle.2.circlepath")

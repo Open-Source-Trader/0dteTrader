@@ -60,7 +60,7 @@ test/
 | Command                | What it does                                                                                                                                   |
 | ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
 | `npm run build`        | `tsc -p tsconfig.build.json` → `dist/`                                                                                                         |
-| `npm run dev`          | build + run with `node --watch` (restarts on dist changes; run `npm run build:watch` in a second terminal for recompiles)                      |
+| `npm run dev`          | build, then `tsc --watch` + `node --watch dist/main.js` together (via `concurrently`) — edits rebuild and restart automatically                |
 | `npm test`             | jest (unit + e2e), `--runInBand`                                                                                                               |
 | `npm run lint`         | eslint over `src/` and `test/`                                                                                                                 |
 | `npm run db:migrate`   | `prisma migrate deploy` (needs `DATABASE_URL`)                                                                                                 |
@@ -163,6 +163,19 @@ uses, including unique-constraint `P2002` errors and NULL-key semantics.
 The `InMemoryPrismaService` fake is also why the app code deliberately uses a
 small Prisma surface (no raw SQL, no interactive transactions) — documented on
 `src/prisma/prisma.service.ts`.
+
+## Profiling
+
+Hot paths (order validation, broker send, chain/candle fetch) are wrapped in
+`timed()` (`src/common/timing.ts`), which logs `<label> took <ms>` at
+`debug` level. Nest's default logger prints every level including
+`debug`/`verbose`, so these spans are **on by default** — no flag needed to
+see them.
+
+To quiet them (or any other debug/verbose logging), set `LOG_LEVEL` to a
+comma-separated subset of `verbose,debug,log,warn,error,fatal` before
+starting the API, e.g. `LOG_LEVEL=log,warn,error,fatal npm run dev` for
+production-like output with the timing spans suppressed.
 
 ## Security notes
 

@@ -1,4 +1,5 @@
 import { useEffect, useMemo } from 'react';
+import { timed } from '../../core/timing';
 import type { ChartInterval, TradingMode } from '@0dtetrader/shared-types';
 import type { ApiClient } from '../../core/api/ApiClient';
 import { useStore } from '../../core/observable';
@@ -118,45 +119,60 @@ export function ChartView({
 
   const closes = useMemo(() => candles.map((c) => c.close), [candles]);
 
-  const overlays = useMemo<OverlaySeries[]>(() => {
-    const colors = overlayPalette();
-    const result: OverlaySeries[] = [];
-    if (indicatorSettings.smaEnabled) {
-      result.push({
-        id: 'sma',
-        color: colors.sma,
-        values: engine.sma(closes, indicatorSettings.smaPeriod),
-      });
-    }
-    if (indicatorSettings.emaEnabled) {
-      result.push({
-        id: 'ema',
-        color: colors.ema,
-        values: engine.ema(closes, indicatorSettings.emaPeriod),
-      });
-    }
-    if (indicatorSettings.vwapEnabled) {
-      result.push({ id: 'vwap', color: colors.vwap, values: engine.vwap(candles) });
-    }
-    if (indicatorSettings.bollingerEnabled) {
-      const bands = engine.bollingerBands(
-        candles,
-        indicatorSettings.bollingerPeriod,
-        indicatorSettings.bollingerMultiplier,
-      );
-      result.push({ id: 'bollingerUpper', color: colors.bollingerUpper, values: bands.upper });
-      result.push({
-        id: 'bollingerMiddle',
-        color: colors.bollingerMiddle,
-        values: bands.middle,
-      });
-      result.push({ id: 'bollingerLower', color: colors.bollingerLower, values: bands.lower });
-    }
-    return result;
-  }, [candles, closes, indicatorSettings]);
+  const overlays = useMemo<OverlaySeries[]>(
+    () =>
+      timed('ChartView.overlays', () => {
+        const colors = overlayPalette();
+        const result: OverlaySeries[] = [];
+        if (indicatorSettings.smaEnabled) {
+          result.push({
+            id: 'sma',
+            color: colors.sma,
+            values: engine.sma(closes, indicatorSettings.smaPeriod),
+          });
+        }
+        if (indicatorSettings.emaEnabled) {
+          result.push({
+            id: 'ema',
+            color: colors.ema,
+            values: engine.ema(closes, indicatorSettings.emaPeriod),
+          });
+        }
+        if (indicatorSettings.vwapEnabled) {
+          result.push({ id: 'vwap', color: colors.vwap, values: engine.vwap(candles) });
+        }
+        if (indicatorSettings.bollingerEnabled) {
+          const bands = engine.bollingerBands(
+            candles,
+            indicatorSettings.bollingerPeriod,
+            indicatorSettings.bollingerMultiplier,
+          );
+          result.push({
+            id: 'bollingerUpper',
+            color: colors.bollingerUpper,
+            values: bands.upper,
+          });
+          result.push({
+            id: 'bollingerMiddle',
+            color: colors.bollingerMiddle,
+            values: bands.middle,
+          });
+          result.push({
+            id: 'bollingerLower',
+            color: colors.bollingerLower,
+            values: bands.lower,
+          });
+        }
+        return result;
+      }),
+    [candles, closes, indicatorSettings],
+  );
 
   const twcModel = useMemo(
-    () => computeTwc(candles, twcSettings, intervalSeconds(interval)),
+    () =>
+      timed('ChartView.twcModel', () =>
+        computeTwc(candles, twcSettings, intervalSeconds(interval)),
+      ),
     [candles, twcSettings, interval],
   );
 
@@ -173,17 +189,21 @@ export function ChartView({
     [twcModel],
   );
 
-  const rsiSeries = useMemo<PaneSeries[] | null>(() => {
-    if (!indicatorSettings.rsiEnabled) return null;
-    return [
-      {
-        id: 'rsi',
-        kind: 'line',
-        color: panePalette().rsi,
-        values: engine.rsi(candles, indicatorSettings.rsiPeriod),
-      },
-    ];
-  }, [candles, indicatorSettings.rsiEnabled, indicatorSettings.rsiPeriod]);
+  const rsiSeries = useMemo<PaneSeries[] | null>(
+    () =>
+      timed('ChartView.rsiSeries', () => {
+        if (!indicatorSettings.rsiEnabled) return null;
+        return [
+          {
+            id: 'rsi',
+            kind: 'line' as const,
+            color: panePalette().rsi,
+            values: engine.rsi(candles, indicatorSettings.rsiPeriod),
+          },
+        ];
+      }),
+    [candles, indicatorSettings.rsiEnabled, indicatorSettings.rsiPeriod],
+  );
 
   // Sub-panes are capped (MAX_SUB_PANES); only panes inside the cap render.
   const visiblePanes = useMemo<Set<SubPaneKey>>(
@@ -191,66 +211,83 @@ export function ChartView({
     [indicatorSettings],
   );
 
-  const macdSeries = useMemo<PaneSeries[] | null>(() => {
-    if (!indicatorSettings.macdEnabled) return null;
-    const values = engine.macd(
+  const macdSeries = useMemo<PaneSeries[] | null>(
+    () =>
+      timed('ChartView.macdSeries', () => {
+        if (!indicatorSettings.macdEnabled) return null;
+        const values = engine.macd(
+          candles,
+          indicatorSettings.macdFastPeriod,
+          indicatorSettings.macdSlowPeriod,
+          indicatorSettings.macdSignalPeriod,
+        );
+        const colors = panePalette();
+        return [
+          {
+            id: 'macdHistogram',
+            kind: 'histogram' as const,
+            positiveColor: colors.macdPositive,
+            negativeColor: colors.macdNegative,
+            values: values.histogram,
+          },
+          { id: 'macd', kind: 'line' as const, color: colors.macd, values: values.macdLine },
+          {
+            id: 'macdSignal',
+            kind: 'line' as const,
+            color: colors.macdSignal,
+            values: values.signalLine,
+          },
+        ];
+      }),
+    [
       candles,
+      indicatorSettings.macdEnabled,
       indicatorSettings.macdFastPeriod,
       indicatorSettings.macdSlowPeriod,
       indicatorSettings.macdSignalPeriod,
-    );
-    const colors = panePalette();
-    return [
-      {
-        id: 'macdHistogram',
-        kind: 'histogram',
-        positiveColor: colors.macdPositive,
-        negativeColor: colors.macdNegative,
-        values: values.histogram,
-      },
-      { id: 'macd', kind: 'line', color: colors.macd, values: values.macdLine },
-      { id: 'macdSignal', kind: 'line', color: colors.macdSignal, values: values.signalLine },
-    ];
-  }, [
-    candles,
-    indicatorSettings.macdEnabled,
-    indicatorSettings.macdFastPeriod,
-    indicatorSettings.macdSlowPeriod,
-    indicatorSettings.macdSignalPeriod,
-  ]);
+    ],
+  );
 
-  const stochSeries = useMemo<PaneSeries[] | null>(() => {
-    if (!indicatorSettings.stochEnabled) return null;
-    const values = engine.stochastic(
+  const stochSeries = useMemo<PaneSeries[] | null>(
+    () =>
+      timed('ChartView.stochSeries', () => {
+        if (!indicatorSettings.stochEnabled) return null;
+        const values = engine.stochastic(
+          candles,
+          indicatorSettings.stochKPeriod,
+          indicatorSettings.stochKSmooth,
+          indicatorSettings.stochDPeriod,
+        );
+        const colors = panePalette();
+        return [
+          { id: 'stochK', kind: 'line' as const, color: colors.stochK, values: values.k },
+          { id: 'stochD', kind: 'line' as const, color: colors.stochD, values: values.d },
+        ];
+      }),
+    [
       candles,
+      indicatorSettings.stochEnabled,
       indicatorSettings.stochKPeriod,
       indicatorSettings.stochKSmooth,
       indicatorSettings.stochDPeriod,
-    );
-    const colors = panePalette();
-    return [
-      { id: 'stochK', kind: 'line', color: colors.stochK, values: values.k },
-      { id: 'stochD', kind: 'line', color: colors.stochD, values: values.d },
-    ];
-  }, [
-    candles,
-    indicatorSettings.stochEnabled,
-    indicatorSettings.stochKPeriod,
-    indicatorSettings.stochKSmooth,
-    indicatorSettings.stochDPeriod,
-  ]);
+    ],
+  );
 
-  const atrSeries = useMemo<PaneSeries[] | null>(() => {
-    if (!indicatorSettings.atrEnabled) return null;
-    return [
-      {
-        id: 'atr',
-        kind: 'line',
-        color: panePalette().atr,
-        values: engine.atr(candles, indicatorSettings.atrPeriod),
-      },
-    ];
-  }, [candles, indicatorSettings.atrEnabled, indicatorSettings.atrPeriod]);
+  const atrSeries = useMemo<PaneSeries[] | null>(
+    () =>
+      timed('ChartView.atrSeries', () => {
+        if (!indicatorSettings.atrEnabled) return null;
+        return [
+          {
+            id: 'atr',
+            kind: 'line' as const,
+            color: panePalette().atr,
+            values: engine.atr(candles, indicatorSettings.atrPeriod),
+          },
+        ];
+      }),
+    [candles, indicatorSettings.atrEnabled, indicatorSettings.atrPeriod],
+  );
 
   // Interval hotkeys (1/5/3/⇧H/⇧D); ignored while typing in a field.
   useEffect(() => {

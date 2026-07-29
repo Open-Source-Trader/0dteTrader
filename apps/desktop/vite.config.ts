@@ -14,6 +14,7 @@ export default defineConfig({
     port: 5173,
     strictPort: true,
     // This machine's inotify watcher limit is exhausted (ENOSPC); poll instead.
-    watch: { usePolling: true, interval: 700 },
+    // 1s balances CPU usage against noticeable save-to-reload lag.
+    watch: { usePolling: true, interval: 1000 },
   },
 });

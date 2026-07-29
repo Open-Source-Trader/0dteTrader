@@ -1,11 +1,11 @@
 import type { ChartOrder, OrderResult, Quote, StreamServerMessage } from '@0dtetrader/shared-types';
 import { Store } from '../observable';
+import { timed } from '../timing';
 
 export type SocketConnectionState = 'disconnected' | 'connecting' | 'connected';
 
 interface QuoteSocketState {
   connectionState: SocketConnectionState;
-  quotes: Record<string, Quote>;
   lastQuote: Quote | null;
   lastErrorMessage: string | null;
 }
@@ -39,7 +39,7 @@ export class QuoteSocket extends Store<QuoteSocketState> {
     private readonly streamUrl: string,
     private readonly tokenProvider: () => Promise<string>,
   ) {
-    super({ connectionState: 'disconnected', quotes: {}, lastQuote: null, lastErrorMessage: null });
+    super({ connectionState: 'disconnected', lastQuote: null, lastErrorMessage: null });
   }
 
   onOrderUpdate(listener: (update: OrderResult) => void): () => void {
@@ -128,13 +128,8 @@ export class QuoteSocket extends Store<QuoteSocketState> {
   unsubscribeSymbols(symbols: string[]): void {
     const removed = symbols.filter((symbol) => this.subscribedSymbols.has(symbol));
     symbols.forEach((symbol) => this.subscribedSymbols.delete(symbol));
-    if (removed.length > 0) {
-      const quotes = { ...this.getState().quotes };
-      removed.forEach((symbol) => delete quotes[symbol]);
-      this.set({ quotes });
-      if (this.getState().connectionState === 'connected') {
-        this.send({ type: 'unsubscribe', symbols: removed });
-      }
+    if (removed.length > 0 && this.getState().connectionState === 'connected') {
+      this.send({ type: 'unsubscribe', symbols: removed });
     }
   }
 
@@ -267,6 +262,10 @@ export class QuoteSocket extends Store<QuoteSocketState> {
   }
 
   private handleMessage(raw: string): void {
+    timed('QuoteSocket.handleMessage', () => this.processMessage(raw));
+  }
+
+  private processMessage(raw: string): void {
     let message: StreamServerMessage;
     try {
       message = JSON.parse(raw) as StreamServerMessage;
@@ -276,10 +275,7 @@ export class QuoteSocket extends Store<QuoteSocketState> {
     switch (message.type) {
       case 'quote': {
         const quote = message.data;
-        this.set({
-          quotes: { ...this.getState().quotes, [quote.symbol]: quote },
-          lastQuote: quote,
-        });
+        this.set({ lastQuote: quote });
         this.quoteListeners.forEach((listener) => listener(quote));
         break;
       }

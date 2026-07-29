@@ -39,10 +39,8 @@ export interface AnchoredPanelPosition {
 
 /**
  * Places a portalled panel against an anchor element, flipping to stay inside
- * the phone frame. Shared by `AnchoredPopup` — every chip dropdown on the
- * screen — and by the order confirmation, which has the same chrome and the
- * same placement rules but is opened by an armed ticket rather than by a click
- * on a trigger.
+ * the phone frame. Used by `AnchoredPopup` — every chip dropdown on the
+ * screen.
  *
  * Returns the position and the function that recomputes it; the caller drives
  * it, because only the caller knows when its panel exists.

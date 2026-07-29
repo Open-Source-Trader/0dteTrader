@@ -12,6 +12,7 @@ import { BROKER_GATEWAY, BrokerGateway } from '../broker/broker-gateway.interfac
 import { findExplicitOption, pickExpiration, resolveAutoOtm } from '../broker/contract-resolution';
 import { errors, isUniqueViolation } from '../common/api-exception';
 import { BrokerError } from '../common/broker-error';
+import { timed } from '../common/timing';
 import { PrismaService } from '../prisma/prisma.service';
 import { OrderRequestDto } from './dto/order-request.dto';
 import { OrdersService } from './orders.service';
@@ -46,7 +47,9 @@ export class TradingService {
     await this.assertTradingEnabled(userId, 'preview', { order: dto });
     const { request: normalized } = await this.resolveAndValidate(userId, dto);
     try {
-      const preview = await this.gateway.previewOrder(userId, normalized);
+      const preview = await timed(this.logger, 'trading.preview.gateway', () =>
+        this.gateway.previewOrder(userId, normalized),
+      );
       await this.audit(userId, 'preview', { order: dto }, preview, 'ok');
       return preview;
     } catch (err) {
@@ -91,13 +94,8 @@ export class TradingService {
         normalized,
         contractSymbol,
       );
-      const result = await this.gateway.placeOrder(
-        userId,
-        capped,
-        idempotencyKey,
-        mode,
-        heldQuantity,
-        contract,
+      const result = await timed(this.logger, 'trading.place.gateway', () =>
+        this.gateway.placeOrder(userId, capped, idempotencyKey, mode, heldQuantity, contract),
       );
       // The broker has accepted. Nothing from here may throw: the catch below
       // deletes the idempotency claim so the caller can retry, which after a
@@ -281,11 +279,15 @@ export class TradingService {
     if (!selection.optionType) {
       throw errors.validation('selection.optionType is required for option orders');
     }
-    const chain = await this.getChainValidated(userId, dto.underlying, selection.expiration);
+    const chain = await timed(this.logger, 'trading.resolveAndValidate.chain', () =>
+      this.getChainValidated(userId, dto.underlying, selection.expiration),
+    );
     const expiration = pickExpiration(chain.expirations, selection.expiration);
 
     if (selection.mode === 'auto_otm') {
-      const quote = await this.gateway.getQuote(userId, dto.underlying);
+      const quote = await timed(this.logger, 'trading.resolveAndValidate.quote', () =>
+        this.gateway.getQuote(userId, dto.underlying),
+      );
       const contract = resolveAutoOtm(chain.contracts, selection.optionType, quote.last);
       return {
         request: {

@@ -209,6 +209,23 @@ Environment variables are set via `railway variables` / the Railway dashboard.
 Secrets (JWT keys, Webull credentials, Tradier token) mirror `.env` — update
 both when rotating.
 
+## Profiling
+
+Both apps have a lightweight, opt-in-by-default timing helper for measuring
+hot paths (order placement, chain/candle fetch, chart indicator recompute,
+WebSocket tick handling):
+
+- **API** (`apps/api/src/common/timing.ts`) — `timed()` logs
+  `<label> took <ms>` at `debug` level. Nest's default logger prints
+  `debug`/`verbose`, so these are **on by default**. Quiet them with
+  `LOG_LEVEL=log,warn,error,fatal` (comma-separated subset of
+  `verbose,debug,log,warn,error,fatal`) before starting the API.
+- **Desktop** (`apps/desktop/src/core/timing.ts`) — `timed()`/`timedAsync()`
+  are **off by default** (a disabled check is cheaper than a
+  `performance.now()` call on every quote tick). Enable from the Electron
+  devtools console with `window.__setTimingEnabled(true)`; disable the same
+  way with `false`.
+
 ## Troubleshooting
 
 - **Prisma can't reach Postgres** — `docker compose ps`; `npm run db:up` again.

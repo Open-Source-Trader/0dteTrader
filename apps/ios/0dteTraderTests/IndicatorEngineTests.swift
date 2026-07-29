@@ -19,6 +19,19 @@ final class IndicatorEngineTests: XCTestCase {
         }
     }
 
+    private func candles(highs: [Double], lows: [Double], closes: [Double]) -> [Candle] {
+        closes.enumerated().map { index, close in
+            Candle(
+                time: Date(timeIntervalSince1970: TimeInterval(index * 60)),
+                open: close,
+                high: highs[index],
+                low: lows[index],
+                close: close,
+                volume: 100
+            )
+        }
+    }
+
     private func assertSeries(
         _ actual: [Double?],
         equals expected: [Double?],
@@ -143,5 +156,46 @@ final class IndicatorEngineTests: XCTestCase {
         let bands = IndicatorEngine.bollingerBands(candles: input, period: 4, multiplier: 2)
         let sma = IndicatorEngine.sma(candles: input, period: 4)
         assertSeries(bands.middle, equals: sma)
+    }
+
+    // MARK: - Stochastic
+
+    func testStochastic_knownValues() {
+        let highs = [5.0, 6, 7, 8, 9, 10, 11]
+        let lows = [1.0, 2, 3, 4, 5, 6, 7]
+        let closes = [3.0, 4, 5, 6, 7, 8, 9]
+        let result = IndicatorEngine.stochastic(
+            candles: candles(highs: highs, lows: lows, closes: closes),
+            kPeriod: 3,
+            kSmooth: 1,
+            dPeriod: 1
+        )
+        // range = highest-lowest over trailing 3 bars = 6 each time; %K unsmoothed.
+        // idx2: window[0..2] high=7 low=1 close=5 -> (5-1)/6*100
+        XCTAssertEqual(result.k[2] ?? .nan, (5.0 - 1) / 6 * 100, accuracy: accuracy)
+        XCTAssertEqual(result.d[2] ?? .nan, (5.0 - 1) / 6 * 100, accuracy: accuracy)
+        XCTAssertNil(result.k[0] ?? nil)
+        XCTAssertNil(result.k[1] ?? nil)
+    }
+
+    func testStochastic_zeroRange_returns50() {
+        let result = IndicatorEngine.stochastic(
+            candles: candles(highs: [5, 5, 5], lows: [5, 5, 5], closes: [5, 5, 5]),
+            kPeriod: 3,
+            kSmooth: 1,
+            dPeriod: 1
+        )
+        XCTAssertEqual(result.k[2] ?? .nan, 50, accuracy: accuracy)
+    }
+
+    func testStochastic_insufficientData_returnsAllNil() {
+        let result = IndicatorEngine.stochastic(
+            candles: candles(highs: [5, 6], lows: [1, 2], closes: [3, 4]),
+            kPeriod: 3,
+            kSmooth: 1,
+            dPeriod: 1
+        )
+        assertSeries(result.k, equals: [nil, nil])
+        assertSeries(result.d, equals: [nil, nil])
     }
 }

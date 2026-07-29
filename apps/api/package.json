@@ -6,7 +6,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "build:watch": "tsc -p tsconfig.build.json --watch",
-    "dev": "npm run db:generate && npm run build && node --watch dist/main.js",
+    "dev": "npm run db:generate && npm run build && concurrently -k -n tsc,node -c blue,green \"npm run build:watch\" \"node --watch dist/main.js\"",
     "start": "node dist/main.js",
     "prestart": "set -a; [ -f ../../.env ] && . ../../.env; set +a; prisma generate && prisma migrate deploy",
     "lint": "eslint \"{src,test}/**/*.ts\"",

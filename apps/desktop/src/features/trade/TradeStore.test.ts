@@ -423,6 +423,35 @@ describe('TradeStore.cancelArmedOrder — the confirm popup dismissed', () => {
   });
 });
 
+describe('TradeStore.applyContractQuote', () => {
+  it('updates the matching position mark and P/L', () => {
+    const store = makeStore();
+    seedPositions(store, [position(2)]);
+    store.applyContractQuote({
+      symbol: CONTRACT.symbol,
+      last: 1.5,
+      bid: 1.48,
+      ask: 1.52,
+    } as unknown as Parameters<TradeStore['applyContractQuote']>[0]);
+    const [updated] = store.getState().positions;
+    expect(updated.markPrice).toBe(1.5);
+    expect(updated.unrealizedPnl).toBe(Math.round((1.5 - 1) * 2 * 100 * 100) / 100);
+  });
+
+  it('leaves positions untouched when no symbol matches', () => {
+    const store = makeStore();
+    const seeded = [position(2)];
+    seedPositions(store, seeded);
+    store.applyContractQuote({
+      symbol: 'QQQ260101C00500000',
+      last: 5,
+      bid: 4.9,
+      ask: 5.1,
+    } as unknown as Parameters<TradeStore['applyContractQuote']>[0]);
+    expect(store.getState().positions).toBe(seeded);
+  });
+});
+
 describe('TradeStore — order pricing', () => {
   it('rounds a custom limit to the contract tick', () => {
     const store = makeStore();

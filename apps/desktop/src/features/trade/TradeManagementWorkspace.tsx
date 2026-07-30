@@ -3,7 +3,7 @@ import type { ChartOrder, OptionContract, OrderResult, Position } from '@0dtetra
 import { AlertDialog } from '../../design/components/AlertDialog';
 import { Spinner } from '../../design/components/Spinner';
 import { Format } from '../../design/format';
-import { XCircleFillIcon } from '../../design/icons';
+import { ChevronDownIcon, XCircleFillIcon } from '../../design/icons';
 import {
   optionTypeShortName,
   orderStatusDisplayName,
@@ -273,6 +273,10 @@ export function TradeManagementWorkspace({
           onClick={() => onExpandedChange(!expanded)}
           aria-expanded={expanded}
         >
+          <ChevronDownIcon
+            size={14}
+            style={{ transform: expanded ? 'rotate(180deg)' : undefined }}
+          />
           {expanded ? 'Collapse' : 'Expand'}
         </button>
       </div>

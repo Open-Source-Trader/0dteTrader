@@ -1640,7 +1640,8 @@
 /* ATM row: a solid pinned band (DOM "current price" convention), not a
    translucent tint — it must read as a fixed reference line, not a hover. */
 .chain-row--atm {
-  background: var(--app-accent-fill);
+  /* background: var(--app-accent-fill); */
+  background: rgba(46, 143, 255, 0.14);
   box-shadow:
     inset 0 var(--border-hairline) 0 var(--hud-stroke),
     inset 0 calc(-1 * var(--border-hairline)) 0 var(--hud-stroke);
@@ -2525,11 +2526,18 @@
 }
 
 .trade-management-expand-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   margin-left: auto;
   color: var(--app-accent-text);
   font-weight: 700;
   min-height: 30px;
   padding: 0 8px;
+}
+
+.trade-management-expand-button svg {
+  transition: transform 0.15s ease;
 }
 
 @media (max-width: 1180px) {

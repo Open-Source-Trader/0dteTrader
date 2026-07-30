@@ -550,5 +550,4 @@ process.on('exit', () => {
 });
 
 // Open external URLs (SnapTrade Connection Portal, etc.) in the system browser.
-const { ipcMain } = require('electron');
 ipcMain.handle('open-external', (_event, url) => shell.openExternal(url));

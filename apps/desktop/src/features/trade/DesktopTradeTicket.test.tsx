@@ -91,7 +91,7 @@ describe('DesktopTradeTicket right rail order', () => {
     expect(markup.indexOf('desktop-contract-summary')).toBeLessThan(
       markup.indexOf('desktop-ticket-qty-row'),
     );
-    expect(markup.indexOf('desktop-ticket-estimate')).toBeLessThan(
+    expect(markup.indexOf('desktop-ticket-risk')).toBeLessThan(
       markup.indexOf('desktop-ticket-action-row'),
     );
     expect((markup.match(/0DTE \/ Expiry|2026-07-29 · 0DTE/g) ?? []).length).toBe(1);
@@ -254,8 +254,9 @@ describe('DesktopTradeTicket CALL/PUT selection', () => {
 
     expect(chainStore.selectedContract).toBeNull();
     expect(markup).toContain('No contract selected');
-    expect(markup).toContain('Debit —');
-    expect(markup).toContain('Max loss —');
+    expect(markup).toContain(
+      'desktop-ticket-risk-label">Max loss</span><span class="desktop-ticket-risk-value">—',
+    );
     expect(markup).toContain('disabled=""');
   });
 

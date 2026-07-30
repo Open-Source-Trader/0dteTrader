@@ -1,4 +1,5 @@
 import type { OptionContract, OrderType } from '@0dtetrader/shared-types';
+import { ChevronDownIcon } from '../../design/icons';
 import { buildDesktopContractSummary } from './DesktopContractSummaryModel';
 
 export function DesktopContractSummary({
@@ -51,40 +52,47 @@ export function DesktopContractSummary({
         </tbody>
       </table>
 
-      <table className="desktop-contract-summary__table numeric">
-        <thead>
-          <tr>
-            <th>Expiry B/E</th>
-            <th>Spread</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr>
-            <td aria-label={summary.breakEvenLine}>
-              {summary.breakEvenValue}
-              {summary.breakEvenPercentValue ? ` (${summary.breakEvenPercentValue})` : ''}
-            </td>
-            <td aria-label={summary.spreadLine}>{summary.spreadValue}</td>
-          </tr>
-        </tbody>
-      </table>
+      <details className="desktop-contract-summary__details">
+        <summary className="desktop-contract-summary__details-toggle">
+          <span>Details</span>
+          <ChevronDownIcon size={10} />
+        </summary>
 
-      <table className="desktop-contract-summary__table numeric">
-        <thead>
-          <tr>
-            <th title="Real value if exercised right now.">Intrinsic</th>
-            <th title="What you're paying for the chance the trade still moves your way — decays to $0 by today's close.">
-              Extrinsic (time)
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr aria-label={summary.intrinsicExtrinsicLine}>
-            <td>{summary.intrinsicValue}</td>
-            <td>{summary.extrinsicValue}</td>
-          </tr>
-        </tbody>
-      </table>
+        <table className="desktop-contract-summary__table numeric">
+          <thead>
+            <tr>
+              <th>Expiry B/E</th>
+              <th>Spread</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td aria-label={summary.breakEvenLine}>
+                {summary.breakEvenValue}
+                {summary.breakEvenPercentValue ? ` (${summary.breakEvenPercentValue})` : ''}
+              </td>
+              <td aria-label={summary.spreadLine}>{summary.spreadValue}</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <table className="desktop-contract-summary__table numeric">
+          <thead>
+            <tr>
+              <th title="Real value if exercised right now.">Intrinsic</th>
+              <th title="What you're paying for the chance the trade still moves your way — decays to $0 by today's close.">
+                Extrinsic (time)
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr aria-label={summary.intrinsicExtrinsicLine}>
+              <td>{summary.intrinsicValue}</td>
+              <td>{summary.extrinsicValue}</td>
+            </tr>
+          </tbody>
+        </table>
+      </details>
     </section>
   );
 }

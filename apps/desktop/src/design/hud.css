@@ -125,6 +125,17 @@
   --hud-btn-tint: rgba(255, 59, 78, 0.14);
   color: var(--sell-red);
 }
+/* SELL with no open position: same footprint and label as BUY, but recedes
+   to a bare outline so the panel reads one dominant action at a time
+   instead of two equal-weight buttons when there's nothing to close. */
+.hud-btn--secondary {
+  --hud-btn-tint: transparent;
+  border-color: var(--hud-stroke-dim);
+  color: var(--label-secondary);
+}
+.hud-btn--secondary .hud-chevrons {
+  opacity: 0.35;
+}
 .hud-btn:active:not(:disabled) {
   transform: scale(var(--press-scale));
 }

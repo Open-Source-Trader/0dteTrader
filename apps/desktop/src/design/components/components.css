@@ -1339,7 +1339,7 @@
   gap: 4px;
   min-height: 34px;
   padding: 6px 2px;
-  border-top: var(--border-hairline) solid rgba(46, 143, 255, 0.16);
+  border-top: var(--border-hairline) solid var(--hud-stroke-dim);
 }
 
 .desktop-expiry-trigger {
@@ -1429,48 +1429,50 @@
   flex-direction: column;
   gap: 7px;
   padding: 6px 2px 0;
-  border-top: var(--border-hairline) solid rgba(46, 143, 255, 0.16);
+  border-top: var(--border-hairline) solid var(--hud-stroke-dim);
 }
 
-.desktop-ticket-qty-row,
 .desktop-ticket-price-row,
-.desktop-ticket-estimate,
 .desktop-ticket-action-row {
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
-.desktop-ticket-qty-row,
-.desktop-ticket-estimate {
-  padding: 2px 0;
-  border: 0;
-}
-
+/* Qty: one continuous bordered track, the same visual weight as the
+   price-mode grid below it — sizing and pricing are the two order
+   parameters a trader sets, so they read as a matched pair, not a bare
+   stepper floating above a framed control. */
 .desktop-ticket-qty-row {
+  display: flex;
+  align-items: stretch;
+  min-height: 40px;
+  border: var(--border-hairline) solid var(--hud-stroke-dim);
+  border-radius: 2px;
   font-size: var(--fs-caption-desktop);
 }
 
 .desktop-ticket-qty-label {
-  margin-right: 2ex;
+  display: flex;
+  align-items: center;
+  padding: 0 10px;
+  color: var(--label-secondary);
+  font-size: var(--fs-caption2-desktop);
+  font-weight: 600;
 }
 
-/* Plain text hit targets, no per-control frame — the row reads as one inline
-   group instead of a stepper widget plus two separate preset buttons. */
 .desktop-qty-step {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 26px;
-  height: 26px;
+  width: 36px;
   color: var(--label-primary);
-  border: var(--border-hairline) solid var(--hud-stroke-dim);
-  border-radius: 2px;
+  border: 0;
+  border-left: var(--border-hairline) solid var(--hud-stroke-dim);
 }
 
 .desktop-qty-step:hover:not(:disabled) {
-  border-color: var(--label-primary);
-  color: var(--label-primary);
+  background: var(--app-surface-elevated);
 }
 
 .desktop-qty-step:disabled {
@@ -1478,22 +1480,36 @@
 }
 
 .desktop-ticket-qty-value {
-  min-width: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 40px;
   text-align: center;
   font-size: var(--fs-subheadline-desktop);
   font-weight: 700;
 }
 
+.desktop-qty-divider {
+  flex: 1;
+  border-left: var(--border-hairline) solid var(--hud-stroke-dim);
+}
+
 .desktop-qty-preset {
-  padding: 3px 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
   color: var(--label-secondary);
   font-family: var(--font-mono);
   font-size: var(--fs-caption2-desktop);
   font-weight: 600;
+  border: 0;
+  border-left: var(--border-hairline) solid var(--hud-stroke-dim);
 }
 
 .desktop-qty-preset:hover {
   color: var(--label-primary);
+  background: var(--app-surface-elevated);
 }
 
 /* Custom, Bid, Mid, Ask, Market: one segmented track, iOS order. Each
@@ -1569,8 +1585,59 @@
   color: var(--label-secondary);
 }
 
-.desktop-ticket-estimate {
-  justify-content: space-between;
+/* Max loss / Spread: the pre-trade risk check, not another metric row —
+   a bordered, tinted strip sets it apart from the plain label/value tables
+   above (Spot/Distance, Details) so it reads as "the number to check before
+   you commit," directly over the BUY/SELL it gates. */
+.desktop-ticket-risk {
+  display: flex;
+  align-items: stretch;
+  min-height: 30px;
+  border: var(--border-hairline) solid color-mix(in srgb, var(--warning-orange) 32%, transparent);
+  border-radius: 2px;
+  background: rgba(255, 179, 71, 0.05);
+}
+
+.desktop-ticket-risk-item {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 1px;
+  flex: 1;
+  min-width: 0;
+  padding: 3px 8px;
+}
+
+.desktop-ticket-risk-item--end {
+  align-items: flex-end;
+  text-align: right;
+}
+
+.desktop-ticket-risk-divider {
+  flex: none;
+  width: var(--border-hairline);
+  background: color-mix(in srgb, var(--warning-orange) 32%, transparent);
+}
+
+.desktop-ticket-risk-label {
+  color: var(--label-secondary);
+  font-size: var(--fs-caption2-desktop);
+  font-weight: 600;
+}
+
+.desktop-ticket-risk-value {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--label-primary);
+  font-size: var(--fs-caption2-desktop);
+  font-weight: 700;
+}
+
+.desktop-ticket-risk-status {
+  flex: none;
+  align-self: center;
+  padding-right: 10px;
   color: var(--label-secondary);
   font-size: var(--fs-caption2-desktop);
 }
@@ -2343,10 +2410,50 @@
   justify-content: space-between;
   gap: 8px;
   min-width: 0;
-  padding: 8px 8px;
-  background: rgba(46, 143, 255, 0.14);
-  /* box-shadow: inset 0 -2px 0 var(--app-accent); */
-  border-radius: 3px;
+  padding: 6px 2px 8px;
+  border-bottom: var(--border-hairline) solid var(--hud-stroke-dim);
+}
+
+/* Details disclosure: quiet toggle, no frame — break-even and
+   intrinsic/extrinsic stay one click away instead of competing with the
+   order-construction controls above for primary space. */
+.desktop-contract-summary__details {
+  margin-top: 2px;
+}
+
+.desktop-contract-summary__details-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--label-secondary);
+  font-size: var(--fs-caption2-desktop);
+  font-weight: 600;
+  cursor: pointer;
+  list-style: none;
+}
+
+.desktop-contract-summary__details-toggle::-webkit-details-marker {
+  display: none;
+}
+
+.desktop-contract-summary__details-toggle:hover {
+  color: var(--label-primary);
+}
+
+.desktop-contract-summary__details-toggle svg {
+  transition: transform 0.15s ease;
+}
+
+.desktop-contract-summary__details[open] .desktop-contract-summary__details-toggle {
+  margin-bottom: 6px;
+}
+
+.desktop-contract-summary__details[open] .desktop-contract-summary__details-toggle svg {
+  transform: rotate(180deg);
+}
+
+.desktop-contract-summary__details .desktop-contract-summary__table {
+  margin-top: 6px;
 }
 
 .desktop-contract-summary__contract {
@@ -2383,6 +2490,11 @@
   font-size: var(--fs-caption2-desktop);
   font-weight: 700;
   text-align: left;
+}
+
+.desktop-contract-summary__table th:last-child,
+.desktop-contract-summary__table td:last-child {
+  text-align: right;
 }
 
 .desktop-contract-summary__table td {

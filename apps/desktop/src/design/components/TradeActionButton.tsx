@@ -4,6 +4,10 @@ interface TradeActionButtonProps {
   title: string;
   color: string;
   isEnabled?: boolean;
+  /** Recede to a quiet outline instead of the full filled HUD treatment —
+   *  used for SELL when there's no open position, so BUY reads as the one
+   *  live decision instead of two equally-weighted actions. */
+  secondary?: boolean;
   onClick: () => void;
 }
 
@@ -19,6 +23,7 @@ export function TradeActionButton({
   title,
   color,
   isEnabled = true,
+  secondary = false,
   onClick,
 }: TradeActionButtonProps) {
   const variant = variantClass(color);
@@ -35,7 +40,7 @@ export function TradeActionButton({
   );
   return (
     <button
-      className={`trade-action-button hud-btn ${variant}`}
+      className={`trade-action-button hud-btn ${variant}${secondary ? ' hud-btn--secondary' : ''}`}
       style={variant ? undefined : { background: color }}
       disabled={!isEnabled}
       onClick={onClick}

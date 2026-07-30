@@ -13,6 +13,7 @@ import { CalendarIcon, ChevronDownIcon } from '../../design/icons';
 import type { ChainStore } from './ChainStore';
 import type { TradeStore } from './TradeStore';
 import { DesktopContractSummary } from './DesktopContractSummary';
+import { buildDesktopContractSummary } from './DesktopContractSummaryModel';
 import { selectedContractPremium } from './expiryBreakEven';
 import { OptionChainTable } from './OptionChainTable';
 
@@ -109,6 +110,14 @@ export function DesktopTradeTicket({
     customLimitPrice: trade.customLimitPrice,
   });
   const estimatedDebit = premium !== null ? premium * trade.quantity * 100 : null;
+  const spreadSummary = buildDesktopContractSummary(
+    selectedContract,
+    chain.isLoading,
+    trade.orderType,
+    trade.customLimitPrice,
+    trade.quantity,
+    chain.underlyingLast,
+  );
   const hasOpenLong = selectedContract
     ? trade.positions.some(
         (position) => position.symbol === selectedContract.symbol && position.quantity > 0,
@@ -228,8 +237,8 @@ export function DesktopTradeTicket({
         />
 
         <div className="desktop-ticket-execution" inert={locked}>
-          <div className="desktop-ticket-qty-row">
-            <span className="text-secondary desktop-ticket-qty-label">Qty</span>
+          <div className="desktop-ticket-qty-row" role="group" aria-label="Order quantity">
+            <span className="desktop-ticket-qty-label">Qty</span>
             <button
               type="button"
               className="desktop-qty-step"
@@ -249,7 +258,7 @@ export function DesktopTradeTicket({
             >
               <PlusIcon size={13} />
             </button>
-            <span style={{ flex: 1 }} />
+            <span className="desktop-qty-divider" aria-hidden="true" />
             <button
               type="button"
               className="desktop-qty-preset"
@@ -316,12 +325,23 @@ export function DesktopTradeTicket({
             })}
           </div>
 
-          <div className="desktop-ticket-estimate numeric" role="status">
-            <span>Debit {estimatedDebit !== null ? `$${Format.price(estimatedDebit)}` : '—'}</span>
-            <span>
-              Max loss {estimatedDebit !== null ? `$${Format.price(estimatedDebit)}` : '—'}
-            </span>
-            {trade.isSubmitting ? <span>Submitting…</span> : null}
+          <div className="desktop-ticket-risk numeric" role="status">
+            <div className="desktop-ticket-risk-item">
+              <span className="desktop-ticket-risk-label">Max loss</span>
+              <span className="desktop-ticket-risk-value">
+                {estimatedDebit !== null ? `$${Format.price(estimatedDebit)}` : '—'}
+              </span>
+            </div>
+            <div className="desktop-ticket-risk-divider" aria-hidden="true" />
+            <div className="desktop-ticket-risk-item desktop-ticket-risk-item--end">
+              <span className="desktop-ticket-risk-label">Spread</span>
+              <span className="desktop-ticket-risk-value">
+                {selectedContract ? spreadSummary.spreadValue : '—'}
+              </span>
+            </div>
+            {trade.isSubmitting ? (
+              <span className="desktop-ticket-risk-status">Submitting…</span>
+            ) : null}
           </div>
         </div>
 
@@ -330,6 +350,7 @@ export function DesktopTradeTicket({
             title="SELL"
             color="var(--sell-red)"
             isEnabled={canSell}
+            secondary={!hasOpenLong}
             onClick={() => onArm('sell')}
           />
           <TradeActionButton

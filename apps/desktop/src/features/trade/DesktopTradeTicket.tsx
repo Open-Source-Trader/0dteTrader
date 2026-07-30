@@ -229,7 +229,7 @@ export function DesktopTradeTicket({
 
         <div className="desktop-ticket-execution" inert={locked}>
           <div className="desktop-ticket-qty-row">
-            <span className="text-secondary">Qty</span>
+            <span className="text-secondary desktop-ticket-qty-label">Qty</span>
             <button
               type="button"
               className="desktop-qty-step"
@@ -293,7 +293,12 @@ export function DesktopTradeTicket({
               <span className="desktop-ticket-price-mode-label">Custom</span>
             </div>
             {PRICE_MODES.map((mode) => {
-              const quote = priceModeQuote(mode.value, selectedContract);
+              const quote =
+                mode.value === 'market'
+                  ? 'Market'
+                  : // `~${priceModeQuote('ask', selectedContract)}` :
+                    priceModeQuote(mode.value, selectedContract);
+
               return (
                 <button
                   key={mode.value}
@@ -302,10 +307,10 @@ export function DesktopTradeTicket({
                   aria-pressed={trade.orderType === mode.value}
                   onClick={() => tradeStore.setOrderType(mode.value)}
                 >
-                  {mode.value !== 'market' ? (
-                    <span className="desktop-ticket-price-mode-value numeric">{quote ?? '—'}</span>
-                  ) : null}
-                  <span className="desktop-ticket-price-mode-label">{mode.label}</span>
+                  <span className="desktop-ticket-price-mode-value numeric">{quote ?? '—'}</span>
+                  <span className="desktop-ticket-price-mode-label">
+                    {mode.value === 'market' ? '' : mode.label}
+                  </span>
                 </button>
               );
             })}

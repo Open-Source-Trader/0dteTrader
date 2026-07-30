@@ -1451,6 +1451,10 @@
   font-size: var(--fs-caption-desktop);
 }
 
+.desktop-ticket-qty-label {
+  margin-right: 2ex;
+}
+
 /* Plain text hit targets, no per-control frame — the row reads as one inline
    group instead of a stepper widget plus two separate preset buttons. */
 .desktop-qty-step {
@@ -1537,7 +1541,7 @@
    inverted fill marks it without adding another blue accent to the row. */
 .desktop-ticket-price-mode.selected {
   background: rgba(46, 143, 255, 0.14);
-  box-shadow: inset 0 -2px 0 var(--app-accent);
+  /* box-shadow: inset 0 -2px 0 var(--app-accent); */
 }
 
 .desktop-ticket-price-mode.selected .desktop-ticket-price-mode-value,
@@ -2338,9 +2342,9 @@
   justify-content: space-between;
   gap: 8px;
   min-width: 0;
-  padding: 5px 8px;
+  padding: 8px 8px;
   background: rgba(46, 143, 255, 0.14);
-  box-shadow: inset 0 -2px 0 var(--app-accent);
+  /* box-shadow: inset 0 -2px 0 var(--app-accent); */
   border-radius: 3px;
 }
 

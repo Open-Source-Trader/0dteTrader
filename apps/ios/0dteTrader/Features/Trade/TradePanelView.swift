@@ -126,10 +126,16 @@ struct TradePanelView: View {
     /// persisted upstream, and the panel only ever asks for the flip.
     var onToggleLock: () -> Void = {}
     var onShowAIAnalysis: () -> Void = {}
+    /// Compact options/analytics warning rendered in the context strip instead
+    /// of over the chart.
+    var optionsWarning: String?
+    /// Retry action for actionable option-chain warnings. Analytics warnings
+    /// are informational and leave this nil.
+    var onRetryOptionsWarning: (() -> Void)?
     /// Passed straight through to the pricing row, which fills it in while its
     /// price field holds the keyboard. The screen above lifts this panel clear
     /// of the keys by it — the panel is only the wire, because the lift has to
-    /// be applied outside the `.clipped()` frame the screen puts round it. See
+    /// be reported to the screen that lifts this panel clear of the keys. See
     /// `OrderPricingRow.editingRowBottomInPanel` and `KeyboardLift`.
     @Binding var editingRowBottomInPanel: CGFloat?
 
@@ -182,29 +188,28 @@ struct TradePanelView: View {
                 }
                 .padding(.top, density.firstRowSpacing)
             }
-            .frame(maxHeight: .infinity, alignment: .top)
-            .clipped()
+            .fixedSize(horizontal: false, vertical: true)
 
-            // Action buttons pinned to the bottom — always visible regardless
-            // of how much content is above (desktop parity: marginTop: auto).
-            HStack(spacing: AppSpacing.md) {
-                TradeActionButton(title: "SELL", color: .sellRed, isEnabled: canTrade) {
-                    onArm(.sell)
-                }
-                .frame(minHeight: density.buttonMinHeight)
-                TradeActionButton(title: "BUY", color: .buyGreen, isEnabled: canTrade) {
-                    onArm(.buy)
-                }
-                .frame(minHeight: density.buttonMinHeight)
-            }
+            // Context summary stays in normal flow. BUY/SELL live in the
+            // screen's `.safeAreaInset(edge: .bottom)` dock so SwiftUI reserves
+            // their height and keeps them above the home indicator.
+            OrderContextStripView(
+                selectedContract: chainViewModel.selectedContract,
+                positions: tradeViewModel.positions,
+                quantity: tradeViewModel.quantity,
+                orderType: tradeViewModel.orderType,
+                customLimitPrice: tradeViewModel.customLimitPrice,
+                isQuoteLoading: chainViewModel.isLoading,
+                warning: chainViewModel.errorMessage ?? optionsWarning,
+                onRetryWarning: chainViewModel.errorMessage == nil ? nil : onRetryOptionsWarning
+            )
             .padding(.top, density.spacing)
+            .padding(.bottom, density.verticalPadding.bottom)
             .layoutPriority(1)
-            // The box the order confirmation opens out of.
-            .tradeActionsAnchorSource()
         }
         .padding(.horizontal, AppSpacing.md)
-        .padding(density.verticalPadding)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(.top, density.verticalPadding.top)
+        .frame(maxWidth: .infinity)
         .coordinateSpace(.named(Self.coordinateSpace))
         .animation(reduceMotion ? nil : .snappy(duration: 0.22, extraBounce: 0), value: chainViewModel.isAutoMode)
         .background(Color.appBackground)
@@ -214,12 +219,6 @@ struct TradePanelView: View {
 
     private var optionsSection: some View {
         VStack(spacing: AppSpacing.sm) {
-            if let message = chainViewModel.errorMessage {
-                errorRow(message) {
-                    Task { await chainViewModel.load(underlying: underlying) }
-                }
-            }
-
             HStack(spacing: AppSpacing.sm) {
                 // The lock leads the row, ahead of the controls it disables,
                 // and stays outside the wrapper that disables them: a control

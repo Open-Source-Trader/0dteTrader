@@ -70,13 +70,31 @@ export function OptionChainTable({
   autoSelected = false,
 }: OptionChainTableProps) {
   const selectedRowRef = useRef<HTMLDivElement>(null);
+  const userInteractingRef = useRef(false);
+  const interactionTimerRef = useRef<number | null>(null);
 
-  // Keep the auto-picked (or manually selected) row in view as it moves —
-  // AUTO's strike tracks live price, so the highlighted row can drift off
-  // screen without this.
+  const markUserInteracting = () => {
+    userInteractingRef.current = true;
+    if (interactionTimerRef.current !== null) window.clearTimeout(interactionTimerRef.current);
+    interactionTimerRef.current = window.setTimeout(() => {
+      userInteractingRef.current = false;
+      interactionTimerRef.current = null;
+    }, 900);
+  };
+
+  // Keep the auto-picked (or manually selected) row in view as it moves,
+  // but never steal the scroll while the trader is scanning the ladder.
   useEffect(() => {
+    if (userInteractingRef.current) return;
     selectedRowRef.current?.scrollIntoView({ block: 'nearest' });
   }, [selectedStrike]);
+
+  useEffect(
+    () => () => {
+      if (interactionTimerRef.current !== null) window.clearTimeout(interactionTimerRef.current);
+    },
+    [],
+  );
 
   if (strikes.length === 0) {
     return (
@@ -95,6 +113,8 @@ export function OptionChainTable({
       }
       role="table"
       aria-label={autoSelected ? 'Option chain, AUTO selection active' : 'Option chain'}
+      onPointerDown={markUserInteracting}
+      onWheel={markUserInteracting}
     >
       <div className="chain-table-header" role="row">
         <span role="columnheader">Call</span>

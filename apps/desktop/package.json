@@ -10,14 +10,14 @@
     "test": "vitest run",
     "lint": "eslint \"src/**/*.{ts,tsx}\"",
     "preview": "vite preview",
-    "electron": "ELECTRON_START_URL=${ELECTRON_START_URL:-http://localhost:5173} electron electron/main.cjs"
+    "electron": "ELECTRON_START_URL=${ELECTRON_START_URL:-http://localhost:5173} electron electron/main.cjs",
+    "electron:dist": "electron electron/main.cjs"
   },
   "dependencies": {
     "@0dtetrader/shared-types": "*",
     "lightweight-charts": "^5.2.0",
     "react": "^19.2.8",
-    "react-dom": "^19.2.8",
-    "react-resizable-panels": "^4.12.2"
+    "react-dom": "^19.2.8"
   },
   "devDependencies": {
     "@types/react": "^19.2.17",

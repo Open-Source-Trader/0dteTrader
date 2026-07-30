@@ -97,63 +97,33 @@
   color: var(--buy-green);
 }
 
-/* Trade action button: chamfered double frame + tinted fill + baked glow.
-   Label content must sit above the ::after tint layer. */
+/* Trade action button: one clean rounded outline + tinted fill. Earlier
+   attempts chamfered the corners with clip-path, but a clipped box's border
+   miter falls outside the clip and vanishes — patching the four corners
+   back in with gradient layers produced visibly disjointed diagonal
+   fragments instead of a continuous edge. A plain rounded-rect border has
+   no seams to misalign and is the more robust choice for the two buttons
+   that matter most on the whole screen. */
 .hud-btn {
-  --hud-border-src: var(--hud-src-accent);
-  position: relative;
-  border: 8px solid transparent;
-  border-image: var(--hud-border-src) 28 fill / 24px / 6px stretch;
-  background: none;
+  --hud-border-color: var(--app-accent);
+  border: 2px solid var(--hud-border-color);
+  border-radius: 6px;
+  background: var(--hud-btn-tint, transparent);
   font-family: var(--font-display);
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
   cursor: pointer;
 }
-.hud-btn::before {
-  /* inner frame */
-  content: '';
-  position: absolute;
-  inset: 1px;
-  pointer-events: none;
-  border: 4px solid transparent;
-  border-image: var(--hud-border-src) 28 / 12px / 0 stretch;
-  opacity: 0.7;
-}
-.hud-btn::after {
-  /* accent tint fill */
-  content: '';
-  position: absolute;
-  inset: 2px;
-  pointer-events: none;
-  background: var(--hud-btn-tint, transparent);
-  clip-path: polygon(
-    8px 0,
-    calc(100% - 8px) 0,
-    100% 8px,
-    100% calc(100% - 8px),
-    calc(100% - 8px) 100%,
-    8px 100%,
-    0 calc(100% - 8px),
-    0 8px
-  );
-}
-.hud-btn > * {
-  position: relative;
-  z-index: 1;
-}
 .hud-btn--buy {
-  --hud-border-src: var(--hud-src-buy);
+  --hud-border-color: var(--buy-green);
   --hud-btn-tint: rgba(34, 224, 106, 0.14);
   color: var(--buy-green);
-  text-shadow: 0 0 8px rgba(34, 224, 106, 0.6);
 }
 .hud-btn--sell {
-  --hud-border-src: var(--hud-src-sell);
+  --hud-border-color: var(--sell-red);
   --hud-btn-tint: rgba(255, 59, 78, 0.14);
   color: var(--sell-red);
-  text-shadow: 0 0 8px rgba(255, 59, 78, 0.6);
 }
 .hud-btn:active:not(:disabled) {
   transform: scale(var(--press-scale));

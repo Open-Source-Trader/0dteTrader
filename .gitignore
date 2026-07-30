@@ -4,6 +4,9 @@ dist/
 coverage/
 *.tsbuildinfo
 
+# Electron packaging output
+apps/desktop/release/
+
 # Env / secrets
 .env
 .env.local

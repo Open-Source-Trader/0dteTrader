@@ -433,9 +433,6 @@ async function createWindow() {
     minHeight: state.minHeight,
     autoHideMenuBar: process.platform !== 'darwin',
     backgroundColor: '#000000',
-    webPreferences: {
-      preload: path.join(__dirname, 'preload.cjs'),
-    },
     icon: APP_ICON,
     show: false,
     title: APP_NAME,

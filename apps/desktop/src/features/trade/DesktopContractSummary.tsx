@@ -32,66 +32,64 @@ export function DesktopContractSummary({
       aria-label={`Selected contract summary: ${summary.contractLine}. ${summary.quoteLine}. ${summary.executionLine}. ${summary.moneynessLine}. ${summary.intrinsicExtrinsicLine}. ${summary.breakEvenLine}. ${summary.spreadValueLine}`}
       data-state={summary.state}
     >
-      <div className="desktop-contract-summary__topline" aria-label={summary.executionLine}>
+      <div className="summary-header" aria-label={summary.executionLine}>
         <span className="desktop-contract-summary__contract numeric">{summary.contractLine}</span>
         <span className="desktop-contract-summary__price numeric">{summary.executionValue}</span>
       </div>
 
-      <table className="desktop-contract-summary__table numeric">
-        <thead>
-          <tr>
-            <th>Spot</th>
-            <th>Distance</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr aria-label={summary.moneynessLine}>
-            <td>{summary.spotValue}</td>
-            <td>{summary.moneynessDistanceValue}</td>
-          </tr>
-        </tbody>
-      </table>
+      <div className="summary-context">
+        <table className="desktop-contract-summary__table numeric">
+          <thead>
+            <tr>
+              <th>Spot</th>
+              <th>Distance</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr aria-label={summary.moneynessLine}>
+              <td>{summary.spotValue}</td>
+              <td>{summary.moneynessDistanceValue}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
 
       <details className="desktop-contract-summary__details">
-        <summary className="desktop-contract-summary__details-toggle">
+        <summary className="summary-details-toggle">
           <span>Details</span>
           <ChevronDownIcon size={10} />
         </summary>
 
-        <table className="desktop-contract-summary__table numeric">
-          <thead>
-            <tr>
-              <th>Expiry B/E</th>
-              <th>Spread</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td aria-label={summary.breakEvenLine}>
-                {summary.breakEvenValue}
-                {summary.breakEvenPercentValue ? ` (${summary.breakEvenPercentValue})` : ''}
-              </td>
-              <td aria-label={summary.spreadLine}>{summary.spreadValue}</td>
-            </tr>
-          </tbody>
-        </table>
-
-        <table className="desktop-contract-summary__table numeric">
-          <thead>
-            <tr>
-              <th title="Real value if exercised right now.">Intrinsic</th>
-              <th title="What you're paying for the chance the trade still moves your way — decays to $0 by today's close.">
-                Extrinsic (time)
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr aria-label={summary.intrinsicExtrinsicLine}>
-              <td>{summary.intrinsicValue}</td>
-              <td>{summary.extrinsicValue}</td>
-            </tr>
-          </tbody>
-        </table>
+        <div className="summary-details-content">
+          <div className="summary-details-cell">
+            <span className="summary-details-label">Expiry B/E</span>
+            <span className="summary-details-value" aria-label={summary.breakEvenLine}>
+              {summary.breakEvenValue}
+              {summary.breakEvenPercentValue ? ` (${summary.breakEvenPercentValue})` : ''}
+            </span>
+          </div>
+          <div className="summary-details-cell summary-details-cell--end">
+            <span className="summary-details-label">Spread</span>
+            <span className="summary-details-value" aria-label={summary.spreadLine}>
+              {summary.spreadValue}
+            </span>
+          </div>
+          <div className="summary-details-cell">
+            <span className="summary-details-label" title="Real value if exercised right now.">
+              Intrinsic
+            </span>
+            <span className="summary-details-value">{summary.intrinsicValue}</span>
+          </div>
+          <div className="summary-details-cell summary-details-cell--end">
+            <span
+              className="summary-details-label"
+              title="What you're paying for the chance the trade still moves your way — decays to $0 by today's close."
+            >
+              Extrinsic (time)
+            </span>
+            <span className="summary-details-value">{summary.extrinsicValue}</span>
+          </div>
+        </div>
       </details>
     </section>
   );

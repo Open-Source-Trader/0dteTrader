@@ -237,42 +237,51 @@ export function DesktopTradeTicket({
         />
 
         <div className="desktop-ticket-execution" inert={locked}>
-          <div className="desktop-ticket-qty-row" role="group" aria-label="Order quantity">
-            <span className="desktop-ticket-qty-label">Qty</span>
-            <button
-              type="button"
-              className="desktop-qty-step"
-              disabled={trade.quantity <= 1}
-              onClick={() => tradeStore.setQuantity(Math.max(1, trade.quantity - 1))}
-              aria-label="Decrement quantity"
-            >
-              <MinusIcon size={13} />
-            </button>
-            <span className="numeric desktop-ticket-qty-value">{trade.quantity}</span>
-            <button
-              type="button"
-              className="desktop-qty-step"
-              disabled={trade.quantity >= 1000}
-              onClick={() => tradeStore.setQuantity(Math.min(1000, trade.quantity + 1))}
-              aria-label="Increment quantity"
-            >
-              <PlusIcon size={13} />
-            </button>
-            <span className="desktop-qty-divider" aria-hidden="true" />
-            <button
-              type="button"
-              className="desktop-qty-preset"
-              onClick={() => tradeStore.addQuantity(5)}
-            >
-              +5
-            </button>
-            <button
-              type="button"
-              className="desktop-qty-preset"
-              onClick={() => tradeStore.addQuantity(10)}
-            >
-              +10
-            </button>
+          <div className="desktop-ticket-qty-section">
+            <span className="desktop-ticket-qty-label">Quantity</span>
+            <div className="desktop-ticket-qty-row" role="group" aria-label="Order quantity">
+              <div className="desktop-qty-stepper">
+                <button
+                  type="button"
+                  className="desktop-qty-step"
+                  disabled={trade.quantity <= 1}
+                  onClick={() => tradeStore.setQuantity(Math.max(1, trade.quantity - 1))}
+                  aria-label="Decrement quantity"
+                >
+                  <MinusIcon size={13} />
+                </button>
+                <span className="numeric desktop-ticket-qty-value">{trade.quantity}</span>
+                <button
+                  type="button"
+                  className="desktop-qty-step"
+                  disabled={trade.quantity >= 1000}
+                  onClick={() => tradeStore.setQuantity(Math.min(1000, trade.quantity + 1))}
+                  aria-label="Increment quantity"
+                >
+                  <PlusIcon size={13} />
+                </button>
+              </div>
+              <div className="desktop-qty-presets" role="group" aria-label="Quantity shortcuts">
+                <button
+                  type="button"
+                  className="desktop-qty-preset"
+                  aria-label="Add 5 contracts"
+                  title="Add 5 contracts"
+                  onClick={() => tradeStore.addQuantity(5)}
+                >
+                  +5
+                </button>
+                <button
+                  type="button"
+                  className="desktop-qty-preset"
+                  aria-label="Add 10 contracts"
+                  title="Add 10 contracts"
+                  onClick={() => tradeStore.addQuantity(10)}
+                >
+                  +10
+                </button>
+              </div>
+            </div>
           </div>
 
           <div className="desktop-ticket-price-row" role="group" aria-label="Execution price mode">
@@ -347,14 +356,14 @@ export function DesktopTradeTicket({
 
         <div className="desktop-ticket-action-row">
           <TradeActionButton
-            title="SELL"
+            title={trade.isSubmitting ? 'Working…' : 'SELL TO CLOSE'}
             color="var(--sell-red)"
             isEnabled={canSell}
             secondary={!hasOpenLong}
             onClick={() => onArm('sell')}
           />
           <TradeActionButton
-            title="BUY"
+            title={trade.isSubmitting ? 'Working…' : 'BUY TO OPEN'}
             color="var(--buy-green)"
             isEnabled={canBuy}
             onClick={() => onArm('buy')}

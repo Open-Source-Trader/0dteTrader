@@ -3,14 +3,19 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { OptionType } from '@0dtetrader/shared-types';
 import type { ApiClient } from '../../core/api/ApiClient';
+import { dayString } from '../../core/models/dates';
 import { ChainStore } from './ChainStore';
 import { DesktopTradeTicket } from './DesktopTradeTicket';
 import { TradeStore } from './TradeStore';
 
+// 0DTE only renders when the contract's expiration matches today, so the
+// fixture uses today's date rather than a fixed string that would drift out
+// of "today" and silently stop exercising that label path.
+const EXPIRATION = dayString();
 const call = {
   symbol: 'SPY260729C00729000',
   underlying: 'SPY',
-  expiration: '2026-07-29',
+  expiration: EXPIRATION,
   strike: 729,
   optionType: 'call' as const,
   bid: 1.48,
@@ -43,14 +48,14 @@ function makeStores({
     chain: {
       underlying: 'SPY',
       underlyingPrice: 728.8,
-      expirations: ['2026-07-29'],
+      expirations: [EXPIRATION],
       contracts: [call, put, nextCall, nextPut],
     },
     isLoading: false,
     errorMessage: null,
     optionType,
     isAutoMode,
-    selectedExpiration: '2026-07-29',
+    selectedExpiration: EXPIRATION,
     selectedStrike: 729,
     underlyingLast: 728.8,
   };
@@ -114,8 +119,8 @@ describe('DesktopTradeTicket right rail order', () => {
       expect(markup).toContain(`>${mode}</span>`);
     }
     expect(markup).toContain('aria-label="Custom limit price"');
-    expect(markup).toContain('>SELL<');
-    expect(markup).toContain('>BUY<');
+    expect(markup).toContain('>SELL TO CLOSE<');
+    expect(markup).toContain('>BUY TO OPEN<');
   });
 
   it('orders price modes as Custom, Bid, Mid, Ask, Market to match iOS', () => {
@@ -132,7 +137,7 @@ describe('DesktopTradeTicket right rail order', () => {
       priceRow.indexOf('desktop-ticket-price-mode-label">Ask<'),
     );
     expect(priceRow.indexOf('desktop-ticket-price-mode-label">Ask<')).toBeLessThan(
-      priceRow.indexOf('desktop-ticket-price-mode-label">Market<'),
+      priceRow.indexOf('desktop-ticket-price-mode-value numeric">Market<'),
     );
   });
 
@@ -198,7 +203,7 @@ describe('DesktopTradeTicket CALL/PUT selection', () => {
 
     chainStore.setOptionType('put');
 
-    expect(chainStore.getState().selectedExpiration).toBe('2026-07-29');
+    expect(chainStore.getState().selectedExpiration).toBe(EXPIRATION);
     expect(chainStore.getState().selectedStrike).toBe(729);
     expect(tradeStore.getState().quantity).toBe(6);
     expect(chainStore.selectedContract?.symbol).toBe(put.symbol);
@@ -212,7 +217,7 @@ describe('DesktopTradeTicket CALL/PUT selection', () => {
     expect(tradeStore.getState().armedTicket?.request).toMatchObject({
       side: 'buy',
       quantity: 2,
-      selection: { mode: 'explicit', optionType: 'put', expiration: '2026-07-29', strike: 729 },
+      selection: { mode: 'explicit', optionType: 'put', expiration: EXPIRATION, strike: 729 },
     });
   });
 
@@ -236,7 +241,7 @@ describe('DesktopTradeTicket CALL/PUT selection', () => {
 
     expect(tradeStore.getState().armedTicket?.request).toMatchObject({
       side: 'sell',
-      selection: { mode: 'explicit', optionType: 'put', expiration: '2026-07-29', strike: 729 },
+      selection: { mode: 'explicit', optionType: 'put', expiration: EXPIRATION, strike: 729 },
     });
   });
 
@@ -245,7 +250,7 @@ describe('DesktopTradeTicket CALL/PUT selection', () => {
     (chainStore as unknown as { state: Record<string, unknown> }).state.chain = {
       underlying: 'SPY',
       underlyingPrice: 728.8,
-      expirations: ['2026-07-29'],
+      expirations: [EXPIRATION],
       contracts: [call],
     };
 

@@ -235,6 +235,9 @@ export function FloatingAxes({ chart, series, candles, interval }: FloatingAxesP
   );
 }
 
+/** Hard-outline halo (not just a blurred shadow) so a light label stays
+ *  legible directly over candle bodies, volume bars, zones, and indicator
+ *  lines — a soft shadow alone washes out against a bright green/red candle. */
 function drawLabel(
   ctx: CanvasRenderingContext2D,
   text: string,
@@ -243,8 +246,13 @@ function drawLabel(
   color: string,
 ): void {
   ctx.save();
+  ctx.lineJoin = 'round';
+  ctx.miterLimit = 2;
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = 'rgba(3, 8, 16, 0.92)';
+  ctx.strokeText(text, x, y);
   ctx.shadowColor = 'rgba(0, 0, 0, 0.9)';
-  ctx.shadowBlur = 4;
+  ctx.shadowBlur = 3;
   ctx.fillStyle = color;
   ctx.fillText(text, x, y);
   ctx.restore();

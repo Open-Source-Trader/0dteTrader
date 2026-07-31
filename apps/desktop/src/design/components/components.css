@@ -1129,46 +1129,21 @@
   flex-direction: column;
   margin: 3px 8px;
   background: rgba(3, 11, 22, 0.74);
-  border: var(--border-hairline) solid var(--hud-stroke);
-  clip-path: polygon(
-    10px 0,
-    100% 0,
-    100% calc(100% - 10px),
-    calc(100% - 10px) 100%,
-    0 100%,
-    0 10px
-  );
+  border: var(--border-hairline) solid var(--hud-stroke-dim);
+  border-radius: 6px;
   overflow: hidden;
 }
 
-/* The clip-path above cuts the chamfer, but a sub-pixel hairline border
-   anti-aliases to invisible along a diagonal edge (it only reads crisply on
-   axis-aligned edges) — these draw a visible stroke on the two cut corners
-   the border itself can't render. */
-.chart-shell::before,
-.chart-shell::after {
-  content: '';
-  position: absolute;
-  width: 15px;
-  height: 15px;
-  pointer-events: none;
-  background: linear-gradient(
-    135deg,
-    transparent calc(50% - 0.75px),
-    var(--hud-stroke) calc(50% - 0.75px),
-    var(--hud-stroke) calc(50% + 0.75px),
-    transparent calc(50% + 0.75px)
-  );
-}
-
-.chart-shell::before {
-  top: -1px;
-  left: -1px;
-}
-
-.chart-shell::after {
-  bottom: -1px;
-  right: -1px;
+/* Desktop grid: the chart sits inside the app shell alongside the option
+   chain and trade rail, which carry no border of their own — a hairline
+   divider (rendered by the parent layout) is the only seam between them.
+   The chart's own border/radius/margin here would read as a second, nested
+   frame instead of the chart being flush content in the same console. */
+.chart-shell--desktop {
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
 }
 
 .chart-command-bar {
@@ -1447,26 +1422,34 @@
   gap: 8px;
 }
 
-/* Qty: one continuous bordered track, the same visual weight as the
-   price-mode grid below it — sizing and pricing are the two order
-   parameters a trader sets, so they read as a matched pair, not a bare
-   stepper floating above a framed control. */
-.desktop-ticket-qty-row {
+/* Quantity: a section label above two independent groups — a compact
+   grouped stepper on the left, secondary preset buttons on the right — not
+   one full-width bordered table row. */
+.desktop-ticket-qty-section {
   display: flex;
-  align-items: stretch;
-  min-height: 40px;
-  border: var(--border-hairline) solid var(--hud-stroke-dim);
-  border-radius: 2px;
-  font-size: var(--fs-caption-desktop);
+  flex-direction: column;
+  gap: 6px;
 }
 
 .desktop-ticket-qty-label {
-  display: flex;
-  align-items: center;
-  padding: 0 10px;
   color: var(--label-secondary);
   font-size: var(--fs-caption2-desktop);
   font-weight: 600;
+}
+
+.desktop-ticket-qty-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.desktop-qty-stepper {
+  display: flex;
+  align-items: stretch;
+  height: 36px;
+  border: var(--border-hairline) solid var(--hud-stroke-dim);
+  border-radius: 2px;
 }
 
 .desktop-qty-step {
@@ -1475,11 +1458,28 @@
   justify-content: center;
   width: 36px;
   color: var(--label-primary);
+  background: transparent;
   border: 0;
+}
+
+.desktop-qty-step:first-child {
+  border-right: var(--border-hairline) solid var(--hud-stroke-dim);
+}
+
+.desktop-qty-step:last-child {
   border-left: var(--border-hairline) solid var(--hud-stroke-dim);
 }
 
 .desktop-qty-step:hover:not(:disabled) {
+  background: var(--app-surface-elevated);
+}
+
+.desktop-qty-step:focus-visible {
+  outline: 2px solid var(--app-accent);
+  outline-offset: -2px;
+}
+
+.desktop-qty-step:active:not(:disabled) {
   background: var(--app-surface-elevated);
 }
 
@@ -1491,32 +1491,49 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  min-width: 40px;
+  min-width: 48px;
   text-align: center;
   font-size: var(--fs-subheadline-desktop);
   font-weight: 700;
 }
 
-.desktop-qty-divider {
-  width: 16px;
-  border-left: var(--border-hairline) solid var(--hud-stroke-dim);
+.desktop-qty-presets {
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
 }
 
+/* Visually secondary to the main stepper: smaller text, muted default
+   color — same neutral border/radius language, but the shortcuts read as
+   quick actions, not another primary control. */
 .desktop-qty-preset {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 40px;
+  min-width: 40px;
+  height: 36px;
+  padding: 0 8px;
   color: var(--label-secondary);
   font-family: var(--font-mono);
   font-size: var(--fs-caption2-desktop);
   font-weight: 600;
-  border: 0;
-  border-left: var(--border-hairline) solid var(--hud-stroke-dim);
+  white-space: nowrap;
+  background: transparent;
+  border: var(--border-hairline) solid var(--hud-stroke-dim);
+  border-radius: 2px;
 }
 
 .desktop-qty-preset:hover {
   color: var(--label-primary);
+  background: var(--app-surface-elevated);
+}
+
+.desktop-qty-preset:focus-visible {
+  outline: 2px solid var(--app-accent);
+  outline-offset: -2px;
+}
+
+.desktop-qty-preset:active {
   background: var(--app-surface-elevated);
 }
 
@@ -1601,9 +1618,8 @@
   display: flex;
   align-items: stretch;
   min-height: 30px;
-  border: var(--border-hairline) solid color-mix(in srgb, var(--warning-orange) 32%, transparent);
+  border: var(--border-hairline) solid var(--hud-stroke-dim);
   border-radius: 2px;
-  background: rgba(255, 179, 71, 0.05);
 }
 
 .desktop-ticket-risk-item {
@@ -1624,7 +1640,7 @@
 .desktop-ticket-risk-divider {
   flex: none;
   width: var(--border-hairline);
-  background: color-mix(in srgb, var(--warning-orange) 32%, transparent);
+  background: var(--hud-stroke-dim);
 }
 
 .desktop-ticket-risk-label {
@@ -1654,6 +1670,16 @@
   flex: none;
   gap: 10px;
   padding: 8px 2px 2px;
+}
+
+/* Longer state-aware labels ("BUY TO OPEN" / "SELL TO CLOSE") need a
+   smaller, tighter size than the generic BUY/SELL to stay on one line at
+   the rail's minimum width. */
+.desktop-ticket-action-row .trade-action-button {
+  gap: 0;
+  font-size: var(--fs-caption-desktop);
+  letter-spacing: 0.02em;
+  white-space: nowrap;
 }
 
 /* --- Option chain table (desktop grid only) ---
@@ -2396,29 +2422,43 @@
   flex: none;
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 10px 0 12px;
   background: transparent;
-  border: 0;
+  border: var(--border-hairline) solid var(--hud-stroke-dim);
+  border-radius: 2px;
 }
 
 .desktop-contract-summary--unavailable {
   color: color-mix(in srgb, var(--warning-orange) 55%, var(--label-primary));
 }
 
+/* Every row below owns its own padding rather than inheriting it from the
+   card — 18px horizontal keeps text off the left/right rails at every row,
+   and each row sets its own vertical padding for its content type. */
+.summary-header,
+.summary-context,
+.summary-details-toggle,
+.summary-details-content {
+  padding-left: 18px;
+  padding-right: 18px;
+}
+
 /* Contract + execution price share one row — collapsing the price out of
    its own tinted row freed real vertical space, and the two belong together
    anyway: "what" and "at what price" read as a single fact, not two. */
-/* Same tint/underline the price-mode row uses for its selected segment —
-   reusing that exact treatment (not a new color) marks this row as "the
-   active selection" using the same visual language, at a glance. */
-.desktop-contract-summary__topline {
+.summary-header {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  gap: 8px;
+  gap: 12px;
   min-width: 0;
-  padding: 6px 2px 8px;
+  padding-top: 14px;
+  padding-bottom: 14px;
+  border-bottom: var(--border-hairline) solid var(--hud-stroke-dim);
+}
+
+.summary-context {
+  padding-top: 12px;
+  padding-bottom: 12px;
   border-bottom: var(--border-hairline) solid var(--hud-stroke-dim);
 }
 
@@ -2426,13 +2466,16 @@
    intrinsic/extrinsic stay one click away instead of competing with the
    order-construction controls above for primary space. */
 .desktop-contract-summary__details {
-  margin-top: 2px;
+  display: flex;
+  flex-direction: column;
 }
 
-.desktop-contract-summary__details-toggle {
-  display: inline-flex;
+.summary-details-toggle {
+  display: flex;
   align-items: center;
   gap: 4px;
+  padding-top: 12px;
+  padding-bottom: 12px;
   color: var(--label-secondary);
   font-size: var(--fs-caption2-desktop);
   font-weight: 600;
@@ -2440,28 +2483,65 @@
   list-style: none;
 }
 
-.desktop-contract-summary__details-toggle::-webkit-details-marker {
+.summary-details-toggle::-webkit-details-marker {
   display: none;
 }
 
-.desktop-contract-summary__details-toggle:hover {
+.summary-details-toggle:hover {
   color: var(--label-primary);
 }
 
-.desktop-contract-summary__details-toggle svg {
+.summary-details-toggle svg {
   transition: transform 0.15s ease;
 }
 
-.desktop-contract-summary__details[open] .desktop-contract-summary__details-toggle {
-  margin-bottom: 6px;
+.desktop-contract-summary__details[open] .summary-details-toggle {
+  border-bottom: var(--border-hairline) solid var(--hud-stroke-dim);
 }
 
-.desktop-contract-summary__details[open] .desktop-contract-summary__details-toggle svg {
+.desktop-contract-summary__details[open] .summary-details-toggle svg {
   transform: rotate(180deg);
 }
 
-.desktop-contract-summary__details .desktop-contract-summary__table {
-  margin-top: 6px;
+/* Real two-column grid: Expiry B/E + Intrinsic on the left, Spread +
+   Extrinsic on the right — not two side-by-side tables, so the right
+   column's text is laid out from its own grid track instead of a
+   space-between flex spanning rail to rail. */
+.summary-details-content {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  column-gap: 32px;
+  row-gap: 12px;
+  padding-top: 14px;
+  padding-bottom: 14px;
+}
+
+.summary-details-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.summary-details-cell--end {
+  align-items: flex-end;
+  text-align: right;
+}
+
+.summary-details-label {
+  color: var(--label-secondary);
+  font-size: var(--fs-caption2-desktop);
+  font-weight: 700;
+}
+
+.summary-details-value {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+  color: var(--label-primary);
+  font-size: var(--fs-caption-desktop);
+  font-weight: 700;
 }
 
 .desktop-contract-summary__contract {
@@ -2482,10 +2562,8 @@
   white-space: nowrap;
 }
 
-/* Spot/Distance, B/E/Spread, Intrinsic/Extrinsic: three small two-column
-   tables instead of middot-joined strings sharing one cell's width — each
-   value gets its own aligned column under its own header, so the row uses
-   the full card width instead of packing two facts into half of it. */
+/* Spot/Distance: two equal columns under their own headers, full card
+   width instead of packing two facts into half of it. */
 .desktop-contract-summary__table {
   width: 100%;
   table-layout: fixed;
@@ -2493,7 +2571,7 @@
 }
 
 .desktop-contract-summary__table th {
-  padding: 0 0 2px;
+  padding: 0 0 6px;
   color: var(--label-secondary);
   font-size: var(--fs-caption2-desktop);
   font-weight: 700;

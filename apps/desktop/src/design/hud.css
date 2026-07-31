@@ -81,20 +81,16 @@
   padding: 0 8px;
   color: var(--hud-amber);
   border: 1px solid currentColor;
+  border-radius: 3px;
   background: var(--hud-panel-fill);
-  clip-path: polygon(
-    5px 0,
-    calc(100% - 5px) 0,
-    100% 5px,
-    100% calc(100% - 5px),
-    calc(100% - 5px) 100%,
-    5px 100%,
-    0 calc(100% - 5px),
-    0 5px
-  );
 }
 .hud-badge--live {
   color: var(--buy-green);
+}
+
+.hud-badge:focus-visible {
+  outline: 2px solid var(--app-accent);
+  outline-offset: 2px;
 }
 
 /* Trade action button: one clean rounded outline + tinted fill. Earlier

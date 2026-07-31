@@ -423,11 +423,8 @@ export function ChartView({
             onShowProfile={onShowProfile}
           />
         ) : null}
-        {/* HUD card wrapping a chamfer-clipped canvas region. The glow is
-            baked into the card raster — never a CSS filter here. */}
         <div className="chart-plot-surface">
           <div
-            className="hud-clip"
             style={{ flex: 1, minHeight: 0, position: 'relative' }}
             onClick={(event) => {
               // Three clicks toggle fullscreen — chrome that lives on this same

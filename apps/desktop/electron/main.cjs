@@ -13,6 +13,7 @@ const path = require('node:path');
 const http = require('node:http');
 const fs = require('node:fs');
 const { loadWindowState, saveWindowState } = require('./windowState.cjs');
+const { NativeProcessSupervisor } = require('./appleIntelligence/supervisor.cjs');
 
 const APP_NAME = '0dteTrader';
 const APP_PROTOCOL = 'odtetrader';
@@ -180,6 +181,30 @@ function stopBackend() {
       // already gone
     }
   }, 3000).unref();
+}
+
+/**
+ * Apple Intelligence sidecar lifecycle: one supervisor for the app session,
+ * started best-effort alongside the backend and stopped on quit. Analysis
+ * remains fully optional — a failed/unavailable start never blocks the
+ * window or backend (docs/apple-intelligence/acceptance-criteria.md).
+ */
+const appleIntelligence = new NativeProcessSupervisor();
+appleIntelligence.onEvent((event) => {
+  if (event.type !== 'native-event' || !mainWindow?.webContents) return;
+  mainWindow.webContents.send('apple-intelligence:event', event.payload);
+});
+
+async function startAppleIntelligence() {
+  try {
+    await appleIntelligence.start({
+      appRoot: path.resolve(path.join(__dirname, '..')),
+      isPackaged: app.isPackaged,
+      resourcesPath: process.resourcesPath,
+    });
+  } catch (error) {
+    console.error('[desktop] apple-intelligence sidecar failed to start:', error);
+  }
 }
 
 function isSafeInternalUrl(url) {
@@ -516,8 +541,10 @@ app.whenReady().then(async () => {
   // before giving up, and createWindow doesn't need the backend up to show
   // the renderer — the app already handles a not-yet-ready API gracefully
   // (inline login errors, QuoteSocket's own reconnect-with-backoff). Cold
-  // start no longer looks frozen for the length of that poll.
-  await Promise.all([ensureBackend(), createWindow()]);
+  // start no longer looks frozen for the length of that poll. The Apple
+  // Intelligence sidecar is best-effort and optional — its promise never
+  // blocks window creation.
+  await Promise.all([ensureBackend(), createWindow(), startAppleIntelligence()]);
   const protocolUrl = extractProtocolArg(process.argv);
   if (protocolUrl) handleProtocolUrl(protocolUrl);
 });
@@ -534,6 +561,7 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
 });
 app.on('will-quit', stopBackend);
+app.on('will-quit', () => void appleIntelligence.stop());
 // Terminal kills and session logouts must also take the backend down.
 for (const signal of ['SIGTERM', 'SIGINT', 'SIGHUP']) {
   process.on(signal, () => app.quit());
@@ -547,7 +575,47 @@ process.on('exit', () => {
       // already gone
     }
   }
+  if (appleIntelligence.child) {
+    try {
+      appleIntelligence.child.kill('SIGKILL');
+    } catch {
+      // already gone
+    }
+  }
 });
 
 // Open external URLs (SnapTrade Connection Portal, etc.) in the system browser.
 ipcMain.handle('open-external', (_event, url) => shell.openExternal(url));
+
+// Apple Intelligence: narrow, feature-scoped IPC surface only (no generic
+// invoke). Runtime-validates renderer payloads before translating them into
+// native requests (docs/apple-intelligence/architecture-enforcement.md).
+ipcMain.handle('apple-intelligence:availability', () => {
+  if (appleIntelligence.state !== 'ready') {
+    return { state: 'unavailable', reason: appleIntelligence.state };
+  }
+  return { state: 'ready' };
+});
+
+ipcMain.handle('apple-intelligence:analyze', (_event, request) => {
+  if (typeof request?.requestId !== 'string' || request.requestId.length === 0) {
+    throw new Error('apple-intelligence:analyze requires a string requestId');
+  }
+  appleIntelligence.send({
+    protocolVersion: 1,
+    requestId: request.requestId,
+    method: 'analysis.run',
+    payload: request.payload ?? {},
+  });
+  return { requestId: request.requestId };
+});
+
+ipcMain.handle('apple-intelligence:cancel', (_event, requestId) => {
+  if (typeof requestId !== 'string' || requestId.length === 0) return;
+  appleIntelligence.send({
+    protocolVersion: 1,
+    requestId,
+    method: 'analysis.cancel',
+    payload: {},
+  });
+});

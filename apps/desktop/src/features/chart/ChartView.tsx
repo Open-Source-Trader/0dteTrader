@@ -384,7 +384,7 @@ export function ChartView({
           />
           {dense ? null : <DrawToolsMenu store={drawingsStore} />}
           <button
-            className="chart-icon-button draw-rail-button"
+            className="chart-icon-button draw-rail-button chart-command-bar__indicators"
             onClick={onIndicatorSettings}
             aria-label="Indicators"
             aria-haspopup="dialog"

@@ -1,0 +1,70 @@
+{
+  "valid": [
+    {
+      "name": "ready-handshake",
+      "line": "{\"protocolVersion\":1,\"requestId\":\"runtime\",\"event\":\"ready\",\"payload\":{\"shimVersion\":\"1.0.0\",\"supportedProtocolVersions\":[1],\"snapshotSchemaVersions\":[1],\"resultSchemaVersions\":[1],\"capabilities\":[\"availability\",\"prewarm\",\"structured-generation\",\"cancellation\"]}}"
+    },
+    {
+      "name": "accepted",
+      "line": "{\"protocolVersion\":1,\"requestId\":\"req-1\",\"event\":\"accepted\"}"
+    },
+    {
+      "name": "progress-with-sequence",
+      "line": "{\"protocolVersion\":1,\"requestId\":\"req-1\",\"event\":\"progress\",\"sequence\":0}"
+    },
+    {
+      "name": "completed-terminal",
+      "line": "{\"protocolVersion\":1,\"requestId\":\"req-1\",\"event\":\"completed\",\"sequence\":1,\"payload\":{\"resultSchemaVersion\":1}}"
+    },
+    {
+      "name": "cancelled-terminal",
+      "line": "{\"protocolVersion\":1,\"requestId\":\"req-2\",\"event\":\"cancelled\"}"
+    },
+    {
+      "name": "failed-terminal-with-error",
+      "line": "{\"protocolVersion\":1,\"requestId\":\"req-3\",\"event\":\"failed\",\"error\":{\"code\":\"model_runtime_failure\",\"message\":\"generation failed\"}}"
+    },
+    {
+      "name": "additive-unknown-field",
+      "line": "{\"protocolVersion\":1,\"requestId\":\"req-1\",\"event\":\"accepted\",\"futureField\":\"ignored-by-compatible-readers\"}"
+    }
+  ],
+  "invalid": [
+    { "name": "malformed-json", "line": "{\"protocolVersion\":1,\"requestId\":\"req-1\"," },
+    {
+      "name": "unknown-event",
+      "line": "{\"protocolVersion\":1,\"requestId\":\"req-1\",\"event\":\"exploded\"}"
+    },
+    {
+      "name": "unknown-method-on-request",
+      "line": "{\"protocolVersion\":1,\"requestId\":\"req-1\",\"method\":\"analysis.frobnicate\",\"payload\":{}}"
+    },
+    {
+      "name": "invalid-number-nan",
+      "line": "{\"protocolVersion\":1,\"requestId\":\"req-1\",\"event\":\"progress\",\"sequence\":NaN}"
+    },
+    {
+      "name": "invalid-number-infinity",
+      "line": "{\"protocolVersion\":1,\"requestId\":\"req-1\",\"event\":\"progress\",\"sequence\":Infinity}"
+    },
+    {
+      "name": "incompatible-protocol-version",
+      "line": "{\"protocolVersion\":2,\"requestId\":\"req-1\",\"event\":\"accepted\"}"
+    },
+    { "name": "missing-request-id", "line": "{\"protocolVersion\":1,\"event\":\"accepted\"}" },
+    {
+      "name": "wrong-type-request-id",
+      "line": "{\"protocolVersion\":1,\"requestId\":42,\"event\":\"accepted\"}"
+    }
+  ],
+  "sequenceViolations": {
+    "duplicateTerminal": [
+      "{\"protocolVersion\":1,\"requestId\":\"req-1\",\"event\":\"completed\",\"sequence\":1}",
+      "{\"protocolVersion\":1,\"requestId\":\"req-1\",\"event\":\"failed\",\"sequence\":2}"
+    ],
+    "outOfOrderSequence": [
+      "{\"protocolVersion\":1,\"requestId\":\"req-1\",\"event\":\"progress\",\"sequence\":2}",
+      "{\"protocolVersion\":1,\"requestId\":\"req-1\",\"event\":\"progress\",\"sequence\":1}"
+    ]
+  }
+}

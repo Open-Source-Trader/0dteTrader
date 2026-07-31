@@ -1,5 +1,5 @@
-// Desktop shell: a resizable window around the 430x932 iPhone-frame web app.
-// The web layer scales its content to fit the window, so any size works.
+// Desktop shell: a standard resizable desktop window around the trading app.
+// The renderer handles its own responsive layout inside the available space.
 // Launch (Linux/Wayland needs the X11 flag, VSCode shells leak RUN_AS_NODE):
 //   env -u ELECTRON_RUN_AS_NODE ELECTRON_START_URL=http://localhost:5173 \
 //     npx electron electron/main.cjs --ozone-platform=x11 --disable-gpu
@@ -7,11 +7,16 @@
 // Production loads dist/ over a loopback HTTP server, not file:// — Chromium
 // blocks ES-module scripts and stylesheets on file:// origins (blank window),
 // and http keeps webSecurity intact (no CORS bypass needed).
-const { app, BrowserWindow, screen, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, Menu, nativeImage, screen, shell, Tray } = require('electron');
 const { spawn } = require('node:child_process');
 const path = require('node:path');
 const http = require('node:http');
 const fs = require('node:fs');
+const { loadWindowState, saveWindowState } = require('./windowState.cjs');
+
+const APP_NAME = '0dteTrader';
+const APP_PROTOCOL = 'odtetrader';
+app.setName(APP_NAME);
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -23,6 +28,8 @@ const MIME = {
   '.png': 'image/png',
   '.woff2': 'font/woff2',
 };
+const APP_ICON = path.resolve(path.join(__dirname, 'assets/icon.png'));
+const WINDOW_STATE_PATH = path.join(app.getPath('userData'), 'window-state.json');
 
 /**
  * Serves the Vite build from ../dist on a loopback port. A FIXED port is
@@ -32,6 +39,18 @@ const MIME = {
  * back to an ephemeral port only when the fixed one is taken.
  */
 const DIST_PORT = 41730;
+let distServer = null;
+let startUrlPromise = null;
+let mainWindow = null;
+let tray = null;
+let allowedAppOrigin = null;
+let desktopBridgeReady = false;
+const pendingDesktopCommands = [];
+
+const singleInstance = app.requestSingleInstanceLock();
+if (!singleInstance) {
+  app.quit();
+}
 
 function serveDist() {
   const root = path.resolve(path.join(__dirname, '../dist'));
@@ -77,11 +96,26 @@ function serveDist() {
   });
 }
 
+async function getStartUrl() {
+  if (startUrlPromise) return startUrlPromise;
+  startUrlPromise = (async () => {
+    if (process.env.ELECTRON_START_URL) {
+      return process.env.ELECTRON_START_URL;
+    }
+    distServer = await serveDist();
+    app.on('will-quit', () => distServer?.close());
+    const url = `http://127.0.0.1:${distServer.address().port}/`;
+    console.log(`[desktop] serving dist at ${url}`);
+    return url;
+  })();
+  return startUrlPromise;
+}
+
 /**
  * Backend lifecycle: the app owns its API process. On launch, an already-
  * running backend on the API port is reused (and left alone on quit — it
  * isn't ours); otherwise the built API is spawned and killed again when the
- * last window closes.
+ * app quits.
  */
 const API_PORT = Number(process.env.PORT) || 3000;
 const API_DIR = path.resolve(path.join(__dirname, '../../api'));
@@ -148,50 +182,354 @@ function stopBackend() {
   }, 3000).unref();
 }
 
-async function createWindow() {
-  const { workAreaSize } = screen.getPrimaryDisplay();
-  const scale = Math.min(1, (workAreaSize.height - 80) / 932, (workAreaSize.width - 40) / 430);
-  const win = new BrowserWindow({
-    width: Math.round(430 * scale),
-    height: Math.round(932 * scale),
-    useContentSize: true,
-    resizable: true,
-    minWidth: 240,
-    minHeight: 520,
-    autoHideMenuBar: true,
-    backgroundColor: '#000000',
-    webPreferences: {
-      preload: path.join(__dirname, 'preload.cjs'),
-    },
-  });
-  win.setAspectRatio(430 / 932);
-  // External links (e.g. the "Deploy on Railway" link on the login screen)
-  // belong in the OS browser, not a new Electron window.
-  win.webContents.setWindowOpenHandler(({ url }) => {
-    // Only web URLs — never hand file:, app protocols, etc. to the OS.
-    if (/^https?:/i.test(url)) void shell.openExternal(url);
-    return { action: 'deny' };
-  });
-
-  let startUrl = process.env.ELECTRON_START_URL;
-  if (!startUrl) {
-    const server = await serveDist();
-    app.on('will-quit', () => server.close());
-    startUrl = `http://127.0.0.1:${server.address().port}/`;
-    console.log(`[desktop] serving dist at ${startUrl}`);
+function isSafeInternalUrl(url) {
+  if (!allowedAppOrigin) return false;
+  try {
+    return new URL(url).origin === allowedAppOrigin;
+  } catch {
+    return false;
   }
-  win.loadURL(startUrl);
 }
 
+function focusMainWindow() {
+  if (!mainWindow) return;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+}
+
+function queueDesktopCommand(command) {
+  if (!command) return;
+  if (desktopBridgeReady && mainWindow?.webContents && !mainWindow.webContents.isLoading()) {
+    mainWindow.webContents.send('desktop-command', command);
+    return;
+  }
+  pendingDesktopCommands.push(command);
+}
+
+function flushDesktopCommands() {
+  if (!desktopBridgeReady || !mainWindow?.webContents || pendingDesktopCommands.length === 0) {
+    return;
+  }
+  const commands = pendingDesktopCommands.splice(0, pendingDesktopCommands.length);
+  commands.forEach((command) => mainWindow.webContents.send('desktop-command', command));
+}
+
+function openExternalUrl(url) {
+  if (/^https?:/i.test(url)) void shell.openExternal(url);
+}
+
+function parseProtocolUrl(rawUrl) {
+  let url;
+  try {
+    url = new URL(rawUrl);
+  } catch {
+    return null;
+  }
+  if (url.protocol !== `${APP_PROTOCOL}:`) return null;
+
+  if (url.hostname === 'trade') {
+    const symbol = url.searchParams.get('symbol')?.trim().toUpperCase() ?? '';
+    if (!/^[A-Z0-9.\-]{1,15}$/.test(symbol)) return null;
+    const interval = url.searchParams.get('interval')?.trim() ?? null;
+    return { type: 'open-trade-symbol', symbol, interval };
+  }
+
+  if (url.hostname === 'server') {
+    const serverUrl = url.searchParams.get('url')?.trim() ?? '';
+    if (!serverUrl) return null;
+    return { type: 'open-server-selector', url: serverUrl };
+  }
+
+  return null;
+}
+
+function handleProtocolUrl(rawUrl) {
+  const command = parseProtocolUrl(rawUrl);
+  if (!command) return;
+  if (!mainWindow) {
+    void createWindow().then(() => queueDesktopCommand(command));
+    return;
+  }
+  focusMainWindow();
+  queueDesktopCommand(command);
+}
+
+function extractProtocolArg(argv) {
+  return argv.find((arg) => arg.startsWith(`${APP_PROTOCOL}://`)) ?? null;
+}
+
+function installApplicationMenu() {
+  app.setAboutPanelOptions({
+    applicationName: APP_NAME,
+    applicationVersion: app.getVersion(),
+    iconPath: APP_ICON,
+  });
+
+  const template =
+    process.platform === 'darwin'
+      ? [
+          {
+            label: APP_NAME,
+            submenu: [
+              { role: 'about', label: `About ${APP_NAME}` },
+              { type: 'separator' },
+              {
+                label: 'Change Server…',
+                click: () => queueDesktopCommand({ type: 'open-server-selector' }),
+              },
+              { type: 'separator' },
+              { role: 'services' },
+              { type: 'separator' },
+              { role: 'hide', label: `Hide ${APP_NAME}` },
+              { role: 'hideOthers' },
+              { role: 'unhide' },
+              { type: 'separator' },
+              { role: 'quit', label: `Quit ${APP_NAME}` },
+            ],
+          },
+        ]
+      : [
+          {
+            label: 'File',
+            submenu: [
+              {
+                label: `Show ${APP_NAME}`,
+                click: () => {
+                  if (!mainWindow) {
+                    void createWindow();
+                    return;
+                  }
+                  focusMainWindow();
+                },
+              },
+              {
+                label: 'Change Server…',
+                click: () => queueDesktopCommand({ type: 'open-server-selector' }),
+              },
+              { type: 'separator' },
+              { role: 'quit', label: `Quit ${APP_NAME}` },
+            ],
+          },
+        ];
+
+  template.push(
+    {
+      label: 'Edit',
+      submenu: [
+        { role: 'undo' },
+        { role: 'redo' },
+        { type: 'separator' },
+        { role: 'cut' },
+        { role: 'copy' },
+        { role: 'paste' },
+        { role: 'selectAll' },
+      ],
+    },
+    {
+      label: 'View',
+      submenu: [
+        { role: 'reload' },
+        { role: 'forceReload' },
+        { role: 'toggleDevTools' },
+        { type: 'separator' },
+        { role: 'resetZoom' },
+        { role: 'zoomIn' },
+        { role: 'zoomOut' },
+        { type: 'separator' },
+        { role: 'togglefullscreen' },
+      ],
+    },
+    {
+      label: 'Window',
+      submenu:
+        process.platform === 'darwin'
+          ? [{ role: 'minimize' }, { role: 'zoom' }, { type: 'separator' }, { role: 'front' }]
+          : [{ role: 'minimize' }, { role: 'close' }],
+    },
+    {
+      label: 'Help',
+      submenu: [
+        ...(process.platform === 'darwin' ? [] : [{ role: 'about', label: `About ${APP_NAME}` }]),
+        {
+          label: 'Change Server…',
+          click: () => queueDesktopCommand({ type: 'open-server-selector' }),
+        },
+      ],
+    },
+  );
+
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
+
+function installTray() {
+  if (tray) return;
+  const icon = nativeImage.createFromPath(APP_ICON);
+  tray = new Tray(icon.resize({ width: 18, height: 18 }));
+  tray.setToolTip(APP_NAME);
+  const menu = Menu.buildFromTemplate([
+    {
+      label: `Show ${APP_NAME}`,
+      click: () => {
+        if (!mainWindow) {
+          void createWindow();
+          return;
+        }
+        focusMainWindow();
+      },
+    },
+    {
+      label: 'Change Server…',
+      click: () => queueDesktopCommand({ type: 'open-server-selector' }),
+    },
+    { type: 'separator' },
+    {
+      label: `Quit ${APP_NAME}`,
+      click: () => app.quit(),
+    },
+  ]);
+  tray.setContextMenu(menu);
+  tray.on('click', () => {
+    if (!mainWindow) {
+      void createWindow();
+      return;
+    }
+    if (mainWindow.isVisible() && mainWindow.isFocused()) {
+      mainWindow.hide();
+      return;
+    }
+    focusMainWindow();
+  });
+}
+
+function saveWindowStateSoon(window) {
+  if (window.isDestroyed()) return;
+  if (window.isMaximized() || window.isFullScreen()) return;
+  saveWindowState(WINDOW_STATE_PATH, window);
+}
+
+async function createWindow() {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    focusMainWindow();
+    return mainWindow;
+  }
+
+  const state = loadWindowState(WINDOW_STATE_PATH, screen.getAllDisplays());
+  const targetWidth = 1440;
+  const targetHeight = 960;
+  const workArea = screen.getPrimaryDisplay().workAreaSize;
+  const shouldMaximize =
+    state.maximized || workArea.width < targetWidth || workArea.height < targetHeight;
+
+  desktopBridgeReady = false;
+
+  const win = new BrowserWindow({
+    ...state,
+    width: state.width,
+    height: state.height,
+    useContentSize: true,
+    resizable: true,
+    minWidth: state.minWidth,
+    minHeight: state.minHeight,
+    autoHideMenuBar: process.platform !== 'darwin',
+    backgroundColor: '#000000',
+    icon: APP_ICON,
+    show: false,
+    title: APP_NAME,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.cjs'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false,
+    },
+  });
+  mainWindow = win;
+
+  win.once('ready-to-show', () => {
+    if (shouldMaximize) {
+      win.maximize();
+    }
+    win.show();
+    flushDesktopCommands();
+  });
+
+  win.on('resize', () => saveWindowStateSoon(win));
+  win.on('move', () => saveWindowStateSoon(win));
+  win.on('close', () => saveWindowState(WINDOW_STATE_PATH, win));
+  win.on('closed', () => {
+    if (mainWindow === win) mainWindow = null;
+  });
+
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    if (isSafeInternalUrl(url)) {
+      return { action: 'allow' };
+    }
+    openExternalUrl(url);
+    return { action: 'deny' };
+  });
+  win.webContents.on('will-navigate', (event, url) => {
+    if (isSafeInternalUrl(url)) return;
+    event.preventDefault();
+    openExternalUrl(url);
+  });
+
+  const startUrl = await getStartUrl();
+  try {
+    allowedAppOrigin = new URL(startUrl).origin;
+  } catch {
+    allowedAppOrigin = null;
+  }
+  await win.loadURL(startUrl);
+  return win;
+}
+
+ipcMain.handle('desktop-command:flush', () => {
+  desktopBridgeReady = true;
+  return pendingDesktopCommands.splice(0, pendingDesktopCommands.length);
+});
+
+app.on('second-instance', (_event, argv) => {
+  if (!mainWindow) {
+    void createWindow();
+  }
+  focusMainWindow();
+  const protocolUrl = extractProtocolArg(argv);
+  if (protocolUrl) handleProtocolUrl(protocolUrl);
+});
+
+app.on('open-url', (event, url) => {
+  event.preventDefault();
+  handleProtocolUrl(url);
+});
+
 app.whenReady().then(async () => {
+  app.setAsDefaultProtocolClient(APP_PROTOCOL);
+  installApplicationMenu();
+  installTray();
+  if (process.platform === 'darwin') {
+    app.dock.setIcon(APP_ICON);
+  }
   // Run in parallel, not sequentially: ensureBackend can poll for up to 15s
   // before giving up, and createWindow doesn't need the backend up to show
   // the renderer — the app already handles a not-yet-ready API gracefully
   // (inline login errors, QuoteSocket's own reconnect-with-backoff). Cold
   // start no longer looks frozen for the length of that poll.
   await Promise.all([ensureBackend(), createWindow()]);
+  const protocolUrl = extractProtocolArg(process.argv);
+  if (protocolUrl) handleProtocolUrl(protocolUrl);
 });
-app.on('window-all-closed', () => app.quit());
+
+app.on('activate', () => {
+  if (BrowserWindow.getAllWindows().length === 0) {
+    void createWindow();
+    return;
+  }
+  focusMainWindow();
+});
+
+app.on('window-all-closed', () => {
+  if (process.platform !== 'darwin') app.quit();
+});
 app.on('will-quit', stopBackend);
 // Terminal kills and session logouts must also take the backend down.
 for (const signal of ['SIGTERM', 'SIGINT', 'SIGHUP']) {
@@ -209,5 +547,4 @@ process.on('exit', () => {
 });
 
 // Open external URLs (SnapTrade Connection Portal, etc.) in the system browser.
-const { ipcMain } = require('electron');
 ipcMain.handle('open-external', (_event, url) => shell.openExternal(url));

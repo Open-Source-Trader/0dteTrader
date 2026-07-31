@@ -34,6 +34,7 @@ interface MenuProps {
   direction?: 'down' | 'up';
   edge?: PopupEdge;
   className?: string;
+  panelClassName?: string;
 }
 
 /**
@@ -133,6 +134,7 @@ export function Menu({
   direction = 'down',
   edge = 'trigger',
   className,
+  panelClassName,
 }: MenuProps) {
   /** ArrowUp/ArrowDown move focus between items, wrapping at the ends. */
   const onMenuKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
@@ -155,6 +157,7 @@ export function Menu({
       direction={direction}
       edge={edge}
       className={className}
+      panelClassName={panelClassName}
       role="menu"
     >
       {(close) => (

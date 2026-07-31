@@ -6,7 +6,7 @@ import { useStore } from '../../core/observable';
 import { Menu } from '../../design/components/Menu';
 import { Spinner } from '../../design/components/Spinner';
 import { Format } from '../../design/format';
-import { ChevronDownIcon, SlidersIcon } from '../../design/icons';
+import { ChevronDownIcon, SlidersIcon, WarningFillIcon } from '../../design/icons';
 import type { ChartStore } from './ChartStore';
 import { CHART_INTERVALS, INTERVAL_HINTS } from './ChartStore';
 import { CandleChart, type ChartTradingProps, type OverlaySeries } from './CandleChart';
@@ -19,7 +19,6 @@ import * as engine from './indicatorEngine';
 import { enabledSubPanes, type SubPaneKey } from './indicatorSettings';
 import { useOptionsAnalytics } from './optionsAnalytics/useOptionsAnalytics';
 import { computeTwc } from './twc/computeTwc';
-import type { TwcBanner } from './twc/twcTypes';
 import { intervalSeconds } from './ChartStore';
 import './chart.css';
 
@@ -51,6 +50,8 @@ interface ChartViewProps {
   onShowProfile?: () => void;
   /** Order-line overlay inputs; null when chart trading is off. */
   chartTrading: ChartTradingProps | null;
+  /** Reports non-blocking analytics warnings so the screen can render them outside the canvas. */
+  onOptionsAnalyticsWarning?: (message: string | null) => void;
 }
 
 // Interval hotkeys. 'H'/'D' are uppercase (shift held) so they don't collide
@@ -88,6 +89,7 @@ export function ChartView({
   onShowHistory,
   onShowProfile,
   chartTrading,
+  onOptionsAnalyticsWarning,
 }: ChartViewProps) {
   const {
     symbol,
@@ -175,6 +177,15 @@ export function ChartView({
       ),
     [candles, twcSettings, interval],
   );
+
+  const globalWarningText =
+    optionsAnalytics.enabled && optionsAnalyticsState.errorMessage
+      ? `Options analytics unavailable: ${optionsAnalyticsState.errorMessage}`
+      : (twcModel?.banner?.text ?? null);
+
+  useEffect(() => {
+    onOptionsAnalyticsWarning?.(globalWarningText);
+  }, [onOptionsAnalyticsWarning, globalWarningText]);
 
   // TWC line series ride the price scale like regular overlays (gap-aware).
   const twcLineOverlays = useMemo<OverlaySeries[]>(
@@ -303,144 +314,106 @@ export function ChartView({
   }, [store]);
 
   return (
-    <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-      {dense ? null : (
-        <div
-          className="chart-header"
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8,
-            margin: '3px 8px 0',
-            padding: '4px 6px',
-            flex: 'none',
-          }}
+    <section
+      className={dense ? 'chart-shell chart-shell--desktop' : 'chart-shell'}
+      aria-label="Chart shell"
+    >
+      <div className="chart-command-bar" data-chart-toolbar="true">
+        <button
+          className="chart-header-symbol chart-command-bar__symbol"
+          onClick={onSymbolSearch}
+          aria-label={`Symbol ${symbol}. Change symbol`}
         >
-          <button
-            className="chart-header-symbol"
-            onClick={onSymbolSearch}
-            aria-label={`Symbol ${symbol}. Change symbol`}
-          >
-            <span className="chart-header-symbol-text">{symbol}</span>
-            <span aria-hidden="true" style={{ display: 'flex', color: 'var(--app-accent)' }}>
-              <ChevronDownIcon size={12} />
+          <span className="chart-header-symbol-text">{symbol}</span>
+          <span aria-hidden="true" className="chart-command-bar__chevron">
+            <ChevronDownIcon size={12} />
+          </span>
+        </button>
+
+        {quote ? (
+          <div className="chart-command-bar__quote numeric">
+            <span>{Format.price(quote.last)}</span>
+            <span className="chart-command-bar__quote-secondary">
+              Bid {Format.price(quote.bid)} · Ask {Format.price(quote.ask)}
             </span>
-          </button>
-
-          {quote ? (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-              <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <span
-                  style={{
-                    fontFamily: 'var(--font-mono)',
-                    fontSize: 18,
-                    fontWeight: 600,
-                    fontVariantNumeric: 'tabular-nums',
-                    textShadow: '0 0 8px var(--hud-glow)',
-                  }}
-                >
-                  {Format.price(quote.last)}
-                </span>
-                {isStale ? (
-                  <span
-                    style={{
-                      fontSize: 'var(--fs-caption2)',
-                      color: 'var(--warning-orange)',
-                      fontWeight: 600,
-                    }}
-                  >
-                    ● STALE
-                  </span>
-                ) : null}
-              </span>
-              <span
-                style={{
-                  fontFamily: 'var(--font-mono)',
-                  fontSize: 'var(--fs-caption2)',
-                  fontVariantNumeric: 'tabular-nums',
-                  display: 'flex',
-                  gap: 10,
-                }}
-              >
-                <span>
-                  <span style={{ color: 'var(--buy-green)', fontWeight: 600 }}>BID </span>
-                  <span style={{ color: 'var(--buy-green)' }}>{Format.price(quote.bid)}</span>
-                </span>
-                <span>
-                  <span style={{ color: 'var(--sell-red)', fontWeight: 600 }}>ASK </span>
-                  <span style={{ color: 'var(--sell-red)' }}>{Format.price(quote.ask)}</span>
-                </span>
-              </span>
-            </div>
-          ) : null}
-
-          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
-            {tickProgress ? (
-              <span
-                className="quick-chip"
-                style={{ fontSize: 'var(--fs-caption)', color: 'var(--label-secondary)' }}
-                aria-label={`Building candle: ${tickProgress.count} of ${tickProgress.size} ticks`}
-              >
-                {tickProgress.count}/{tickProgress.size} ticks
-              </span>
-            ) : null}
-            <button
-              className={tradingMode === 'live' ? 'hud-badge hud-badge--live' : 'hud-badge'}
-              onClick={onToggleMode}
-              aria-label={`Trading mode ${tradingMode === 'live' ? 'LIVE' : 'PRACTICE'}. Switch mode`}
-            >
-              {tradingMode === 'live' ? 'LIVE' : 'PRACTICE'}
-            </button>
-            <Menu
-              trigger={
-                <button
-                  className="quick-chip"
-                  style={{ minHeight: 32, padding: '6px 10px' }}
-                  aria-label={`Chart interval ${interval}`}
-                  aria-haspopup="menu"
-                >
-                  {interval}
-                </button>
-              }
-              items={CHART_INTERVALS.map((option) => ({
-                key: option,
-                label: (
-                  <>
-                    {option.toUpperCase()}
-                    {INTERVAL_HINTS[option] ? (
-                      <span
-                        style={{
-                          marginLeft: 12,
-                          fontSize: 'var(--fs-caption)',
-                          color: 'var(--label-secondary)',
-                        }}
-                      >
-                        {INTERVAL_HINTS[option]}
-                      </span>
-                    ) : null}
-                  </>
-                ),
-                checked: option === interval,
-                onSelect: () => store.selectInterval(option),
-              }))}
-            />
-            <DrawToolsMenu store={drawingsStore} />
-            <button
-              className="chart-icon-button"
-              onClick={onIndicatorSettings}
-              aria-label="Indicator settings"
-            >
-              <SlidersIcon size={16} />
-            </button>
+            {isStale ? <span className="chart-command-bar__stale">STALE</span> : null}
           </div>
+        ) : null}
+
+        <div className="chart-command-bar__actions">
+          {tickProgress ? (
+            <span
+              className="quick-chip chart-command-bar__secondary"
+              aria-label={`Building candle: ${tickProgress.count} of ${tickProgress.size} ticks`}
+            >
+              {tickProgress.count}/{tickProgress.size} ticks
+            </span>
+          ) : null}
+          <button
+            className={tradingMode === 'live' ? 'hud-badge hud-badge--live' : 'hud-badge'}
+            onClick={onToggleMode}
+            aria-label={`Trading mode ${tradingMode === 'live' ? 'LIVE' : 'PRACTICE'}. Switch mode`}
+          >
+            {tradingMode === 'live' ? 'LIVE' : 'PRACTICE'}
+          </button>
+          <Menu
+            trigger={
+              <button
+                className="chart-command-bar__interval"
+                aria-label={`Chart interval ${interval}`}
+                aria-haspopup="menu"
+              >
+                <span className="chart-command-bar__interval-label">{interval}</span>
+                <ChevronDownIcon size={11} />
+              </button>
+            }
+            panelClassName="chart-interval-menu"
+            items={CHART_INTERVALS.map((option) => ({
+              key: option,
+              label: (
+                <>
+                  {option.toUpperCase()}
+                  {INTERVAL_HINTS[option] ? (
+                    <span className="chart-command-bar__menu-hint">{INTERVAL_HINTS[option]}</span>
+                  ) : null}
+                </>
+              ),
+              checked: option === interval,
+              onSelect: () => store.selectInterval(option),
+            }))}
+          />
+          {dense ? null : <DrawToolsMenu store={drawingsStore} />}
+          <button
+            className="chart-icon-button draw-rail-button chart-command-bar__indicators"
+            onClick={onIndicatorSettings}
+            aria-label="Indicators"
+            aria-haspopup="dialog"
+            title="Indicators"
+          >
+            <SlidersIcon size={16} />
+          </button>
         </div>
-      )}
+      </div>
+
+      {globalWarningText ? (
+        <div
+          className="desktop-warning-row chart-warning-row"
+          role="status"
+          title={globalWarningText}
+        >
+          <span className="desktop-warning-chip desktop-warning-chip--caution">
+            <WarningFillIcon size={11} />
+            Caution
+          </span>
+          <span className="chart-warning-row__message">{globalWarningText}</span>
+        </div>
+      ) : null}
 
       {/* Chart area row: the persistent drawing-tool rail (desktop grid
           only) sits flush with the chart canvas card, not the header above
           it — TradingView's left toolbar is always vertically aligned with
           the chart itself. */}
-      <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
+      <div className="chart-plot-area" data-chart-plot-area="true">
         {dense ? (
           <DrawToolsRail
             store={drawingsStore}
@@ -450,14 +423,8 @@ export function ChartView({
             onShowProfile={onShowProfile}
           />
         ) : null}
-        {/* HUD card wrapping a chamfer-clipped canvas region. The glow is
-            baked into the card raster — never a CSS filter here. */}
-        <div
-          className="hud-card hud-card--flat"
-          style={{ flex: 1, minHeight: 100, margin: '3px 8px', padding: 0, display: 'flex' }}
-        >
+        <div className="chart-plot-surface">
           <div
-            className="hud-clip"
             style={{ flex: 1, minHeight: 0, position: 'relative' }}
             onClick={(event) => {
               // Three clicks toggle fullscreen — chrome that lives on this same
@@ -484,22 +451,6 @@ export function ChartView({
               ask={dense ? (quote?.ask ?? null) : null}
               chartTrading={chartTrading}
             />
-            {twcModel?.banner ? <TwcBiasBanner banner={twcModel.banner} /> : null}
-            {optionsAnalytics.enabled && optionsAnalyticsState.errorMessage ? (
-              <div
-                style={{
-                  position: 'absolute',
-                  top: 8,
-                  left: 65,
-                  fontSize: 'var(--fs-caption2)',
-                  color: 'var(--warning-orange)',
-                  pointerEvents: 'none',
-                  zIndex: 3,
-                }}
-              >
-                Options analytics unavailable: {optionsAnalyticsState.errorMessage}
-              </div>
-            ) : null}
             {isLoading && candles.length === 0 && (
               <div className="chart-skeleton" aria-hidden="true">
                 {SKELETON_BARS.map((height, index) => (
@@ -618,7 +569,7 @@ export function ChartView({
           <IndicatorPane height={68} candles={candles} series={atrSeries} />
         </PaneCard>
       ) : null}
-    </div>
+    </section>
   );
 }
 
@@ -638,40 +589,4 @@ function paneReadouts(series: PaneSeries[], labels: Record<string, string>): Pan
     readouts.push({ label, value: value.toFixed(2), color });
   }
   return readouts;
-}
-
-const BANNER_FONT_SIZES: Record<string, number> = {
-  Tiny: 10,
-  Small: 12,
-  Normal: 14,
-  Large: 17,
-};
-
-/** TWC bias banner pinned to one of nine chart positions (Pine table analog). */
-function TwcBiasBanner({ banner }: { banner: TwcBanner }) {
-  const [vPos, hPos] = banner.position.split(' ') as [string, string];
-  // Pine renders the banner with a fully transparent background: text only.
-  const style: React.CSSProperties = {
-    position: 'absolute',
-    zIndex: 3,
-    pointerEvents: 'none',
-    padding: '3px 10px',
-    color: banner.color,
-    fontSize: BANNER_FONT_SIZES[banner.size] ?? 10,
-    fontWeight: 600,
-    whiteSpace: 'nowrap',
-  };
-  if (vPos === 'Top') style.top = 8;
-  else if (vPos === 'Bottom') style.bottom = 8;
-  else {
-    style.top = '50%';
-    style.transform = 'translateY(-50%)';
-  }
-  if (hPos === 'Left') style.left = 56;
-  else if (hPos === 'Right') style.right = 8;
-  else {
-    style.left = '50%';
-    style.transform = `${style.transform ?? ''} translateX(-50%)`.trim();
-  }
-  return <div style={style}>{banner.text}</div>;
 }

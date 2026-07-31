@@ -140,18 +140,6 @@ struct ChartView: View {
                 if let banner = viewModel.twcRenderModel?.banner {
                     TwcBiasBannerView(banner: banner)
                 }
-                if let analyticsError = viewModel.optionsAnalyticsErrorMessage,
-                   viewModel.optionsAnalyticsSettings.enabled {
-                    Text(optionsAnalyticsErrorText(analyticsError))
-                        .font(.caption2)
-                        .foregroundStyle(Color.appWarning)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
-                        .padding(.leading, ChartMetrics.overlayLeading)
-                        // Clear of the time labels, which float along the
-                        // bottom of the plot rather than under it.
-                        .padding(.bottom, ChartMetrics.overlayBottom)
-                        .allowsHitTesting(false)
-                }
                 chartTopBar
                 if viewModel.isLoading, viewModel.candles.isEmpty {
                     loadingState
@@ -298,17 +286,6 @@ struct ChartView: View {
                     settings: viewModel.optionsAnalyticsSettings
                 )
             }
-        }
-    }
-
-    private func optionsAnalyticsErrorText(_ error: String) -> String {
-        switch viewModel.optionsAnalyticsDisplayState {
-        case .retained:
-            return "Options Structure retained snapshot: \(error)"
-        case .expired:
-            return "Options Structure expired: \(error)"
-        default:
-            return "Options Structure unavailable: \(error)"
         }
     }
 

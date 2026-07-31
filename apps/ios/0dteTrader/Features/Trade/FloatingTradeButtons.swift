@@ -5,10 +5,21 @@ import SwiftUI
 /// AUTO +1 OTM, nearest expiration, qty 1, mid).
 struct FloatingTradeButtons: View {
     let isEnabled: Bool
+    var showDisabledHint: Bool = true
     let onSide: (OrderSide) -> Void
 
     var body: some View {
         VStack(spacing: AppSpacing.sm) {
+            if showDisabledHint, !isEnabled {
+                Text("Select a contract in split view to trade")
+                    .font(.chipLabel)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, AppSpacing.md)
+                    .padding(.vertical, AppSpacing.xs)
+                    .background(Color.appSurface.opacity(0.9))
+                    .clipShape(Capsule())
+            }
+
             // Glow is baked into the buttons' HUD frames — no extra shadows.
             HStack(spacing: AppSpacing.lg) {
                 TradeActionButton(title: "SELL", color: .sellRed, isEnabled: isEnabled) {
@@ -19,18 +30,14 @@ struct FloatingTradeButtons: View {
                 }
             }
             .padding(.horizontal, AppSpacing.xl)
+            .padding(.top, AppSpacing.sm)
+            .padding(.bottom, AppSpacing.sm)
             // The box the order confirmation opens out of.
             .tradeActionsAnchorSource()
-
-            if !isEnabled {
-                Text("Select a contract in split view to trade")
-                    .font(.chipLabel)
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, AppSpacing.md)
-                    .padding(.vertical, AppSpacing.xs)
-                    .background(Color.appSurface.opacity(0.9))
-                    .clipShape(Capsule())
-            }
+        }
+        .background {
+            Color.appBackground
+                .ignoresSafeArea(edges: .bottom)
         }
     }
 }

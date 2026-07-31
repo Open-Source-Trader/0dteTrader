@@ -365,6 +365,56 @@ describe('TradeStore.refreshTradingData — concurrent calls coalesce', () => {
   });
 });
 
+describe('TradeStore position-management exits', () => {
+  it('prevents duplicate close submissions while one is pending', async () => {
+    let resolveOrder!: () => void;
+    const placeOrder = vi.fn(
+      () =>
+        new Promise<OrderResult>((resolve) => {
+          resolveOrder = () => resolve({ ...placedOrder, side: 'sell', quantity: 2 });
+        }),
+    );
+    const apiClient = {
+      placeOrder,
+      positions: async () => [],
+      openOrders: async () => [],
+    } as unknown as ApiClient;
+    const store = withResolver(new TradeStore(apiClient), [CONTRACT]);
+    store.isSocketConnected = () => true;
+    const held = position(2);
+
+    const first = store.flatten(held);
+    const second = store.flatten(held);
+
+    expect(placeOrder).toHaveBeenCalledTimes(1);
+    resolveOrder();
+    await Promise.all([first, second]);
+  });
+
+  it('trims half of the correct position quantity', async () => {
+    const placeOrder = vi.fn(async () => ({ ...placedOrder, side: 'sell', quantity: 2 }));
+    const apiClient = {
+      placeOrder,
+      positions: async () => [],
+      openOrders: async () => [],
+    } as unknown as ApiClient;
+    const store = withResolver(new TradeStore(apiClient), [CONTRACT]);
+    store.isSocketConnected = () => true;
+
+    await store.trimHalf(position(5));
+
+    expect(placeOrder).toHaveBeenCalledWith(
+      expect.objectContaining({
+        side: 'sell',
+        quantity: 2,
+        orderType: 'market',
+        selection: expect.objectContaining({ strike: CONTRACT.strike }),
+      }),
+      expect.any(String),
+    );
+  });
+});
+
 describe('TradeStore.refreshTradingData — positions and open orders run in parallel', () => {
   it('starts the openOrders request without waiting for positions to resolve', async () => {
     let resolvePositions!: () => void;

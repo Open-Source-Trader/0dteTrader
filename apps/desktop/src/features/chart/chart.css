@@ -122,9 +122,7 @@
   letter-spacing: 0.03em;
 }
 
-/* Symbol/price sub-pieces reused by DesktopTopBar (features/trade) — the
-   desktop grid's single top row lives one level up now, merged with the
-   app's global actions instead of stacking a separate app NavBar above it. */
+/* Symbol/price sub-pieces reused by the chart command bar inside ChartView. */
 .chart-strip-symbol {
   display: flex;
   align-items: center;

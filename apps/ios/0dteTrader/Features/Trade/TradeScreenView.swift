@@ -41,6 +41,7 @@ struct TradeScreenView: View {
     /// That field is the one on this screen the keys would cover, and so the
     /// one thing that makes the panel move. See `layoutContent`.
     @State private var editingPriceRowBottom: CGFloat?
+    @State private var tradePanelHeight: CGFloat = 0
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
 
@@ -333,11 +334,11 @@ struct TradeScreenView: View {
 
     // MARK: - Layouts
 
-    /// Panel fraction driven by sub-pane count (desktop parity): the panel
-    /// shrinks as indicators appear so the chart keeps enough room. The panel
-    /// content compacts via its density tier — it never scrolls.
-    private static let panelFractions: [CGFloat] = [1.0 / 3.0, 0.30, 0.27]
-    private static let panelDensities: [TradePanelDensity] = [.roomy, .compact, .dense]
+    /// The lower ticket is intrinsic-height now; the chart is the only row that
+    /// flexes. Density still tightens controls as indicator panes reduce the
+    /// chart's useful vertical space.
+    private static let panelDensities: [TradePanelDensity] = [.compact, .dense, .dense]
+    private static let chartMinHeight: CGFloat = 180
 
     private var paneCount: Int {
         chartViewModel.indicatorSettings.enabledSubPaneCount
@@ -345,14 +346,10 @@ struct TradeScreenView: View {
 
     @ViewBuilder
     private var layoutContent: some View {
-        // One reader for both layouts. `safeAreaInsets` reports only the
-        // insets remaining at this position, so reserving
-        // `safeAreaInsets.bottom` below keeps the panel/dock out of the
-        // home-indicator (swipe-up) strip exactly like the desktop frame's
-        // 34px strip: 0 (no-op) where an ancestor already applied the safe
-        // area, ~34pt under edge-to-edge (iOS 26) layout.
+        // One reader for both layouts. Bottom safe-area ownership is handled by
+        // `.safeAreaInset(edge: .bottom)` below, so the content receives the
+        // dock's reserved height and the chart shrinks naturally.
         GeometryReader { geometry in
-            let insetBottom = geometry.safeAreaInsets.bottom
             switch layout {
             case .fullscreen:
                 // Layout A — FR-10.
@@ -360,20 +357,21 @@ struct TradeScreenView: View {
                     chartView
                     VStack(spacing: AppSpacing.sm) {
                         positionsStrip
-                        FloatingTradeButtons(isEnabled: canTrade) { side in
-                            tradeViewModel.arm(
-                                side: side,
-                                underlying: chartViewModel.symbol,
-                                chainViewModel: chainViewModel,
-                                bypass: settingsStore.bypassOrderConfirmation
-                            )
-                        }
+                        OrderContextStripView(
+                            selectedContract: chainViewModel.selectedContract,
+                            positions: tradeViewModel.positions,
+                            quantity: tradeViewModel.quantity,
+                            orderType: tradeViewModel.orderType,
+                            customLimitPrice: tradeViewModel.customLimitPrice,
+                            isQuoteLoading: chainViewModel.isLoading,
+                            warning: chainViewModel.errorMessage ?? optionsWarning,
+                            onRetryWarning: chainViewModel.errorMessage == nil ? nil : retryOptionsWarning
+                        )
+                        .padding(.horizontal, AppSpacing.xl)
                     }
-                    .padding(.bottom, AppSpacing.lg + insetBottom)
                     .background(
                         LinearGradient(colors: [.clear, Color.appBackground],
                                        startPoint: .top, endPoint: .bottom)
-                            .ignoresSafeArea(edges: .bottom)
                     )
                     // These are siblings of the chart in this ZStack, so they
                     // sit *above* the placement card living inside it. Left
@@ -387,21 +385,20 @@ struct TradeScreenView: View {
                 }
 
             case .split:
-                // Layout B — automatic sizing based on indicator count (desktop parity).
-                let usableHeight = geometry.size.height - insetBottom
-                let fraction = Self.panelFractions[min(paneCount, Self.panelFractions.count - 1)]
-                let panelHeight = (usableHeight * fraction).rounded()
-                let chartHeight = max(usableHeight - panelHeight - 1, 96)
+                // Layout B — one explicit vertical flow. The ticket owns its
+                // intrinsic height and bottom safe area; the chart takes the
+                // remaining flexible space and yields first on shorter screens.
                 let density = Self.panelDensities[min(paneCount, Self.panelDensities.count - 1)]
                 VStack(spacing: 0) {
                     chartView
-                        .frame(height: chartHeight)
+                        .frame(minHeight: Self.chartMinHeight, maxHeight: .infinity)
+                        .layoutPriority(0)
                     // The chart card and the trade panel are each already read
                     // as a surface — the card by its border, the panel by the
                     // controls filling it — so a rule between them was drawing
                     // a seam nobody needed. Kept as an empty 1pt gap rather
-                    // than deleted: `chartHeight` subtracts it, and reclaiming
-                    // it would move the split by a point for no reason.
+                    // than deleted: reclaiming it would move the split by a
+                    // point for no reason.
                     Color.clear
                         .frame(height: 1)
                     TradePanelView(
@@ -421,26 +418,34 @@ struct TradeScreenView: View {
                         },
                         onToggleLock: { toggleLock() },
                         onShowAIAnalysis: { showAIAnalysis = true },
+                        optionsWarning: optionsWarning,
+                        onRetryOptionsWarning: retryOptionsWarning,
                         editingRowBottomInPanel: $editingPriceRowBottom
                     )
-                    .frame(height: panelHeight)
-                    .clipped()
+                    .fixedSize(horizontal: false, vertical: true)
+                    .background {
+                        GeometryReader { proxy in
+                            Color.clear
+                                .onAppear { tradePanelHeight = proxy.size.height }
+                                .onChange(of: proxy.size.height) { _, height in tradePanelHeight = height }
+                        }
+                    }
+                    .layoutPriority(1)
                     // Drawn offset, not layout: the panel slides up over the
-                    // chart far enough to bring the price field clear of the
-                    // keys, and `panelHeight` — with every other number on this
-                    // screen — stays exactly what it was. Sized to the field
-                    // and not to the panel, so SELL/BUY stay behind the
-                    // keyboard rather than ending up beside its Done bar.
+                    // chart just far enough to bring the price field clear of
+                    // the keys. The dock remains part of normal layout and owns
+                    // the bottom safe-area inset.
                     .keyboardLift(
-                        clearance: editingPriceRowBottom.map { panelHeight - $0 },
-                        maxLift: chartHeight
+                        clearance: editingPriceRowBottom.map { max(0, tradePanelHeight - $0) },
+                        maxLift: max(0, geometry.size.height - Self.chartMinHeight)
                     )
                 }
-                // Reserve the swipe-up strip so BUY/SELL never enter it.
-                .padding(.bottom, insetBottom)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: paneCount)
             }
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            tradeActionDock(showDisabledHint: layout == .fullscreen)
         }
         // The whole screen is sized off the reader above, so SwiftUI's automatic
         // keyboard avoidance does not politely "push the field up" here: it
@@ -458,6 +463,17 @@ struct TradeScreenView: View {
         // Tap or swipe-down to put the custom-price keyboard away comes from
         // `RootView.dismissKeyboardOnInteraction()` — this screen lives in the
         // root window, so it needs no copy of its own.
+    }
+
+    private func tradeActionDock(showDisabledHint: Bool) -> some View {
+        FloatingTradeButtons(isEnabled: canTrade, showDisabledHint: showDisabledHint) { side in
+            tradeViewModel.arm(
+                side: side,
+                underlying: chartViewModel.symbol,
+                chainViewModel: chainViewModel,
+                bypass: settingsStore.bypassOrderConfirmation
+            )
+        }
     }
 
     private var chartView: some View {
@@ -567,6 +583,24 @@ struct TradeScreenView: View {
         for position in tradeViewModel.positions { symbols.insert(position.symbol) }
         symbols.remove(chartViewModel.symbol)
         return symbols.sorted()
+    }
+
+    private var optionsWarning: String? {
+        guard let message = chartViewModel.optionsAnalyticsErrorMessage,
+              chartViewModel.optionsAnalyticsSettings.enabled
+        else { return nil }
+        switch chartViewModel.optionsAnalyticsDisplayState {
+        case .retained:
+            return "Options Structure retained snapshot: \(message)"
+        case .expired:
+            return "Options Structure expired: \(message)"
+        default:
+            return "Options Structure unavailable: \(message)"
+        }
+    }
+
+    private var retryOptionsWarning: () -> Void {
+        { Task { await chainViewModel.load(underlying: chartViewModel.symbol) } }
     }
 
     /// Same gate as the split-layout TradePanelView's Buy/Sell buttons; the lock

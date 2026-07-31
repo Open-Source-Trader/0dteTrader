@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { DEFAULT_API_BASE_URL } from '../../app/config';
 import { useContainer } from '../../app/container';
@@ -11,15 +11,18 @@ import { Spinner } from '../../design/components/Spinner';
 import { hostLabel, RAILWAY_DEPLOY_URL } from './serverSelect';
 
 type Step = 'choose' | 'connect' | 'deploy';
+export type ServerSelectMode = 'setup' | 'manage';
 
 const STEP_TITLES: Record<Step, string> = {
   choose: 'Choose Your Server',
-  connect: 'My Railway Backend',
+  connect: 'Connect a Backend',
   deploy: 'Deploy a Backend',
 };
 
-interface ServerSelectViewProps {
-  onDismiss: () => void;
+export interface ServerSelectViewProps {
+  mode?: ServerSelectMode;
+  prefillUrl?: string | null;
+  onDismiss?: () => void;
   /** Called once a server is chosen. `serverChanged` is true when the base URL
       actually changed (which rebuilds the app container and remounts the
       login screen), so the caller knows whether its local state survives. */
@@ -27,18 +30,26 @@ interface ServerSelectViewProps {
 }
 
 /**
- * Full-height server picker shown before account creation (and from the
- * "Server: … · Change" link on the login screen). Three options: the built-in
- * default backend, connecting an existing self-hosted backend, or deploying a
- * new one on Railway. Thin by design — URL validation and the health probe
- * live in ServerConfigStore where they are unit tested.
+ * Full-height server picker shown on first run and from desktop shell actions.
+ * Three options: the built-in default backend, connecting an existing hosted
+ * backend, or deploying a new one on Railway.
  */
-export function ServerSelectView({ onDismiss, onContinue }: ServerSelectViewProps) {
+export function ServerSelectView({
+  mode = 'manage',
+  prefillUrl = null,
+  onDismiss,
+  onContinue,
+}: ServerSelectViewProps) {
   const { serverConfigStore } = useContainer();
   const { baseUrl } = useStore(serverConfigStore);
-  const [step, setStep] = useState<Step>('choose');
+  const [step, setStep] = useState<Step>(prefillUrl ? 'connect' : 'choose');
 
   const isDefault = baseUrl === DEFAULT_API_BASE_URL;
+  const currentHost = hostLabel(baseUrl);
+
+  useEffect(() => {
+    if (prefillUrl) setStep('connect');
+  }, [prefillUrl]);
 
   const useDefault = () => {
     const changed = !isDefault;
@@ -46,21 +57,26 @@ export function ServerSelectView({ onDismiss, onContinue }: ServerSelectViewProp
     onContinue(changed);
   };
 
-  return (
-    <Sheet detent="large" onDismiss={onDismiss}>
+  let leading: ReactNode = <span />;
+  if (step === 'choose' && onDismiss) {
+    leading = (
+      <button className="navbar-text-button" onClick={onDismiss}>
+        Cancel
+      </button>
+    );
+  } else if (step !== 'choose') {
+    leading = (
+      <button className="navbar-text-button" onClick={() => setStep('choose')}>
+        Back
+      </button>
+    );
+  }
+
+  const body = (
+    <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
       <NavBar
-        title={STEP_TITLES[step]}
-        leading={
-          step === 'choose' ? (
-            <button className="navbar-text-button" onClick={onDismiss}>
-              Cancel
-            </button>
-          ) : (
-            <button className="navbar-text-button" onClick={() => setStep('choose')}>
-              Back
-            </button>
-          )
-        }
+        title={mode === 'setup' && step === 'choose' ? 'Connect to a Backend' : STEP_TITLES[step]}
+        leading={leading}
       />
       <div
         className="sheet-body hide-scrollbar"
@@ -74,48 +90,53 @@ export function ServerSelectView({ onDismiss, onContinue }: ServerSelectViewProp
         }}
       >
         {step === 'choose' ? (
-          <>
+          <div style={{ display: 'contents' }}>
             <p
               className="text-secondary"
               style={{ fontSize: 'var(--fs-subheadline)', textAlign: 'center', margin: 0 }}
             >
-              Pick the backend this app connects to.
+              {mode === 'setup'
+                ? 'Choose the backend this desktop app should use on this device.'
+                : `Current backend: ${currentHost}. Pick a different backend or keep using the default server.`}
             </p>
 
             <ServerCard
               title="Default server"
               description={`Use the built-in backend — ${hostLabel(DEFAULT_API_BASE_URL)}.`}
               selected={isDefault}
+              actionLabel={mode === 'setup' ? 'Use default' : undefined}
               onClick={useDefault}
             />
             <ServerCard
-              title="My Railway backend"
-              description="Already hosting your own? Connect it."
+              title="My hosted backend"
+              description="Already running your own backend? Connect it here."
               selected={!isDefault}
+              actionLabel={mode === 'setup' ? 'Connect backend' : undefined}
               onClick={() => setStep('connect')}
             />
             <ServerCard
               title="Deploy a new backend"
-              description="One click on Railway — free to start."
+              description="Launch the template on Railway, then connect it here."
+              actionLabel={mode === 'setup' ? 'Deploy backend' : undefined}
               onClick={() => setStep('deploy')}
             />
-          </>
+          </div>
         ) : null}
 
         {step === 'connect' ? (
-          <>
+          <div style={{ display: 'contents' }}>
             <p
               className="text-secondary"
               style={{ fontSize: 'var(--fs-subheadline)', textAlign: 'center', margin: 0 }}
             >
-              Paste your backend&apos;s URL and test the connection.
+              Paste your backend URL, test the connection, then continue.
             </p>
-            <ServerUrlForm onContinue={onContinue} />
-          </>
+            <ServerUrlForm mode={mode} prefillUrl={prefillUrl} onContinue={onContinue} />
+          </div>
         ) : null}
 
         {step === 'deploy' ? (
-          <>
+          <div style={{ display: 'contents' }}>
             <ol
               className="text-secondary"
               style={{
@@ -129,21 +150,29 @@ export function ServerSelectView({ onDismiss, onContinue }: ServerSelectViewProp
             >
               <li>Press Deploy and sign in to Railway.</li>
               <li>Wait for the services to go green.</li>
-              <li>Copy the api service&apos;s public URL and paste it below.</li>
+              <li>Copy the API service&apos;s public URL and paste it below.</li>
             </ol>
-            <a
+            <button
+              type="button"
               className="button-primary"
-              href={RAILWAY_DEPLOY_URL}
-              target="_blank"
-              rel="noreferrer"
-              style={{ textDecoration: 'none' }}
+              onClick={() => window.open(RAILWAY_DEPLOY_URL, '_blank', 'noopener,noreferrer')}
             >
               Deploy on Railway
-            </a>
-            <ServerUrlForm onContinue={onContinue} />
-          </>
+            </button>
+            <ServerUrlForm mode={mode} prefillUrl={prefillUrl} onContinue={onContinue} />
+          </div>
         ) : null}
       </div>
+    </div>
+  );
+
+  if (mode === 'setup') {
+    return body;
+  }
+
+  return (
+    <Sheet detent="large" onDismiss={onDismiss ?? (() => {})}>
+      {body}
     </Sheet>
   );
 }
@@ -152,11 +181,13 @@ function ServerCard({
   title,
   description,
   selected = false,
+  actionLabel,
   onClick,
 }: {
   title: string;
   description: string;
   selected?: boolean;
+  actionLabel?: string;
   onClick: () => void;
 }) {
   return (
@@ -188,6 +219,11 @@ function ServerCard({
       <span className="text-secondary" style={{ fontSize: 'var(--fs-footnote)' }}>
         {description}
       </span>
+      {actionLabel ? (
+        <span style={{ fontSize: 'var(--fs-footnote)', color: 'var(--app-accent)' }}>
+          {actionLabel}
+        </span>
+      ) : null}
     </button>
   );
 }
@@ -196,13 +232,33 @@ function ServerCard({
  * Shared URL entry for the connect/deploy steps: field, health probe, and a
  * Continue that persists via ServerConfigStore (which rebuilds the container).
  */
-function ServerUrlForm({ onContinue }: { onContinue: (serverChanged: boolean) => void }) {
+function ServerUrlForm({
+  mode,
+  prefillUrl,
+  onContinue,
+}: {
+  mode: ServerSelectMode;
+  prefillUrl: string | null;
+  onContinue: (serverChanged: boolean) => void;
+}) {
   const { serverConfigStore } = useContainer();
   const { baseUrl } = useStore(serverConfigStore);
-  const [draft, setDraft] = useState(baseUrl === DEFAULT_API_BASE_URL ? '' : baseUrl);
+  const initialDraft = useMemo(() => {
+    if (prefillUrl && prefillUrl !== DEFAULT_API_BASE_URL) return prefillUrl;
+    return baseUrl === DEFAULT_API_BASE_URL ? '' : baseUrl;
+  }, [baseUrl, prefillUrl]);
+  const [draft, setDraft] = useState(initialDraft);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [isChecking, setIsChecking] = useState(false);
   const [health, setHealth] = useState<HealthCheckResult | null>(null);
+
+  useEffect(() => {
+    setDraft(initialDraft);
+    setSaveError(null);
+    setHealth(null);
+  }, [initialDraft]);
+  const requiresPassingCheck = mode === 'setup' || draft.trim() !== baseUrl;
+  const canContinue = draft.trim() !== '' && (!requiresPassingCheck || health?.ok === true);
 
   const testConnection = async () => {
     if (isChecking) return;
@@ -213,6 +269,7 @@ function ServerUrlForm({ onContinue }: { onContinue: (serverChanged: boolean) =>
   };
 
   const save = () => {
+    if (!canContinue) return;
     try {
       const saved = serverConfigStore.save(draft);
       onContinue(saved !== baseUrl);
@@ -225,6 +282,7 @@ function ServerUrlForm({ onContinue }: { onContinue: (serverChanged: boolean) =>
   if (saveError) status = saveError;
   else if (isChecking) status = <Spinner size={14} />;
   else if (health) status = `${health.ok ? '✓' : '✗'} ${health.message}`;
+  else if (requiresPassingCheck) status = 'Test your backend before continuing.';
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
@@ -271,7 +329,12 @@ function ServerUrlForm({ onContinue }: { onContinue: (serverChanged: boolean) =>
         Test connection
       </button>
 
-      <button type="button" className="button-primary" onClick={save}>
+      <button
+        type="button"
+        className={`button-primary${canContinue ? '' : ' dimmed'}`}
+        disabled={!canContinue}
+        onClick={save}
+      >
         Continue
       </button>
     </div>

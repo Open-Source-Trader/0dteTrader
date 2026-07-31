@@ -36,7 +36,7 @@ describe('SessionStore refresh token scoping', () => {
     const storeB = new SessionStore('https://server-b.test');
 
     expect(storeB.hasStoredRefreshToken()).toBe(false);
-    expect(await storeB.restoreSession()).toBe(false);
+    expect(await storeB.restoreSession()).toEqual({ status: 'no-session' });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 

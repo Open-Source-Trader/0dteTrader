@@ -21,7 +21,7 @@ export const DEFAULT_OPTIONS_ANALYTICS_SETTINGS: OptionsAnalyticsSettings = {
   showDealerProxy: false,
   refreshSeconds: 45,
   profileStrikeCount: 12,
-  showDiagnostics: true,
+  showDiagnostics: false,
 };
 
 function booleanValue(value: unknown, fallback: boolean): boolean {

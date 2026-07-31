@@ -64,7 +64,7 @@ describe('SettingsStore options analytics settings', () => {
       showDealerProxy: false,
       refreshSeconds: 45,
       profileStrikeCount: 12,
-      showDiagnostics: true,
+      showDiagnostics: false,
     });
   });
 
@@ -119,6 +119,30 @@ describe('SettingsStore options analytics settings', () => {
     expect(localStorage.getItem('settings.optionsAnalytics.v1')).not.toBeNull();
     const obsoleteKey = `settings.${['g', 'e', 'x', 'Settings'].join('')}`;
     expect(localStorage.getItem(obsoleteKey)).toBeNull();
+  });
+});
+
+describe('SettingsStore server setup preference', () => {
+  beforeEach(() => {
+    Object.defineProperty(globalThis, 'localStorage', {
+      configurable: true,
+      value: new MemoryStorage(),
+    });
+  });
+
+  it('defaults first-run server selection to incomplete', () => {
+    expect(new SettingsStore().hasCompletedServerSelection).toBe(false);
+  });
+
+  it('persists first-run server selection completion', () => {
+    new SettingsStore().hasCompletedServerSelection = true;
+    expect(new SettingsStore().hasCompletedServerSelection).toBe(true);
+  });
+
+  it('treats an existing install footprint as already configured', () => {
+    localStorage.setItem('settings.riskDisclaimerAccepted', 'true');
+    localStorage.setItem('settings.lastSymbol', 'SPY');
+    expect(new SettingsStore().hasCompletedServerSelection).toBe(true);
   });
 });
 

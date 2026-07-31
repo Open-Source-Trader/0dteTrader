@@ -129,7 +129,11 @@ describe('checkServerHealth', () => {
 
     const result = await checkServerHealth('https://my-api.up.railway.app');
 
-    expect(result).toEqual({ ok: true, message: 'Server reachable, API ok' });
+    expect(result).toEqual({
+      ok: true,
+      message: 'Server reachable, API ok',
+      baseUrl: 'https://my-api.up.railway.app',
+    });
     const [url] = fetchMock.mock.calls[0] as [string];
     expect(url).toBe('https://my-api.up.railway.app/v1/health');
   });
@@ -147,6 +151,7 @@ describe('checkServerHealth', () => {
     const result = await checkServerHealth('https://my-api.up.railway.app');
 
     expect(result.ok).toBe(false);
+    expect(result.baseUrl).toBe('https://my-api.up.railway.app');
     expect(result.message).toMatch(/503/);
   });
 
@@ -156,6 +161,7 @@ describe('checkServerHealth', () => {
     const result = await checkServerHealth('https://my-api.up.railway.app');
 
     expect(result.ok).toBe(false);
+    expect(result.baseUrl).toBe('https://my-api.up.railway.app');
     expect(result.message).toMatch(/unreachable/i);
   });
 
@@ -168,6 +174,7 @@ describe('checkServerHealth', () => {
     const result = await checkServerHealth('https://my-api.up.railway.app');
 
     expect(result.ok).toBe(false);
+    expect(result.baseUrl).toBe('https://my-api.up.railway.app');
     expect(result.message).toMatch(/timed out/i);
   });
 
@@ -178,6 +185,7 @@ describe('checkServerHealth', () => {
     const result = await checkServerHealth('garbage');
 
     expect(result.ok).toBe(false);
+    expect(result.baseUrl).toBe('garbage');
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });

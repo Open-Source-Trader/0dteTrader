@@ -1,5 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { Group, Panel, Separator, useDefaultLayout } from 'react-resizable-panels';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type {
   ChartOrder,
   Me,
@@ -36,10 +35,10 @@ import { IndicatorSettingsDesktop } from '../chart/IndicatorSettingsDesktop';
 import { SymbolSearchView } from '../chart/SymbolSearchView';
 import { SymbolSpotlight } from '../chart/SymbolSpotlight';
 import { ProfileView } from '../profile/ProfileView';
-import { DesktopPositionsPanel } from './DesktopPositionsPanel';
-import { DesktopChartTopBar } from './DesktopTopBar';
 import { DesktopTradeTicket } from './DesktopTradeTicket';
 import { FloatingTradeButtons } from './FloatingTradeButtons';
+import { TradeManagementWorkspace } from './TradeManagementWorkspace';
+import { desktopTradeWorkspaceHeight } from './TradeManagementWorkspaceModel';
 import { HistoryView } from './HistoryView';
 import { OrderConfirmPopup } from './OrderConfirmPopup';
 import { PositionsStrip } from './PositionsStrip';
@@ -94,6 +93,7 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
   const chart = useStore(chartStore, chartChromeSlice, shallowEqual);
   const trade = useStore(tradeStore);
   const chain = useStore(chainStore); // Chain selection supplies the exact analytics expiration.
+  const chartOrders = useStore(chartOrdersStore);
 
   const [layout, setLayout] = useState<TradeLayout>(() => settingsStore.layoutMode);
   const [locked, setLocked] = useState(() => settingsStore.tradingLocked);
@@ -117,6 +117,7 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
   // so it confirms — matching the iOS alert rather than cancelling on one click.
   const [orderPendingCancel, setOrderPendingCancel] = useState<ChartOrder | null>(null);
   const [me, setMe] = useState<Me | null>(null);
+  const [desktopWorkspaceExpanded, setDesktopWorkspaceExpanded] = useState(false);
   const nextMode: TradingMode = tradingMode === 'live' ? 'practice' : 'live';
 
   // Active trading provider (from /v1/me) and whether it has credentials
@@ -162,14 +163,6 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
   const [contentHeight, setContentHeight] = useState(0);
   const [shellRef, breakpoint] = useLayoutBreakpoint();
   const isDesktopGrid = breakpoint === 'standard' || breakpoint === 'wide';
-
-  // Chart/ticket column widths for the desktop grid, persisted across
-  // restarts (localStorage-backed, same mechanism SettingsStore uses).
-  const desktopGridLayout = useDefaultLayout({
-    id: 'trade-screen.desktop-grid',
-    storage: localStorage,
-    panelIds: ['chart', 'ticket'],
-  });
 
   // Startup: candles + stream, positions/orders, chain.
   useEffect(() => {
@@ -398,14 +391,31 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
     />
   );
 
-  // Desktop grid: tabbed dense table instead of the phone strip's chip row.
+  const resolveOptionContract = useCallback(
+    (symbol: string) =>
+      chainStore.getState().chain?.contracts.find((contract) => contract.symbol === symbol) ?? null,
+    [chainStore],
+  );
+  const hasDesktopActivity = trade.positions.length > 0 || trade.openOrders.length > 0;
+  const desktopWorkspaceHeight = desktopTradeWorkspaceHeight({
+    expanded: desktopWorkspaceExpanded,
+    hasActivity: hasDesktopActivity,
+  });
+
+  // Desktop grid: state-aware trade-management workspace instead of a fixed empty table.
   const desktopPositionsPanel = (
-    <DesktopPositionsPanel
+    <TradeManagementWorkspace
       positions={trade.positions}
       openOrders={trade.openOrders}
+      chartOrders={chartOrders.orders}
       workingSymbols={trade.workingSymbols}
-      onFlatten={(position) => void tradeStore.flatten(position)}
+      expanded={desktopWorkspaceExpanded}
+      onExpandedChange={setDesktopWorkspaceExpanded}
+      onClosePosition={(position) => void tradeStore.flatten(position)}
+      onTrimPosition={(position) => void tradeStore.trimHalf(position)}
       onCancelOrder={(order) => void tradeStore.cancel(order)}
+      onCancelChartOrder={(order) => void chartOrdersStore.cancel(order.id)}
+      resolveContract={resolveOptionContract}
       locked={locked}
     />
   );
@@ -414,25 +424,8 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
   if (isDesktopGrid) {
     contentArea = (
       <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column' }}>
-        <Group
-          orientation="horizontal"
-          style={{ flex: 1, minHeight: 0, display: 'flex' }}
-          defaultLayout={desktopGridLayout.defaultLayout}
-          onLayoutChanged={desktopGridLayout.onLayoutChanged}
-        >
-          <Panel
-            id="chart"
-            defaultSize={breakpoint === 'wide' ? '78' : '70'}
-            minSize="40"
-            style={{ minWidth: 0, display: 'flex', flexDirection: 'column' }}
-          >
-            <DesktopChartTopBar
-              chartStore={chartStore}
-              onSymbolSearch={() => setShowSymbolSearch(true)}
-              onIndicatorSettings={() => setShowIndicatorSettings(true)}
-              tradingMode={tradingMode}
-              onToggleMode={() => setShowModeConfirmation(true)}
-            />
+        <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
+          <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
             <ChartView
               store={chartStore}
               drawingsStore={drawingsStore}
@@ -450,26 +443,27 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
               onShowHistory={() => setShowHistory(true)}
               onShowProfile={() => setShowProfile(true)}
             />
-          </Panel>
+          </div>
 
-          {/* Draggable divider between chart and the order ticket rail. */}
-          <Separator
-            style={{
-              width: 5,
-              flex: 'none',
-              cursor: 'col-resize',
-              background: 'var(--hud-stroke-dim)',
-            }}
+          {/* Static hairline between the chart and the order ticket rail. */}
+          <div
+            aria-hidden
+            style={{ width: DIVIDER_HEIGHT, flex: 'none', background: 'var(--hud-stroke-dim)' }}
           />
 
           {/* Order ticket + chain rail: always visible, never a sheet —
               a scalper needs the ticket armed and ready without a click
-              to reveal it. */}
-          <Panel
-            id="ticket"
-            defaultSize={breakpoint === 'wide' ? '22' : '30'}
-            minSize="18"
-            style={{ minHeight: 0, display: 'flex', flexDirection: 'column' }}
+              to reveal it. Fixed proportion of the row per breakpoint —
+              resizing added no utility and just risked an awkwardly narrow
+              rail, so the layout stays responsive without user dragging. */}
+          <div
+            style={{
+              flex: `0 0 ${breakpoint === 'wide' ? '22%' : '30%'}`,
+              minWidth: 320,
+              minHeight: 0,
+              display: 'flex',
+              flexDirection: 'column',
+            }}
           >
             <DesktopTradeTicket
               tradeStore={tradeStore}
@@ -477,8 +471,8 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
               onArm={arm}
               locked={locked}
             />
-          </Panel>
-        </Group>
+          </div>
+        </div>
 
         {/* Static hairline between the main row and the positions footer */}
         <div
@@ -488,7 +482,9 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
 
         {/* Positions/orders footer: full width, always visible so open
             risk is never a click away. */}
-        <div style={{ flex: 'none', height: 160, minHeight: 0 }}>{desktopPositionsPanel}</div>
+        <div style={{ flex: 'none', height: desktopWorkspaceHeight, minHeight: 0 }}>
+          {desktopPositionsPanel}
+        </div>
       </div>
     );
   } else if (layout === 'fullscreen') {
@@ -599,10 +595,8 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
         position: 'relative',
       }}
     >
-      {/* Desktop grid uses DesktopTopBar instead — one merged row with the
-          chart's own symbol/price alongside these same global actions,
-          rather than a full-width app NavBar stacked above a second,
-          separate chart header. */}
+      {/* Desktop grid renders chart controls inside ChartView's chart shell;
+          compact layouts keep the app NavBar above content. */}
       {isDesktopGrid ? null : (
         <NavBar
           title="0dteTrader"

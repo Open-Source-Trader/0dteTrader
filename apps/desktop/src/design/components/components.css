@@ -75,11 +75,9 @@
   opacity: 0.5;
 }
 
-/* --- Desktop grid top bar (features/trade/DesktopTopBar) ---
-   One row for the whole app: symbol/price (what you're trading), chart
-   controls, and global actions (profile/history/lock) together — not a
-   full-width app NavBar with a centered logo stacked above a second,
-   separate chart header. Solid fill, terminal convention. */
+/* --- Desktop chart command bar ---
+   Symbol/price, mode, timeframe, and indicator actions live inside the chart
+   shell instead of a standalone page-level header. */
 /* Each resizable panel (chart, order ticket) gets its own top bar, rendered
    inside that panel — so the bar's right edge always tracks the panel's
    real width, including while the user is live-dragging the chart/ticket
@@ -263,6 +261,83 @@
   padding: 2px 0;
   transform-origin: top;
   animation: hud-popup-drop 200ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+/* Expiry picker: a flattened grid of dates, not the vertical checkmark list
+   `.menu-dropdown` is built for — a handful of near-term expirations reads
+   faster as a compact grid than as a scrolling column, and it doesn't need
+   the opaque angular-frame chrome the rest of the trade rail has moved away
+   from. */
+.desktop-expiry-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 64px);
+  gap: 4px;
+  width: max-content;
+  overflow-x: hidden;
+  /* Extra right padding clears the vertical scrollbar (inherited from
+     .menu-dropdown's overflow-y: auto) so it doesn't sit over the last
+     column's dates. */
+  padding: 8px 14px 8px 8px;
+  scrollbar-gutter: stable;
+  border: var(--border-hairline) solid var(--hud-stroke-dim);
+  border-image: none;
+  background: var(--app-surface-elevated);
+  border-radius: 4px;
+  box-shadow: var(--shadow-overlay);
+}
+
+.desktop-expiry-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  min-width: 0;
+  padding: 6px 4px;
+  border: var(--border-hairline) solid transparent;
+  border-radius: 3px;
+  color: var(--label-secondary);
+}
+
+.desktop-expiry-cell:hover {
+  border-color: var(--hud-stroke-dim);
+  color: var(--label-primary);
+}
+
+.desktop-expiry-cell.selected {
+  color: var(--app-accent-text);
+  background: rgba(46, 143, 255, 0.14);
+  box-shadow: inset 0 -2px 0 var(--app-accent);
+}
+
+.desktop-expiry-cell-badge {
+  font-size: var(--fs-caption2-desktop);
+  font-weight: 800;
+  letter-spacing: 0.03em;
+}
+
+.desktop-expiry-cell-date {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-caption-desktop);
+  font-weight: 700;
+}
+
+/* Chart interval picker: same flat surface + hairline border as the expiry
+   grid, replacing `.menu-dropdown`'s opaque angular-frame chrome — still a
+   vertical checkmark list (not a grid; a dozen-odd timeframes read better
+   as a scrollable column), just without the filled-box HUD texture. */
+.chart-interval-menu {
+  border: var(--border-hairline) solid var(--hud-stroke-dim);
+  border-image: none;
+  background: var(--app-surface-elevated);
+  border-radius: 4px;
+}
+
+.chart-interval-menu .menu-item {
+  padding: 9px 20px;
 }
 
 /* The order confirmation wears the popups' chrome, and none of their
@@ -1046,6 +1121,567 @@
   font-size: var(--fs-caption2-desktop);
 }
 
+.chart-shell {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  margin: 3px 8px;
+  background: rgba(3, 11, 22, 0.74);
+  border: var(--border-hairline) solid var(--hud-stroke-dim);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+/* Desktop grid: the chart sits inside the app shell alongside the option
+   chain and trade rail, which carry no border of their own — a hairline
+   divider (rendered by the parent layout) is the only seam between them.
+   The chart's own border/radius/margin here would read as a second, nested
+   frame instead of the chart being flush content in the same console. */
+.chart-shell--desktop {
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.chart-command-bar {
+  flex: none;
+  min-height: 38px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 8px;
+  background: transparent;
+  border-bottom: var(--border-hairline) solid rgba(46, 143, 255, 0.22);
+  overflow: visible;
+}
+
+.chart-command-bar__symbol {
+  flex: none;
+}
+
+.chart-command-bar__chevron {
+  display: flex;
+  color: var(--app-accent);
+}
+
+.chart-command-bar__quote {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-size: var(--fs-subheadline-desktop);
+  font-weight: 700;
+}
+
+.chart-command-bar__quote-secondary {
+  color: var(--label-secondary);
+  font-size: var(--fs-caption-desktop);
+  font-weight: 500;
+}
+
+.chart-command-bar__stale {
+  color: var(--warning-orange);
+  font-size: var(--fs-caption2-desktop);
+  font-weight: 800;
+}
+
+.chart-command-bar__actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: max-content;
+}
+
+/* Flat chip matching the trade rail's expiry selector — a thin border and
+   surface fill instead of the opaque angular-frame `.quick-chip` texture,
+   with the chevron marking it as a dropdown the same way that button does. */
+.chart-command-bar__interval {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 5px 10px;
+  color: var(--label-primary);
+  font-family: var(--font-mono);
+  font-size: var(--fs-caption);
+  font-weight: 600;
+  border: var(--border-hairline) solid var(--hud-stroke-dim);
+  border-radius: 3px;
+  background: var(--app-surface);
+}
+
+.chart-command-bar__interval:hover {
+  border-color: var(--label-primary);
+  background: var(--app-surface-elevated);
+}
+
+.chart-command-bar__interval-label {
+  text-transform: uppercase;
+}
+
+.chart-command-bar__secondary,
+.chart-command-bar__menu-hint {
+  font-size: var(--fs-caption2-desktop);
+  color: var(--label-secondary);
+}
+
+.chart-command-bar__menu-hint {
+  margin-left: 12px;
+}
+
+.chart-command-bar__indicators {
+  width: 32px;
+  min-width: 32px;
+  min-height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 5px;
+  color: var(--app-accent-text);
+  border: var(--border-hairline) solid transparent;
+  background: transparent;
+  clip-path: polygon(7px 0, 100% 0, 100% calc(100% - 7px), calc(100% - 7px) 100%, 0 100%, 0 7px);
+}
+
+.chart-command-bar__indicators:hover {
+  border-color: var(--hud-stroke-dim);
+  background: rgba(46, 143, 255, 0.08);
+}
+
+.chart-plot-area {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+.chart-plot-surface {
+  flex: 1;
+  min-height: 100px;
+  display: flex;
+  padding: 0;
+}
+
+.chart-warning-row {
+  margin: 0;
+  min-height: 26px;
+  overflow: hidden;
+  border-left: 0;
+  border-right: 0;
+  /* Left edge lines up with the chart canvas, not the draw-tools rail — the
+     rail sits to the left of the plot area below this row. */
+  padding-left: calc(44px + var(--space-2));
+}
+
+.chart-warning-row__message {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 1180px) {
+  .chart-command-bar__quote-secondary,
+  .chart-command-bar__secondary {
+    display: none;
+  }
+
+  .chart-command-bar__indicators {
+    width: 32px;
+    min-width: 32px;
+  }
+}
+
+.desktop-ticket-rail {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 0 8px 8px;
+  background: var(--app-background);
+  height: 100%;
+  min-height: 0;
+}
+
+/* One continuous execution surface: everything between the chain and
+   BUY/SELL shares this background, with thin hairline separators between
+   groups instead of independent bordered cards per group. */
+.desktop-execution-deck {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  background: var(--app-background);
+}
+
+.desktop-ticket-config-row {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 34px;
+  padding: 6px 2px;
+  border-top: var(--border-hairline) solid var(--hud-stroke-dim);
+}
+
+.desktop-expiry-trigger {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.desktop-expiry-button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  width: 100%;
+  padding: 5px 8px;
+  color: var(--label-primary);
+  font-size: var(--fs-caption-desktop);
+  font-weight: 600;
+  border: var(--border-hairline) solid var(--hud-stroke-dim);
+  border-radius: 3px;
+  background: var(--app-surface);
+}
+
+.desktop-expiry-button:hover {
+  border-color: var(--label-primary);
+  background: var(--app-surface-elevated);
+}
+
+.desktop-expiry-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.desktop-expiry-button svg {
+  flex: none;
+}
+
+/* Auto / Call / Put: one control family, quiet until active. Active state is
+   a thin tinted underline + color, not an individual filled frame. */
+.desktop-mode-button {
+  flex: none;
+  min-height: 30px;
+  padding: 5px 10px;
+  border: var(--border-hairline) solid transparent;
+  border-radius: 2px;
+  color: var(--label-secondary);
+  font-size: var(--fs-caption2-desktop);
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.desktop-mode-button:hover {
+  color: var(--label-primary);
+}
+
+.desktop-mode-button--auto.selected {
+  color: var(--app-accent-text);
+  border-color: color-mix(in srgb, var(--app-accent) 55%, transparent);
+  background: rgba(46, 143, 255, 0.1);
+}
+
+.desktop-mode-button--call.selected {
+  color: var(--buy-green);
+  border-color: color-mix(in srgb, var(--buy-green) 55%, transparent);
+  background: rgba(91, 255, 139, 0.08);
+}
+
+.desktop-mode-button--put.selected {
+  color: var(--sell-red);
+  border-color: color-mix(in srgb, var(--sell-red) 55%, transparent);
+  background: rgba(255, 94, 94, 0.08);
+}
+
+.desktop-ticket-config-error {
+  color: var(--pnl-negative);
+  font-size: var(--fs-caption2-desktop);
+  text-decoration: underline;
+}
+
+.desktop-ticket-execution {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 6px 2px 0;
+  border-top: var(--border-hairline) solid var(--hud-stroke-dim);
+}
+
+.desktop-ticket-price-row,
+.desktop-ticket-action-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Quantity: a section label above two independent groups — a compact
+   grouped stepper on the left, secondary preset buttons on the right — not
+   one full-width bordered table row. */
+.desktop-ticket-qty-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.desktop-ticket-qty-label {
+  color: var(--label-secondary);
+  font-size: var(--fs-caption2-desktop);
+  font-weight: 600;
+}
+
+.desktop-ticket-qty-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.desktop-qty-stepper {
+  display: flex;
+  align-items: stretch;
+  height: 36px;
+  border: var(--border-hairline) solid var(--hud-stroke-dim);
+  border-radius: 2px;
+}
+
+.desktop-qty-step {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  color: var(--label-primary);
+  background: transparent;
+  border: 0;
+}
+
+.desktop-qty-step:first-child {
+  border-right: var(--border-hairline) solid var(--hud-stroke-dim);
+}
+
+.desktop-qty-step:last-child {
+  border-left: var(--border-hairline) solid var(--hud-stroke-dim);
+}
+
+.desktop-qty-step:hover:not(:disabled) {
+  background: var(--app-surface-elevated);
+}
+
+.desktop-qty-step:focus-visible {
+  outline: 2px solid var(--app-accent);
+  outline-offset: -2px;
+}
+
+.desktop-qty-step:active:not(:disabled) {
+  background: var(--app-surface-elevated);
+}
+
+.desktop-qty-step:disabled {
+  opacity: var(--disabled-opacity);
+}
+
+.desktop-ticket-qty-value {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 48px;
+  text-align: center;
+  font-size: var(--fs-subheadline-desktop);
+  font-weight: 700;
+}
+
+.desktop-qty-presets {
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+}
+
+/* Visually secondary to the main stepper: smaller text, muted default
+   color — same neutral border/radius language, but the shortcuts read as
+   quick actions, not another primary control. */
+.desktop-qty-preset {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 40px;
+  height: 36px;
+  padding: 0 8px;
+  color: var(--label-secondary);
+  font-family: var(--font-mono);
+  font-size: var(--fs-caption2-desktop);
+  font-weight: 600;
+  white-space: nowrap;
+  background: transparent;
+  border: var(--border-hairline) solid var(--hud-stroke-dim);
+  border-radius: 2px;
+}
+
+.desktop-qty-preset:hover {
+  color: var(--label-primary);
+  background: var(--app-surface-elevated);
+}
+
+.desktop-qty-preset:focus-visible {
+  outline: 2px solid var(--app-accent);
+  outline-offset: -2px;
+}
+
+.desktop-qty-preset:active {
+  background: var(--app-surface-elevated);
+}
+
+/* Custom, Bid, Mid, Ask, Market: one segmented track, iOS order. Each
+   segment carries its own live price over its label (Market has none to
+   show) so the price-mode row is the single place quote prices live —
+   nothing above it needs to repeat Bid/Mid/Ask. */
+.desktop-ticket-price-row {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0;
+  border: var(--border-hairline) solid var(--hud-stroke-dim);
+  border-radius: 2px;
+}
+
+.desktop-ticket-price-mode {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  min-height: 40px;
+  padding: 4px;
+  border: 0;
+  border-right: var(--border-hairline) solid var(--hud-stroke-dim);
+  color: var(--label-secondary);
+}
+
+.desktop-ticket-price-mode:last-child {
+  border-right: 0;
+}
+
+.desktop-ticket-price-mode-value {
+  font-size: var(--fs-caption-desktop);
+  font-weight: 700;
+  color: var(--label-primary);
+}
+
+.desktop-ticket-price-mode-label {
+  font-size: var(--fs-caption2-desktop);
+  font-weight: 600;
+  color: var(--label-secondary);
+}
+
+/* Position in the track already signals which mode is active — a neutral
+   inverted fill marks it without adding another blue accent to the row. */
+.desktop-ticket-price-mode.selected {
+  background: rgba(46, 143, 255, 0.14);
+  /* box-shadow: inset 0 -2px 0 var(--app-accent); */
+}
+
+.desktop-ticket-price-mode.selected .desktop-ticket-price-mode-value,
+.desktop-ticket-price-mode.selected .desktop-ticket-price-mode-label,
+.desktop-ticket-price-mode.selected .desktop-ticket-price-mode-input {
+  color: var(--app-accent-text);
+}
+
+.desktop-ticket-price-mode--custom {
+  cursor: text;
+}
+
+.desktop-ticket-price-mode-input {
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  text-align: center;
+  font-size: var(--fs-caption-desktop);
+  font-weight: 700;
+  color: var(--label-primary);
+}
+
+.desktop-ticket-price-mode-input::placeholder {
+  color: var(--label-secondary);
+}
+
+/* Max loss / Spread: the pre-trade risk check, not another metric row —
+   a bordered, tinted strip sets it apart from the plain label/value tables
+   above (Spot/Distance, Details) so it reads as "the number to check before
+   you commit," directly over the BUY/SELL it gates. */
+.desktop-ticket-risk {
+  display: flex;
+  align-items: stretch;
+  min-height: 30px;
+  border: var(--border-hairline) solid var(--hud-stroke-dim);
+  border-radius: 2px;
+}
+
+.desktop-ticket-risk-item {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 1px;
+  flex: 1;
+  min-width: 0;
+  padding: 3px 8px;
+}
+
+.desktop-ticket-risk-item--end {
+  align-items: flex-end;
+  text-align: right;
+}
+
+.desktop-ticket-risk-divider {
+  flex: none;
+  width: var(--border-hairline);
+  background: var(--hud-stroke-dim);
+}
+
+.desktop-ticket-risk-label {
+  color: var(--label-secondary);
+  font-size: var(--fs-caption2-desktop);
+  font-weight: 600;
+}
+
+.desktop-ticket-risk-value {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--label-primary);
+  font-size: var(--fs-caption2-desktop);
+  font-weight: 700;
+}
+
+.desktop-ticket-risk-status {
+  flex: none;
+  align-self: center;
+  padding-right: 10px;
+  color: var(--label-secondary);
+  font-size: var(--fs-caption2-desktop);
+}
+
+.desktop-ticket-action-row {
+  flex: none;
+  gap: 10px;
+  padding: 8px 2px 2px;
+}
+
+/* Longer state-aware labels ("BUY TO OPEN" / "SELL TO CLOSE") need a
+   smaller, tighter size than the generic BUY/SELL to stay on one line at
+   the rail's minimum width. */
+.desktop-ticket-action-row .trade-action-button {
+  gap: 0;
+  font-size: var(--fs-caption-desktop);
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
 /* --- Option chain table (desktop grid only) ---
    Calls | Strike | Puts, one row per strike. Replaces the phone ticket's
    single-strike dropdown chips at the standard/wide breakpoints — a scalper
@@ -1068,9 +1704,10 @@
   display: grid;
   grid-template-columns: 1fr 60px 1fr;
   flex: none;
-  padding: 3px var(--space-2);
+  padding: 5px var(--space-2);
   color: var(--label-secondary);
-  font-size: var(--fs-caption2);
+  font-size: var(--fs-caption2-desktop);
+  font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.06em;
   border-bottom: var(--border-hairline) solid var(--hud-stroke-dim);
@@ -1104,7 +1741,8 @@
 /* ATM row: a solid pinned band (DOM "current price" convention), not a
    translucent tint — it must read as a fixed reference line, not a hover. */
 .chain-row--atm {
-  background: var(--app-accent-fill);
+  /* background: var(--app-accent-fill); */
+  background: rgba(46, 143, 255, 0.14);
   box-shadow:
     inset 0 var(--border-hairline) 0 var(--hud-stroke),
     inset 0 calc(-1 * var(--border-hairline)) 0 var(--hud-stroke);
@@ -1172,10 +1810,18 @@
 
 .chain-cell--call.selected {
   border-left-color: var(--buy-green);
+  background: rgba(91, 255, 139, 0.12);
+  box-shadow:
+    inset 0 0 0 1px rgba(91, 255, 139, 0.2),
+    inset 4px 0 0 rgba(91, 255, 139, 0.18);
 }
 
 .chain-cell--put.selected {
   border-right-color: var(--sell-red);
+  background: rgba(255, 94, 94, 0.12);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 94, 94, 0.2),
+    inset -4px 0 0 rgba(255, 94, 94, 0.18);
 }
 
 /* AUTO mode: the chain stays fully readable — not the trading-locked
@@ -1758,4 +2404,348 @@
 
 .desktop-positions-action:disabled {
   opacity: var(--disabled-opacity);
+}
+
+.desktop-positions-action--danger {
+  color: var(--sell-red);
+}
+
+.is-positive {
+  color: var(--pnl-positive);
+}
+
+.is-negative {
+  color: var(--pnl-negative);
+}
+
+.desktop-contract-summary {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  background: transparent;
+  border: var(--border-hairline) solid var(--hud-stroke-dim);
+  border-radius: 2px;
+}
+
+.desktop-contract-summary--unavailable {
+  color: color-mix(in srgb, var(--warning-orange) 55%, var(--label-primary));
+}
+
+/* Every row below owns its own padding rather than inheriting it from the
+   card — 18px horizontal keeps text off the left/right rails at every row,
+   and each row sets its own vertical padding for its content type. */
+.summary-header,
+.summary-context,
+.summary-details-toggle,
+.summary-details-content {
+  padding-left: 18px;
+  padding-right: 18px;
+}
+
+/* Contract + execution price share one row — collapsing the price out of
+   its own tinted row freed real vertical space, and the two belong together
+   anyway: "what" and "at what price" read as a single fact, not two. */
+.summary-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+  padding-top: 14px;
+  padding-bottom: 14px;
+  border-bottom: var(--border-hairline) solid var(--hud-stroke-dim);
+}
+
+.summary-context {
+  padding-top: 12px;
+  padding-bottom: 12px;
+  border-bottom: var(--border-hairline) solid var(--hud-stroke-dim);
+}
+
+/* Details disclosure: quiet toggle, no frame — break-even and
+   intrinsic/extrinsic stay one click away instead of competing with the
+   order-construction controls above for primary space. */
+.desktop-contract-summary__details {
+  display: flex;
+  flex-direction: column;
+}
+
+.summary-details-toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding-top: 12px;
+  padding-bottom: 12px;
+  color: var(--label-secondary);
+  font-size: var(--fs-caption2-desktop);
+  font-weight: 600;
+  cursor: pointer;
+  list-style: none;
+}
+
+.summary-details-toggle::-webkit-details-marker {
+  display: none;
+}
+
+.summary-details-toggle:hover {
+  color: var(--label-primary);
+}
+
+.summary-details-toggle svg {
+  transition: transform 0.15s ease;
+}
+
+.desktop-contract-summary__details[open] .summary-details-toggle {
+  border-bottom: var(--border-hairline) solid var(--hud-stroke-dim);
+}
+
+.desktop-contract-summary__details[open] .summary-details-toggle svg {
+  transform: rotate(180deg);
+}
+
+/* Real two-column grid: Expiry B/E + Intrinsic on the left, Spread +
+   Extrinsic on the right — not two side-by-side tables, so the right
+   column's text is laid out from its own grid track instead of a
+   space-between flex spanning rail to rail. */
+.summary-details-content {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  column-gap: 32px;
+  row-gap: 12px;
+  padding-top: 14px;
+  padding-bottom: 14px;
+}
+
+.summary-details-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.summary-details-cell--end {
+  align-items: flex-end;
+  text-align: right;
+}
+
+.summary-details-label {
+  color: var(--label-secondary);
+  font-size: var(--fs-caption2-desktop);
+  font-weight: 700;
+}
+
+.summary-details-value {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+  color: var(--label-primary);
+  font-size: var(--fs-caption-desktop);
+  font-weight: 700;
+}
+
+.desktop-contract-summary__contract {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-subheadline-desktop);
+  font-weight: 800;
+  color: var(--label-primary);
+}
+
+.desktop-contract-summary__price {
+  flex: none;
+  font-size: var(--fs-title3);
+  font-weight: 900;
+  color: var(--label-primary);
+  white-space: nowrap;
+}
+
+/* Spot/Distance: two equal columns under their own headers, full card
+   width instead of packing two facts into half of it. */
+.desktop-contract-summary__table {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+}
+
+.desktop-contract-summary__table th {
+  padding: 0 0 6px;
+  color: var(--label-secondary);
+  font-size: var(--fs-caption2-desktop);
+  font-weight: 700;
+  text-align: left;
+}
+
+.desktop-contract-summary__table th:last-child,
+.desktop-contract-summary__table td:last-child {
+  text-align: right;
+}
+
+.desktop-contract-summary__table td {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0;
+  color: var(--label-primary);
+  font-size: var(--fs-caption-desktop);
+  font-weight: 700;
+  text-align: left;
+}
+
+.desktop-warning-row {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 8px 2px 47px;
+  padding: 3px 8px;
+  min-height: 24px;
+  background: rgba(255, 179, 71, 0.08);
+  border: var(--border-hairline) solid color-mix(in srgb, var(--warning-orange) 40%, transparent);
+  color: var(--label-primary);
+  font-size: var(--fs-caption2-desktop);
+}
+
+.desktop-warning-row--compact {
+  margin: 4px 8px 0;
+}
+
+.desktop-warning-chip {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 6px;
+  border-radius: var(--radius-chip);
+  font-weight: 800;
+}
+
+.desktop-warning-chip--caution {
+  color: var(--warning-orange);
+  background: rgba(255, 179, 71, 0.12);
+}
+
+.desktop-warning-row.chart-warning-row {
+  margin: 0;
+  border-left: 0;
+  border-right: 0;
+}
+
+.trade-management-workspace {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+  background: var(--app-background);
+  transition: height 180ms var(--ease-out);
+}
+
+.trade-position-strip {
+  flex: none;
+  display: grid;
+  grid-template-columns: minmax(140px, 1.15fr) minmax(110px, 0.45fr) minmax(260px, 2fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 88px;
+  padding: 8px 10px;
+  border-bottom: var(--border-hairline) solid var(--hud-stroke-dim);
+  background: linear-gradient(90deg, rgba(46, 143, 255, 0.08), rgba(3, 11, 22, 0.18));
+}
+
+.trade-position-strip__identity {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.trade-position-strip__contract {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-subheadline-desktop);
+  font-weight: 800;
+}
+
+.trade-position-strip__pnl {
+  font-size: var(--fs-subheadline-desktop);
+  font-weight: 800;
+  text-align: right;
+}
+
+.trade-position-strip__details {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(72px, 1fr));
+  gap: 4px 10px;
+  color: var(--label-secondary);
+  font-size: var(--fs-caption-desktop);
+}
+
+.trade-position-strip__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 5px;
+  max-width: 410px;
+}
+
+.trade-position-strip__actions .desktop-positions-action,
+.trade-management-table .desktop-positions-action {
+  min-height: 28px;
+}
+
+.trade-management-expanded {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.trade-management-table {
+  min-width: 1040px;
+}
+
+.trade-management-statusbar {
+  flex: none;
+  min-height: 36px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 0 10px;
+  border-top: var(--border-hairline) solid var(--hud-stroke-dim);
+  color: var(--label-secondary);
+  font-size: var(--fs-caption-desktop);
+}
+
+.trade-management-statusbar span {
+  white-space: nowrap;
+}
+
+.trade-management-expand-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  color: var(--app-accent-text);
+  font-weight: 700;
+  min-height: 30px;
+  padding: 0 8px;
+}
+
+.trade-management-expand-button svg {
+  transition: transform 0.15s ease;
+}
+
+@media (max-width: 1180px) {
+  .trade-position-strip {
+    grid-template-columns: minmax(120px, 1fr) minmax(100px, 0.5fr) minmax(220px, 1.5fr);
+  }
+
+  .trade-position-strip__actions {
+    grid-column: 1 / -1;
+    justify-content: flex-start;
+    max-width: none;
+  }
 }

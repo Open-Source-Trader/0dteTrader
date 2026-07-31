@@ -469,7 +469,18 @@ export class TradeStore extends Store<TradeStoreState> {
 
   /** Tap-to-flatten: opposite-side market order for the full position size. */
   async flatten(position: Position): Promise<void> {
-    if (position.quantity === 0) return;
+    await this.exitPosition(position, Math.abs(position.quantity), 'Flatten');
+  }
+
+  /** Partial scale-out: opposite-side market order for half the current size. */
+  async trimHalf(position: Position): Promise<void> {
+    const quantity = Math.floor(Math.abs(position.quantity) / 2);
+    if (quantity <= 0) return;
+    await this.exitPosition(position, quantity, 'Trim');
+  }
+
+  private async exitPosition(position: Position, quantity: number, action: string): Promise<void> {
+    if (position.quantity === 0 || quantity <= 0) return;
     if (this.getState().workingSymbols.includes(position.symbol)) return;
     this.set({ workingSymbols: [...this.getState().workingSymbols, position.symbol] });
 
@@ -477,7 +488,7 @@ export class TradeStore extends Store<TradeStoreState> {
       const side: OrderSide = position.quantity > 0 ? 'sell' : 'buy';
       const contract = this.optionContractResolver?.(position.symbol) ?? null;
       if (!contract) {
-        this.showToast(`Open ${position.symbol}'s chart to flatten this option.`, 'error');
+        this.showToast(`Open ${position.symbol}'s chart to manage this option.`, 'error');
         return;
       }
       const selection: OrderSelection = {
@@ -491,14 +502,14 @@ export class TradeStore extends Store<TradeStoreState> {
         underlying: contract.underlying,
         assetClass: 'option',
         side,
-        quantity: Math.abs(position.quantity),
+        quantity: Math.min(quantity, Math.abs(position.quantity)),
         orderType: 'market',
         selection,
       };
       try {
         const result = await this.apiClient.placeOrder(request, newIdempotencyKey());
         this.showToast(
-          `Flatten ${position.symbol} — ${orderStatusDisplayName(result.status)}`,
+          `${action} ${position.symbol} — ${orderStatusDisplayName(result.status)}`,
           result.status === 'rejected' ? 'error' : 'success',
         );
         // See submitOrder: the placement's own orderUpdate push refreshes

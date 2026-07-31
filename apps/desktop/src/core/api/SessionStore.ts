@@ -1,6 +1,12 @@
 import type { AuthTokens } from '@0dtetrader/shared-types';
 import { ApiError, parseErrorEnvelope } from './ApiError';
 
+export type RestoreSessionResult =
+  | { status: 'authenticated' }
+  | { status: 'no-session' }
+  | { status: 'session-expired' }
+  | { status: 'server-unreachable'; message: string };
+
 const REFRESH_TOKEN_KEY_PREFIX = '0dte.refreshToken';
 
 /**
@@ -18,7 +24,13 @@ export class SessionStore {
   private readonly refreshTokenKey: string;
 
   constructor(private readonly baseUrl: string) {
-    this.refreshTokenKey = `${REFRESH_TOKEN_KEY_PREFIX}:${new URL(baseUrl).origin}`;
+    let origin: string;
+    try {
+      origin = new URL(baseUrl).origin;
+    } catch {
+      origin = baseUrl;
+    }
+    this.refreshTokenKey = `${REFRESH_TOKEN_KEY_PREFIX}:${origin}`;
     // One-time migration: drop any token stored under the pre-scoping key.
     localStorage.removeItem(REFRESH_TOKEN_KEY_PREFIX);
   }
@@ -43,13 +55,22 @@ export class SessionStore {
   }
 
   /** Attempts to restore a session from the stored refresh token (app launch). */
-  async restoreSession(): Promise<boolean> {
-    if (!this.hasStoredRefreshToken()) return false;
+  async restoreSession(): Promise<RestoreSessionResult> {
+    if (!this.hasStoredRefreshToken()) return { status: 'no-session' };
     try {
       await this.refreshAccessToken();
-      return true;
-    } catch {
-      return false;
+      return { status: 'authenticated' };
+    } catch (error) {
+      if (ApiError.isUnauthorized(error)) {
+        return { status: 'session-expired' };
+      }
+      if (error instanceof ApiError && error.failure.kind === 'network') {
+        return { status: 'server-unreachable', message: error.userMessage };
+      }
+      return {
+        status: 'server-unreachable',
+        message: 'Server unreachable. Check your connection and server URL.',
+      };
     }
   }
 

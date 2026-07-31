@@ -16,6 +16,7 @@
     "dev:desktop": "npm run dev --workspace apps/desktop",
     "dev:all": "npm run build --workspace packages/shared-types && concurrently -n api,web -c blue,green \"npm run dev:api\" \"npm run dev:desktop\"",
     "build": "npm run build --workspace packages/shared-types && npm run build --workspace apps/api && npm run build --workspace apps/desktop",
+    "build:electron": "npm run build && npm run electron:dist --workspace apps/desktop",
     "test": "npm run test --workspaces --if-present",
     "lint": "npm run lint --workspaces --if-present",
     "db:up": "docker compose up -d",

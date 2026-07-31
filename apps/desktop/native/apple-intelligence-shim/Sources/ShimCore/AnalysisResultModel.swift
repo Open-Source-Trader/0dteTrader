@@ -1,0 +1,105 @@
+import Foundation
+#if canImport(FoundationModels)
+import FoundationModels
+#endif
+
+// Canonical spec: docs/apple-intelligence/data-contracts.md. This is the
+// structured-generation half of AnalysisResult — the wire-level fields
+// (resultSchemaVersion, analysisId, context, generatedAt) are attached by
+// RequestHandler after generation, not asked of the model, since the model
+// has no reason to invent a UUID or a timestamp.
+
+#if canImport(FoundationModels)
+@available(macOS 26, *)
+@Generable
+enum GeneratedRecommendation: String, Sendable {
+    case wait, enter, hold, trim, exit, avoid
+}
+
+@available(macOS 26, *)
+@Generable
+enum GeneratedSetupState: String, Sendable {
+    case none, forming, confirmed, extended, invalidated
+}
+
+@available(macOS 26, *)
+@Generable
+enum GeneratedBias: String, Sendable {
+    case bullish, bearish, neutral, mixed
+}
+
+/// A generated numeric level reference. `levelId` must match a candidate
+/// level supplied in the snapshot — this struct only carries what the model
+/// produced; `GroundingValidator` checks the match afterward. A `levelId`
+/// that doesn't match any supplied candidate makes the whole reference
+/// ungrounded and it is dropped, never trusted at face value.
+@available(macOS 26, *)
+@Generable
+struct GeneratedLevelReference: Sendable {
+    @Guide(description: "Must exactly match the id of one of the supplied candidate levels")
+    var levelId: String
+    @Guide(description: "The price of the referenced candidate level, copied from that candidate")
+    var price: Double
+}
+
+@available(macOS 26, *)
+@Generable
+struct GeneratedAnalysis: Sendable {
+    @Guide(description: "wait | enter | hold | trim | exit | avoid")
+    var recommendation: GeneratedRecommendation
+
+    @Guide(description: "none | forming | confirmed | extended | invalidated")
+    var setupState: GeneratedSetupState
+
+    @Guide(description: "bullish | bearish | neutral | mixed")
+    var bias: GeneratedBias
+
+    @Guide(description: "Support level, only if grounded in a supplied candidate level")
+    var support: GeneratedLevelReference?
+
+    @Guide(description: "Resistance level, only if grounded in a supplied candidate level")
+    var resistance: GeneratedLevelReference?
+
+    @Guide(description: "Confidence in this interpretation, 0.0 to 1.0. Not a calibrated probability.")
+    var confidence: Double
+
+    @Guide(description: "2 to 5 short reasons citing specific supplied evidence")
+    var reasons: [String]
+
+    @Guide(description: "Warnings about stale, omitted, or conflicting evidence, if any")
+    var warnings: [String]
+
+    @Guide(description: "Assumptions made where evidence was incomplete, if any")
+    var assumptions: [String]
+
+    @Guide(description: "One paragraph plain-language summary")
+    var summary: String
+}
+#endif
+
+/// Grounding rule (data-contracts.md): every recommended numeric level must
+/// reference a supplied candidate-level identifier. Runs regardless of
+/// FoundationModels availability so it stays testable on every platform.
+public enum GroundingValidator {
+    public struct LevelReference: Sendable, Equatable {
+        public let levelId: String
+        public let price: Double
+
+        public init(levelId: String, price: Double) {
+            self.levelId = levelId
+            self.price = price
+        }
+    }
+
+    /// Returns the reference unchanged if `levelId` matches a supplied
+    /// candidate, or nil if it does not — an ungrounded level must never be
+    /// silently promoted to the result.
+    public static func groundOrReject(
+        _ reference: LevelReference?,
+        candidateIds: Set<String>
+    ) -> LevelReference? {
+        guard let reference else { return nil }
+        guard candidateIds.contains(reference.levelId) else { return nil }
+        return reference
+    }
+}

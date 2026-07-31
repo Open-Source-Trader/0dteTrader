@@ -3,11 +3,9 @@ import Foundation
 import FoundationModels
 #endif
 
-/// Phase 1 scope only: hello handshake, availability, prewarm, a fixed
-/// bounded test analyze payload, cancellation, and shutdown. Structured
-/// snapshot/result schemas are Phase 2 (docs/apple-intelligence/
-/// implementation-plan.md). Single-flight: one active analysis task at a
-/// time, per the ADR (docs/apple-intelligence/adr-swift-sidecar.md).
+/// Hello handshake, availability, prewarm, snapshot-driven structured
+/// analysis, cancellation, and shutdown. Single-flight: one active analysis
+/// task at a time, per the ADR (docs/apple-intelligence/adr-swift-sidecar.md).
 public actor RequestHandler {
     public static let shimVersion = "0.1.0"
 
@@ -58,8 +56,6 @@ public actor RequestHandler {
         }
     }
 
-    /// Fixed bounded test payload only (Phase 1) — the request's own
-    /// `payload` field is not yet parsed into a real analysis snapshot.
     private func startAnalysis(_ request: NativeRequest, emit: @escaping @Sendable (NativeEvent) -> Void) async {
         // Single-flight: a new analysis request while one is active cancels
         // the prior one rather than running concurrently.
@@ -70,17 +66,18 @@ public actor RequestHandler {
 
         let requestId = request.requestId
         activeRequestId = requestId
+        let payload = request.payload
 
         let task = Task { [weak self] in
             guard let self else { return }
             emit(NativeEvent(requestId: requestId, event: .accepted))
 
-            guard case .ready = AvailabilityService.current() else {
+            guard let snapshot = AnalysisRunner.decodeSnapshot(from: payload) else {
                 emit(
                     NativeEvent(
                         requestId: requestId,
                         event: .failed,
-                        error: NativeErrorPayload(code: .runtimeUnavailable, message: "model unavailable")
+                        error: NativeErrorPayload(code: .payloadInvalid, message: "snapshot did not match the expected schema")
                     )
                 )
                 await self.clearActive(requestId: requestId)
@@ -93,60 +90,32 @@ public actor RequestHandler {
                 return
             }
 
-            // Phase 1 bounded test generation: a trivial fixed prompt proves
-            // the handshake/session/cancellation path end to end. Real
-            // snapshot-driven prompts and structured @Generable results are
-            // Phase 2.
-            #if canImport(FoundationModels)
-            if #available(macOS 26, *) {
-                do {
-                    let session = LanguageModelSession(instructions: "Reply with exactly one word.")
-                    let response = try await session.respond(to: "Say 'ready'.")
-                    if Task.isCancelled {
-                        emit(NativeEvent(requestId: requestId, event: .cancelled))
-                    } else {
-                        emit(
-                            NativeEvent(
-                                requestId: requestId,
-                                event: .completed,
-                                payload: .object(["text": .string(response.content)])
-                            )
-                        )
-                    }
-                } catch is CancellationError {
+            do {
+                let resultPayload = try await AnalysisRunner.run(snapshot: snapshot) { Task.isCancelled }
+                if Task.isCancelled {
                     emit(NativeEvent(requestId: requestId, event: .cancelled))
-                } catch {
-                    emit(
-                        NativeEvent(
-                            requestId: requestId,
-                            event: .failed,
-                            error: NativeErrorPayload(code: .modelRuntimeFailure, message: "generation failed")
-                        )
-                    )
+                } else {
+                    emit(NativeEvent(requestId: requestId, event: .completed, payload: resultPayload))
                 }
-            } else {
+            } catch is CancellationError {
+                emit(NativeEvent(requestId: requestId, event: .cancelled))
+            } catch let error as AnalysisRunError {
+                emit(NativeEvent(requestId: requestId, event: .failed, error: nativeError(forAnalysisRunError: error)))
+            } catch {
                 emit(
                     NativeEvent(
                         requestId: requestId,
                         event: .failed,
-                        error: NativeErrorPayload(code: .runtimeIncompatible, message: "os-version-unsupported")
+                        error: NativeErrorPayload(code: .modelRuntimeFailure, message: "generation failed")
                     )
                 )
             }
-            #else
-            emit(
-                NativeEvent(
-                    requestId: requestId,
-                    event: .failed,
-                    error: NativeErrorPayload(code: .runtimeUnavailable, message: "foundation-models-unavailable")
-                )
-            )
-            #endif
 
             await self.clearActive(requestId: requestId)
         }
         activeAnalysisTask = task
     }
+
 
     private func cancelActive(requestId: String, emit: @escaping @Sendable (NativeEvent) -> Void) async {
         guard let task = activeAnalysisTask, activeRequestId == requestId else { return }
@@ -165,4 +134,19 @@ private func encodePayload<T: Encodable>(_ value: T) -> JSONValue? {
     guard let data = try? JSONEncoder().encode(value) else { return nil }
     guard let jsonValue = try? JSONDecoder().decode(JSONValue.self, from: data) else { return nil }
     return jsonValue
+}
+
+private func nativeError(forAnalysisRunError error: AnalysisRunError) -> NativeErrorPayload {
+    switch error {
+    case .payloadInvalid:
+        return NativeErrorPayload(code: .payloadInvalid, message: "snapshot payload invalid")
+    case .modelUnavailable:
+        return NativeErrorPayload(code: .runtimeUnavailable, message: "model unavailable")
+    case .structuredOutputInvalid:
+        return NativeErrorPayload(code: .structuredOutputInvalid, message: "structured output failed validation")
+    case .guardrailRejection:
+        return NativeErrorPayload(code: .modelGuardrailRejection, message: "model declined to generate")
+    case .runtimeFailure:
+        return NativeErrorPayload(code: .modelRuntimeFailure, message: "generation failed")
+    }
 }

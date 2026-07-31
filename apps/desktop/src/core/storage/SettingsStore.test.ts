@@ -64,7 +64,7 @@ describe('SettingsStore options analytics settings', () => {
       showDealerProxy: false,
       refreshSeconds: 45,
       profileStrikeCount: 12,
-      showDiagnostics: true,
+      showDiagnostics: false,
     });
   });
 

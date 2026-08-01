@@ -12,7 +12,7 @@ export interface NativeEventPayload {
   error?: { code: string; message: string };
 }
 
-interface AppleIntelligenceBridge {
+export interface AppleIntelligenceBridge {
   getAvailability(): Promise<{ state: string; reason?: string }>;
   analyze(request: { requestId: string; payload: unknown }): Promise<{ requestId: string }>;
   cancel(requestId: string): Promise<void>;

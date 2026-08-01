@@ -11,6 +11,8 @@ import { ChartStore } from '../features/chart/ChartStore';
 import { DrawingsStore } from '../features/chart/drawings';
 import { ChainStore } from '../features/trade/ChainStore';
 import { TradeStore } from '../features/trade/TradeStore';
+import { AnalysisStore } from '../features/appleIntelligence/AnalysisStore';
+import { getAppleIntelligenceBridge } from '../core/desktop/appleIntelligence';
 
 /** Dependency container (AppContainer.swift analog). Recreated by main.tsx
     whenever ServerConfigStore changes the base URL. */
@@ -26,6 +28,7 @@ export class AppContainer {
   readonly tradeStore: TradeStore;
   readonly drawingsStore: DrawingsStore;
   readonly chartOrdersStore: ChartOrdersStore;
+  readonly analysisStore: AnalysisStore;
 
   constructor(serverConfigStore: ServerConfigStore, baseUrl: string) {
     this.serverConfigStore = serverConfigStore;
@@ -50,6 +53,7 @@ export class AppContainer {
     this.tradeStore.toastPolicy = () => this.settingsStore.toastsEnabled;
     this.drawingsStore = new DrawingsStore();
     this.chartOrdersStore = new ChartOrdersStore(this.apiClient);
+    this.analysisStore = new AnalysisStore(getAppleIntelligenceBridge());
   }
 }
 

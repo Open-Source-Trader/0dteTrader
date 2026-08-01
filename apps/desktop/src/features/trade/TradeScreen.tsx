@@ -46,6 +46,8 @@ import {
   desktopTradeWorkspaceHeight,
   StopTargetEditorStore,
 } from './TradeManagementWorkspaceModel';
+import { AIAnalysisButton } from '../appleIntelligence/AIAnalysisButton';
+import { buildAnalysisSnapshot } from '../appleIntelligence/AnalysisSnapshotBuilder';
 import { HistoryView } from './HistoryView';
 import { OrderConfirmPopup } from './OrderConfirmPopup';
 import { PositionsStrip } from './PositionsStrip';
@@ -91,6 +93,7 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
     quoteSocket,
     drawingsStore,
     chartOrdersStore,
+    analysisStore,
   } = container;
 
   // Chrome-only slice: this screen never reads candles/quote/tickProgress,
@@ -661,6 +664,16 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
         position: 'relative',
       }}
     >
+      <AIAnalysisButton
+        analysisStore={analysisStore}
+        buildSnapshot={() =>
+          buildAnalysisSnapshot({
+            chart: chartStore.getState(),
+            positions: trade.positions,
+          })
+        }
+      />
+
       {/* Desktop grid renders chart controls inside ChartView's chart shell;
           compact layouts keep the app NavBar above content. */}
       {isDesktopGrid ? null : (

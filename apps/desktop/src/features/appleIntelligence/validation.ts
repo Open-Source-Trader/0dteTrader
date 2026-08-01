@@ -3,7 +3,7 @@
 // (grounding rule) and architecture-enforcement.md (runtime validation is
 // required at every trust boundary — TypeScript types alone do not qualify).
 import { z } from 'zod';
-import type { AnalysisResult, CandidateLevel } from './types';
+import type { AnalysisResult, CandidateLevel, TradeDeskPlan } from './types';
 
 const groundedLevelRefSchema = z.object({
   levelId: z.string().min(1),
@@ -175,4 +175,69 @@ export function isTradeDeskPlanGrounded(
     ...(result.tradeDeskPlan.targets.underlying ?? []).map((target) => target.price),
   ];
   return prices.every((price) => !price?.levelId || knownIds.has(price.levelId));
+}
+
+/**
+ * Decision contract (data-contracts.md "Decision invariants"): a plan's
+ * `action` is only valid when its required fields are present. This is a
+ * different concern from `isTradeDeskPlanGrounded` above — that function
+ * checks "if present, is it valid"; this one checks "does this action
+ * require presence at all." A plan failing this check must be downgraded,
+ * never presented as its original action with missing data.
+ */
+export function isTradeDeskActionSatisfied(plan: TradeDeskPlan, hasOpenPosition: boolean): boolean {
+  switch (plan.action) {
+    case 'enter':
+      return Boolean(
+        (plan.entry?.underlying || plan.entry?.contract || plan.entry?.preferredContractPrice) &&
+        plan.invalidation,
+      );
+    case 'hold':
+      return (
+        hasOpenPosition &&
+        plan.management.holdConditions.length > 0 &&
+        plan.management.exitConditions.length > 0
+      );
+    case 'scale':
+      return Boolean(
+        hasOpenPosition &&
+        plan.scaleAdvice &&
+        (plan.scaleAdvice.direction === 'in' || plan.scaleAdvice.direction === 'out') &&
+        plan.scaleAdvice.condition.trim().length > 0,
+      );
+    case 'exit':
+      return Boolean(plan.invalidation || plan.management.exitConditions.length > 0);
+    case 'wait':
+    case 'avoid':
+      return plan.summary.trim().length > 0 || (plan.warnings?.length ?? 0) > 0;
+  }
+}
+
+/**
+ * Enforces the decision contract on a grounded result: a `tradeDeskPlan`
+ * whose action invariant isn't satisfied is downgraded to `wait` with an
+ * appended warning, mirroring the Swift sidecar's existing
+ * downgradedToObservationOnly pattern (AnalysisRunner.swift) — the plan is
+ * never dropped outright, since summary/warnings/setupLabel are still
+ * useful context even when the numeric plan can't be trusted as its
+ * original action.
+ */
+export function enforceTradeDeskInvariants(
+  result: AnalysisResult,
+  hasOpenPosition: boolean,
+): AnalysisResult {
+  const plan = result.tradeDeskPlan;
+  if (!plan || isTradeDeskActionSatisfied(plan, hasOpenPosition)) return result;
+
+  return {
+    ...result,
+    tradeDeskPlan: {
+      ...plan,
+      action: 'wait',
+      warnings: [
+        ...(plan.warnings ?? []),
+        `Downgraded from "${plan.action}": required data for that action was missing.`,
+      ],
+    },
+  };
 }

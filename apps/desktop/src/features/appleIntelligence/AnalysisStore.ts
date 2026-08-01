@@ -4,7 +4,12 @@ import type {
   NativeEventPayload,
 } from '../../core/desktop/appleIntelligence';
 import { isResultCurrent } from './stalenessGate';
-import { isTradeDeskPlanGrounded, parseAnalysisResult, rejectUngroundedLevels } from './validation';
+import {
+  enforceTradeDeskInvariants,
+  isTradeDeskPlanGrounded,
+  parseAnalysisResult,
+  rejectUngroundedLevels,
+} from './validation';
 import { AnalysisScheduler, shouldPreempt, type QueuedWork } from './AnalysisScheduler';
 import type {
   AIAvailability,
@@ -213,14 +218,21 @@ export class AnalysisStore extends Store<AnalysisStoreState> {
       });
       return;
     }
-    const isCurrent = isResultCurrent(grounded.context, currentContext);
+    const invariantChecked = enforceTradeDeskInvariants(
+      grounded,
+      Boolean(this.lastSnapshot.position),
+    );
+    const isCurrent = isResultCurrent(invariantChecked.context, currentContext);
 
-    this.pushHistory({ result: grounded, wasPromoted: isCurrent });
+    this.pushHistory({ result: invariantChecked, wasPromoted: isCurrent });
     if (isCurrent) {
       // Current: safe to update guidance. Stale: retained above for
       // diagnostics/history only, per lifecycle-and-concurrency.md — it
       // must never replace current guidance.
-      this.set({ latestResult: grounded, latestTriggerKind: this.lastSnapshot.trigger.kind });
+      this.set({
+        latestResult: invariantChecked,
+        latestTriggerKind: this.lastSnapshot.trigger.kind,
+      });
     }
   }
 

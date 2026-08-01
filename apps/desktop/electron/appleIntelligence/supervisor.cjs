@@ -15,6 +15,13 @@ const SHUTDOWN_GRACE_MS = 3000;
 const MAX_LINE_BYTES = 256 * 1024;
 const CRASH_WINDOW_MS = 60000;
 
+// Crash-loop policy (docs/apple-intelligence/lifecycle-and-concurrency.md):
+// 1st exit -> restart immediately, 2nd within the window -> short backoff,
+// 3rd within the window -> longer backoff + degraded, 4th+ -> disabled.
+// Not documented with exact millisecond values beyond "short"/"longer", so
+// these are deliberately small, testable constants.
+const RESTART_DELAYS_MS = [0, 1000, 5000];
+
 const STATES = [
   'stopped',
   'starting',
@@ -44,6 +51,9 @@ class NativeProcessSupervisor {
     this.listeners = new Set();
     this.recentExits = [];
     this.shuttingDown = false;
+    this.disabled = false;
+    this.lastContext = null;
+    this.restartTimer = null;
   }
 
   onEvent(listener) {
@@ -67,7 +77,10 @@ class NativeProcessSupervisor {
    */
   async start(context) {
     if (this.state === 'ready' || this.state === 'starting' || this.state === 'handshaking') return;
+    if (this.disabled) return;
+    this.cancelRestartTimer();
     this.shuttingDown = false;
+    this.lastContext = context;
     this.setState('starting');
 
     const binaryPath = this.resolvePath(context);
@@ -191,17 +204,34 @@ class NativeProcessSupervisor {
     const now = Date.now();
     this.recentExits = this.recentExits.filter((t) => now - t < CRASH_WINDOW_MS);
     this.recentExits.push(now);
+    const exitCount = this.recentExits.length;
 
-    if (this.recentExits.length >= 4) {
+    if (exitCount >= 4) {
+      this.disabled = true;
       this.setState('disabled');
       this.emit({ type: 'disabled', reason: 'crash-loop' });
       return;
     }
 
-    if (this.recentExits.length >= 3) {
-      this.setState('degraded');
-    } else {
-      this.setState('crashed');
+    this.setState(exitCount >= 3 ? 'degraded' : 'crashed');
+    this.scheduleRestart(RESTART_DELAYS_MS[exitCount - 1] ?? RESTART_DELAYS_MS[RESTART_DELAYS_MS.length - 1]);
+  }
+
+  /** Only one restart timer may exist at any time; a fresh exit replaces any pending one. */
+  scheduleRestart(delayMs) {
+    this.cancelRestartTimer();
+    this.restartTimer = setTimeout(() => {
+      this.restartTimer = null;
+      if (this.shuttingDown || this.disabled) return;
+      this.setState('restarting');
+      void this.start(this.lastContext);
+    }, delayMs);
+  }
+
+  cancelRestartTimer() {
+    if (this.restartTimer) {
+      clearTimeout(this.restartTimer);
+      this.restartTimer = null;
     }
   }
 
@@ -215,11 +245,12 @@ class NativeProcessSupervisor {
 
   /** Bounded graceful shutdown: request shutdown, escalate to SIGKILL after a timeout. */
   async stop() {
+    this.shuttingDown = true;
+    this.cancelRestartTimer();
     if (!this.child) {
       this.setState('stopped');
       return;
     }
-    this.shuttingDown = true;
     const child = this.child;
     this.send({ protocolVersion: 1, requestId: 'shutdown', method: 'runtime.shutdown', payload: {} });
 
@@ -240,6 +271,14 @@ class NativeProcessSupervisor {
     });
     this.setState('stopped');
   }
+
+  /** Explicit feature disablement (AI toggled off): never restart, mirrors crash-loop disable. */
+  disableFeature(reason = 'feature-disabled') {
+    this.disabled = true;
+    this.cancelRestartTimer();
+    this.setState('disabled');
+    this.emit({ type: 'disabled', reason });
+  }
 }
 
 /** Never inherit process.env wholesale (security-boundary.md). */
@@ -249,4 +288,11 @@ function minimalEnv() {
   };
 }
 
-module.exports = { NativeProcessSupervisor, STATES, HANDSHAKE_TIMEOUT_MS, SHUTDOWN_GRACE_MS };
+module.exports = {
+  NativeProcessSupervisor,
+  STATES,
+  HANDSHAKE_TIMEOUT_MS,
+  SHUTDOWN_GRACE_MS,
+  CRASH_WINDOW_MS,
+  RESTART_DELAYS_MS,
+};

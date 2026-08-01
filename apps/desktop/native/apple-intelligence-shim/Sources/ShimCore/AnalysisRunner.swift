@@ -21,10 +21,12 @@ public enum AnalysisRunner {
     public static let systemInstructions = """
         You are a technical market analyst assisting a 0DTE options trader. \
         Analyze only the supplied evidence. Reference candidate level ids \
-        exactly as given for any numeric support/resistance level — never \
-        invent a price that is not one of the supplied candidate levels. Do \
-        not suggest order actions beyond the recommendation categories \
-        provided. Be concise and cite specific supplied values.
+        exactly as given for any numeric underlying price — never invent a \
+        price that is not one of the supplied candidate levels. Contract \
+        premium prices must stay close to the supplied selected contract's \
+        own bid/ask/last. Do not suggest order actions beyond the \
+        recommendation categories provided. Be concise and cite specific \
+        supplied values.
         """
 
     /// Decodes the raw wire payload into a snapshot. `nil` means the
@@ -181,7 +183,7 @@ public enum AnalysisRunner {
         contractReference: Double?,
         snapshotId: String
     ) -> JSONValue? {
-        func groundedLevel(_ ref: GeneratedUnderlyingPrice?) -> JSONValue? {
+        func groundedLevel(_ ref: GeneratedLevelReference?) -> JSONValue? {
             guard let ref, candidateIds.contains(ref.levelId) else { return nil }
             return .object([
                 "value": .number(ref.price),

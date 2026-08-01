@@ -17,7 +17,17 @@ public struct BudgetedPrompt: Sendable {
 }
 
 public enum ContextBudgeter {
-    public static let maxPromptCharacters = 6000
+    // The model's context window (4096 tokens) has to fit the system
+    // instructions, this budgeted prompt text, the @Generable output
+    // schema FoundationModels encodes for GeneratedAnalysis, AND the
+    // generated response itself — not just the prompt. This was 6000 chars
+    // (roughly the whole 4096-token budget at ~4 chars/token, leaving
+    // nothing for the rest) before GeneratedTradeDeskPlan's larger schema
+    // pushed real requests over the limit (exceededContextWindowSize at
+    // ~4800 tokens for a ~6000-char prompt). Lowered to leave real margin;
+    // if the schema grows again, this needs to shrink further or the
+    // schema itself needs trimming — the two trade off against each other.
+    public static let maxPromptCharacters = 3500
 
     public static func build(from snapshot: AnalysisSnapshotInput) -> BudgetedPrompt {
         var includeOptions = snapshot.options != nil

@@ -48,27 +48,13 @@ enum GeneratedTradeDeskAction: String, Sendable {
     case wait, enter, hold, scale, exit, avoid
 }
 
-/// A price tied to the underlying symbol, grounded by a supplied candidate
-/// level id — the model never invents a number here, it only names which
-/// candidate level a plan price corresponds to. `priceDomain`/`evidenceId`/
-/// `snapshotId` are attached after generation by AnalysisRunner, same as
-/// `context`/`analysisId` — the model has no reason to invent those either.
-@available(macOS 26, *)
-@Generable
-struct GeneratedUnderlyingPrice: Sendable {
-    @Guide(description: "Must exactly match the id of one of the supplied candidate levels")
-    var levelId: String
-    @Guide(description: "The price of the referenced candidate level, copied from that candidate")
-    var price: Double
-}
-
 @available(macOS 26, *)
 @Generable
 struct GeneratedUnderlyingZone: Sendable {
-    @Guide(description: "Must exactly match the id of one of the supplied candidate levels for the low bound")
+    @Guide(description: "Must match a supplied candidate level id")
     var lowLevelId: String
     var low: Double
-    @Guide(description: "Must exactly match the id of one of the supplied candidate levels for the high bound")
+    @Guide(description: "Must match a supplied candidate level id")
     var highLevelId: String
     var high: Double
 }
@@ -76,9 +62,7 @@ struct GeneratedUnderlyingZone: Sendable {
 @available(macOS 26, *)
 @Generable
 struct GeneratedContractZone: Sendable {
-    @Guide(description: "Contract premium low bound, must fall within the supplied selected contract's bid/ask range")
     var low: Double
-    @Guide(description: "Contract premium high bound, must fall within the supplied selected contract's bid/ask range")
     var high: Double
 }
 
@@ -95,7 +79,6 @@ struct GeneratedScaleAdvice: Sendable {
 struct GeneratedTradeDeskTarget: Sendable {
     @Guide(description: "first | runner | final")
     var role: String
-    @Guide(description: "Contract premium target price, must fall within a plausible range of the supplied selected contract")
     var contractPrice: Double
     var condition: String?
 }
@@ -105,15 +88,13 @@ struct GeneratedTradeDeskTarget: Sendable {
 struct GeneratedTradeDeskEntry: Sendable {
     var underlying: GeneratedUnderlyingZone?
     var contract: GeneratedContractZone?
-    @Guide(description: "Single preferred contract premium entry price, must fall within a plausible range of the supplied selected contract")
     var preferredContractPrice: Double?
 }
 
 @available(macOS 26, *)
 @Generable
 struct GeneratedTradeDeskInvalidation: Sendable {
-    var underlying: GeneratedUnderlyingPrice?
-    @Guide(description: "Contract premium invalidation price, must fall within a plausible range of the supplied selected contract")
+    var underlying: GeneratedLevelReference?
     var contractPrice: Double?
 }
 
@@ -121,35 +102,27 @@ struct GeneratedTradeDeskInvalidation: Sendable {
 /// generated result — see data-contracts.md for the decision-invariant
 /// table that governs which fields must be present for a given `action`;
 /// that rule is enforced downstream (TS `validateTradeDeskInvariants`), not
-/// here, since it needs the current position/context to evaluate.
+/// here, since it needs the current position/context to evaluate. Contract
+/// premium fields carry no per-field @Guide restating the "grounded against
+/// the selected contract" requirement — that's stated once in
+/// AnalysisRunner.systemInstructions, and GroundingValidator drops any
+/// ungrounded value regardless of what the model was told.
 @available(macOS 26, *)
 @Generable
 struct GeneratedTradeDeskPlan: Sendable {
-    @Guide(description: "wait | enter | hold | scale | exit | avoid")
     var action: GeneratedTradeDeskAction
-
     @Guide(description: "Required only when action is scale")
     var scaleAdvice: GeneratedScaleAdvice?
-
     @Guide(description: "Short label for the current setup, e.g. 'Bullish pullback'")
     var setupLabel: String
-
-    @Guide(description: "One paragraph plain-language summary")
     var summary: String
-
     var entry: GeneratedTradeDeskEntry?
     var invalidation: GeneratedTradeDeskInvalidation?
-
     @Guide(description: "Up to 3 contract-premium targets, ordered first to final")
     var contractTargets: [GeneratedTradeDeskTarget]
-
-    @Guide(description: "Conditions under which to keep holding the position, if any")
     var holdConditions: [String]
-    @Guide(description: "Conditions under which to scale in or out, if any")
     var scaleConditions: [String]
-    @Guide(description: "Conditions under which to exit the position, if any")
     var exitConditions: [String]
-
     @Guide(description: "low | medium | high")
     var confidence: String?
 }
@@ -187,7 +160,6 @@ struct GeneratedAnalysis: Sendable {
     @Guide(description: "One paragraph plain-language summary")
     var summary: String
 
-    @Guide(description: "Structured trade-desk decision plan: entry, invalidation, targets, and management guidance")
     var tradeDeskPlan: GeneratedTradeDeskPlan?
 }
 #endif

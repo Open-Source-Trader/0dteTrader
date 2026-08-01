@@ -14,6 +14,7 @@ const http = require('node:http');
 const fs = require('node:fs');
 const { loadWindowState, saveWindowState } = require('./windowState.cjs');
 const { NativeProcessSupervisor } = require('./appleIntelligence/supervisor.cjs');
+const { RequestRegistry } = require('./appleIntelligence/requestRegistry.cjs');
 
 const APP_NAME = '0dteTrader';
 const APP_PROTOCOL = 'odtetrader';
@@ -190,9 +191,53 @@ function stopBackend() {
  * window or backend (docs/apple-intelligence/acceptance-criteria.md).
  */
 const appleIntelligence = new NativeProcessSupervisor();
+
+/**
+ * Electron main is authoritative for native analysis-request lifecycle and
+ * deadlines (docs/apple-intelligence/lifecycle-and-concurrency.md "Request
+ * ownership"). The registry tracks one entry per in-flight `analysis.run`,
+ * assigns a bounded deadline, and is the sole router from a native event to
+ * a specific renderer's webContents — never a broadcast.
+ */
+const appleIntelligenceRequests = new RequestRegistry({
+  send: (request) => appleIntelligence.send(request),
+  dispatch: (webContentsId, payload) => {
+    const contents = webContentsForId(webContentsId);
+    if (!contents || contents.isDestroyed()) return;
+    contents.send('apple-intelligence:event', payload);
+  },
+});
+
+function webContentsForId(id) {
+  // Single-window today, but resolved by ID rather than assumed to be
+  // mainWindow — cross-window isolation must hold even though only one
+  // window exists in practice (security-boundary.md "Cross-window leakage").
+  return BrowserWindow.getAllWindows().find(
+    (win) => !win.isDestroyed() && win.webContents.id === id,
+  )?.webContents;
+}
+
+// requestIds the supervisor itself owns outside the analysis registry
+// (runtime.hello's handshake response, runtime.shutdown's ack) — expected
+// to never appear in the registry, not a protocol anomaly worth logging.
+const SUPERVISOR_OWNED_REQUEST_IDS = new Set(['runtime', 'shutdown']);
+
 appleIntelligence.onEvent((event) => {
-  if (event.type !== 'native-event' || !mainWindow?.webContents) return;
-  mainWindow.webContents.send('apple-intelligence:event', event.payload);
+  if (event.type === 'native-event') {
+    if (SUPERVISOR_OWNED_REQUEST_IDS.has(event.payload.requestId)) return;
+    const result = appleIntelligenceRequests.handleNativeEvent(event.payload);
+    if (!result.routed && result.reason === 'unknown-request') {
+      console.error(
+        `[desktop] apple-intelligence: event for unknown requestId "${event.payload.requestId}" (${event.payload.event})`,
+      );
+    }
+    return;
+  }
+  if (event.type === 'exit') {
+    // Sidecar exited: every pending request is unreachable and must be
+    // rejected deterministically (lifecycle-and-concurrency.md "Crashed").
+    appleIntelligenceRequests.rejectAll('native_process_exited');
+  }
 });
 
 async function startAppleIntelligence() {
@@ -484,6 +529,13 @@ async function createWindow() {
   win.on('closed', () => {
     if (mainWindow === win) mainWindow = null;
   });
+  // A destroyed renderer can no longer receive results — cancel whatever it
+  // had in flight rather than let it run to a terminal event nobody reads
+  // (lifecycle-and-concurrency.md "cancel requests when the owning window is
+  // destroyed").
+  win.webContents.on('destroyed', () => {
+    appleIntelligenceRequests.cancelForWebContents(win.webContents.id);
+  });
 
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (isSafeInternalUrl(url)) {
@@ -561,6 +613,10 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
 });
 app.on('will-quit', stopBackend);
+// Clear all pending-request timers before the sidecar itself stops — no
+// renderer or child process will be around to receive further events, and
+// an uncleared timer would otherwise still fire after shutdown.
+app.on('will-quit', () => appleIntelligenceRequests.clear());
 app.on('will-quit', () => void appleIntelligence.stop());
 // Terminal kills and session logouts must also take the backend down.
 for (const signal of ['SIGTERM', 'SIGINT', 'SIGHUP']) {
@@ -597,21 +653,33 @@ ipcMain.handle('apple-intelligence:availability', () => {
   return { state: 'ready' };
 });
 
-ipcMain.handle('apple-intelligence:analyze', (_event, request) => {
+ipcMain.handle('apple-intelligence:analyze', (event, request) => {
   if (typeof request?.requestId !== 'string' || request.requestId.length === 0) {
     throw new Error('apple-intelligence:analyze requires a string requestId');
   }
+  // Main validates, creates the registry entry, and assigns the deadline
+  // before anything is sent to Swift — main is authoritative for the
+  // request's existence and lifetime, not merely a passthrough.
+  const entry = appleIntelligenceRequests.register({
+    requestId: request.requestId,
+    originatingWebContentsId: event.sender.id,
+  });
   appleIntelligence.send({
     protocolVersion: 1,
     requestId: request.requestId,
     method: 'analysis.run',
+    deadlineAt: entry.deadlineAt,
     payload: request.payload ?? {},
   });
   return { requestId: request.requestId };
 });
 
-ipcMain.handle('apple-intelligence:cancel', (_event, requestId) => {
+ipcMain.handle('apple-intelligence:cancel', (event, requestId) => {
   if (typeof requestId !== 'string' || requestId.length === 0) return;
+  // Cross-window isolation: a renderer may only cancel a request it owns.
+  // Silently ignore otherwise rather than let one window affect another's
+  // in-flight analysis (security-boundary.md "Cross-window leakage").
+  if (!appleIntelligenceRequests.isOwnedBy(requestId, event.sender.id)) return;
   appleIntelligence.send({
     protocolVersion: 1,
     requestId,

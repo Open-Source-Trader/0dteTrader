@@ -67,9 +67,29 @@ public actor RequestHandler {
         let requestId = request.requestId
         activeRequestId = requestId
         let payload = request.payload
+        let deadlineDate = request.deadlineAt.flatMap { ISO8601DateFormatter().date(from: $0) }
 
         let task = Task { [weak self] in
             guard let self else { return }
+
+            // Main is authoritative for the deadline and enforces it with
+            // its own timer regardless of what Swift observes (protocol.md
+            // "Main owns deadlines"); this is a cooperative courtesy check
+            // only, for the case where the request already expired before
+            // Swift even started work (e.g. it sat behind a prior
+            // single-flight task).
+            if let deadlineDate, deadlineDate <= Date() {
+                emit(
+                    NativeEvent(
+                        requestId: requestId,
+                        event: .failed,
+                        error: NativeErrorPayload(code: .requestTimeout, message: "deadline already expired")
+                    )
+                )
+                await self.clearActive(requestId: requestId)
+                return
+            }
+
             emit(NativeEvent(requestId: requestId, event: .accepted))
 
             guard let snapshot = AnalysisRunner.decodeSnapshot(from: payload) else {
@@ -91,7 +111,13 @@ public actor RequestHandler {
             }
 
             do {
-                let resultPayload = try await AnalysisRunner.run(snapshot: snapshot, analysisId: requestId) { Task.isCancelled }
+                let resultPayload = try await AnalysisRunner.run(snapshot: snapshot, analysisId: requestId) {
+                    // Cooperative only — main's own timer is what actually
+                    // terminates a stuck request from the app's perspective;
+                    // this lets Swift also stop generating promptly if it
+                    // happens to check between token/response steps.
+                    Task.isCancelled || (deadlineDate.map { $0 <= Date() } ?? false)
+                }
                 if Task.isCancelled {
                     emit(NativeEvent(requestId: requestId, event: .cancelled))
                 } else {

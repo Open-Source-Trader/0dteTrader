@@ -5,10 +5,18 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
+// `npm run build`/`build:shim` produces the release configuration — dev mode
+// intentionally resolves the same release binary rather than a separate
+// debug one, so "it works in dev" and "it works packaged" exercise the same
+// artifact.
 const DEV_BUILD_RELATIVE_PATH = path.join(
-  'native/apple-intelligence-shim/.build/debug/AppleIntelligenceShim',
+  'native/apple-intelligence-shim/.build/release/AppleIntelligenceShim',
 );
-const PACKAGED_RELATIVE_PATH = path.join('native', 'apple-intelligence-shim');
+const PACKAGED_RELATIVE_PATH = path.join(
+  'native',
+  'apple-intelligence-shim',
+  'AppleIntelligenceShim',
+);
 
 /**
  * @param {{ isPackaged: boolean, resourcesPath?: string, appRoot: string }} context

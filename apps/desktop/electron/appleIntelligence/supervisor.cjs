@@ -5,6 +5,7 @@
 // (runtime state machine, crash-loop policy) and architecture.md
 // (NativeProcessSupervisor responsibilities).
 const { spawn } = require('node:child_process');
+const path = require('node:path');
 const { LineFramer } = require('./lineFramer.cjs');
 const { parseNativeEventLine } = require('./protocol.cjs');
 const { resolveShimPath } = require('./binaryResolver.cjs');
@@ -76,10 +77,17 @@ class NativeProcessSupervisor {
       return;
     }
 
+    // The binary's own directory, not appRoot: in a packaged build appRoot
+    // resolves inside app.asar, which is a file, not a directory — spawn's
+    // cwd must be a real filesystem directory. The binary itself is never
+    // inside the asar (electron-builder's extraResources sits alongside
+    // it), so this is always real. It also happens to satisfy
+    // security-boundary.md's "fixed working directory with no sensitive
+    // data" requirement better than the app root would.
     const child = this.spawnFn(binaryPath, [], {
       stdio: ['pipe', 'pipe', 'pipe'],
       env: minimalEnv(),
-      cwd: context.appRoot,
+      cwd: path.dirname(binaryPath),
     });
     this.child = child;
     this.framer = new LineFramer({

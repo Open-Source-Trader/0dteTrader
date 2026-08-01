@@ -302,4 +302,45 @@ describe('buildTradeDeskViewState', () => {
     const state = current({ marketSessionState: 'live' });
     expect(state.canApplySuggestedPrice).toBe(true);
   });
+
+  it('agrees the action badge and the applicable price suggestion when a plan is present (the ENTER/NO ENTRY PRICE repro)', () => {
+    const state = current({
+      latestResult: result({
+        tradeDeskPlan: { ...result().tradeDeskPlan!, action: 'enter' },
+      }),
+    });
+    expect(state.presentation?.action).toBe('enter');
+    expect(state.presentation?.applicablePriceSuggestion).toBeDefined();
+    expect(state.canApplySuggestedPrice).toBe(true);
+  });
+
+  it('does not backfill a missing plan sub-field from legacy top-level levels when a plan is present', () => {
+    const withoutEntry = current({
+      latestResult: result({
+        tradeDeskPlan: { ...result().tradeDeskPlan!, entry: undefined },
+        levels: { support: { levelId: 'lvl-1', price: 400 } },
+      }),
+    });
+    expect(withoutEntry.presentation?.entry).toBeUndefined();
+  });
+
+  it('falls back to legacy fields together when no plan is present at all', () => {
+    const legacyOnly = current({
+      latestResult: result({
+        tradeDeskPlan: undefined,
+        recommendation: 'enter',
+        levels: {
+          support: { levelId: 'lvl-1', price: 746.55 },
+          cutBelow: { levelId: 'lvl-2', price: 746.28 },
+        },
+      }),
+    });
+    expect(legacyOnly.presentation?.action).toBe('enter');
+    expect(legacyOnly.presentation?.entry?.underlying).toBeDefined();
+    expect(legacyOnly.presentation?.invalidation?.underlying).toBeDefined();
+    // Legacy path never has a preferredContractPrice source, so no
+    // applicable suggestion — action and suggestion still agree (both
+    // absent), never split.
+    expect(legacyOnly.presentation?.applicablePriceSuggestion).toBeUndefined();
+  });
 });

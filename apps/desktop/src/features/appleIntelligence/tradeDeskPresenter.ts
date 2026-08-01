@@ -213,6 +213,16 @@ export function buildTradeDeskViewState(input: BuildTradeDeskViewStateInput): Tr
   };
 }
 
+/**
+ * Whether to source the presentation from `tradeDeskPlan` or from the
+ * legacy top-level fields is decided once, here, rather than per field —
+ * a plan half-used (action from the plan, price suggestion from legacy, or
+ * vice versa) is exactly the bug that made the header say ENTER while the
+ * button said NO ENTRY PRICE. `tradeDeskPlan` is only ever absent for
+ * results predating this feature (schema-migration safety); once present,
+ * every field it doesn't itself populate is simply absent in the
+ * presentation, never silently backfilled from the legacy fields.
+ */
 function presentResult({
   result,
   selectedContract,
@@ -225,18 +235,21 @@ function presentResult({
   limits: TradeDeskPresentationLimits;
 }): TradeDeskPresentation {
   const plan = result.tradeDeskPlan;
-  const action = normalizeAction(
-    plan?.action ?? legacyAction(result.recommendation),
-    plan?.scaleAdvice,
-  );
+  const action = plan
+    ? normalizeAction(plan.action, plan.scaleAdvice)
+    : normalizeAction(legacyAction(result.recommendation));
   const snapshotId = result.context.snapshotId ?? '';
   const contractIdentity = selectedContract?.symbol ?? result.context.selectedContractSymbol ?? '';
   const setupLabel = clampText(
     plan?.setupLabel ?? legacySetupLabel(result),
     limits.maxSetupLabelCharacters,
   );
-  const entry = presentEntry(plan?.entry, result, selectedContract);
-  const invalidation = presentInvalidation(plan?.invalidation, result);
+  const entry = plan
+    ? presentEntry(plan.entry, selectedContract, result.context.symbol)
+    : legacyEntry(result);
+  const invalidation = plan
+    ? presentInvalidation(plan.invalidation, result.context.symbol)
+    : legacyInvalidation(result);
   const contractTargets = (plan?.targets.contract ?? [])
     .filter((target) => target.price.priceDomain === 'contract-premium')
     .slice(0, limits.maxContractTargets)
@@ -257,24 +270,27 @@ function presentResult({
       condition: target.condition ? clampText(target.condition, 80) : undefined,
       evidenceId: target.price.evidenceId,
     }));
-  const management = {
-    holdConditions: clampList(
-      plan?.management.holdConditions ?? legacyHoldConditions(result),
-      limits,
-    ),
-    scaleConditions: clampList(plan?.management.scaleConditions ?? [], limits),
-    exitConditions: clampList(
-      plan?.management.exitConditions ?? legacyExitConditions(result),
-      limits,
-    ),
-  };
-  const applicablePriceSuggestion = buildApplicableSuggestion({
-    result,
-    selectedContract,
-    currentPositionVersion,
-    contractIdentity,
-    snapshotId,
-  });
+  const management = plan
+    ? {
+        holdConditions: clampList(plan.management.holdConditions, limits),
+        scaleConditions: clampList(plan.management.scaleConditions, limits),
+        exitConditions: clampList(plan.management.exitConditions, limits),
+      }
+    : {
+        holdConditions: clampList(legacyHoldConditions(result), limits),
+        scaleConditions: [],
+        exitConditions: clampList(legacyExitConditions(result), limits),
+      };
+  const applicablePriceSuggestion = plan
+    ? buildApplicableSuggestion({
+        plan,
+        result,
+        selectedContract,
+        currentPositionVersion,
+        contractIdentity,
+        snapshotId,
+      })
+    : undefined;
 
   return {
     resultId: result.analysisId,
@@ -301,32 +317,26 @@ function presentResult({
 
 function presentEntry(
   entry: TradeDeskPlan['entry'] | undefined,
-  result: AnalysisResult,
   selectedContract: OptionContract | null,
+  symbol: string,
 ): TradeDeskPresentation['entry'] | undefined {
-  if (!entry && !result.levels.support && !result.levels.resistance) return undefined;
+  if (!entry) return undefined;
   const output: NonNullable<TradeDeskPresentation['entry']> = {};
-  if (entry?.underlying?.priceDomain === 'underlying') {
+  if (entry.underlying?.priceDomain === 'underlying') {
     output.underlying = {
       label: 'Underlying',
-      value: `${result.context.symbol} ${Format.price(entry.underlying.low)}–${Format.price(entry.underlying.high)}`,
+      value: `${symbol} ${Format.price(entry.underlying.low)}–${Format.price(entry.underlying.high)}`,
       evidenceId: entry.underlying.evidenceId,
     };
-  } else if (result.levels.support) {
-    output.underlying = {
-      label: 'Underlying',
-      value: `${result.context.symbol} ${Format.price(result.levels.support.price)}`,
-      evidenceId: result.levels.support.levelId,
-    };
   }
-  if (entry?.contract?.priceDomain === 'contract-premium') {
+  if (entry.contract?.priceDomain === 'contract-premium') {
     output.contract = {
       label: 'Contract',
       value: `${money(entry.contract.low)}–${money(entry.contract.high)}`,
       evidenceId: entry.contract.evidenceId,
     };
   }
-  if (entry?.preferredContractPrice?.priceDomain === 'contract-premium') {
+  if (entry.preferredContractPrice?.priceDomain === 'contract-premium') {
     output.preferredContractPrice = {
       label: selectedContract ? 'Preferred option price' : 'Preferred contract price',
       value: money(entry.preferredContractPrice.value),
@@ -336,26 +346,31 @@ function presentEntry(
   return Object.keys(output).length > 0 ? output : undefined;
 }
 
+function legacyEntry(result: AnalysisResult): TradeDeskPresentation['entry'] | undefined {
+  if (!result.levels.support) return undefined;
+  return {
+    underlying: {
+      label: 'Underlying',
+      value: `${result.context.symbol} ${Format.price(result.levels.support.price)}`,
+      evidenceId: result.levels.support.levelId,
+    },
+  };
+}
+
 function presentInvalidation(
   invalidation: TradeDeskPlan['invalidation'] | undefined,
-  result: AnalysisResult,
+  symbol: string,
 ): TradeDeskPresentation['invalidation'] | undefined {
-  if (!invalidation && !result.levels.cutBelow) return undefined;
+  if (!invalidation) return undefined;
   const output: NonNullable<TradeDeskPresentation['invalidation']> = {};
-  if (invalidation?.underlying) {
+  if (invalidation.underlying) {
     output.underlying = {
       label: 'Invalidation',
-      value: `${result.context.symbol} ${invalidation.underlying.operator} ${Format.price(invalidation.underlying.price.value)}`,
+      value: `${symbol} ${invalidation.underlying.operator} ${Format.price(invalidation.underlying.price.value)}`,
       evidenceId: invalidation.underlying.price.evidenceId,
     };
-  } else if (result.levels.cutBelow) {
-    output.underlying = {
-      label: 'Invalidation',
-      value: `${result.context.symbol} below ${Format.price(result.levels.cutBelow.price)}`,
-      evidenceId: result.levels.cutBelow.levelId,
-    };
   }
-  if (invalidation?.contract) {
+  if (invalidation.contract) {
     output.contract = {
       label: 'Contract invalidation',
       value: `Contract ${invalidation.contract.operator} ${money(invalidation.contract.price.value)}`,
@@ -365,20 +380,35 @@ function presentInvalidation(
   return Object.keys(output).length > 0 ? output : undefined;
 }
 
+function legacyInvalidation(
+  result: AnalysisResult,
+): TradeDeskPresentation['invalidation'] | undefined {
+  if (!result.levels.cutBelow) return undefined;
+  return {
+    underlying: {
+      label: 'Invalidation',
+      value: `${result.context.symbol} below ${Format.price(result.levels.cutBelow.price)}`,
+      evidenceId: result.levels.cutBelow.levelId,
+    },
+  };
+}
+
 function buildApplicableSuggestion({
+  plan,
   result,
   selectedContract,
   currentPositionVersion,
   contractIdentity,
   snapshotId,
 }: {
+  plan: TradeDeskPlan;
   result: AnalysisResult;
   selectedContract: OptionContract | null;
   currentPositionVersion: number;
   contractIdentity: string;
   snapshotId: string;
 }): ApplicablePriceSuggestion | undefined {
-  const preferred = result.tradeDeskPlan?.entry?.preferredContractPrice;
+  const preferred = plan.entry?.preferredContractPrice;
   if (!preferred || preferred.priceDomain !== 'contract-premium') return undefined;
   if (!selectedContract || !contractIdentity || !snapshotId) return undefined;
   if (result.context.selectedContractSymbol !== selectedContract.symbol) return undefined;

@@ -94,6 +94,8 @@ interface AnalysisResult {
 
 `tradeDeskPlan` is the structured decision plan the Trade Desk panel renders (entry, invalidation, targets, management). It is optional on the wire: generation may omit it, and it is always omitted when the task was downgraded to observation-only. When present, every price-bearing field has already passed grounding (see below) before being placed on the wire — the model itself never emits `evidenceId`/`snapshotId`, only a `levelId` (underlying prices) or a plausible number (contract-premium prices); the runner attaches grounding metadata after validating.
 
+`tradeDeskPlan`, when present, is the presenter's sole source for the action badge, entry/invalidation display, and the apply-price suggestion — never a mix of `tradeDeskPlan` and the legacy top-level `recommendation`/`levels` fields for the same presentation. The legacy fields are read only when `tradeDeskPlan` is absent entirely (results predating this feature), and in that case every legacy-derived field is used together, not selectively. Splitting the source per field is what previously let the action badge read `ENTER` from `recommendation` while the price suggestion read absent from `tradeDeskPlan`, showing a contradictory "ENTER" header next to a "NO ENTRY PRICE" button.
+
 ```typescript
 interface TradeDeskPlan {
   action: 'wait' | 'enter' | 'hold' | 'scale' | 'exit' | 'avoid';

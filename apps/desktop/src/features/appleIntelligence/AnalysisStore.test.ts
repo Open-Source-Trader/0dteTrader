@@ -279,4 +279,166 @@ describe('AnalysisStore', () => {
     await store.cancel();
     expect(cancelMock).not.toHaveBeenCalled();
   });
+
+  describe('scheduling (Phase 4)', () => {
+    it('queues a candle-close request submitted while manual work is active', async () => {
+      const { bridge, analyzeMock } = makeFakeBridge();
+      const store = new AnalysisStore(bridge);
+      await store.analyze(makeSnapshot({ snapshotId: 'manual-1' }), 'manual');
+      await store.submitCandleClose(makeSnapshot({ snapshotId: 'candle-1' }));
+
+      expect(analyzeMock).toHaveBeenCalledTimes(1);
+      expect(store.getState().queueDepth).toBe(1);
+    });
+
+    it('runs the next queued request automatically once the active one completes', async () => {
+      const { bridge, emit, analyzeMock } = makeFakeBridge();
+      const store = new AnalysisStore(bridge);
+      store.start();
+
+      await store.analyze(makeSnapshot({ snapshotId: 'manual-1' }), 'manual');
+      const firstRequestId = store.getState().activeRequestId;
+      await store.submitCandleClose(makeSnapshot({ snapshotId: 'candle-1' }));
+      expect(store.getState().queueDepth).toBe(1);
+
+      emit({
+        protocolVersion: 1,
+        requestId: firstRequestId!,
+        event: 'completed',
+        payload: validResultPayload({ analysisId: 'manual-result' }),
+      });
+
+      expect(analyzeMock).toHaveBeenCalledTimes(2);
+      expect(store.getState().queueDepth).toBe(0);
+      expect(store.getState().isAnalyzing).toBe(true);
+    });
+
+    it('position-critical work preempts an active candle-close request', async () => {
+      const { bridge, cancelMock, analyzeMock } = makeFakeBridge();
+      const store = new AnalysisStore(bridge);
+      await store.submitCandleClose(makeSnapshot({ snapshotId: 'candle-1' }));
+      await store.analyze(makeSnapshot({ snapshotId: 'critical-1' }), 'position-critical');
+
+      expect(cancelMock).toHaveBeenCalledTimes(1);
+      expect(analyzeMock).toHaveBeenCalledTimes(2);
+      expect(store.getState().activePriority).toBe('position-critical');
+    });
+
+    it('manual work does not preempt active position-critical work', async () => {
+      const { bridge, cancelMock, analyzeMock } = makeFakeBridge();
+      const store = new AnalysisStore(bridge);
+      await store.analyze(makeSnapshot({ snapshotId: 'critical-1' }), 'position-critical');
+      await store.analyze(makeSnapshot({ snapshotId: 'manual-1' }), 'manual');
+
+      expect(cancelMock).not.toHaveBeenCalled();
+      expect(analyzeMock).toHaveBeenCalledTimes(1);
+      expect(store.getState().queueDepth).toBe(1);
+    });
+
+    it('discardStaleBackgroundWork clears only queued background work', async () => {
+      const { bridge } = makeFakeBridge();
+      const store = new AnalysisStore(bridge);
+      await store.analyze(makeSnapshot({ snapshotId: 'manual-1' }), 'manual');
+      await store.analyze(makeSnapshot({ snapshotId: 'bg-1' }), 'background');
+      store.discardStaleBackgroundWork();
+      expect(store.getState().queueDepth).toBe(0);
+    });
+  });
+
+  describe('history (Phase 4)', () => {
+    it('records a promoted result in history', async () => {
+      const { bridge, emit } = makeFakeBridge();
+      const store = new AnalysisStore(bridge);
+      store.start();
+      await store.analyze(makeSnapshot());
+      const { activeRequestId } = store.getState();
+      emit({
+        protocolVersion: 1,
+        requestId: activeRequestId!,
+        event: 'completed',
+        payload: validResultPayload(),
+      });
+
+      expect(store.getState().history).toHaveLength(1);
+      expect(store.getState().history[0].wasPromoted).toBe(true);
+    });
+
+    it('retains a stale result in history without promoting it to latestResult', async () => {
+      const { bridge, emit } = makeFakeBridge();
+      const store = new AnalysisStore(bridge);
+      store.start();
+
+      await store.analyze(makeSnapshot({ snapshotSequence: 1 }));
+      const firstRequestId = store.getState().activeRequestId;
+      emit({
+        protocolVersion: 1,
+        requestId: firstRequestId!,
+        event: 'completed',
+        payload: validResultPayload({ analysisId: 'first' }),
+      });
+      expect(store.getState().latestResult?.analysisId).toBe('first');
+
+      await store.analyze(makeSnapshot({ snapshotSequence: 2 }));
+      const secondRequestId = store.getState().activeRequestId;
+      emit({
+        protocolVersion: 1,
+        requestId: secondRequestId!,
+        event: 'completed',
+        payload: validResultPayload({
+          analysisId: 'stale-second',
+          context: { symbol: 'SPY', timeframe: '5m', snapshotSequence: 1, positionVersion: 0 },
+        }),
+      });
+
+      // Stale result is retained in history for diagnostics...
+      expect(store.getState().history.some((h) => h.result.analysisId === 'stale-second')).toBe(
+        true,
+      );
+      expect(
+        store.getState().history.find((h) => h.result.analysisId === 'stale-second')?.wasPromoted,
+      ).toBe(false);
+      // ...but must never replace current guidance.
+      expect(store.getState().latestResult?.analysisId).toBe('first');
+    });
+
+    it('caps history at 20 entries', async () => {
+      const { bridge, emit } = makeFakeBridge();
+      const store = new AnalysisStore(bridge);
+      store.start();
+
+      for (let i = 0; i < 25; i++) {
+        await store.analyze(makeSnapshot({ snapshotId: `s${i}`, snapshotSequence: i }));
+        const requestId = store.getState().activeRequestId;
+        emit({
+          protocolVersion: 1,
+          requestId: requestId!,
+          event: 'completed',
+          payload: validResultPayload({
+            analysisId: `a${i}`,
+            context: { symbol: 'SPY', timeframe: '5m', snapshotSequence: i, positionVersion: 0 },
+          }),
+        });
+      }
+
+      expect(store.getState().history).toHaveLength(20);
+      expect(store.getState().history[0].result.analysisId).toBe('a24');
+    });
+
+    it('records analysis duration on completion', async () => {
+      const { bridge, emit } = makeFakeBridge();
+      const store = new AnalysisStore(bridge);
+      store.start();
+      await store.analyze(makeSnapshot());
+      const { activeRequestId } = store.getState();
+      emit({
+        protocolVersion: 1,
+        requestId: activeRequestId!,
+        event: 'completed',
+        payload: validResultPayload(),
+      });
+
+      expect(store.getState().lastAnalysisDurationMs).not.toBeNull();
+      expect(store.getState().lastAnalysisDurationMs).toBeGreaterThanOrEqual(0);
+    });
+  });
 });

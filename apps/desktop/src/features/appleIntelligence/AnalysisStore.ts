@@ -5,30 +5,51 @@ import type {
 } from '../../core/desktop/appleIntelligence';
 import { isResultCurrent } from './stalenessGate';
 import { parseAnalysisResult, rejectUngroundedLevels } from './validation';
+import { AnalysisScheduler, shouldPreempt, type QueuedWork } from './AnalysisScheduler';
 import type {
   AIAvailability,
   AnalysisContextIdentity,
   AnalysisResult,
   AnalysisSnapshot,
+  TriggerPriority,
 } from './types';
+
+const MAX_HISTORY = 20;
+
+export interface HistoryEntry {
+  result: AnalysisResult;
+  /** False when the result failed the staleness gate at completion time —
+   * retained for local diagnostics/history but never promoted to
+   * latestResult (lifecycle-and-concurrency.md: "may be retained for local
+   * diagnostics or history. It must never replace current guidance"). */
+  wasPromoted: boolean;
+}
 
 interface AnalysisStoreState {
   availability: AIAvailability;
   isAnalyzing: boolean;
   activeRequestId: string | null;
+  activePriority: TriggerPriority | null;
   latestResult: AnalysisResult | null;
   errorMessage: string | null;
+  history: HistoryEntry[];
+  queueDepth: number;
+  lastAnalysisDurationMs: number | null;
 }
 
 /**
  * Feature-owned presentation state (AnalysisStore, architecture.md). Owns
- * request lifecycle, cancellation, and the staleness gate. Cannot mutate
- * authoritative trading state and cannot promote a result that fails the
- * staleness gate or grounding validation.
+ * request lifecycle, cancellation, the staleness gate, and — as of Phase 4 —
+ * the bounded single-flight scheduler for automatic (candle-close/
+ * background) work alongside manual/position-critical requests. Cannot
+ * mutate authoritative trading state and cannot promote a result that fails
+ * the staleness gate or grounding validation.
  */
 export class AnalysisStore extends Store<AnalysisStoreState> {
   private unsubscribeEvents: (() => void) | null = null;
   private lastSnapshot: AnalysisSnapshot | null = null;
+  private readonly scheduler = new AnalysisScheduler();
+  private requestStartedAt: number | null = null;
 
   constructor(private readonly bridge: AppleIntelligenceBridge | null) {
     super({
@@ -37,8 +58,12 @@ export class AnalysisStore extends Store<AnalysisStoreState> {
         : { state: 'unavailable', reason: 'bridge-not-present' },
       isAnalyzing: false,
       activeRequestId: null,
+      activePriority: null,
       latestResult: null,
       errorMessage: null,
+      history: [],
+      queueDepth: 0,
+      lastAnalysisDurationMs: null,
     });
   }
 
@@ -57,28 +82,80 @@ export class AnalysisStore extends Store<AnalysisStoreState> {
   stop(): void {
     this.unsubscribeEvents?.();
     this.unsubscribeEvents = null;
+    this.scheduler.clear();
   }
 
-  async analyze(snapshot: AnalysisSnapshot): Promise<void> {
+  /** Manual (or position-critical, in a later phase) request: runs
+   * immediately if nothing is active, or preempts/queues per priority. */
+  async analyze(snapshot: AnalysisSnapshot, priority: TriggerPriority = 'manual'): Promise<void> {
+    await this.submitWork({
+      snapshot,
+      priority,
+      dedupeKey: snapshot.identity.snapshotId,
+    });
+  }
+
+  /** Automatic candle-close request — queued/replaced/dropped per the
+   * scheduler's rules rather than always running immediately. */
+  async submitCandleClose(snapshot: AnalysisSnapshot): Promise<void> {
+    await this.submitWork({
+      snapshot,
+      priority: 'candle-close',
+      dedupeKey: snapshot.identity.snapshotId,
+      replaceKey: `${snapshot.identity.symbol}:${snapshot.identity.timeframe}`,
+    });
+  }
+
+  private async submitWork(work: QueuedWork): Promise<void> {
     if (!this.bridge) {
       this.set({ errorMessage: 'Apple Intelligence is not available on this platform.' });
       return;
     }
-    if (this.getState().isAnalyzing) return;
 
-    this.lastSnapshot = snapshot;
-    this.set({ isAnalyzing: true, errorMessage: null });
+    const { isAnalyzing, activePriority } = this.getState();
+    if (isAnalyzing && activePriority) {
+      if (shouldPreempt(activePriority, work.priority)) {
+        await this.cancel();
+        await this.runNow(work);
+        return;
+      }
+      this.scheduler.submit(work);
+      this.set({ queueDepth: this.scheduler.size });
+      return;
+    }
+
+    await this.runNow(work);
+  }
+
+  private async runNow(work: QueuedWork): Promise<void> {
+    if (!this.bridge) return;
+    this.lastSnapshot = work.snapshot;
+    this.requestStartedAt = Date.now();
+    this.set({ isAnalyzing: true, activePriority: work.priority, errorMessage: null });
     const { requestId } = await this.bridge.analyze({
       requestId: crypto.randomUUID(),
-      payload: snapshot,
+      payload: work.snapshot,
     });
     this.set({ activeRequestId: requestId });
+  }
+
+  private async runNextQueued(): Promise<void> {
+    const next = this.scheduler.dequeueNext();
+    this.set({ queueDepth: this.scheduler.size });
+    if (next) await this.runNow(next);
   }
 
   async cancel(): Promise<void> {
     const { activeRequestId } = this.getState();
     if (!activeRequestId) return;
     await this.bridge?.cancel(activeRequestId);
+  }
+
+  /** Drops queued background work that can no longer affect the current
+   * view — e.g. the user switched symbols. */
+  discardStaleBackgroundWork(): void {
+    this.scheduler.dropBackgroundWork();
+    this.set({ queueDepth: this.scheduler.size });
   }
 
   private handleEvent(event: NativeEventPayload): void {
@@ -90,14 +167,11 @@ export class AnalysisStore extends Store<AnalysisStoreState> {
         this.handleCompleted(event.payload);
         break;
       case 'cancelled':
-        this.set({ isAnalyzing: false, activeRequestId: null });
+        this.finishActive();
         break;
       case 'failed':
-        this.set({
-          isAnalyzing: false,
-          activeRequestId: null,
-          errorMessage: event.error?.message ?? 'Analysis failed.',
-        });
+        this.finishActive();
+        this.set({ errorMessage: event.error?.message ?? 'Analysis failed.' });
         break;
       default:
         break;
@@ -105,7 +179,9 @@ export class AnalysisStore extends Store<AnalysisStoreState> {
   }
 
   private handleCompleted(payload: unknown): void {
-    this.set({ isAnalyzing: false, activeRequestId: null });
+    const durationMs = this.requestStartedAt ? Date.now() - this.requestStartedAt : null;
+    this.finishActive();
+    this.set({ lastAnalysisDurationMs: durationMs });
 
     const result = parseAnalysisResult(payload);
     if (!result) {
@@ -115,14 +191,28 @@ export class AnalysisStore extends Store<AnalysisStoreState> {
 
     if (!this.lastSnapshot) return;
     const currentContext = contextFromSnapshot(this.lastSnapshot);
-    if (!isResultCurrent(result.context, currentContext)) {
-      // Stale: context moved on while the model was working. Discarded from
-      // current guidance rather than promoted (lifecycle-and-concurrency.md).
-      return;
-    }
-
     const grounded = rejectUngroundedLevels(result, this.lastSnapshot.levels);
-    this.set({ latestResult: grounded });
+    const isCurrent = isResultCurrent(result.context, currentContext);
+
+    this.pushHistory({ result: grounded, wasPromoted: isCurrent });
+    if (isCurrent) {
+      // Current: safe to update guidance. Stale: retained above for
+      // diagnostics/history only, per lifecycle-and-concurrency.md — it
+      // must never replace current guidance.
+      this.set({ latestResult: grounded });
+    }
+  }
+
+  private pushHistory(entry: HistoryEntry): void {
+    const history = [entry, ...this.getState().history].slice(0, MAX_HISTORY);
+    this.set({ history });
+  }
+
+  /** Common cleanup after any terminal event, then starts the next queued
+   * work (if any) — the single-flight invariant. */
+  private finishActive(): void {
+    this.set({ isAnalyzing: false, activeRequestId: null, activePriority: null });
+    void this.runNextQueued();
   }
 }
 

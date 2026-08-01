@@ -179,6 +179,13 @@ export interface AnalysisResult {
   tradeDeskPlan?: TradeDeskPlan;
 }
 
+/** Presentation-layer session/freshness state (data-contracts.md
+ * "MarketAnalysisState") — derived from connection/freshness state and the
+ * current time, not asked of the model. `unavailable` takes priority over
+ * `stale`, which takes priority over `market-closed`; see
+ * marketSessionState.ts. */
+export type MarketAnalysisState = 'live' | 'delayed' | 'market-closed' | 'stale' | 'unavailable';
+
 export type AIAvailability =
   | { state: 'unavailable'; reason: string }
   | { state: 'incompatible'; reason: string }

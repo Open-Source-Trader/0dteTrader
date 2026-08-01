@@ -4,6 +4,7 @@ import { useStore, shallowEqual } from '../../core/observable';
 import type { AnalysisSnapshot } from '../appleIntelligence/types';
 import type { AnalysisStore } from '../appleIntelligence/AnalysisStore';
 import { hashPositionVersion } from '../appleIntelligence/AnalysisSnapshotBuilder';
+import { deriveMarketSessionState } from '../appleIntelligence/marketSessionState';
 import {
   buildTradeDeskViewState,
   type TradeDeskPresentation,
@@ -19,6 +20,12 @@ interface TradeDeskPanelProps {
   selectedContract: OptionContract | null;
   buildSnapshot: () => AnalysisSnapshot;
   locked?: boolean;
+  /** Quote socket connection state, from ChartStoreState.isStale — the
+   * caller subscribes and passes this through rather than TradeDeskPanel
+   * taking an optional ChartStore itself, since hooks can't be called
+   * conditionally on an optional store. Defaults to false (assume live) for
+   * callers that don't have chart state available. */
+  isQuoteStreamStale?: boolean;
 }
 
 export function TradeDeskPanel({
@@ -28,6 +35,7 @@ export function TradeDeskPanel({
   selectedContract,
   buildSnapshot,
   locked = false,
+  isQuoteStreamStale = false,
 }: TradeDeskPanelProps) {
   const analysis = useStore(
     analysisStore,
@@ -74,6 +82,14 @@ export function TradeDeskPanel({
     };
   }, [analysis.latestResult, selectedContract, currentPositionVersion]);
 
+  // isChainStale isn't tracked yet (AnalysisSnapshotBuilder always supplies
+  // false for it — see its own comment); once it is, thread the same value
+  // used to build the snapshot through here instead of hardcoding false.
+  const marketSessionState = useMemo(
+    () => deriveMarketSessionState({ isQuoteStreamStale, isChainStale: false }),
+    [isQuoteStreamStale],
+  );
+
   const viewState = useMemo(
     () =>
       buildTradeDeskViewState({
@@ -83,8 +99,17 @@ export function TradeDeskPanel({
         currentPositionVersion,
         dismissedResultId,
         disabled: locked,
+        marketSessionState,
       }),
-    [analysis, currentContext, selectedContract, currentPositionVersion, dismissedResultId, locked],
+    [
+      analysis,
+      currentContext,
+      selectedContract,
+      currentPositionVersion,
+      dismissedResultId,
+      locked,
+      marketSessionState,
+    ],
   );
 
   useEffect(() => {
@@ -284,10 +309,12 @@ function TradeDeskExpandedView({
 
 function TradeDeskStatus({ viewState }: { viewState: TradeDeskViewState }) {
   const age = useRelativeAge(viewState.generatedAt);
-  const label = statusLabel(viewState.status);
+  const label = statusLabel(viewState.status, viewState.marketSessionState);
   return (
     <span className="trade-desk__status" role="status" aria-live="polite">
-      {viewState.status === 'current' && age ? `${label} · ${age}` : label}
+      {viewState.status === 'current' && viewState.marketSessionState === 'live' && age
+        ? `${label} · ${age}`
+        : label}
     </span>
   );
 }
@@ -405,10 +432,28 @@ function useRelativeAge(generatedAt?: string): string | null {
   return `${Math.floor(seconds / 60)}m ago`;
 }
 
-function statusLabel(status: TradeDeskViewState['status']): string {
+function statusLabel(
+  status: TradeDeskViewState['status'],
+  marketSessionState: TradeDeskViewState['marketSessionState'],
+): string {
+  // A "current" result (identity matches, per the staleness gate) can still
+  // be non-actionable if the market itself is closed, stale, or
+  // unavailable — that must never render as LIVE.
+  if (status === 'current') {
+    switch (marketSessionState) {
+      case 'live':
+        return 'LIVE';
+      case 'delayed':
+        return 'DELAYED';
+      case 'market-closed':
+        return 'MARKET CLOSED';
+      case 'stale':
+        return 'STALE';
+      case 'unavailable':
+        return 'UNAVAILABLE';
+    }
+  }
   switch (status) {
-    case 'current':
-      return 'LIVE';
     case 'generating':
       return 'ANALYZING';
     case 'stale':

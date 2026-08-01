@@ -280,4 +280,26 @@ describe('buildTradeDeskViewState', () => {
       }).presentation?.applicablePriceSuggestion,
     ).toBeUndefined();
   });
+
+  it('defaults marketSessionState to live when the caller does not supply one', () => {
+    expect(current().marketSessionState).toBe('live');
+  });
+
+  it('threads a supplied marketSessionState through', () => {
+    expect(current({ marketSessionState: 'market-closed' }).marketSessionState).toBe(
+      'market-closed',
+    );
+  });
+
+  it('disables the applicable price suggestion when the market is closed, even for a current result', () => {
+    const state = current({ marketSessionState: 'market-closed' });
+    expect(state.status).toBe('current');
+    expect(state.presentation?.applicablePriceSuggestion).toBeDefined();
+    expect(state.canApplySuggestedPrice).toBe(false);
+  });
+
+  it('allows the applicable price suggestion when the market is live', () => {
+    const state = current({ marketSessionState: 'live' });
+    expect(state.canApplySuggestedPrice).toBe(true);
+  });
 });

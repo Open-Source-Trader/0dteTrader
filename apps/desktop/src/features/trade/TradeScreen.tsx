@@ -176,6 +176,19 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
     };
   }, [apiClient, chartStore]);
 
+  // Apple Intelligence event subscription: must be active for the screen's
+  // full lifetime, independent of which layout renders the Trade Desk UI.
+  // Previously only AIAnalysisButton (compact/split layouts only) called
+  // start()/refreshAvailability() — on the desktop grid, where TradeDeskPanel
+  // renders instead of AIAnalysisButton, no native completion/failure event
+  // was ever subscribed to, so a request's `completed` terminal event had
+  // nowhere to arrive and the panel stayed on "Analyzing" indefinitely.
+  useEffect(() => {
+    analysisStore.start();
+    void analysisStore.refreshAvailability();
+    return () => analysisStore.stop();
+  }, [analysisStore]);
+
   // Automatic candle-close analysis: connected for the screen's lifetime.
   // The wiring's trigger policy dedupes per candle close, so a remount
   // cannot double-fire on the same candle.
@@ -580,6 +593,7 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
               locked={locked}
               analysisStore={analysisStore}
               buildAnalysisSnapshot={buildCurrentAnalysisSnapshot}
+              chartStore={chartStore}
             />
           </div>
         </div>

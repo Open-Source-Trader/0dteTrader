@@ -148,6 +148,12 @@ A generated number without grounding is invalid. Reject the structured result or
 
 Model confidence is not a calibrated probability. The UI must present it as model-reported interpretive confidence and display material omissions, stale inputs, and assumptions nearby.
 
+## Market session state
+
+`MarketAnalysisState` (`'live' | 'delayed' | 'market-closed' | 'stale' | 'unavailable'`) is a presentation-layer concept, computed deterministically from connection/freshness state and the current time (`marketSessionState.ts`) — never derived from model prose, and not part of the wire snapshot/result schema. `unavailable` (quote stream disconnected) takes priority over `stale` (chain data stale), which takes priority over `market-closed` (outside regular trading hours). A `tradeDeskPresenter` result whose identity is `current` per the staleness gate can still be `market-closed` — the panel must never label that combination `LIVE`, and the apply-price action is disabled whenever the session state isn't `live`, regardless of whether the underlying assessment is current.
+
+v1 scope is regular US-equity hours only (Mon-Fri 09:30-16:00 America/New_York); market holidays and early closes are not accounted for.
+
 ## Identity and staleness
 
 `AnalysisContextIdentity` must contain enough immutable state to prevent stale promotion, including:

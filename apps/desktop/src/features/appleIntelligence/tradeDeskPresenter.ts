@@ -6,6 +6,7 @@ import type {
   AIAvailability,
   AnalysisContextIdentity,
   AnalysisResult,
+  MarketAnalysisState,
   TradeDeskPlan,
 } from './types';
 
@@ -83,6 +84,11 @@ export interface TradeDeskViewState {
   generatedAt?: string;
   staleReason?: string;
   canApplySuggestedPrice: boolean;
+  /** Session/freshness state independent of result staleness — a `current`
+   * result can still be `market-closed` if captured outside trading hours.
+   * Defaults to `live` when the caller doesn't supply one, so existing
+   * callers/tests are unaffected. */
+  marketSessionState: MarketAnalysisState;
 }
 
 export interface TradeDeskPresentationLimits {
@@ -114,10 +120,14 @@ export interface BuildTradeDeskViewStateInput {
   dismissedResultId?: string | null;
   disabled?: boolean;
   limits?: Partial<TradeDeskPresentationLimits>;
+  marketSessionState?: MarketAnalysisState;
 }
 
 export function buildTradeDeskViewState(input: BuildTradeDeskViewStateInput): TradeDeskViewState {
-  if (input.disabled) return { status: 'disabled', canApplySuggestedPrice: false };
+  const marketSessionState = input.marketSessionState ?? 'live';
+  if (input.disabled) {
+    return { status: 'disabled', canApplySuggestedPrice: false, marketSessionState };
+  }
 
   const limits = { ...DEFAULT_TRADE_DESK_LIMITS, ...input.limits };
   const presentation = input.latestResult
@@ -137,11 +147,17 @@ export function buildTradeDeskViewState(input: BuildTradeDeskViewStateInput): Tr
       presentation: visiblePresentation,
       generatedAt: visiblePresentation?.resultId ? input.latestResult?.generatedAt : undefined,
       canApplySuggestedPrice: false,
+      marketSessionState,
     };
   }
 
   if (input.errorMessage && !visiblePresentation) {
-    return { status: 'failed', staleReason: input.errorMessage, canApplySuggestedPrice: false };
+    return {
+      status: 'failed',
+      staleReason: input.errorMessage,
+      canApplySuggestedPrice: false,
+      marketSessionState,
+    };
   }
 
   if (input.availability.state !== 'ready' && input.availability.state !== 'degraded') {
@@ -149,11 +165,12 @@ export function buildTradeDeskViewState(input: BuildTradeDeskViewStateInput): Tr
       status: input.availability.state === 'unavailable' ? 'unavailable' : 'disabled',
       staleReason: 'reason' in input.availability ? input.availability.reason : undefined,
       canApplySuggestedPrice: false,
+      marketSessionState,
     };
   }
 
   if (!visiblePresentation || !input.latestResult) {
-    return { status: 'unavailable', canApplySuggestedPrice: false };
+    return { status: 'unavailable', canApplySuggestedPrice: false, marketSessionState };
   }
 
   const isCurrent = input.currentContext
@@ -167,6 +184,7 @@ export function buildTradeDeskViewState(input: BuildTradeDeskViewStateInput): Tr
       generatedAt: input.latestResult.generatedAt,
       staleReason: staleReason(input.latestResult.context, input.currentContext),
       canApplySuggestedPrice: false,
+      marketSessionState,
     };
   }
 
@@ -177,15 +195,21 @@ export function buildTradeDeskViewState(input: BuildTradeDeskViewStateInput): Tr
       generatedAt: input.latestResult.generatedAt,
       staleReason: input.errorMessage,
       canApplySuggestedPrice: false,
+      marketSessionState,
     };
   }
 
-  const canApplySuggestedPrice = Boolean(visiblePresentation.applicablePriceSuggestion);
+  // Market-closed data can still be "current" against the staleness gate
+  // (identity matches) but must never present as an actionable live entry —
+  // downgrade the applicable-price suggestion rather than the result itself.
+  const canApplySuggestedPrice =
+    marketSessionState === 'live' && Boolean(visiblePresentation.applicablePriceSuggestion);
   return {
     status: 'current',
     presentation: visiblePresentation,
     generatedAt: input.latestResult.generatedAt,
     canApplySuggestedPrice,
+    marketSessionState,
   };
 }
 

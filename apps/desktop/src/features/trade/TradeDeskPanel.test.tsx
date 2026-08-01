@@ -129,7 +129,11 @@ function makeStores(result: AnalysisResult | null = makeResult()) {
   return { analysisStore, chainStore, tradeStore, snapshot };
 }
 
-function markup({ expanded = false, result = makeResult() } = {}) {
+function markup({
+  expanded = false,
+  result = makeResult(),
+  isQuoteStreamStale = false,
+}: { expanded?: boolean; result?: AnalysisResult | null; isQuoteStreamStale?: boolean } = {}) {
   const stores = makeStores(result);
   vi.mocked(localStorage.getItem).mockReturnValue(expanded ? '1' : '0');
   return renderToStaticMarkup(
@@ -139,6 +143,7 @@ function markup({ expanded = false, result = makeResult() } = {}) {
       tradeStore: stores.tradeStore,
       selectedContract: contract,
       buildSnapshot: () => stores.snapshot,
+      isQuoteStreamStale,
     }),
   );
 }
@@ -181,5 +186,30 @@ describe('TradeDeskPanel', () => {
     const html = markup({ expanded: true, result: stale });
     expect(html).toContain('STALE');
     expect(html).toContain('disabled=""');
+  });
+
+  it('shows LIVE during regular trading hours with a fresh quote stream', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-29T15:00:00.000Z')); // Wed 11:00 ET
+    const html = markup({ isQuoteStreamStale: false });
+    vi.useRealTimers();
+    expect(html).toContain('LIVE');
+  });
+
+  it('shows MARKET CLOSED outside trading hours, never LIVE', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-08-01T15:00:00.000Z')); // Saturday
+    const html = markup({ isQuoteStreamStale: false });
+    vi.useRealTimers();
+    expect(html).toContain('MARKET CLOSED');
+    expect(html).not.toContain('>LIVE<');
+  });
+
+  it('shows UNAVAILABLE when the quote stream is stale, even during trading hours', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-29T15:00:00.000Z')); // Wed 11:00 ET
+    const html = markup({ isQuoteStreamStale: true });
+    vi.useRealTimers();
+    expect(html).toContain('UNAVAILABLE');
   });
 });

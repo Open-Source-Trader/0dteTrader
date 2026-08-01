@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { OptionContract, OrderSide, OrderType } from '@0dtetrader/shared-types';
-import { useStore } from '../../core/observable';
+import { Store, useStore } from '../../core/observable';
 import { dayString } from '../../core/models/dates';
 import { midPrice, quotesPending } from '../../core/models/domain';
 import { isPriceInputShape, parsePriceInput } from '../../core/models/priceInput';
@@ -18,6 +18,7 @@ import { selectedContractPremium } from './expiryBreakEven';
 import { OptionChainTable } from './OptionChainTable';
 import type { AnalysisSnapshot } from '../appleIntelligence/types';
 import type { AnalysisStore } from '../appleIntelligence/AnalysisStore';
+import type { ChartStore } from '../chart/ChartStore';
 import { TradeDeskPanel } from './TradeDeskPanel';
 
 interface DesktopTradeTicketProps {
@@ -27,7 +28,14 @@ interface DesktopTradeTicketProps {
   locked?: boolean;
   analysisStore?: AnalysisStore;
   buildAnalysisSnapshot?: () => AnalysisSnapshot;
+  chartStore?: ChartStore;
 }
+
+/** Stand-in for callers that don't supply a ChartStore (e.g. tests) — a
+ * store that never reports stale, so useStore always has a valid,
+ * non-optional Store<S> to subscribe to regardless of whether the caller
+ * passed a real one. */
+const ALWAYS_LIVE_CHART_STORE = new Store({ isStale: false });
 
 const PRICE_MODES: Array<{ value: OrderType; label: string }> = [
   { value: 'bid', label: 'Bid' },
@@ -82,9 +90,15 @@ export function DesktopTradeTicket({
   locked = false,
   analysisStore,
   buildAnalysisSnapshot,
+  chartStore,
 }: DesktopTradeTicketProps) {
   const trade = useStore(tradeStore);
   const chain = useStore(chainStore);
+  const isQuoteStreamStale = useStore(
+    chartStore ?? ALWAYS_LIVE_CHART_STORE,
+    (state) => state.isStale,
+    (a, b) => a === b,
+  );
   const [customDraft, setCustomDraft] = useState<string | null>(null);
   const customRef = useRef<HTMLInputElement>(null);
 
@@ -263,6 +277,7 @@ export function DesktopTradeTicket({
             selectedContract={selectedContract}
             buildSnapshot={buildAnalysisSnapshot}
             locked={locked}
+            isQuoteStreamStale={isQuoteStreamStale}
           />
         ) : null}
 

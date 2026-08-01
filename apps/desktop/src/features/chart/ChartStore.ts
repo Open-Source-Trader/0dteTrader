@@ -160,6 +160,15 @@ export function chartChromeSlice(state: ChartStoreState) {
   };
 }
 
+/** Fired when a candle actually completes — a time-interval bucket rolls
+ *  over or a tick candle fills — never on intra-candle updates. */
+export interface CandleCloseEvent {
+  symbol: string;
+  interval: ChartInterval;
+  /** Epoch-seconds time of the candle that just closed. */
+  closeTime: number;
+}
+
 /** Upper bound on rendered candles so live appends stay cheap. */
 const MAX_CANDLES = 600;
 
@@ -196,6 +205,7 @@ export class ChartStore extends Store<ChartStoreState> {
     interval: TickInterval;
     state: StoredTickState;
   } | null = null;
+  private candleCloseListeners = new Set<(event: CandleCloseEvent) => void>();
 
   constructor(
     private readonly apiClient: ApiClient,
@@ -364,6 +374,21 @@ export class ChartStore extends Store<ChartStoreState> {
     this.set({ visiblePriceRange: range });
   }
 
+  /** Narrow hook for features that react to completed candles (never to
+   *  intra-candle updates). Listeners run synchronously on the quote path,
+   *  so they must be cheap and must not mutate chart state re-entrantly. */
+  onCandleClose(listener: (event: CandleCloseEvent) => void): () => void {
+    this.candleCloseListeners.add(listener);
+    return () => {
+      this.candleCloseListeners.delete(listener);
+    };
+  }
+
+  private emitCandleClose(closeTime: number): void {
+    const { symbol, interval } = this.getState();
+    this.candleCloseListeners.forEach((listener) => listener({ symbol, interval, closeTime }));
+  }
+
   // MARK: - Live updates
 
   /** Reads the candle array as of the last call, including any patch still
@@ -462,6 +487,8 @@ export class ChartStore extends Store<ChartStoreState> {
         next = next.slice(next.length - MAX_CANDLES);
       }
       this.setCandlePatch({ candles: next });
+      // A new bucket opening means the previous candle just closed.
+      this.emitCandleClose(last.time);
     }
   }
 
@@ -519,6 +546,7 @@ export class ChartStore extends Store<ChartStoreState> {
       // accumulator churning on every quote.
       this.scheduleTickSave(symbol, interval, { candles: next, accumulator: this.tickAccumulator });
       this.flushTickSave();
+      this.emitCandleClose(candle.time);
     } else {
       this.set({ tickProgress: { count: this.tickAccumulator.count, size } });
       // In-progress accumulator only: debounced, so a burst of same-second

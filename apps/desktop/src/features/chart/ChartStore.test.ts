@@ -304,6 +304,47 @@ describe('tick charts', () => {
   });
 });
 
+describe('ChartStore.onCandleClose', () => {
+  it('emits when a next-bucket quote closes the previous candle', () => {
+    const store = makeStore();
+    const events: unknown[] = [];
+    store.onCandleClose((event) => events.push(event));
+
+    liveQuote(store, quote('2026-07-17T14:30:30Z', 501.9)); // in-bucket
+    expect(events).toEqual([]);
+
+    liveQuote(store, quote('2026-07-17T14:31:05Z', 502.1)); // next bucket
+    expect(events).toEqual([{ symbol: 'SPY', interval: '1m', closeTime: BUCKET }]);
+  });
+
+  it('emits when a tick candle fills', async () => {
+    (loadTickState as Mock).mockResolvedValueOnce({
+      candles: [{ time: 1_784_298_000, open: 1, high: 1, low: 1, close: 1, volume: 0 }],
+      accumulator: { count: 9, open: 1, high: 2, low: 1, close: 2, firstTimestamp: 1_784_298_500 },
+    });
+    const store = makeStore();
+    (store as unknown as { set(patch: object): void }).set({ interval: '10t', candles: [] });
+    await store.loadCandles();
+
+    const events: { closeTime: number }[] = [];
+    store.onCandleClose((event) => events.push(event));
+    liveQuote(store, quote('2026-07-17T14:30:02Z', 502));
+
+    expect(events).toHaveLength(1);
+    expect(events[0].closeTime).toBe(store.getState().candles.at(-1)!.time);
+  });
+
+  it('stops emitting after unsubscribe', () => {
+    const store = makeStore();
+    const events: unknown[] = [];
+    const unsubscribe = store.onCandleClose((event) => events.push(event));
+    unsubscribe();
+
+    liveQuote(store, quote('2026-07-17T14:31:05Z', 502.1));
+    expect(events).toEqual([]);
+  });
+});
+
 describe('chartChromeSlice', () => {
   it('omits candles/quote/tickProgress/isStale — the fields a live tick changes', () => {
     const store = makeStore();

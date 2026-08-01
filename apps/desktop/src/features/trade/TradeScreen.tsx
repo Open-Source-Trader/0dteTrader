@@ -48,6 +48,7 @@ import {
 } from './TradeManagementWorkspaceModel';
 import { AIAnalysisButton } from '../appleIntelligence/AIAnalysisButton';
 import { buildAnalysisSnapshot } from '../appleIntelligence/AnalysisSnapshotBuilder';
+import { connectCandleCloseAnalysis } from '../appleIntelligence/candleCloseWiring';
 import { HistoryView } from './HistoryView';
 import { OrderConfirmPopup } from './OrderConfirmPopup';
 import { PositionsStrip } from './PositionsStrip';
@@ -173,6 +174,19 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
       cancelled = true;
     };
   }, [apiClient, chartStore]);
+
+  // Automatic candle-close analysis: connected for the screen's lifetime.
+  // The wiring's trigger policy dedupes per candle close, so a remount
+  // cannot double-fire on the same candle.
+  useEffect(
+    () =>
+      connectCandleCloseAnalysis({
+        chartStore,
+        analysisStore,
+        getPositions: () => tradeStore.getState().positions,
+      }),
+    [chartStore, analysisStore, tradeStore],
+  );
 
   const confirmModeSwitch = async () => {
     await apiClient.updateTradingMode(nextMode);

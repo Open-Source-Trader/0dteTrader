@@ -78,6 +78,32 @@ describe('Apple Intelligence cannot reach order execution (placeholder — expan
     // import to check, so this asserts the negative precondition holds.
     expect(mainSource).not.toMatch(/appleIntelligence.*order|order.*appleIntelligence/i);
   });
+
+  it('renderer AI modules only type-import trading stores — no runtime import, no execution surface', () => {
+    // architecture-enforcement.md: AI modules must not import order
+    // placement/mutation or broker execution modules. `import type` is
+    // erased at compile time and carries no runtime capability; anything
+    // else from trade/, api/, or broker paths is a boundary violation.
+    const aiDir = path.join(desktopRoot, 'src/features/appleIntelligence');
+    const files = listFiles(aiDir, ['.ts', '.tsx']).filter((f) => !/\.test\.tsx?$/.test(f));
+    const offenders = [];
+    for (const file of files) {
+      const source = readFileSync(file, 'utf8');
+      const runtimeImports =
+        source.match(/^import\s+(?!type\b)[^;]*from\s+['"][^'"]*\/(trade|api|broker)\//gm) ?? [];
+      if (runtimeImports.length > 0) offenders.push({ file, runtimeImports });
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  it('renderer AI modules never call order methods on any store', () => {
+    const aiDir = path.join(desktopRoot, 'src/features/appleIntelligence');
+    const files = listFiles(aiDir, ['.ts', '.tsx']);
+    const offenders = files.filter((file) =>
+      /\.(arm|submitOrder|placeOrder|cancelOrder|flatten)\s*\(/.test(readFileSync(file, 'utf8')),
+    );
+    expect(offenders).toEqual([]);
+  });
 });
 
 describe('no second Electron bootstrap or preload root is introduced', () => {

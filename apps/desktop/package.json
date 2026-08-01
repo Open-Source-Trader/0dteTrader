@@ -15,7 +15,9 @@
     "preview": "vite preview",
     "electron": "ELECTRON_START_URL=${ELECTRON_START_URL:-http://localhost:5173} electron electron/main.cjs",
     "electron:dist": "electron electron/main.cjs",
-    "dist:mac": "npm run build:shim && electron-builder --mac dmg --publish never"
+    "dist:mac": "npm run build:shim && electron-builder --mac dmg --publish never && node scripts/verify-packaged-shim.mjs",
+    "verify:shim": "node scripts/verify-packaged-shim.mjs",
+    "smoke:shim": "node scripts/packaged-shim-smoke.mjs"
   },
   "dependencies": {
     "@0dtetrader/shared-types": "*",

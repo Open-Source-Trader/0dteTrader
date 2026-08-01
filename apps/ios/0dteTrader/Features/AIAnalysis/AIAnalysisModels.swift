@@ -1,4 +1,5 @@
 #if canImport(FoundationModels)
+import CandleEncoding
 import Foundation
 import FoundationModels
 
@@ -174,6 +175,12 @@ enum AIAnalysisPromptBuilder {
 
     // MARK: - Helpers
 
+    /// Thin adapter over the shared CandleEncoding package (packages/swift-shared,
+    /// consumed by desktop's Swift shim too) — maps iOS's own `Candle`/`Date`
+    /// into the package's plain `CandleBar`/pre-formatted `startLabel`, and
+    /// prepends the iOS-specific "RECENT PRICE ACTION..." label line. The
+    /// lossless base+delta encoding algorithm itself lives in the shared
+    /// package, not here.
     static func buildCandleTable(_ candles: [Candle], interval: String) -> String {
         guard let first = candles.first else { return "" }
 
@@ -181,30 +188,22 @@ enum AIAnalysisPromptBuilder {
         formatter.dateFormat = "yyyy-MM-dd HH:mm"
         formatter.timeZone = TimeZone(identifier: "America/New_York")
 
-        var lines: [String] = []
-        lines.append("RECENT PRICE ACTION (last \(candles.count) candles, newest last):")
-        lines.append(
-            "CANDLES \(interval) start=\(formatter.string(from: first.time)) tz=NY " +
-            "columns=open,high,low,close,volume encoding=b1-absolute-bars2plus-delta-from-previous-close"
+        let bars = candles.map { candle in
+            CandleBar(
+                open: candle.open,
+                high: candle.high,
+                low: candle.low,
+                close: candle.close,
+                volume: Double(candle.volume)
+            )
+        }
+        let table = CandleTableEncoder.encode(
+            bars,
+            interval: interval,
+            startLabel: formatter.string(from: first.time)
         )
 
-        var previousClose: Double?
-        for (index, candle) in candles.enumerated() {
-            if index == 0 {
-                lines.append(
-                    "B1: \(f(candle.open)),\(f(candle.high)),\(f(candle.low)),\(f(candle.close)),\(candle.volume)"
-                )
-            } else {
-                let base = previousClose ?? candle.close
-                lines.append(
-                    "B\(index + 1): \(sf(candle.open - base)),\(sf(candle.high - base))," +
-                    "\(sf(candle.low - base)),\(sf(candle.close - base)),\(candle.volume)"
-                )
-            }
-            previousClose = candle.close
-        }
-
-        return lines.joined(separator: "\n")
+        return "RECENT PRICE ACTION (last \(candles.count) candles, newest last):\n\(table)"
     }
 
     private static func buildIndicatorsSection(

@@ -4,27 +4,12 @@ import XCTest
 
 @available(iOS 26, *)
 final class AIAnalysisModelsTests: XCTestCase {
-    func testBuildCandleTableRoundTripsAtTwoDecimalPrecision() {
-        let candles = [
-            Candle(time: makeDate("2026-07-24T09:30:00Z"), open: 100.12, high: 101.34, low: 99.87, close: 100.56, volume: 120_000),
-            Candle(time: makeDate("2026-07-24T09:35:00Z"), open: 100.63, high: 101.11, low: 100.22, close: 100.89, volume: 118_500),
-            Candle(time: makeDate("2026-07-24T09:40:00Z"), open: 100.77, high: 101.45, low: 100.40, close: 101.02, volume: 121_250),
-            Candle(time: makeDate("2026-07-24T09:45:00Z"), open: 101.05, high: 101.62, low: 100.88, close: 101.31, volume: 119_900),
-        ]
-
-        let encoded = AIAnalysisPromptBuilder.buildCandleTable(candles, interval: "5m")
-        let reconstructed = reconstructCandles(from: encoded)
-
-        XCTAssertEqual(reconstructed.count, candles.count)
-        for (source, recovered) in zip(candles, reconstructed) {
-            XCTAssertEqual(twoDecimalString(recovered.open), twoDecimalString(source.open))
-            XCTAssertEqual(twoDecimalString(recovered.high), twoDecimalString(source.high))
-            XCTAssertEqual(twoDecimalString(recovered.low), twoDecimalString(source.low))
-            XCTAssertEqual(twoDecimalString(recovered.close), twoDecimalString(source.close))
-            XCTAssertEqual(recovered.volume, source.volume)
-        }
-    }
-
+    /// The delta-encoding algorithm itself (round-trip losslessness, size
+    /// vs. verbose encoding) is tested in the shared CandleEncoding package
+    /// (packages/swift-shared/Tests/CandleEncodingTests) it now lives in.
+    /// This is the adapter-wiring check: proves `buildCandleTable` correctly
+    /// maps `Candle` → `CandleBar` and formats the NY-timezone `startLabel`
+    /// for the header — not a re-test of the encoding format.
     func testBuildCandleTableHandlesSingleAndEmptyInputs() {
         XCTAssertEqual(AIAnalysisPromptBuilder.buildCandleTable([], interval: "5m"), "")
 
@@ -38,18 +23,11 @@ final class AIAnalysisModelsTests: XCTestCase {
         )
         let encoded = AIAnalysisPromptBuilder.buildCandleTable([single], interval: "5m")
 
+        XCTAssertTrue(encoded.contains("RECENT PRICE ACTION (last 1 candles, newest last):"))
+        XCTAssertTrue(encoded.contains("CANDLES 5m start=2026-07-24 05:30 tz=NY"))
         XCTAssertTrue(encoded.contains("B1: 100.12,101.34,99.87,100.56,120000"))
         XCTAssertFalse(encoded.contains("B2:"))
         XCTAssertTrue(encoded.contains("encoding=b1-absolute-bars2plus-delta-from-previous-close"))
-    }
-
-    func testBuildCandleTableIsSmallerThanVerboseEncoding() {
-        let candles = makeCandles(count: 50)
-
-        let encoded = AIAnalysisPromptBuilder.buildCandleTable(candles, interval: "5m")
-        let verbose = verboseCandleTable(candles)
-
-        XCTAssertLessThan(encoded.count, verbose.count)
     }
 
     func testBuildOptionsAnalyticsSectionDensifiesAndPreservesValues() throws {
@@ -109,88 +87,6 @@ final class AIAnalysisModelsTests: XCTestCase {
 
 @available(iOS 26, *)
 private extension AIAnalysisModelsTests {
-    func reconstructCandles(from encoded: String) -> [Candle] {
-        let lines = encoded.split(separator: "\n")
-        let candleLines = lines.filter { $0.hasPrefix("B") }
-
-        var previousClose: Double?
-        var result: [Candle] = []
-
-        for lineSubsequence in candleLines {
-            let line = String(lineSubsequence)
-            let parts = line.split(separator: ":", maxSplits: 1).map(String.init)
-            XCTAssertEqual(parts.count, 2)
-            let values = parts[1]
-                .split(separator: ",")
-                .map { $0.trimmingCharacters(in: .whitespaces) }
-
-            XCTAssertEqual(values.count, 5)
-
-            if previousClose == nil {
-                let open = Double(values[0])
-                let high = Double(values[1])
-                let low = Double(values[2])
-                let close = Double(values[3])
-                let volume = Int(values[4])
-                XCTAssertNotNil(open)
-                XCTAssertNotNil(high)
-                XCTAssertNotNil(low)
-                XCTAssertNotNil(close)
-                XCTAssertNotNil(volume)
-                result.append(
-                    Candle(
-                        time: Date(timeIntervalSince1970: 0),
-                        open: open ?? 0,
-                        high: high ?? 0,
-                        low: low ?? 0,
-                        close: close ?? 0,
-                        volume: volume ?? 0
-                    )
-                )
-                previousClose = close
-            } else {
-                let deltaOpen = Double(values[0])
-                let deltaHigh = Double(values[1])
-                let deltaLow = Double(values[2])
-                let deltaClose = Double(values[3])
-                let volume = Int(values[4])
-                XCTAssertNotNil(deltaOpen)
-                XCTAssertNotNil(deltaHigh)
-                XCTAssertNotNil(deltaLow)
-                XCTAssertNotNil(deltaClose)
-                XCTAssertNotNil(volume)
-                let open = previousClose! + (deltaOpen ?? 0)
-                let high = previousClose! + (deltaHigh ?? 0)
-                let low = previousClose! + (deltaLow ?? 0)
-                let close = previousClose! + (deltaClose ?? 0)
-                result.append(
-                    Candle(
-                        time: Date(timeIntervalSince1970: 0),
-                        open: open,
-                        high: high,
-                        low: low,
-                        close: close,
-                        volume: volume ?? 0
-                    )
-                )
-                previousClose = close
-            }
-        }
-
-        return result
-    }
-
-    func verboseCandleTable(_ candles: [Candle]) -> String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd HH:mm"
-        formatter.timeZone = TimeZone(identifier: "America/New_York")
-
-        return candles.map { candle in
-            "\(formatter.string(from: candle.time)) | \(twoDecimalString(candle.open)) | \(twoDecimalString(candle.high)) | \(twoDecimalString(candle.low)) | \(twoDecimalString(candle.close)) | \(candle.volume)"
-        }
-        .joined(separator: "\n")
-    }
-
     func makeCandles(count: Int) -> [Candle] {
         let start = makeDate("2026-07-24T09:30:00Z")
         var candles: [Candle] = []
@@ -210,10 +106,6 @@ private extension AIAnalysisModelsTests {
         }
 
         return candles
-    }
-
-    func twoDecimalString(_ value: Double) -> String {
-        String(format: "%.2f", value)
     }
 
     func makeDate(_ iso: String) -> Date {

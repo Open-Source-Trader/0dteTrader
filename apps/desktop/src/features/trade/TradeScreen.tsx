@@ -49,6 +49,7 @@ import {
 import { AIAnalysisButton } from '../appleIntelligence/AIAnalysisButton';
 import { buildAnalysisSnapshot } from '../appleIntelligence/AnalysisSnapshotBuilder';
 import { connectCandleCloseAnalysis } from '../appleIntelligence/candleCloseWiring';
+import { connectPositionAnalysis } from '../appleIntelligence/positionWiring';
 import { HistoryView } from './HistoryView';
 import { OrderConfirmPopup } from './OrderConfirmPopup';
 import { PositionsStrip } from './PositionsStrip';
@@ -186,6 +187,13 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
         getPositions: () => tradeStore.getState().positions,
       }),
     [chartStore, analysisStore, tradeStore],
+  );
+
+  // Position lifecycle analysis (open/scale/close/material P&L change):
+  // position-critical priority, advisory only — never touches orders.
+  useEffect(
+    () => connectPositionAnalysis({ tradeStore, chartStore, analysisStore }),
+    [tradeStore, chartStore, analysisStore],
   );
 
   const confirmModeSwitch = async () => {

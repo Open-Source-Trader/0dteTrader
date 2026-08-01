@@ -93,6 +93,40 @@ describe('buildAnalysisSnapshot', () => {
     expect(snapshot.position).toBeUndefined();
   });
 
+  it('prefers an explicitly triggered position over the symbol lookup', () => {
+    const contract = position({ symbol: 'SPY260731C00500000', quantity: 3 });
+    const snapshot = buildAnalysisSnapshot({
+      chart: { symbol: 'SPY', interval: '1m', candles: [], quote: null, isStale: false },
+      positions: [position({ symbol: 'SPY' }), contract],
+      triggeredPosition: contract,
+      now: FIXED_NOW,
+    });
+    expect(snapshot.position).toMatchObject({ quantity: 3 });
+  });
+
+  it('declares a material position-data-missing omission for a management task without a position', () => {
+    const snapshot = buildAnalysisSnapshot({
+      chart: { symbol: 'SPY', interval: '1m', candles: [], quote: null, isStale: false },
+      positions: [],
+      triggeredPosition: null,
+      trigger: { kind: 'position-change', priority: 'position-critical', reason: 'closed' },
+      now: FIXED_NOW,
+    });
+    expect(snapshot.position).toBeUndefined();
+    expect(snapshot.omissions).toContainEqual(
+      expect.objectContaining({ code: 'position-data-missing', material: true }),
+    );
+  });
+
+  it('does not declare position-data-missing for a manual task without a position', () => {
+    const snapshot = buildAnalysisSnapshot({
+      chart: { symbol: 'SPY', interval: '1m', candles: [], quote: null, isStale: false },
+      positions: [],
+      now: FIXED_NOW,
+    });
+    expect(snapshot.omissions.map((o) => o.code)).not.toContain('position-data-missing');
+  });
+
   it('declares a material omission when the quote stream is stale', () => {
     const snapshot = buildAnalysisSnapshot({
       chart: { symbol: 'SPY', interval: '5m', candles: [], quote: null, isStale: true },

@@ -11,6 +11,7 @@ import type {
   AnalysisContextIdentity,
   AnalysisResult,
   AnalysisSnapshot,
+  TriggerKind,
   TriggerPriority,
 } from './types';
 
@@ -31,6 +32,9 @@ interface AnalysisStoreState {
   activeRequestId: string | null;
   activePriority: TriggerPriority | null;
   latestResult: AnalysisResult | null;
+  /** Trigger kind of the promoted latestResult — lets the UI label
+   * automatic (candle-close/position) results as such. */
+  latestTriggerKind: TriggerKind | null;
   errorMessage: string | null;
   history: HistoryEntry[];
   queueDepth: number;
@@ -60,6 +64,7 @@ export class AnalysisStore extends Store<AnalysisStoreState> {
       activeRequestId: null,
       activePriority: null,
       latestResult: null,
+      latestTriggerKind: null,
       errorMessage: null,
       history: [],
       queueDepth: 0,
@@ -199,7 +204,7 @@ export class AnalysisStore extends Store<AnalysisStoreState> {
       // Current: safe to update guidance. Stale: retained above for
       // diagnostics/history only, per lifecycle-and-concurrency.md — it
       // must never replace current guidance.
-      this.set({ latestResult: grounded });
+      this.set({ latestResult: grounded, latestTriggerKind: this.lastSnapshot.trigger.kind });
     }
   }
 

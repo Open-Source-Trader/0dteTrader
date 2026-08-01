@@ -1,7 +1,13 @@
 import { useEffect, useState } from 'react';
 import { useStore } from '../../core/observable';
 import type { AnalysisStore } from './AnalysisStore';
-import type { AnalysisSnapshot } from './types';
+import type { AnalysisSnapshot, TriggerKind } from './types';
+
+const TRIGGER_LABELS: Record<Exclude<TriggerKind, 'manual'>, string> = {
+  'candle-close': 'candle close',
+  'position-change': 'position change',
+  'material-change': 'material P&L change',
+};
 
 interface AIAnalysisButtonProps {
   analysisStore: AnalysisStore;
@@ -81,6 +87,13 @@ export function AIAnalysisButton({ analysisStore, buildSnapshot }: AIAnalysisBut
               ) : null}
               {state.latestResult ? (
                 <div>
+                  {state.latestTriggerKind && state.latestTriggerKind !== 'manual' ? (
+                    // Advisory-only label for automatic results: the app
+                    // never acts on analysis; the user always does.
+                    <p className="text-secondary">
+                      Auto-generated ({TRIGGER_LABELS[state.latestTriggerKind]}) — advisory only.
+                    </p>
+                  ) : null}
                   <p>
                     <strong>{state.latestResult.recommendation.toUpperCase()}</strong> ·{' '}
                     {state.latestResult.bias} · confidence{' '}

@@ -24,6 +24,11 @@ export interface BuildSnapshotInput {
   chart: Pick<ChartStoreState, 'symbol' | 'interval' | 'candles' | 'quote' | 'isStale'>;
   positions: Position[];
   trigger?: { kind: TriggerKind; priority: TriggerPriority; reason: string };
+  /** Position lifecycle triggers know exactly which position changed —
+   * option positions are keyed by contract symbol and never match the
+   * chart's underlying symbol, so the default lookup below can't find
+   * them. `null` means "explicitly no position" (a close event). */
+  triggeredPosition?: Position | null;
   now?: () => Date;
 }
 
@@ -64,7 +69,27 @@ export function buildAnalysisSnapshot(input: BuildSnapshotInput): AnalysisSnapsh
     });
   }
 
-  const position = input.positions.find((p) => p.symbol === input.chart.symbol) ?? null;
+  const position =
+    input.triggeredPosition !== undefined
+      ? input.triggeredPosition
+      : (input.positions.find((p) => p.symbol === input.chart.symbol) ?? null);
+
+  const trigger = input.trigger ?? {
+    kind: 'manual' as TriggerKind,
+    priority: 'manual' as TriggerPriority,
+    reason: 'user requested',
+  };
+  // Management tasks must never silently proceed without position data
+  // (context-and-prompt-budgeting.md priority 1): declaring it material
+  // lets the Swift budgeter downgrade to observation-only analysis.
+  if ((trigger.kind === 'position-change' || trigger.kind === 'material-change') && !position) {
+    omissions.push({
+      code: 'position-data-missing',
+      category: 'position',
+      reason: 'unavailable',
+      material: true,
+    });
+  }
 
   return {
     snapshotSchemaVersion: 1,
@@ -77,7 +102,7 @@ export function buildAnalysisSnapshot(input: BuildSnapshotInput): AnalysisSnapsh
       snapshotSequence: snapshotSequenceCounter,
       positionVersion: position ? hashPositionVersion(position) : 0,
     },
-    trigger: input.trigger ?? { kind: 'manual', priority: 'manual', reason: 'user requested' },
+    trigger,
     market: {
       last: input.chart.quote?.last ?? null,
       bid: input.chart.quote?.bid ?? null,

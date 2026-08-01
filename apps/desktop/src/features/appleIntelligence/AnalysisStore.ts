@@ -11,6 +11,7 @@ import {
   rejectUngroundedLevels,
 } from './validation';
 import { AnalysisScheduler, shouldPreempt, type QueuedWork } from './AnalysisScheduler';
+import { computeSnapshotContentHash } from './snapshotContentHash';
 import type {
   AIAvailability,
   AnalysisContextIdentity,
@@ -21,6 +22,7 @@ import type {
 } from './types';
 
 const MAX_HISTORY = 20;
+const MAX_CONTENT_CACHE = 10;
 
 export interface HistoryEntry {
   result: AnalysisResult;
@@ -59,6 +61,13 @@ export class AnalysisStore extends Store<AnalysisStoreState> {
   private lastSnapshot: AnalysisSnapshot | null = null;
   private readonly scheduler = new AnalysisScheduler();
   private requestStartedAt: number | null = null;
+  /** Bounded cache of validated results keyed by snapshot content hash
+   * (lifecycle-and-concurrency.md "repeated-analysis cache") — a Refresh on
+   * semantically unchanged market state reuses the cached assessment
+   * instead of invoking the model again. Never bypasses the staleness gate:
+   * a cache hit is re-promoted through the same isResultCurrent check as a
+   * fresh completion, just with a rebuilt context. */
+  private readonly contentCache = new Map<string, AnalysisResult>();
 
   constructor(private readonly bridge: AppleIntelligenceBridge | null) {
     super({
@@ -140,6 +149,23 @@ export class AnalysisStore extends Store<AnalysisStoreState> {
   private async runNow(work: QueuedWork): Promise<void> {
     if (!this.bridge) return;
     this.lastSnapshot = work.snapshot;
+
+    const contentHash = computeSnapshotContentHash(work.snapshot);
+    const cached = this.contentCache.get(contentHash);
+    if (cached) {
+      this.set({ isAnalyzing: true, activePriority: work.priority, errorMessage: null });
+      // Re-stamp the cached result's identity onto the current snapshot's —
+      // the market state is semantically identical (that's the cache-key
+      // match) but the snapshot itself is a new capture, so its identity is
+      // what "current" now means. This is the only field mutation trusted
+      // on a cache hit; the plan/prices themselves are the model's own
+      // untouched validated output.
+      const restamped: AnalysisResult = { ...cached, context: contextFromSnapshot(work.snapshot) };
+      this.promoteResult(restamped, contextFromSnapshot(work.snapshot));
+      this.finishActive();
+      return;
+    }
+
     this.requestStartedAt = Date.now();
     this.set({ isAnalyzing: true, activePriority: work.priority, errorMessage: null });
     const { requestId } = await this.bridge.analyze({
@@ -200,38 +226,64 @@ export class AnalysisStore extends Store<AnalysisStoreState> {
     }
 
     if (!this.lastSnapshot) return;
-    const currentContext = contextFromSnapshot(this.lastSnapshot);
+    const validated = this.validateResult(result, this.lastSnapshot);
+    if (!validated) return;
+
+    const contentHash = computeSnapshotContentHash(this.lastSnapshot);
+    this.contentCache.set(contentHash, validated);
+    if (this.contentCache.size > MAX_CONTENT_CACHE) {
+      const oldestKey = this.contentCache.keys().next().value;
+      if (oldestKey !== undefined) this.contentCache.delete(oldestKey);
+    }
+
+    this.promoteResult(validated, contextFromSnapshot(this.lastSnapshot));
+  }
+
+  /** Structural + grounding + decision-invariant validation shared by a
+   * fresh completion and a cache-hit replay — a cached result was already
+   * validated once when first produced, but re-validating here keeps the
+   * two paths identical rather than trusting cache contents blindly. */
+  private validateResult(
+    result: AnalysisResult,
+    snapshot: AnalysisSnapshot,
+  ): AnalysisResult | null {
     const enriched: AnalysisResult = {
       ...result,
       context: {
         ...result.context,
-        snapshotId: result.context.snapshotId ?? this.lastSnapshot.identity.snapshotId,
+        snapshotId: result.context.snapshotId ?? snapshot.identity.snapshotId,
         selectedContractSymbol:
-          result.context.selectedContractSymbol ??
-          this.lastSnapshot.identity.selectedContractSymbol,
+          result.context.selectedContractSymbol ?? snapshot.identity.selectedContractSymbol,
       },
     };
-    const grounded = rejectUngroundedLevels(enriched, this.lastSnapshot.levels);
-    if (!isTradeDeskPlanGrounded(grounded, this.lastSnapshot.levels)) {
+    const grounded = rejectUngroundedLevels(enriched, snapshot.levels);
+    if (!isTradeDeskPlanGrounded(grounded, snapshot.levels)) {
       this.set({
         errorMessage: 'Analysis returned an ungrounded Trade Desk plan and was discarded.',
       });
-      return;
+      return null;
     }
-    const invariantChecked = enforceTradeDeskInvariants(
-      grounded,
-      Boolean(this.lastSnapshot.position),
-    );
-    const isCurrent = isResultCurrent(invariantChecked.context, currentContext);
+    return enforceTradeDeskInvariants(grounded, Boolean(snapshot.position));
+  }
 
-    this.pushHistory({ result: invariantChecked, wasPromoted: isCurrent });
+  /** Applies the staleness gate and promotes/records a validated result
+   * against `currentContext` — the authoritative identity of whatever
+   * snapshot is current *right now*, which may differ from the result's own
+   * `context` (a fresh completion's context reflects what was actually
+   * analyzed, possibly already superseded; a cache-hit's context is a prior
+   * capture's identity entirely). The gate compares the two rather than
+   * trusting either alone, so a cache hit can never bypass it. */
+  private promoteResult(result: AnalysisResult, currentContext: AnalysisContextIdentity): void {
+    const isCurrent = isResultCurrent(result.context, currentContext);
+
+    this.pushHistory({ result, wasPromoted: isCurrent });
     if (isCurrent) {
       // Current: safe to update guidance. Stale: retained above for
       // diagnostics/history only, per lifecycle-and-concurrency.md — it
       // must never replace current guidance.
       this.set({
-        latestResult: invariantChecked,
-        latestTriggerKind: this.lastSnapshot.trigger.kind,
+        latestResult: result,
+        latestTriggerKind: this.lastSnapshot?.trigger.kind ?? null,
       });
     }
   }

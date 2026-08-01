@@ -441,4 +441,77 @@ describe('AnalysisStore', () => {
       expect(store.getState().lastAnalysisDurationMs).toBeGreaterThanOrEqual(0);
     });
   });
+
+  describe('snapshot content-hash cache', () => {
+    it('reuses a cached result for a semantically identical snapshot without calling the bridge again', async () => {
+      const { bridge, emit, analyzeMock } = makeFakeBridge();
+      const store = new AnalysisStore(bridge);
+      store.start();
+
+      const first = makeSnapshot({ snapshotSequence: 1 });
+      await store.analyze(first);
+      const firstRequestId = store.getState().activeRequestId;
+      emit({
+        protocolVersion: 1,
+        requestId: firstRequestId!,
+        event: 'completed',
+        payload: validResultPayload({ analysisId: 'a1' }),
+      });
+      expect(store.getState().latestResult?.analysisId).toBe('a1');
+      expect(analyzeMock).toHaveBeenCalledTimes(1);
+
+      // A second, semantically identical snapshot (same market content,
+      // different bookkeeping identity) must hit the cache, not the bridge.
+      const second = makeSnapshot({
+        snapshotId: 'different-snapshot-id',
+        snapshotSequence: 2,
+      });
+      await store.analyze(second);
+
+      expect(analyzeMock).toHaveBeenCalledTimes(1);
+      expect(store.getState().latestResult?.analysisId).toBe('a1');
+      expect(store.getState().isAnalyzing).toBe(false);
+    });
+
+    it('invokes the bridge again for a snapshot with materially different content', async () => {
+      const { bridge, emit, analyzeMock } = makeFakeBridge();
+      const store = new AnalysisStore(bridge);
+      store.start();
+
+      await store.analyze(makeSnapshot({ snapshotSequence: 1 }));
+      const firstRequestId = store.getState().activeRequestId;
+      emit({
+        protocolVersion: 1,
+        requestId: firstRequestId!,
+        event: 'completed',
+        payload: validResultPayload({ analysisId: 'a1' }),
+      });
+
+      const changed = makeSnapshot({ snapshotSequence: 2 });
+      changed.candles = { count: 5, recent: [{ time: 1, open: 1, high: 2, low: 0, close: 1.5 }] };
+      await store.analyze(changed);
+
+      expect(analyzeMock).toHaveBeenCalledTimes(2);
+    });
+
+    it('re-stamps a cache-hit result with the current snapshot identity', async () => {
+      const { bridge, emit } = makeFakeBridge();
+      const store = new AnalysisStore(bridge);
+      store.start();
+
+      await store.analyze(makeSnapshot({ snapshotSequence: 1 }));
+      const firstRequestId = store.getState().activeRequestId;
+      emit({
+        protocolVersion: 1,
+        requestId: firstRequestId!,
+        event: 'completed',
+        payload: validResultPayload({ analysisId: 'a1' }),
+      });
+
+      await store.analyze(makeSnapshot({ snapshotId: 'later-snapshot', snapshotSequence: 2 }));
+
+      expect(store.getState().latestResult?.context.snapshotSequence).toBe(2);
+      expect(store.getState().latestResult?.context.snapshotId).toBe('later-snapshot');
+    });
+  });
 });

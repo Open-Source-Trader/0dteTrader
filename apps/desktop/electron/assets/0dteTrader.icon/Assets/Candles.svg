@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="gGreen" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#7dff9b"/>
+      <stop offset="0.22" stop-color="#21ef69"/>
+      <stop offset="1" stop-color="#00a63d"/>
+    </linearGradient>
+    <linearGradient id="gRed" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ff7979"/>
+      <stop offset="0.25" stop-color="#ff3838"/>
+      <stop offset="1" stop-color="#b70021"/>
+    </linearGradient>
+    <filter id="softGlow" x="-80%" y="-80%" width="260%" height="260%">
+      <feGaussianBlur stdDeviation="8" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <g stroke-width="9" stroke-linecap="round" filter="url(#softGlow)">
+    <!-- green, red, green, green, green: lowest to highest -->
+    <g stroke="#18ef69"><path d="M344 666V790"/><rect x="314" y="690" width="60" height="72" rx="5" fill="url(#gGreen)" stroke="#9affb8" stroke-width="5"/></g>
+    <g stroke="#ff394d"><path d="M432 572V740"/><rect x="398" y="608" width="68" height="92" rx="5" fill="url(#gRed)" stroke="#ffb0ad" stroke-width="5"/></g>
+    <g stroke="#18ef69"><path d="M526 474V690"/><rect x="490" y="520" width="72" height="116" rx="5" fill="url(#gGreen)" stroke="#a8ffbf" stroke-width="5"/></g>
+    <g stroke="#18ef69"><path d="M628 382V598"/><rect x="592" y="430" width="72" height="116" rx="5" fill="url(#gGreen)" stroke="#a8ffbf" stroke-width="5"/></g>
+    <g stroke="#18ef69"><path d="M730 290V504"/><rect x="694" y="338" width="72" height="116" rx="5" fill="url(#gGreen)" stroke="#a8ffbf" stroke-width="5"/></g>
+  </g>
+</svg>

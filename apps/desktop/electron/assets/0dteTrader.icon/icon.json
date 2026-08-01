@@ -1,0 +1,95 @@
+{
+  "fill": {
+    "linear-gradient": [
+      "display-p3:0.00600,0.01800,0.07000,1.00000",
+      "display-p3:0.00400,0.04500,0.15000,1.00000"
+    ]
+  },
+  "groups": [
+    {
+      "blend-mode": "normal",
+      "blur-material": null,
+      "layers": [
+        {
+          "glass": false,
+          "image-name": "Grid.svg",
+          "name": "Instrument Grid",
+          "opacity-specializations": [
+            { "value": 0.42 },
+            { "appearance": "dark", "value": 0.58 },
+            { "appearance": "tinted", "value": 0.18 }
+          ]
+        }
+      ],
+      "lighting": "individual",
+      "position": {
+        "scale": 1,
+        "translation-in-points": [0, 0]
+      },
+      "shadow": { "kind": "neutral", "opacity": 0.18 },
+      "specular": false,
+      "translucency": { "enabled": true, "value": 0.22 }
+    },
+    {
+      "blend-mode": "normal",
+      "blur-material": 0.08,
+      "layers": [
+        {
+          "glass": true,
+          "image-name": "Zero.svg",
+          "name": "Zero Mark"
+        }
+      ],
+      "lighting": "individual",
+      "position": {
+        "scale": 0.94,
+        "translation-in-points": [0, 4]
+      },
+      "shadow": { "kind": "neutral", "opacity": 0.46 },
+      "specular": true,
+      "translucency": { "enabled": true, "value": 0.16 }
+    },
+    {
+      "blend-mode": "normal",
+      "blur-material": null,
+      "layers": [
+        {
+          "glass": false,
+          "image-name": "Candles.svg",
+          "name": "Candlestick Sequence"
+        }
+      ],
+      "lighting": "individual",
+      "position": {
+        "scale": 0.94,
+        "translation-in-points": [0, 4]
+      },
+      "shadow": { "kind": "layer-color", "opacity": 0.36 },
+      "specular": true,
+      "translucency": { "enabled": false, "value": 0.0 }
+    },
+    {
+      "blend-mode": "normal",
+      "blur-material": 0.05,
+      "layers": [
+        {
+          "glass": true,
+          "image-name": "Rocket.svg",
+          "name": "Launch Arrow"
+        }
+      ],
+      "lighting": "individual",
+      "position": {
+        "scale": 0.92,
+        "translation-in-points": [0, 0]
+      },
+      "shadow": { "kind": "neutral", "opacity": 0.44 },
+      "specular": true,
+      "translucency": { "enabled": true, "value": 0.1 }
+    }
+  ],
+  "supported-platforms": {
+    "circles": ["watchOS"],
+    "squares": "shared"
+  }
+}

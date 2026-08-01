@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="shaft" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#062d80"/>
+      <stop offset="0.32" stop-color="#45d8ff"/>
+      <stop offset="0.56" stop-color="#d8fbff"/>
+      <stop offset="0.78" stop-color="#208cff"/>
+      <stop offset="1" stop-color="#021b58"/>
+    </linearGradient>
+    <linearGradient id="tip" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#f3ffff"/>
+      <stop offset="0.35" stop-color="#49d9ff"/>
+      <stop offset="0.72" stop-color="#1671eb"/>
+      <stop offset="1" stop-color="#04143d"/>
+    </linearGradient>
+    <linearGradient id="trail" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#e9ffff" stop-opacity="0.95"/>
+      <stop offset="0.3" stop-color="#35cfff" stop-opacity="0.9"/>
+      <stop offset="1" stop-color="#0877ff" stop-opacity="0"/>
+    </linearGradient>
+    <filter id="rocketGlow" x="-80%" y="-80%" width="260%" height="260%">
+      <feGaussianBlur stdDeviation="10" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <g transform="rotate(33 512 512)" filter="url(#rocketGlow)">
+    <path d="M488 750L488 262Q488 218 512 166Q536 218 536 262L536 750Z" fill="url(#shaft)" stroke="#8ce9ff" stroke-width="5"/>
+    <path d="M512 104L438 242L512 214L586 242Z" fill="url(#tip)" stroke="#bdf5ff" stroke-width="5"/>
+    <path d="M486 650L434 724L488 700Z" fill="#0a4cae" stroke="#60dfff" stroke-width="4"/>
+    <path d="M538 650L590 724L536 700Z" fill="#0a4cae" stroke="#60dfff" stroke-width="4"/>
+    <path d="M495 750L512 936L529 750Z" fill="url(#trail)"/>
+  </g>
+</svg>

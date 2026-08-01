@@ -15,6 +15,7 @@ const fs = require('node:fs');
 const { loadWindowState, saveWindowState } = require('./windowState.cjs');
 const { NativeProcessSupervisor } = require('./appleIntelligence/supervisor.cjs');
 const { RequestRegistry } = require('./appleIntelligence/requestRegistry.cjs');
+const { emitTelemetryEvent } = require('./appleIntelligence/telemetry.cjs');
 
 const APP_NAME = '0dteTrader';
 const APP_PROTOCOL = 'odtetrader';
@@ -230,6 +231,7 @@ appleIntelligence.onEvent((event) => {
       console.error(
         `[desktop] apple-intelligence: event for unknown requestId "${event.payload.requestId}" (${event.payload.event})`,
       );
+      emitTelemetryEvent('protocol_violation', { protocolViolationCode: 'unknown_request_id' });
     }
     return;
   }
@@ -659,10 +661,14 @@ ipcMain.handle('apple-intelligence:analyze', (event, request) => {
   }
   // Main validates, creates the registry entry, and assigns the deadline
   // before anything is sent to Swift — main is authoritative for the
-  // request's existence and lifetime, not merely a passthrough.
+  // request's existence and lifetime, not merely a passthrough. `trigger.kind`
+  // is read here purely as a short enum tag for telemetry (testing-and-
+  // observability.md "analysis_trigger_kind") — main does not otherwise
+  // interpret the payload, which stays opaque and is forwarded as-is.
   const entry = appleIntelligenceRequests.register({
     requestId: request.requestId,
     originatingWebContentsId: event.sender.id,
+    triggerKind: request.payload?.trigger?.kind,
   });
   appleIntelligence.send({
     protocolVersion: 1,

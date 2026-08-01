@@ -12,6 +12,7 @@ import { fileURLToPath } from 'node:url';
 
 const require = createRequire(import.meta.url);
 const { NativeProcessSupervisor } = require('./supervisor.cjs');
+const { RequestRegistry } = require('./requestRegistry.cjs');
 const { spawn: realSpawn } = require('node:child_process');
 
 const fakeShimPath = path.join(
@@ -119,5 +120,131 @@ describe('log safety', () => {
     const all = captured.join('\n');
     expect(all).not.toContain('snapshotSchemaVersion');
     expect(all).not.toContain('"payload"');
+  });
+});
+
+// Phase 3: the same guarantee, specifically for the new telemetry module —
+// wired through RequestRegistry exactly as main.cjs composes it, with
+// sentinels shaped like each forbidden category
+// (testing-and-observability.md "Logging constraints": prompts, raw
+// snapshots, full model output, account identifiers, exact positions, order
+// details, credentials).
+describe('log safety — telemetry (RequestRegistry + NativeProcessSupervisor)', () => {
+  let captured;
+
+  const PROMPT_SENTINEL = 'PROMPT-SENTINEL-Analyze SPY 0DTE call spread entry near VWAP reclaim';
+  const SNAPSHOT_SENTINEL = 'SNAPSHOT-SENTINEL-candles-indicators-levels-blob';
+  const POSITION_SENTINEL = 'POSITION-SENTINEL-3xSPY260JULCALL-qty12-avg1.42';
+  const CREDENTIAL_SENTINEL = 'sk-live-CREDENTIAL-SENTINEL-4f9a8b7c6d5e';
+  const ACCOUNT_SENTINEL = 'ACCOUNT-SENTINEL-8823910-webull';
+
+  beforeEach(() => {
+    captured = [];
+    for (const method of ['log', 'info', 'warn', 'error', 'debug']) {
+      vi.spyOn(console, method).mockImplementation((...args) => {
+        captured.push(args.map(String).join(' '));
+      });
+    }
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  function wireRegistry(supervisor) {
+    const dispatched = [];
+    const registry = new RequestRegistry({
+      send: (request) => supervisor.send(request),
+      dispatch: (webContentsId, payload) => dispatched.push({ webContentsId, payload }),
+    });
+    supervisor.onEvent((event) => {
+      if (event.type === 'native-event') registry.handleNativeEvent(event.payload);
+      else if (event.type === 'exit') registry.rejectAll('native_process_exited');
+    });
+    return { registry, dispatched };
+  }
+
+  function sentinelLadenRequest(requestId) {
+    return {
+      protocolVersion: 1,
+      requestId,
+      method: 'analysis.run',
+      payload: {
+        snapshotSchemaVersion: 1,
+        identity: { snapshotId: `snap-${requestId}`, symbol: 'SPY', timeframe: '1m', snapshotSequence: 1, positionVersion: 1 },
+        trigger: { kind: 'manual', priority: 'manual', reason: PROMPT_SENTINEL },
+        market: { note: SNAPSHOT_SENTINEL },
+        position: { detail: POSITION_SENTINEL },
+        account: { id: ACCOUNT_SENTINEL },
+        credentials: { apiKey: CREDENTIAL_SENTINEL },
+        candles: {},
+        indicators: {},
+        levels: [],
+        quality: { capturedAt: '2026-07-31T00:00:00Z', candlesFreshAsOf: '', isChainStale: false },
+        omissions: [],
+      },
+    };
+  }
+
+  it('keeps prompt/snapshot/position/account/credential-shaped content out of telemetry on a completed request', async () => {
+    const supervisor = makeSupervisor('valid-handshake');
+    const { registry } = wireRegistry(supervisor);
+    await supervisor.start({ appRoot: process.cwd(), isPackaged: false });
+
+    const requestId = 'req-telemetry-1';
+    // Mirrors main.cjs's analyze handler: register (which reads trigger.kind
+    // for analysis_trigger_kind telemetry) before forwarding to the sidecar.
+    const request = sentinelLadenRequest(requestId);
+    registry.register({ requestId, originatingWebContentsId: 1, triggerKind: request.payload.trigger.kind });
+    supervisor.send(request);
+
+    await vi.waitFor(() => expect(registry.has(requestId)).toBe(false));
+    await supervisor.stop();
+
+    const all = captured.join('\n');
+    expect(all).not.toContain(PROMPT_SENTINEL);
+    expect(all).not.toContain(SNAPSHOT_SENTINEL);
+    expect(all).not.toContain(POSITION_SENTINEL);
+    expect(all).not.toContain(ACCOUNT_SENTINEL);
+    expect(all).not.toContain(CREDENTIAL_SENTINEL);
+  });
+
+  it('keeps sentinel content out of telemetry when the sidecar crashes mid-request (rejectAll path)', async () => {
+    const supervisor = makeSupervisor('crash-mid-stream');
+    const { registry } = wireRegistry(supervisor);
+    await supervisor.start({ appRoot: process.cwd(), isPackaged: false });
+
+    const requestId = 'req-telemetry-2';
+    const request = sentinelLadenRequest(requestId);
+    registry.register({ requestId, originatingWebContentsId: 1, triggerKind: request.payload.trigger.kind });
+    supervisor.send(request);
+
+    await vi.waitFor(() => expect(registry.has(requestId)).toBe(false));
+    await supervisor.stop();
+
+    const all = captured.join('\n');
+    expect(all).not.toContain(PROMPT_SENTINEL);
+    expect(all).not.toContain(SNAPSHOT_SENTINEL);
+    expect(all).not.toContain(POSITION_SENTINEL);
+    expect(all).not.toContain(ACCOUNT_SENTINEL);
+    expect(all).not.toContain(CREDENTIAL_SENTINEL);
+  });
+
+  it('keeps sentinel content out of telemetry on deadline timeout', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const registry = new RequestRegistry({ send: () => {}, dispatch: () => {}, deadlineMs: 50 });
+    const requestId = 'req-telemetry-3';
+    const request = sentinelLadenRequest(requestId);
+    registry.register({ requestId, originatingWebContentsId: 1, triggerKind: request.payload.trigger.kind });
+
+    await vi.advanceTimersByTimeAsync(60);
+    vi.useRealTimers();
+
+    const all = captured.join('\n');
+    expect(all).not.toContain(PROMPT_SENTINEL);
+    expect(all).not.toContain(SNAPSHOT_SENTINEL);
+    expect(all).not.toContain(POSITION_SENTINEL);
+    expect(all).not.toContain(ACCOUNT_SENTINEL);
+    expect(all).not.toContain(CREDENTIAL_SENTINEL);
   });
 });

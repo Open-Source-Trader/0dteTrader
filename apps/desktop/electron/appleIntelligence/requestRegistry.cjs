@@ -19,6 +19,8 @@
 //
 // This is an additional layer on top of the supervisor's existing
 // single-flight `state !== 'ready'` guard (Phase 1), not a replacement for it.
+const { emitTelemetryEvent } = require('./telemetry.cjs');
+
 const TERMINAL_EVENTS = new Set(['completed', 'cancelled', 'failed']);
 
 // No existing repository constant covers an end-to-end analysis deadline
@@ -86,7 +88,7 @@ class RequestRegistry {
    * (non-terminal) entry — duplicate active request IDs are rejected rather
    * than silently replacing the tracked owner, per lifecycle-and-concurrency.md.
    */
-  register({ requestId, originatingWebContentsId }) {
+  register({ requestId, originatingWebContentsId, triggerKind }) {
     const existing = this.pending.get(requestId);
     if (existing && !existing.terminal) {
       throw new Error(`apple-intelligence: duplicate active requestId "${requestId}"`);
@@ -99,6 +101,13 @@ class RequestRegistry {
       originatingWebContentsId,
       deadlineAt,
       terminal: false,
+      registeredAt: this.now(),
+      acceptedAt: null,
+      // Metadata only (docs/apple-intelligence/testing-and-observability.md
+      // "analysis_trigger_kind") — a short enum tag ('manual',
+      // 'candle-close', 'position-critical', 'background'), never the
+      // free-form `trigger.reason` string that accompanies it on the wire.
+      triggerKind: typeof triggerKind === 'string' ? triggerKind : undefined,
       timeoutHandle: setTimeout(() => this.handleTimeout(requestId), this.deadlineMs),
     };
     this.pending.set(requestId, entry);
@@ -124,8 +133,27 @@ class RequestRegistry {
       return { routed: false, reason: 'unknown-request' };
     }
 
+    // `accepted` is Swift's earliest acknowledgement that single-flight work
+    // began — the gap since `register()` is queue/dispatch wait, not
+    // inference time.
+    if (event.event === 'accepted' && entry.acceptedAt === null) {
+      entry.acceptedAt = this.now();
+      emitTelemetryEvent('analysis_queue_wait', {
+        requestId: entry.requestId,
+        analysisQueueWaitMs: entry.acceptedAt - entry.registeredAt,
+        analysisTriggerKind: entry.triggerKind,
+      });
+    }
+
     const isTerminal = TERMINAL_EVENTS.has(event.event);
     if (isTerminal) {
+      emitTelemetryEvent('analysis_terminal', {
+        requestId: entry.requestId,
+        analysisTerminalState: event.event,
+        analysisDurationMs: this.now() - entry.registeredAt,
+        analysisTriggerKind: entry.triggerKind,
+        errorCode: event.error?.code,
+      });
       this.markTerminal(entry);
     }
     this.dispatch?.(entry.originatingWebContentsId, event);
@@ -147,6 +175,13 @@ class RequestRegistry {
       payload: {},
     });
 
+    emitTelemetryEvent('analysis_terminal', {
+      requestId: entry.requestId,
+      analysisTerminalState: 'failed',
+      analysisDurationMs: this.now() - entry.registeredAt,
+      analysisTriggerKind: entry.triggerKind,
+      errorCode: 'request_timeout',
+    });
     this.markTerminal(entry);
     this.dispatch?.(entry.originatingWebContentsId, {
       protocolVersion: 1,
@@ -169,6 +204,12 @@ class RequestRegistry {
         method: 'analysis.cancel',
         payload: {},
       });
+      emitTelemetryEvent('analysis_terminal', {
+        requestId: entry.requestId,
+        analysisTerminalState: 'cancelled',
+        analysisDurationMs: this.now() - entry.registeredAt,
+        analysisTriggerKind: entry.triggerKind,
+      });
       this.markTerminal(entry);
     }
   }
@@ -179,6 +220,13 @@ class RequestRegistry {
    * that would receive it is already gone. */
   rejectAll(reason = 'native_process_exited') {
     for (const entry of [...this.pending.values()]) {
+      emitTelemetryEvent('analysis_terminal', {
+        requestId: entry.requestId,
+        analysisTerminalState: 'failed',
+        analysisDurationMs: this.now() - entry.registeredAt,
+        analysisTriggerKind: entry.triggerKind,
+        errorCode: reason,
+      });
       this.markTerminal(entry);
       this.dispatch?.(entry.originatingWebContentsId, {
         protocolVersion: 1,

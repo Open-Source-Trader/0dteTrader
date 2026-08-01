@@ -9,6 +9,7 @@ const path = require('node:path');
 const { LineFramer } = require('./lineFramer.cjs');
 const { parseNativeEventLine } = require('./protocol.cjs');
 const { resolveShimPath } = require('./binaryResolver.cjs');
+const { emitTelemetryEvent, emitVerbose } = require('./telemetry.cjs');
 
 const HANDSHAKE_TIMEOUT_MS = 5000;
 const SHUTDOWN_GRACE_MS = 3000;
@@ -68,6 +69,9 @@ class NativeProcessSupervisor {
   setState(state) {
     this.state = state;
     this.emit({ type: 'state', state });
+    // Every transition, not just the terminal/summary events emitted
+    // elsewhere — dev-only verbosity (AI_VERBOSE_LOGGING=1), off by default.
+    emitVerbose('state', { availabilityState: state });
   }
 
   /**
@@ -82,11 +86,13 @@ class NativeProcessSupervisor {
     this.shuttingDown = false;
     this.lastContext = context;
     this.setState('starting');
+    const startedAt = Date.now();
 
     const binaryPath = this.resolvePath(context);
     if (!binaryPath) {
       this.setState('unavailable');
       this.emit({ type: 'unavailable', reason: 'binary-not-found' });
+      emitTelemetryEvent('availability', { availabilityState: 'unavailable', availabilityReason: 'binary-not-found' });
       return;
     }
 
@@ -106,7 +112,10 @@ class NativeProcessSupervisor {
     this.framer = new LineFramer({
       maxLineBytes: MAX_LINE_BYTES,
       onLine: (line) => this.handleLine(line),
-      onOversized: () => this.emit({ type: 'protocol-violation', code: 'payload_too_large' }),
+      onOversized: () => {
+        this.emit({ type: 'protocol-violation', code: 'payload_too_large' });
+        emitTelemetryEvent('protocol_violation', { protocolViolationCode: 'payload_too_large' });
+      },
     });
     child.stdout.on('data', (chunk) => this.framer.push(chunk));
     child.stderr.on('data', () => {
@@ -118,18 +127,26 @@ class NativeProcessSupervisor {
 
     this.setState('handshaking');
     const handshakeResult = await this.performHandshake(child);
+    const shimStartDurationMs = Date.now() - startedAt;
     if (handshakeResult.ok) {
       this.setState('ready');
+      emitTelemetryEvent('handshake', { handshakeResult: 'ok', shimStartDurationMs });
     } else if (handshakeResult.reason === 'timeout') {
       this.setState('unavailable');
       this.emit({ type: 'unavailable', reason: 'handshake-timeout' });
       this.killChild(child);
+      emitTelemetryEvent('handshake', { handshakeResult: 'timeout', shimStartDurationMs });
+      emitTelemetryEvent('availability', { availabilityState: 'unavailable', availabilityReason: 'handshake-timeout' });
     } else if (handshakeResult.reason === 'incompatible') {
       this.setState('incompatible');
       this.emit({ type: 'incompatible', reason: 'protocol-version-mismatch' });
+      emitTelemetryEvent('handshake', { handshakeResult: 'incompatible', shimStartDurationMs });
+      emitTelemetryEvent('availability', { availabilityState: 'incompatible', availabilityReason: 'protocol-version-mismatch' });
     } else if (handshakeResult.reason === 'exited') {
       this.setState('unavailable');
       this.emit({ type: 'unavailable', reason: 'exited-before-handshake' });
+      emitTelemetryEvent('handshake', { handshakeResult: 'exited', shimStartDurationMs });
+      emitTelemetryEvent('availability', { availabilityState: 'unavailable', availabilityReason: 'exited-before-handshake' });
     }
   }
 
@@ -172,6 +189,7 @@ class NativeProcessSupervisor {
     const event = parseNativeEventLine(line, MAX_LINE_BYTES);
     if (!event) {
       this.emit({ type: 'protocol-violation', code: 'protocol_malformed_json' });
+      emitTelemetryEvent('protocol_violation', { protocolViolationCode: 'protocol_malformed_json' });
       return;
     }
     this.emit({ type: 'native-event', payload: event });
@@ -198,6 +216,7 @@ class NativeProcessSupervisor {
     }
 
     this.emit({ type: 'exit', code, signal });
+    emitTelemetryEvent('shim_exit', { exitCode: code ?? null, exitSignal: signal ?? null });
 
     if (!wasReady) return;
 
@@ -210,20 +229,22 @@ class NativeProcessSupervisor {
       this.disabled = true;
       this.setState('disabled');
       this.emit({ type: 'disabled', reason: 'crash-loop' });
+      emitTelemetryEvent('availability', { availabilityState: 'disabled', availabilityReason: 'crash-loop' });
       return;
     }
 
     this.setState(exitCount >= 3 ? 'degraded' : 'crashed');
-    this.scheduleRestart(RESTART_DELAYS_MS[exitCount - 1] ?? RESTART_DELAYS_MS[RESTART_DELAYS_MS.length - 1]);
+    this.scheduleRestart(exitCount, RESTART_DELAYS_MS[exitCount - 1] ?? RESTART_DELAYS_MS[RESTART_DELAYS_MS.length - 1]);
   }
 
   /** Only one restart timer may exist at any time; a fresh exit replaces any pending one. */
-  scheduleRestart(delayMs) {
+  scheduleRestart(restartAttempt, delayMs) {
     this.cancelRestartTimer();
     this.restartTimer = setTimeout(() => {
       this.restartTimer = null;
       if (this.shuttingDown || this.disabled) return;
       this.setState('restarting');
+      emitTelemetryEvent('restart', { restartAttempt });
       void this.start(this.lastContext);
     }, delayMs);
   }

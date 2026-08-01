@@ -11,8 +11,11 @@ public actor RequestHandler {
 
     private var activeAnalysisTask: Task<Void, Never>?
     private var activeRequestId: String?
+    private let telemetry: ShimTelemetrySink
 
-    public init() {}
+    public init(telemetry: @escaping ShimTelemetrySink = noopTelemetrySink) {
+        self.telemetry = telemetry
+    }
 
     public func handle(_ request: NativeRequest, emit: @escaping @Sendable (NativeEvent) -> Void) async {
         switch request.method {
@@ -111,13 +114,18 @@ public actor RequestHandler {
             }
 
             do {
-                let resultPayload = try await AnalysisRunner.run(snapshot: snapshot, analysisId: requestId) {
-                    // Cooperative only — main's own timer is what actually
-                    // terminates a stuck request from the app's perspective;
-                    // this lets Swift also stop generating promptly if it
-                    // happens to check between token/response steps.
-                    Task.isCancelled || (deadlineDate.map { $0 <= Date() } ?? false)
-                }
+                let resultPayload = try await AnalysisRunner.run(
+                    snapshot: snapshot,
+                    analysisId: requestId,
+                    isCancelled: {
+                        // Cooperative only — main's own timer is what actually
+                        // terminates a stuck request from the app's perspective;
+                        // this lets Swift also stop generating promptly if it
+                        // happens to check between token/response steps.
+                        Task.isCancelled || (deadlineDate.map { $0 <= Date() } ?? false)
+                    },
+                    telemetry: self.telemetry
+                )
                 if Task.isCancelled {
                     emit(NativeEvent(requestId: requestId, event: .cancelled))
                 } else {

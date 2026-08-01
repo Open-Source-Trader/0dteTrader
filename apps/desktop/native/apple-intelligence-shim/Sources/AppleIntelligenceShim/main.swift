@@ -20,7 +20,13 @@ func writeEvent(_ event: NativeEvent) {
     fflush(stdout)
 }
 
-let handler = RequestHandler()
+// Production telemetry sink: metadata-only diagnostic lines to stderr
+// (docs/apple-intelligence/testing-and-observability.md, security-
+// boundary.md "Logging"). Reuses the same stderr channel as `logDiagnostic`
+// — stdout stays protocol-only.
+let handler = RequestHandler(telemetry: { event in
+    logDiagnostic(event.describe())
+})
 
 logDiagnostic("starting")
 

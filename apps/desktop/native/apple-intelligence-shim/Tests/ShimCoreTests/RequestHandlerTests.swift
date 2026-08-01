@@ -9,6 +9,7 @@ import XCTest
 final class EventBox: @unchecked Sendable {
     private let lock = NSLock()
     private var storage: [NativeEvent] = []
+    private var telemetryStorage: [ShimTelemetryEvent] = []
 
     func append(_ event: NativeEvent) {
         lock.lock()
@@ -20,6 +21,20 @@ final class EventBox: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         return storage
+    }
+
+    /// Shared with AnalysisRunnerTests's telemetry coverage — same
+    /// lock-protected collection pattern, one extra typed list.
+    func appendTelemetry(_ event: ShimTelemetryEvent) {
+        lock.lock()
+        defer { lock.unlock() }
+        telemetryStorage.append(event)
+    }
+
+    var telemetryEvents: [ShimTelemetryEvent] {
+        lock.lock()
+        defer { lock.unlock() }
+        return telemetryStorage
     }
 }
 

@@ -115,4 +115,98 @@ final class AnalysisRunnerTests: XCTestCase {
         XCTAssertNotNil(fields["generatedAt"])
         XCTAssertNotNil(fields["summary"])
     }
+
+    /// Telemetry coverage (testing-and-observability.md "Required metrics":
+    /// analysis_duration_ms, snapshot_bytes, prompt_chars, omission_codes).
+    /// Runs regardless of Foundation Models availability — the telemetry
+    /// `defer` in `AnalysisRunner.run` fires before the availability guard,
+    /// so this is deterministic everywhere, unlike the live-generation
+    /// smoke test above.
+    func testEmitsAnalysisContextTelemetryWithMetadataOnlyFields() async {
+        let snapshot = AnalysisSnapshotInput(
+            snapshotSchemaVersion: 1,
+            identity: .init(
+                snapshotId: "s1",
+                capturedAt: "2026-07-31T00:00:00Z",
+                symbol: "SPY",
+                timeframe: "5m",
+                candleCloseTime: nil,
+                snapshotSequence: 7,
+                positionVersion: 2,
+                strategyPolicyVersion: nil
+            ),
+            trigger: .init(kind: "manual", priority: "manual", reason: "telemetry test"),
+            market: .object(["last": .number(580.25)]),
+            candles: .array([]),
+            indicators: .object([:]),
+            levels: [],
+            options: nil,
+            position: nil,
+            strategyPolicy: nil,
+            quality: .object(["stale": .bool(false)]),
+            omissions: []
+        )
+
+        let box = EventBox()
+        _ = try? await AnalysisRunner.run(
+            snapshot: snapshot,
+            analysisId: "telemetry-req-1",
+            isCancelled: { false },
+            telemetry: { box.appendTelemetry($0) }
+        )
+
+        let events = box.telemetryEvents
+        XCTAssertEqual(events.count, 1)
+        let event = events[0]
+        XCTAssertEqual(event.name, "analysis_context")
+        XCTAssertEqual(event.requestId, "telemetry-req-1")
+        XCTAssertNotNil(event.analysisDurationMs)
+        XCTAssertGreaterThanOrEqual(event.analysisDurationMs ?? -1, 0)
+        XCTAssertNotNil(event.snapshotBytes)
+        XCTAssertGreaterThan(event.snapshotBytes ?? 0, 0)
+        XCTAssertNotNil(event.promptChars)
+        XCTAssertGreaterThan(event.promptChars ?? 0, 0)
+    }
+
+    /// Negative assertion mirroring the Node-side log-safety tests: a
+    /// prompt/snapshot/position-shaped sentinel planted in the snapshot must
+    /// never appear in the rendered telemetry line.
+    func testTelemetryNeverContainsSensitiveSnapshotOrPromptContent() async {
+        let sensitiveMarker = "SENSITIVE-ACCT-4429-POS-17-SHORT"
+        let snapshot = AnalysisSnapshotInput(
+            snapshotSchemaVersion: 1,
+            identity: .init(
+                snapshotId: "snap-\(sensitiveMarker)",
+                capturedAt: "2026-07-31T00:00:00Z",
+                symbol: "SPY",
+                timeframe: "1m",
+                candleCloseTime: nil,
+                snapshotSequence: 1,
+                positionVersion: 7,
+                strategyPolicyVersion: nil
+            ),
+            trigger: .init(kind: "manual", priority: "manual", reason: sensitiveMarker),
+            market: .object(["accountNote": .string(sensitiveMarker)]),
+            candles: .array([]),
+            indicators: .object([:]),
+            levels: [],
+            options: nil,
+            position: .object(["detail": .string(sensitiveMarker)]),
+            strategyPolicy: nil,
+            quality: .object([:]),
+            omissions: []
+        )
+
+        let box = EventBox()
+        _ = try? await AnalysisRunner.run(
+            snapshot: snapshot,
+            analysisId: "telemetry-req-2",
+            isCancelled: { false },
+            telemetry: { box.appendTelemetry($0) }
+        )
+
+        for event in box.telemetryEvents {
+            XCTAssertFalse(event.describe().contains(sensitiveMarker))
+        }
+    }
 }

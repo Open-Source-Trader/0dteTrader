@@ -46,9 +46,29 @@ public enum AnalysisRunner {
     public static func run(
         snapshot: AnalysisSnapshotInput,
         analysisId: String,
-        isCancelled: @Sendable () -> Bool
+        isCancelled: @Sendable () -> Bool,
+        telemetry: ShimTelemetrySink = noopTelemetrySink
     ) async throws -> JSONValue {
+        let startedAt = Date()
         let budgeted = ContextBudgeter.build(from: snapshot)
+        // Byte/char counts only — never the snapshot or prompt text itself
+        // (security-boundary.md "Logging"). `snapshotBytes` re-encodes the
+        // already-decoded snapshot purely to measure its size (the raw wire
+        // bytes aren't retained past decode); `promptChars` is the exact
+        // assembled-prompt length ContextBudgeter already computed.
+        let snapshotBytes = (try? JSONEncoder().encode(snapshot))?.count
+        defer {
+            telemetry(
+                ShimTelemetryEvent(
+                    name: "analysis_context",
+                    requestId: analysisId,
+                    analysisDurationMs: Int(Date().timeIntervalSince(startedAt) * 1000),
+                    snapshotBytes: snapshotBytes,
+                    promptChars: budgeted.text.count,
+                    omissionCodes: budgeted.omissions.map(\.code)
+                )
+            )
+        }
 
         #if canImport(FoundationModels)
         guard #available(macOS 26, *) else { throw AnalysisRunError.modelUnavailable }

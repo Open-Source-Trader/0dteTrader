@@ -58,6 +58,43 @@ final class ContextBudgeterTests: XCTestCase {
         XCTAssertTrue(budgeted.text.contains("lvl-0"))
     }
 
+    /// Candles render via the shared CandleEncoding package's lossless
+    /// base+delta table (adapter-wiring level — the encoder's own format
+    /// correctness is covered by CandleEncodingTests) rather than raw JSON.
+    func testCandlesRenderAsADeltaTableNotRawJSON() {
+        var snapshot = makeSnapshot()
+        let recent = JSONValue.array([
+            .object([
+                "time": .number(1_700_000_000), "open": .number(579.12), "high": .number(580.45),
+                "low": .number(578.67), "close": .number(579.89), "volume": .number(123456),
+            ]),
+            .object([
+                "time": .number(1_700_000_300), "open": .number(579.90), "high": .number(580.10),
+                "low": .number(579.50), "close": .number(579.95), "volume": .number(98000),
+            ]),
+        ])
+        snapshot = AnalysisSnapshotInput(
+            snapshotSchemaVersion: snapshot.snapshotSchemaVersion,
+            identity: snapshot.identity,
+            trigger: snapshot.trigger,
+            market: snapshot.market,
+            candles: .object(["count": .number(2), "recent": recent]),
+            indicators: snapshot.indicators,
+            levels: snapshot.levels,
+            options: snapshot.options,
+            position: snapshot.position,
+            strategyPolicy: snapshot.strategyPolicy,
+            quality: snapshot.quality,
+            omissions: snapshot.omissions
+        )
+
+        let budgeted = ContextBudgeter.build(from: snapshot)
+        XCTAssertTrue(budgeted.text.contains("encoding=b1-absolute-bars2plus-delta-from-previous-close"))
+        XCTAssertTrue(budgeted.text.contains("B1: 579.12,580.45,578.67,579.89,123456"))
+        XCTAssertTrue(budgeted.text.contains("B2:"))
+        XCTAssertFalse(budgeted.text.contains("\"open\""), "candles must not render as raw JSON anymore")
+    }
+
     func testManagementTaskWithoutPositionIsDowngraded() {
         let snapshot = makeSnapshot(includePosition: false, triggerKind: "position-change")
         let budgeted = ContextBudgeter.build(from: snapshot)
@@ -75,9 +112,16 @@ final class ContextBudgeterTests: XCTestCase {
         // A large candle blob forces the budgeter to trim options first,
         // then levels, before strategy policy.
         var snapshot = makeSnapshot(levelCount: 40)
-        let hugeCandles = JSONValue.array((0..<400).map { _ in
-            .object(["o": .number(1), "h": .number(2), "l": .number(0.5), "c": .number(1.5), "v": .number(1000)])
-        })
+        let hugeCandles = JSONValue.object([
+            "count": .number(400),
+            "recent": .array((0..<400).map { index in
+                .object([
+                    "time": .number(Double(index)),
+                    "open": .number(1), "high": .number(2), "low": .number(0.5),
+                    "close": .number(1.5), "volume": .number(1000),
+                ])
+            }),
+        ])
         snapshot = AnalysisSnapshotInput(
             snapshotSchemaVersion: snapshot.snapshotSchemaVersion,
             identity: snapshot.identity,
@@ -107,18 +151,30 @@ final class ContextBudgeterTests: XCTestCase {
     /// nil), so budget was exceeded silently until the model rejected the
     /// oversized request with exceededContextWindowSize.
     func testOversizedRealShapedCandlesAreTrimmedViaTheRecentField() {
+        // Even the compact delta-table encoding needs a genuinely large
+        // candle count to force this lever — 2000 candles of real-sized,
+        // varying values comfortably exceeds budget on its own once
+        // options/indicators/levels are already exhausted.
         var snapshot = makeSnapshot(levelCount: 40)
-        let recent = JSONValue.array((0..<50).map { index in
-            .object([
-                "time": .number(Double(index)),
-                "open": .number(579.12),
-                "high": .number(580.45),
-                "low": .number(578.67),
-                "close": .number(579.89),
-                "volume": .number(123456),
-            ])
-        })
-        let realShapedCandles = JSONValue.object(["count": .number(50), "recent": recent])
+        var recentItems: [JSONValue] = []
+        for index in 0..<2000 {
+            let openOffset: Double = Double(index % 7) * 0.31
+            let highOffset: Double = Double(index % 5) * 0.22
+            let lowOffset: Double = Double(index % 3) * 0.18
+            let closeOffset: Double = Double(index % 11) * 0.09
+            let volume: Double = Double(100000 + index * 137)
+            recentItems.append(
+                .object([
+                    "time": .number(Double(index)),
+                    "open": .number(579.12 + openOffset),
+                    "high": .number(580.45 + highOffset),
+                    "low": .number(578.67 - lowOffset),
+                    "close": .number(579.89 + closeOffset),
+                    "volume": .number(volume),
+                ])
+            )
+        }
+        let realShapedCandles = JSONValue.object(["count": .number(2000), "recent": .array(recentItems)])
         snapshot = AnalysisSnapshotInput(
             snapshotSchemaVersion: snapshot.snapshotSchemaVersion,
             identity: snapshot.identity,

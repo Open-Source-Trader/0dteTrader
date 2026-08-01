@@ -1,3 +1,4 @@
+import CandleEncoding
 import Foundation
 
 // Canonical spec: docs/apple-intelligence/context-and-prompt-budgeting.md.
@@ -174,16 +175,66 @@ public enum ContextBudgeter {
         return nil
     }
 
-    private static func trimmedCandles(_ candles: JSONValue, limit: Int?) -> JSONValue {
-        guard let limit else { return candles }
+    private static let nyDateTimeFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd HH:mm"
+        formatter.timeZone = TimeZone(identifier: "America/New_York")
+        return formatter
+    }()
+
+    /// Renders the already-trimmed candle set via the shared lossless
+    /// base+delta encoder (CandleEncoding, ported from iOS's
+    /// AIAnalysisPromptBuilder.buildCandleTable) instead of raw JSON — same
+    /// prompt format both apps send the model, roughly 35-45% smaller than
+    /// one JSON object per candle with zero information loss. Returns ""
+    /// (nothing appended) when no bars survive extraction, matching
+    /// CandleTableEncoder's own empty-input behavior.
+    private static func candleTableText(from candles: JSONValue, limit: Int?, interval: String) -> String {
+        let items = candleItems(from: candles, limit: limit)
+        let bars = items.compactMap(candleBar(from:))
+        guard !bars.isEmpty else { return "" }
+
+        let startLabel: String
+        if let first = items.first, case let .number(time)? = first["time"] {
+            startLabel = nyDateTimeFormatter.string(from: Date(timeIntervalSince1970: time))
+        } else {
+            startLabel = "unknown"
+        }
+        return CandleTableEncoder.encode(bars, interval: interval, startLabel: startLabel)
+    }
+
+    /// Extracts the (already count-limited) candle objects from either wire
+    /// shape — `{ count, recent: [...] }` (the real shape,
+    /// AnalysisSnapshotBuilder.ts) or a bare array (test fixtures) — as raw
+    /// `[String: JSONValue]` dictionaries for `candleBar(from:)` to parse.
+    private static func candleItems(from candles: JSONValue, limit: Int?) -> [[String: JSONValue]] {
+        let rawItems: [JSONValue]
         if case let .array(items) = candles {
-            return .array(Array(items.suffix(limit)))
+            rawItems = items
+        } else if case let .object(fields) = candles, case let .array(items)? = fields["recent"] {
+            rawItems = items
+        } else {
+            rawItems = []
         }
-        if case var .object(fields) = candles, case let .array(items)? = fields["recent"] {
-            fields["recent"] = .array(Array(items.suffix(limit)))
-            return .object(fields)
+        let limited = limit.map { Array(rawItems.suffix($0)) } ?? rawItems
+        return limited.compactMap { item in
+            if case let .object(fields) = item { return fields }
+            return nil
         }
-        return candles
+    }
+
+    /// A malformed individual candle (missing/non-numeric field) is
+    /// skipped, not fatal — consistent with this file's generally
+    /// defensive JSONValue handling elsewhere.
+    private static func candleBar(from fields: [String: JSONValue]) -> CandleBar? {
+        guard
+            case let .number(open)? = fields["open"],
+            case let .number(high)? = fields["high"],
+            case let .number(low)? = fields["low"],
+            case let .number(close)? = fields["close"],
+            case let .number(volume)? = fields["volume"]
+        else { return nil }
+        return CandleBar(open: open, high: high, low: low, close: close, volume: volume)
     }
 
     private static func compose(
@@ -216,7 +267,14 @@ public enum ContextBudgeter {
 
         // Priority 2: candles and market structure.
         parts.append("MARKET: \(compactJSON(snapshot.market))")
-        parts.append("CANDLES: \(compactJSON(trimmedCandles(snapshot.candles, limit: candleLimit)))")
+        let candleTable = candleTableText(
+            from: snapshot.candles,
+            limit: candleLimit,
+            interval: snapshot.identity.timeframe
+        )
+        if !candleTable.isEmpty {
+            parts.append(candleTable)
+        }
         if includeExtendedIndicators {
             parts.append("INDICATORS: \(compactJSON(snapshot.indicators))")
         }

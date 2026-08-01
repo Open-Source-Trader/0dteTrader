@@ -4,7 +4,7 @@ import type {
   NativeEventPayload,
 } from '../../core/desktop/appleIntelligence';
 import { isResultCurrent } from './stalenessGate';
-import { parseAnalysisResult, rejectUngroundedLevels } from './validation';
+import { isTradeDeskPlanGrounded, parseAnalysisResult, rejectUngroundedLevels } from './validation';
 import { AnalysisScheduler, shouldPreempt, type QueuedWork } from './AnalysisScheduler';
 import type {
   AIAvailability,
@@ -196,8 +196,24 @@ export class AnalysisStore extends Store<AnalysisStoreState> {
 
     if (!this.lastSnapshot) return;
     const currentContext = contextFromSnapshot(this.lastSnapshot);
-    const grounded = rejectUngroundedLevels(result, this.lastSnapshot.levels);
-    const isCurrent = isResultCurrent(result.context, currentContext);
+    const enriched: AnalysisResult = {
+      ...result,
+      context: {
+        ...result.context,
+        snapshotId: result.context.snapshotId ?? this.lastSnapshot.identity.snapshotId,
+        selectedContractSymbol:
+          result.context.selectedContractSymbol ??
+          this.lastSnapshot.identity.selectedContractSymbol,
+      },
+    };
+    const grounded = rejectUngroundedLevels(enriched, this.lastSnapshot.levels);
+    if (!isTradeDeskPlanGrounded(grounded, this.lastSnapshot.levels)) {
+      this.set({
+        errorMessage: 'Analysis returned an ungrounded Trade Desk plan and was discarded.',
+      });
+      return;
+    }
+    const isCurrent = isResultCurrent(grounded.context, currentContext);
 
     this.pushHistory({ result: grounded, wasPromoted: isCurrent });
     if (isCurrent) {
@@ -223,12 +239,14 @@ export class AnalysisStore extends Store<AnalysisStoreState> {
 
 function contextFromSnapshot(snapshot: AnalysisSnapshot): AnalysisContextIdentity {
   return {
+    snapshotId: snapshot.identity.snapshotId,
     symbol: snapshot.identity.symbol,
     timeframe: snapshot.identity.timeframe,
     snapshotSequence: snapshot.identity.snapshotSequence,
     candleCloseTime: snapshot.identity.candleCloseTime,
     positionVersion: snapshot.identity.positionVersion,
     strategyPolicyVersion: snapshot.identity.strategyPolicyVersion,
+    selectedContractSymbol: snapshot.identity.selectedContractSymbol,
   };
 }
 

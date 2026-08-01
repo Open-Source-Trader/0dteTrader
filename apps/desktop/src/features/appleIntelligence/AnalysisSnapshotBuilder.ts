@@ -6,7 +6,7 @@
 // ChainStore instance.
 import { lastValue, rsi, vwap, type CandleInput } from '../chart/indicatorEngine';
 import type { ChartCandle, ChartStoreState } from '../chart/ChartStore';
-import type { Position } from '@0dtetrader/shared-types';
+import type { OptionContract, Position } from '@0dtetrader/shared-types';
 import type {
   AnalysisSnapshot,
   CandidateLevel,
@@ -29,6 +29,7 @@ export interface BuildSnapshotInput {
    * chart's underlying symbol, so the default lookup below can't find
    * them. `null` means "explicitly no position" (a close event). */
   triggeredPosition?: Position | null;
+  selectedContract?: OptionContract | null;
   now?: () => Date;
 }
 
@@ -69,10 +70,14 @@ export function buildAnalysisSnapshot(input: BuildSnapshotInput): AnalysisSnapsh
     });
   }
 
-  const position =
-    input.triggeredPosition !== undefined
-      ? input.triggeredPosition
-      : (input.positions.find((p) => p.symbol === input.chart.symbol) ?? null);
+  let position: Position | null;
+  if (input.triggeredPosition !== undefined) {
+    position = input.triggeredPosition;
+  } else if (input.selectedContract) {
+    position = input.positions.find((p) => p.symbol === input.selectedContract?.symbol) ?? null;
+  } else {
+    position = input.positions.find((p) => p.symbol === input.chart.symbol) ?? null;
+  }
 
   const trigger = input.trigger ?? {
     kind: 'manual' as TriggerKind,
@@ -101,6 +106,7 @@ export function buildAnalysisSnapshot(input: BuildSnapshotInput): AnalysisSnapsh
       candleCloseTime: lastCandleCloseTime(candles),
       snapshotSequence: snapshotSequenceCounter,
       positionVersion: position ? hashPositionVersion(position) : 0,
+      selectedContractSymbol: input.selectedContract?.symbol,
     },
     trigger,
     market: {
@@ -124,6 +130,20 @@ export function buildAnalysisSnapshot(input: BuildSnapshotInput): AnalysisSnapsh
       vwap: vwapValue,
     },
     levels: buildCandidateLevels(vwapValue),
+    options: input.selectedContract
+      ? {
+          selectedContract: {
+            symbol: input.selectedContract.symbol,
+            underlying: input.selectedContract.underlying,
+            expiration: input.selectedContract.expiration,
+            strike: input.selectedContract.strike,
+            optionType: input.selectedContract.optionType,
+            bid: input.selectedContract.bid,
+            ask: input.selectedContract.ask,
+            last: input.selectedContract.last,
+          },
+        }
+      : undefined,
     position: position
       ? {
           quantity: position.quantity,
@@ -170,7 +190,7 @@ function lastCandleCloseTime(candles: ChartCandle[]): string | undefined {
 /** Positions have no server-supplied version field; a cheap content hash
  * lets the staleness gate detect a position change between snapshot capture
  * and result delivery without adding a version field to shared-types. */
-function hashPositionVersion(position: Position): number {
+export function hashPositionVersion(position: Position): number {
   const key = `${position.quantity}:${position.avgPrice}:${position.markPrice}`;
   let hash = 0;
   for (let i = 0; i < key.length; i++) {

@@ -42,6 +42,7 @@ export interface AnalysisSnapshotIdentity {
   snapshotSequence: number;
   positionVersion: number;
   strategyPolicyVersion?: number;
+  selectedContractSymbol?: string;
 }
 
 export interface AnalysisSnapshot {
@@ -63,6 +64,8 @@ export interface AnalysisSnapshot {
   omissions: Omission[];
 }
 
+export type PriceDomain = 'underlying' | 'contract-premium';
+
 export interface GroundedLevelReference {
   levelId: string;
   price: number;
@@ -73,7 +76,32 @@ export interface EvidenceReference {
   detail: string;
 }
 
+export interface GroundedPrice {
+  value: number;
+  priceDomain: PriceDomain;
+  evidenceId: string;
+  snapshotId: string;
+  deterministicRuleId?: string;
+  levelId?: string;
+}
+
+export interface GroundedPriceZone {
+  low: number;
+  high: number;
+  priceDomain: PriceDomain;
+  evidenceId: string;
+  snapshotId: string;
+  deterministicRuleId?: string;
+  levelId?: string;
+}
+
+export interface GroundedPriceCondition {
+  operator: 'above' | 'below' | 'at-or-above' | 'at-or-below';
+  price: GroundedPrice;
+}
+
 export interface AnalysisContextIdentity {
+  snapshotId?: string;
   symbol: string;
   timeframe: string;
   snapshotSequence: number;
@@ -84,8 +112,48 @@ export interface AnalysisContextIdentity {
 }
 
 export type Recommendation = 'wait' | 'enter' | 'hold' | 'trim' | 'exit' | 'avoid';
+export type TradeDeskAction = 'wait' | 'enter' | 'hold' | 'scale' | 'exit' | 'avoid';
 export type SetupState = 'none' | 'forming' | 'confirmed' | 'extended' | 'invalidated';
 export type Bias = 'bullish' | 'bearish' | 'neutral' | 'mixed';
+
+export interface ScaleAdvice {
+  direction: 'in' | 'out';
+  quantity?: number;
+  condition: string;
+}
+
+export interface TradeDeskTarget {
+  role: 'first' | 'runner' | 'final';
+  price: GroundedPrice;
+  condition?: string;
+}
+
+export interface TradeDeskPlan {
+  action: TradeDeskAction;
+  scaleAdvice?: ScaleAdvice;
+  setupLabel: string;
+  summary: string;
+  entry?: {
+    underlying?: GroundedPriceZone;
+    contract?: GroundedPriceZone;
+    preferredContractPrice?: GroundedPrice;
+  };
+  invalidation?: {
+    underlying?: GroundedPriceCondition;
+    contract?: GroundedPriceCondition;
+  };
+  targets: {
+    contract: TradeDeskTarget[];
+    underlying?: TradeDeskTarget[];
+  };
+  management: {
+    holdConditions: string[];
+    scaleConditions: string[];
+    exitConditions: string[];
+  };
+  warnings?: string[];
+  confidence?: 'low' | 'medium' | 'high';
+}
 
 export interface AnalysisResult {
   resultSchemaVersion: 1;
@@ -108,6 +176,7 @@ export interface AnalysisResult {
   assumptions: string[];
   observedOmissions: Omission[];
   summary: string;
+  tradeDeskPlan?: TradeDeskPlan;
 }
 
 export type AIAvailability =

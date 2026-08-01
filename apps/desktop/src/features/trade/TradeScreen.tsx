@@ -185,15 +185,22 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
         chartStore,
         analysisStore,
         getPositions: () => tradeStore.getState().positions,
+        getSelectedContract: () => chainStore.selectedContract,
       }),
-    [chartStore, analysisStore, tradeStore],
+    [chartStore, analysisStore, tradeStore, chainStore],
   );
 
   // Position lifecycle analysis (open/scale/close/material P&L change):
   // position-critical priority, advisory only — never touches orders.
   useEffect(
-    () => connectPositionAnalysis({ tradeStore, chartStore, analysisStore }),
-    [tradeStore, chartStore, analysisStore],
+    () =>
+      connectPositionAnalysis({
+        tradeStore,
+        chartStore,
+        analysisStore,
+        getSelectedContract: () => chainStore.selectedContract,
+      }),
+    [tradeStore, chartStore, analysisStore, chainStore],
   );
 
   const confirmModeSwitch = async () => {
@@ -481,6 +488,16 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
   });
 
   // Desktop grid: state-aware trade-management workspace instead of a fixed empty table.
+  const buildCurrentAnalysisSnapshot = useCallback(
+    () =>
+      buildAnalysisSnapshot({
+        chart: chartStore.getState(),
+        positions: tradeStore.getState().positions,
+        selectedContract: chainStore.selectedContract,
+      }),
+    [chartStore, tradeStore, chainStore],
+  );
+
   const desktopPositionsPanel = (
     <TradeManagementWorkspace
       positions={trade.positions}
@@ -561,6 +578,8 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
               chainStore={chainStore}
               onArm={arm}
               locked={locked}
+              analysisStore={analysisStore}
+              buildAnalysisSnapshot={buildCurrentAnalysisSnapshot}
             />
           </div>
         </div>
@@ -686,15 +705,12 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
         position: 'relative',
       }}
     >
-      <AIAnalysisButton
-        analysisStore={analysisStore}
-        buildSnapshot={() =>
-          buildAnalysisSnapshot({
-            chart: chartStore.getState(),
-            positions: trade.positions,
-          })
-        }
-      />
+      {isDesktopGrid ? null : (
+        <AIAnalysisButton
+          analysisStore={analysisStore}
+          buildSnapshot={buildCurrentAnalysisSnapshot}
+        />
+      )}
 
       {/* Desktop grid renders chart controls inside ChartView's chart shell;
           compact layouts keep the app NavBar above content. */}

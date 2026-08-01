@@ -4,6 +4,7 @@
 // position state to the analysis pipeline: availability gate → lifecycle
 // diff → snapshot build → position-critical submit. Read-only over domain
 // state; advisory only — no order construction or mutation of any kind.
+import type { OptionContract } from '@0dtetrader/shared-types';
 import type { ChartStore } from '../chart/ChartStore';
 import type { TradeStore } from '../trade/TradeStore';
 import type { AnalysisStore } from './AnalysisStore';
@@ -18,6 +19,7 @@ export interface PositionWiringDeps {
   tradeStore: Pick<TradeStore, 'subscribe' | 'getState'>;
   chartStore: Pick<ChartStore, 'getState'>;
   analysisStore: Pick<AnalysisStore, 'getState' | 'analyze'>;
+  getSelectedContract?: () => OptionContract | null;
 }
 
 /**
@@ -40,6 +42,7 @@ export function connectPositionAnalysis(deps: PositionWiringDeps): () => void {
       const snapshot = buildAnalysisSnapshot({
         chart: deps.chartStore.getState(),
         positions,
+        selectedContract: deps.getSelectedContract?.() ?? null,
         // A closed position no longer exists: build without position data
         // so the management-task evidence rule downgrades the analysis to
         // observation-only instead of reasoning about a phantom position.

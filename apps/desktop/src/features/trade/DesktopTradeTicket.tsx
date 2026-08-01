@@ -16,12 +16,17 @@ import { DesktopContractSummary } from './DesktopContractSummary';
 import { buildDesktopContractSummary } from './DesktopContractSummaryModel';
 import { selectedContractPremium } from './expiryBreakEven';
 import { OptionChainTable } from './OptionChainTable';
+import type { AnalysisSnapshot } from '../appleIntelligence/types';
+import type { AnalysisStore } from '../appleIntelligence/AnalysisStore';
+import { TradeDeskPanel } from './TradeDeskPanel';
 
 interface DesktopTradeTicketProps {
   tradeStore: TradeStore;
   chainStore: ChainStore;
   onArm: (side: OrderSide) => void;
   locked?: boolean;
+  analysisStore?: AnalysisStore;
+  buildAnalysisSnapshot?: () => AnalysisSnapshot;
 }
 
 const PRICE_MODES: Array<{ value: OrderType; label: string }> = [
@@ -75,6 +80,8 @@ export function DesktopTradeTicket({
   chainStore,
   onArm,
   locked = false,
+  analysisStore,
+  buildAnalysisSnapshot,
 }: DesktopTradeTicketProps) {
   const trade = useStore(tradeStore);
   const chain = useStore(chainStore);
@@ -247,6 +254,17 @@ export function DesktopTradeTicket({
             </button>
           ) : null}
         </div>
+
+        {analysisStore && buildAnalysisSnapshot ? (
+          <TradeDeskPanel
+            analysisStore={analysisStore}
+            tradeStore={tradeStore}
+            chainStore={chainStore}
+            selectedContract={selectedContract}
+            buildSnapshot={buildAnalysisSnapshot}
+            locked={locked}
+          />
+        ) : null}
 
         <DesktopContractSummary
           selectedContract={selectedContract}

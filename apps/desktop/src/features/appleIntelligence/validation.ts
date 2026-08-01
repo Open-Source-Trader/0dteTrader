@@ -15,6 +15,81 @@ const evidenceReferenceSchema = z.object({
   detail: z.string(),
 });
 
+const groundedPriceSchema = z.object({
+  value: z.number().finite(),
+  priceDomain: z.enum(['underlying', 'contract-premium']),
+  evidenceId: z.string().min(1),
+  snapshotId: z.string().min(1),
+  deterministicRuleId: z.string().min(1).optional(),
+  levelId: z.string().min(1).optional(),
+});
+
+const groundedPriceZoneSchema = z.object({
+  low: z.number().finite(),
+  high: z.number().finite(),
+  priceDomain: z.enum(['underlying', 'contract-premium']),
+  evidenceId: z.string().min(1),
+  snapshotId: z.string().min(1),
+  deterministicRuleId: z.string().min(1).optional(),
+  levelId: z.string().min(1).optional(),
+});
+
+const groundedPriceConditionSchema = z.object({
+  operator: z.enum(['above', 'below', 'at-or-above', 'at-or-below']),
+  price: groundedPriceSchema,
+});
+
+const tradeDeskPlanSchema = z.object({
+  action: z.enum(['wait', 'enter', 'hold', 'scale', 'exit', 'avoid']),
+  scaleAdvice: z
+    .object({
+      direction: z.enum(['in', 'out']),
+      quantity: z.number().int().positive().optional(),
+      condition: z.string().min(1),
+    })
+    .optional(),
+  setupLabel: z.string().min(1),
+  summary: z.string().min(1),
+  entry: z
+    .object({
+      underlying: groundedPriceZoneSchema.optional(),
+      contract: groundedPriceZoneSchema.optional(),
+      preferredContractPrice: groundedPriceSchema.optional(),
+    })
+    .optional(),
+  invalidation: z
+    .object({
+      underlying: groundedPriceConditionSchema.optional(),
+      contract: groundedPriceConditionSchema.optional(),
+    })
+    .optional(),
+  targets: z.object({
+    contract: z.array(
+      z.object({
+        role: z.enum(['first', 'runner', 'final']),
+        price: groundedPriceSchema,
+        condition: z.string().optional(),
+      }),
+    ),
+    underlying: z
+      .array(
+        z.object({
+          role: z.enum(['first', 'runner', 'final']),
+          price: groundedPriceSchema,
+          condition: z.string().optional(),
+        }),
+      )
+      .optional(),
+  }),
+  management: z.object({
+    holdConditions: z.array(z.string()),
+    scaleConditions: z.array(z.string()),
+    exitConditions: z.array(z.string()),
+  }),
+  warnings: z.array(z.string()).optional(),
+  confidence: z.enum(['low', 'medium', 'high']).optional(),
+});
+
 const omissionSchema = z.object({
   code: z.string().min(1),
   category: z.string().min(1),
@@ -28,6 +103,7 @@ export const analysisResultSchema = z.object({
   resultSchemaVersion: z.literal(1),
   analysisId: z.string().min(1),
   context: z.object({
+    snapshotId: z.string().min(1).optional(),
     symbol: z.string().min(1),
     timeframe: z.string().min(1),
     snapshotSequence: z.number().int().nonnegative(),
@@ -53,6 +129,7 @@ export const analysisResultSchema = z.object({
   assumptions: z.array(z.string()),
   observedOmissions: z.array(omissionSchema),
   summary: z.string(),
+  tradeDeskPlan: tradeDeskPlanSchema.optional(),
 });
 
 /**
@@ -80,4 +157,22 @@ export function rejectUngroundedLevels(
     ([, ref]) => ref === undefined || knownIds.has(ref.levelId),
   );
   return { ...result, levels: Object.fromEntries(filteredEntries) };
+}
+
+export function isTradeDeskPlanGrounded(
+  result: AnalysisResult,
+  supplied: CandidateLevel[],
+): boolean {
+  if (!result.tradeDeskPlan) return true;
+  const knownIds = new Set(supplied.map((level) => level.id));
+  const prices = [
+    result.tradeDeskPlan.entry?.underlying,
+    result.tradeDeskPlan.entry?.contract,
+    result.tradeDeskPlan.entry?.preferredContractPrice,
+    result.tradeDeskPlan.invalidation?.underlying?.price,
+    result.tradeDeskPlan.invalidation?.contract?.price,
+    ...result.tradeDeskPlan.targets.contract.map((target) => target.price),
+    ...(result.tradeDeskPlan.targets.underlying ?? []).map((target) => target.price),
+  ];
+  return prices.every((price) => !price?.levelId || knownIds.has(price.levelId));
 }

@@ -3,7 +3,7 @@
 // Connects ChartStore's narrow candle-close hook to the analysis pipeline:
 // availability gate → trigger policy → snapshot build → scheduler submit.
 // Read-only over domain state; owns nothing but its per-chart dedupe state.
-import type { Position } from '@0dtetrader/shared-types';
+import type { OptionContract, Position } from '@0dtetrader/shared-types';
 import type { CandleCloseEvent, ChartStore } from '../chart/ChartStore';
 import type { AnalysisStore } from './AnalysisStore';
 import { buildAnalysisSnapshot } from './AnalysisSnapshotBuilder';
@@ -13,6 +13,7 @@ export interface CandleCloseWiringDeps {
   chartStore: Pick<ChartStore, 'onCandleClose' | 'getState'>;
   analysisStore: Pick<AnalysisStore, 'getState' | 'submitCandleClose'>;
   getPositions: () => Position[];
+  getSelectedContract?: () => OptionContract | null;
 }
 
 /**
@@ -39,6 +40,7 @@ export function connectCandleCloseAnalysis(deps: CandleCloseWiringDeps): () => v
     const snapshot = buildAnalysisSnapshot({
       chart: deps.chartStore.getState(),
       positions: deps.getPositions(),
+      selectedContract: deps.getSelectedContract?.() ?? null,
       trigger: { kind: 'candle-close', priority: 'candle-close', reason: decision.reason },
     });
     void deps.analysisStore.submitCandleClose(snapshot);

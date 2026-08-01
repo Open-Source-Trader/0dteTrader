@@ -88,8 +88,50 @@ interface AnalysisResult {
   assumptions: string[];
   observedOmissions: Omission[];
   summary: string;
+  tradeDeskPlan?: TradeDeskPlan;
 }
 ```
+
+`tradeDeskPlan` is the structured decision plan the Trade Desk panel renders (entry, invalidation, targets, management). It is optional on the wire: generation may omit it, and it is always omitted when the task was downgraded to observation-only. When present, every price-bearing field has already passed grounding (see below) before being placed on the wire — the model itself never emits `evidenceId`/`snapshotId`, only a `levelId` (underlying prices) or a plausible number (contract-premium prices); the runner attaches grounding metadata after validating.
+
+```typescript
+interface TradeDeskPlan {
+  action: 'wait' | 'enter' | 'hold' | 'scale' | 'exit' | 'avoid';
+  scaleAdvice?: { direction: 'in' | 'out'; quantity?: number; condition: string };
+  setupLabel: string;
+  summary: string;
+  entry?: {
+    underlying?: GroundedPriceZone;
+    contract?: GroundedPriceZone;
+    preferredContractPrice?: GroundedPrice;
+  };
+  invalidation?: {
+    underlying?: GroundedPriceCondition;
+    contract?: GroundedPriceCondition;
+  };
+  targets: { contract: TradeDeskTarget[]; underlying?: TradeDeskTarget[] };
+  management: {
+    holdConditions: string[];
+    scaleConditions: string[];
+    exitConditions: string[];
+  };
+  warnings?: string[];
+  confidence?: 'low' | 'medium' | 'high';
+}
+```
+
+### Decision invariants
+
+A `tradeDeskPlan.action` is only valid when its required fields are present. A plan violating its action's invariant is downgraded to `wait` with an appended warning rather than dropped outright — see [`lifecycle-and-concurrency.md`](lifecycle-and-concurrency.md).
+
+| Action  | Required                                                                                   |
+| ------- | ------------------------------------------------------------------------------------------ |
+| `enter` | At least one grounded `entry` price/zone, and `invalidation` present                       |
+| `hold`  | An open position, at least one `holdConditions` entry, at least one `exitConditions` entry |
+| `scale` | `scaleAdvice` with a `direction` (`in`/`out`) and a `condition`                            |
+| `exit`  | `invalidation` present, or at least one `exitConditions` entry                             |
+| `wait`  | A non-empty `summary` explaining what's missing                                            |
+| `avoid` | A non-empty `summary`/`warnings` stating the concrete reason                               |
 
 ## Grounding rule
 
@@ -99,6 +141,8 @@ Every recommended numeric level must reference:
 - a deterministic strategy-rule identifier with supplied operands.
 
 A generated number without grounding is invalid. Reject the structured result or downgrade it to observation-only output. Never silently accept an ungrounded level.
+
+`tradeDeskPlan` prices ground the same way, with one addition: contract-premium prices have no candidate-level identifier to match, so they are grounded against the supplied selected contract's own bid/ask/last reference price instead (rejected if no contract was supplied, or if the price falls far outside a plausible multiple of that reference).
 
 ## Confidence rule
 

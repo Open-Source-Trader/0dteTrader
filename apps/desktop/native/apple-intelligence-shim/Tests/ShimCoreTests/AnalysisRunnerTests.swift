@@ -114,6 +114,19 @@ final class AnalysisRunnerTests: XCTestCase {
         XCTAssertEqual(context["snapshotSequence"], .number(7))
         XCTAssertNotNil(fields["generatedAt"])
         XCTAssertNotNil(fields["summary"])
+
+        // tradeDeskPlan is optional on the wire (omitted when generation
+        // didn't produce one, or when downgraded to observation-only) but
+        // if present every price must carry the grounding metadata
+        // AnalysisRunner attaches (snapshotId/priceDomain/evidenceId) —
+        // never a bare number the model could have invented.
+        if case let .object(plan)? = fields["tradeDeskPlan"] {
+            XCTAssertNotNil(plan["action"])
+            if case let .object(entry)? = plan["entry"], case let .object(preferred)? = entry["preferredContractPrice"] {
+                XCTAssertEqual(preferred["priceDomain"], .string("contract-premium"))
+                XCTAssertEqual(preferred["snapshotId"], .string("s1"))
+            }
+        }
     }
 
     /// Telemetry coverage (testing-and-observability.md "Required metrics":

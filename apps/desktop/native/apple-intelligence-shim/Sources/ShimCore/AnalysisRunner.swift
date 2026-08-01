@@ -111,7 +111,7 @@ public enum AnalysisRunner {
             warnings.append("Position/risk evidence required for this management task was unavailable; downgraded to observation-only.")
         }
 
-        return .object([
+        var resultObject: [String: JSONValue] = [
             "resultSchemaVersion": .number(1),
             "analysisId": .string(analysisId),
             "context": contextIdentity(from: snapshot.identity),
@@ -126,11 +126,155 @@ public enum AnalysisRunner {
             "assumptions": .array(generated.assumptions.map(JSONValue.string)),
             "observedOmissions": .array(budgeted.omissions.map(omissionToJSON)),
             "summary": .string(generated.summary),
-        ])
+        ]
+
+        if !budgeted.downgradedToObservationOnly, let plan = generated.tradeDeskPlan {
+            let contractReference = selectedContractReferencePrice(from: snapshot.options)
+            let snapshotId = snapshot.identity.snapshotId
+            if let groundedPlan = groundTradeDeskPlan(
+                plan,
+                candidateIds: candidateIds,
+                contractReference: contractReference,
+                snapshotId: snapshotId
+            ) {
+                resultObject["tradeDeskPlan"] = groundedPlan
+            }
+        }
+
+        return .object(resultObject)
         #else
         throw AnalysisRunError.modelUnavailable
         #endif
     }
+
+    #if canImport(FoundationModels)
+    /// Bid/ask/last of the snapshot's selected contract, if supplied — the
+    /// only reference a generated contract-premium price can be grounded
+    /// against, since `options` is opaque JSON with no typed model here
+    /// (AnalysisSnapshotInput's doc comment on why it stays untyped).
+    @available(macOS 26, *)
+    private static func selectedContractReferencePrice(from options: JSONValue?) -> Double? {
+        guard case let .object(root)? = options, case let .object(contract)? = root["selectedContract"] else {
+            return nil
+        }
+        for key in ["last", "ask", "bid"] {
+            if case let .number(value)? = contract[key], value.isFinite, value > 0 {
+                return value
+            }
+        }
+        return nil
+    }
+
+    /// Grounds every price-bearing field in a generated trade-desk plan
+    /// before it is trusted: underlying prices against the supplied
+    /// candidate levels (GroundingValidator.groundOrReject, same mechanism
+    /// as support/resistance), contract-premium prices against the supplied
+    /// selected contract's own reference price
+    /// (GroundingValidator.groundOrRejectContractPrice). A field that fails
+    /// grounding is omitted, never trusted at face value or replaced with a
+    /// guess. `evidenceId`/`snapshotId` are attached here, not asked of the
+    /// model, since it has no reason to invent either.
+    @available(macOS 26, *)
+    private static func groundTradeDeskPlan(
+        _ plan: GeneratedTradeDeskPlan,
+        candidateIds: Set<String>,
+        contractReference: Double?,
+        snapshotId: String
+    ) -> JSONValue? {
+        func groundedLevel(_ ref: GeneratedUnderlyingPrice?) -> JSONValue? {
+            guard let ref, candidateIds.contains(ref.levelId) else { return nil }
+            return .object([
+                "value": .number(ref.price),
+                "priceDomain": .string("underlying"),
+                "evidenceId": .string(ref.levelId),
+                "snapshotId": .string(snapshotId),
+                "levelId": .string(ref.levelId),
+            ])
+        }
+
+        func groundedContractPrice(_ price: Double?, evidenceId: String) -> JSONValue? {
+            guard let grounded = GroundingValidator.groundOrRejectContractPrice(price, contractReference: contractReference) else {
+                return nil
+            }
+            return .object([
+                "value": .number(grounded),
+                "priceDomain": .string("contract-premium"),
+                "evidenceId": .string(evidenceId),
+                "snapshotId": .string(snapshotId),
+            ])
+        }
+
+        var entryObject: [String: JSONValue] = [:]
+        if let entry = plan.entry {
+            if let underlying = entry.underlying,
+               candidateIds.contains(underlying.lowLevelId), candidateIds.contains(underlying.highLevelId) {
+                entryObject["underlying"] = .object([
+                    "low": .number(underlying.low),
+                    "high": .number(underlying.high),
+                    "priceDomain": .string("underlying"),
+                    "evidenceId": .string(underlying.lowLevelId),
+                    "snapshotId": .string(snapshotId),
+                ])
+            }
+            if let contract = entry.contract,
+               GroundingValidator.groundOrRejectContractPrice(contract.low, contractReference: contractReference) != nil,
+               GroundingValidator.groundOrRejectContractPrice(contract.high, contractReference: contractReference) != nil {
+                entryObject["contract"] = .object([
+                    "low": .number(contract.low),
+                    "high": .number(contract.high),
+                    "priceDomain": .string("contract-premium"),
+                    "evidenceId": .string("selected-contract"),
+                    "snapshotId": .string(snapshotId),
+                ])
+            }
+            if let preferred = groundedContractPrice(entry.preferredContractPrice, evidenceId: "selected-contract") {
+                entryObject["preferredContractPrice"] = preferred
+            }
+        }
+
+        var invalidationObject: [String: JSONValue] = [:]
+        if let invalidation = plan.invalidation {
+            if let underlyingPrice = groundedLevel(invalidation.underlying) {
+                invalidationObject["underlying"] = .object(["operator": .string("below"), "price": underlyingPrice])
+            }
+            if let contractPrice = groundedContractPrice(invalidation.contractPrice, evidenceId: "selected-contract") {
+                invalidationObject["contract"] = .object(["operator": .string("below"), "price": contractPrice])
+            }
+        }
+
+        let contractTargets = plan.contractTargets.compactMap { target -> JSONValue? in
+            guard let price = groundedContractPrice(target.contractPrice, evidenceId: "selected-contract") else { return nil }
+            var object: [String: JSONValue] = ["role": .string(target.role), "price": price]
+            if let condition = target.condition { object["condition"] = .string(condition) }
+            return .object(object)
+        }
+
+        var planObject: [String: JSONValue] = [
+            "action": .string(plan.action.rawValue),
+            "setupLabel": .string(plan.setupLabel),
+            "summary": .string(plan.summary),
+            "targets": .object(["contract": .array(contractTargets)]),
+            "management": .object([
+                "holdConditions": .array(plan.holdConditions.map(JSONValue.string)),
+                "scaleConditions": .array(plan.scaleConditions.map(JSONValue.string)),
+                "exitConditions": .array(plan.exitConditions.map(JSONValue.string)),
+            ]),
+        ]
+        if !entryObject.isEmpty { planObject["entry"] = .object(entryObject) }
+        if !invalidationObject.isEmpty { planObject["invalidation"] = .object(invalidationObject) }
+        if let scaleAdvice = plan.scaleAdvice, ["in", "out"].contains(scaleAdvice.direction) {
+            planObject["scaleAdvice"] = .object([
+                "direction": .string(scaleAdvice.direction),
+                "condition": .string(scaleAdvice.condition),
+            ])
+        }
+        if let confidence = plan.confidence, ["low", "medium", "high"].contains(confidence) {
+            planObject["confidence"] = .string(confidence)
+        }
+
+        return .object(planObject)
+    }
+    #endif
 
     private static func contextIdentity(from identity: AnalysisSnapshotInput.IdentityInput) -> JSONValue {
         var object: [String: JSONValue] = [

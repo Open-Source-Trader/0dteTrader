@@ -44,6 +44,118 @@ struct GeneratedLevelReference: Sendable {
 
 @available(macOS 26, *)
 @Generable
+enum GeneratedTradeDeskAction: String, Sendable {
+    case wait, enter, hold, scale, exit, avoid
+}
+
+/// A price tied to the underlying symbol, grounded by a supplied candidate
+/// level id — the model never invents a number here, it only names which
+/// candidate level a plan price corresponds to. `priceDomain`/`evidenceId`/
+/// `snapshotId` are attached after generation by AnalysisRunner, same as
+/// `context`/`analysisId` — the model has no reason to invent those either.
+@available(macOS 26, *)
+@Generable
+struct GeneratedUnderlyingPrice: Sendable {
+    @Guide(description: "Must exactly match the id of one of the supplied candidate levels")
+    var levelId: String
+    @Guide(description: "The price of the referenced candidate level, copied from that candidate")
+    var price: Double
+}
+
+@available(macOS 26, *)
+@Generable
+struct GeneratedUnderlyingZone: Sendable {
+    @Guide(description: "Must exactly match the id of one of the supplied candidate levels for the low bound")
+    var lowLevelId: String
+    var low: Double
+    @Guide(description: "Must exactly match the id of one of the supplied candidate levels for the high bound")
+    var highLevelId: String
+    var high: Double
+}
+
+@available(macOS 26, *)
+@Generable
+struct GeneratedContractZone: Sendable {
+    @Guide(description: "Contract premium low bound, must fall within the supplied selected contract's bid/ask range")
+    var low: Double
+    @Guide(description: "Contract premium high bound, must fall within the supplied selected contract's bid/ask range")
+    var high: Double
+}
+
+@available(macOS 26, *)
+@Generable
+struct GeneratedScaleAdvice: Sendable {
+    @Guide(description: "in | out")
+    var direction: String
+    var condition: String
+}
+
+@available(macOS 26, *)
+@Generable
+struct GeneratedTradeDeskTarget: Sendable {
+    @Guide(description: "first | runner | final")
+    var role: String
+    @Guide(description: "Contract premium target price, must fall within a plausible range of the supplied selected contract")
+    var contractPrice: Double
+    var condition: String?
+}
+
+@available(macOS 26, *)
+@Generable
+struct GeneratedTradeDeskEntry: Sendable {
+    var underlying: GeneratedUnderlyingZone?
+    var contract: GeneratedContractZone?
+    @Guide(description: "Single preferred contract premium entry price, must fall within a plausible range of the supplied selected contract")
+    var preferredContractPrice: Double?
+}
+
+@available(macOS 26, *)
+@Generable
+struct GeneratedTradeDeskInvalidation: Sendable {
+    var underlying: GeneratedUnderlyingPrice?
+    @Guide(description: "Contract premium invalidation price, must fall within a plausible range of the supplied selected contract")
+    var contractPrice: Double?
+}
+
+/// Mirrors TypeScript's `TradeDeskPlan` (types.ts). Optional on the
+/// generated result — see data-contracts.md for the decision-invariant
+/// table that governs which fields must be present for a given `action`;
+/// that rule is enforced downstream (TS `validateTradeDeskInvariants`), not
+/// here, since it needs the current position/context to evaluate.
+@available(macOS 26, *)
+@Generable
+struct GeneratedTradeDeskPlan: Sendable {
+    @Guide(description: "wait | enter | hold | scale | exit | avoid")
+    var action: GeneratedTradeDeskAction
+
+    @Guide(description: "Required only when action is scale")
+    var scaleAdvice: GeneratedScaleAdvice?
+
+    @Guide(description: "Short label for the current setup, e.g. 'Bullish pullback'")
+    var setupLabel: String
+
+    @Guide(description: "One paragraph plain-language summary")
+    var summary: String
+
+    var entry: GeneratedTradeDeskEntry?
+    var invalidation: GeneratedTradeDeskInvalidation?
+
+    @Guide(description: "Up to 3 contract-premium targets, ordered first to final")
+    var contractTargets: [GeneratedTradeDeskTarget]
+
+    @Guide(description: "Conditions under which to keep holding the position, if any")
+    var holdConditions: [String]
+    @Guide(description: "Conditions under which to scale in or out, if any")
+    var scaleConditions: [String]
+    @Guide(description: "Conditions under which to exit the position, if any")
+    var exitConditions: [String]
+
+    @Guide(description: "low | medium | high")
+    var confidence: String?
+}
+
+@available(macOS 26, *)
+@Generable
 struct GeneratedAnalysis: Sendable {
     @Guide(description: "wait | enter | hold | trim | exit | avoid")
     var recommendation: GeneratedRecommendation
@@ -74,6 +186,9 @@ struct GeneratedAnalysis: Sendable {
 
     @Guide(description: "One paragraph plain-language summary")
     var summary: String
+
+    @Guide(description: "Structured trade-desk decision plan: entry, invalidation, targets, and management guidance")
+    var tradeDeskPlan: GeneratedTradeDeskPlan?
 }
 #endif
 
@@ -101,5 +216,22 @@ public enum GroundingValidator {
         guard let reference else { return nil }
         guard candidateIds.contains(reference.levelId) else { return nil }
         return reference
+    }
+
+    /// Contract-premium prices have no candidate-level id to match against
+    /// (unlike underlying prices) — instead they're grounded against the
+    /// supplied selected contract's own bid/ask/last, mirroring the
+    /// TypeScript-side `isValidContractPremium` bound
+    /// (tradeDeskPresenter.ts). A generated price outside a generous
+    /// multiple of the contract's own reference prices, or one produced with
+    /// no contract supplied at all, is ungrounded and must be dropped.
+    public static func groundOrRejectContractPrice(
+        _ price: Double?,
+        contractReference: Double?
+    ) -> Double? {
+        guard let price, price.isFinite, price > 0 else { return nil }
+        guard let contractReference, contractReference.isFinite, contractReference > 0 else { return nil }
+        guard price <= contractReference * 20 else { return nil }
+        return price
     }
 }

@@ -24,4 +24,29 @@ final class GroundingValidatorTests: XCTestCase {
         let result = GroundingValidator.groundOrReject(reference, candidateIds: [])
         XCTAssertNil(result)
     }
+
+    func testKeepsAContractPriceWithinAGenerousMultipleOfTheReference() {
+        let result = GroundingValidator.groundOrRejectContractPrice(1.85, contractReference: 1.80)
+        XCTAssertEqual(result, 1.85)
+    }
+
+    func testRejectsAContractPriceWithNoSuppliedReference() {
+        let result = GroundingValidator.groundOrRejectContractPrice(1.85, contractReference: nil)
+        XCTAssertNil(result)
+    }
+
+    func testRejectsAContractPriceFarBeyondTheReference() {
+        let result = GroundingValidator.groundOrRejectContractPrice(1000, contractReference: 1.80)
+        XCTAssertNil(result)
+    }
+
+    func testRejectsANonPositiveContractPrice() {
+        let result = GroundingValidator.groundOrRejectContractPrice(0, contractReference: 1.80)
+        XCTAssertNil(result)
+    }
+
+    func testNilContractPricePassesThroughAsNil() {
+        let result = GroundingValidator.groundOrRejectContractPrice(nil, contractReference: 1.80)
+        XCTAssertNil(result)
+    }
 }

@@ -3,7 +3,7 @@ import Foundation
 /// A `Codable`, `Sendable` representation of an arbitrary JSON value, used
 /// for wire-protocol `payload` fields whose shape depends on `method`/`event`
 /// and is validated by a narrower decoder further down the pipeline.
-public indirect enum JSONValue: Codable, Sendable {
+public indirect enum JSONValue: Codable, Sendable, Equatable {
     case null
     case bool(Bool)
     case number(Double)

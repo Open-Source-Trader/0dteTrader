@@ -39,7 +39,15 @@ public enum AnalysisRunner {
     /// (JSONValue), or throws an `AnalysisRunError` that the caller maps to
     /// a `failed` event with a stable error code. Never returns an
     /// ungrounded numeric level.
-    public static func run(snapshot: AnalysisSnapshotInput, isCancelled: @Sendable () -> Bool) async throws -> JSONValue {
+    ///
+    /// `analysisId` reuses the caller's requestId — one analysis run
+    /// produces at most one result, so a separate id would only be another
+    /// identifier to keep in sync for no benefit.
+    public static func run(
+        snapshot: AnalysisSnapshotInput,
+        analysisId: String,
+        isCancelled: @Sendable () -> Bool
+    ) async throws -> JSONValue {
         let budgeted = ContextBudgeter.build(from: snapshot)
 
         #if canImport(FoundationModels)
@@ -84,6 +92,10 @@ public enum AnalysisRunner {
         }
 
         return .object([
+            "resultSchemaVersion": .number(1),
+            "analysisId": .string(analysisId),
+            "context": contextIdentity(from: snapshot.identity),
+            "generatedAt": .string(ISO8601DateFormatter().string(from: Date())),
             "recommendation": .string(recommendation),
             "setupState": .string(generated.setupState.rawValue),
             "bias": .string(generated.bias.rawValue),
@@ -98,6 +110,20 @@ public enum AnalysisRunner {
         #else
         throw AnalysisRunError.modelUnavailable
         #endif
+    }
+
+    private static func contextIdentity(from identity: AnalysisSnapshotInput.IdentityInput) -> JSONValue {
+        var object: [String: JSONValue] = [
+            "symbol": .string(identity.symbol),
+            "timeframe": .string(identity.timeframe),
+            "snapshotSequence": .number(Double(identity.snapshotSequence)),
+            "positionVersion": .number(Double(identity.positionVersion)),
+        ]
+        if let candleCloseTime = identity.candleCloseTime { object["candleCloseTime"] = .string(candleCloseTime) }
+        if let strategyPolicyVersion = identity.strategyPolicyVersion {
+            object["strategyPolicyVersion"] = .number(Double(strategyPolicyVersion))
+        }
+        return .object(object)
     }
 
     private static func omissionToJSON(_ omission: OmissionInput) -> JSONValue {

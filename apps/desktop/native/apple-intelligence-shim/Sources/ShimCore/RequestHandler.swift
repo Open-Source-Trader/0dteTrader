@@ -91,7 +91,7 @@ public actor RequestHandler {
             }
 
             do {
-                let resultPayload = try await AnalysisRunner.run(snapshot: snapshot) { Task.isCancelled }
+                let resultPayload = try await AnalysisRunner.run(snapshot: snapshot, analysisId: requestId) { Task.isCancelled }
                 if Task.isCancelled {
                     emit(NativeEvent(requestId: requestId, event: .cancelled))
                 } else {

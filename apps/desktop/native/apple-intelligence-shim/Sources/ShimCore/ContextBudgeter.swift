@@ -131,21 +131,59 @@ public enum ContextBudgeter {
             text = recompose()
         }
 
+        // Every lever above (options, indicators, levels, candles, strategy
+        // policy) can be exhausted while POSITION/MARKET — never trimmed,
+        // since position/risk evidence must not be silently dropped — are
+        // still large enough alone to exceed budget (e.g. a verbose
+        // position or market payload). A hard truncation is the backstop
+        // that guarantees the model actually receives a request under its
+        // context window, rather than trusting every lever combined is
+        // always sufficient. Prefer never reaching this path (the levers
+        // above should ordinarily be enough); this exists so an unusually
+        // large payload downgrades to a truncated-but-attemptable prompt
+        // instead of unconditionally overflowing the model's window.
+        if text.count > maxPromptCharacters {
+            text = String(text.prefix(maxPromptCharacters))
+            omissions.append(
+                OmissionInput(
+                    code: "prompt-truncated",
+                    category: "prompt",
+                    reason: "budget",
+                    originalCount: nil,
+                    retainedCount: nil,
+                    material: true
+                )
+            )
+        }
+
         return BudgetedPrompt(text: text, omissions: omissions, downgradedToObservationOnly: downgradedToObservationOnly)
     }
 
     /// Candles are the one section without a typed model here (opaque
-    /// JSONValue) — if the payload is a JSON array, its length is the trim
-    /// lever; any other shape has no lever and is left to the strategy
-    /// policy/options/level trims to make room.
+    /// JSONValue). The wire shape (AnalysisSnapshotBuilder.ts) is
+    /// `{ count, recent: Candle[] }`, not a bare array — the trim lever
+    /// looks inside `recent` for that shape, or accepts a bare array
+    /// directly for callers/fixtures that already supply one. Any other
+    /// shape has no lever and is left to the strategy policy/options/level
+    /// trims to make room.
     private static func candleCount(in candles: JSONValue) -> Int? {
         if case let .array(items) = candles { return items.count }
+        if case let .object(fields) = candles, case let .array(items)? = fields["recent"] {
+            return items.count
+        }
         return nil
     }
 
     private static func trimmedCandles(_ candles: JSONValue, limit: Int?) -> JSONValue {
-        guard let limit, case let .array(items) = candles else { return candles }
-        return .array(Array(items.suffix(limit)))
+        guard let limit else { return candles }
+        if case let .array(items) = candles {
+            return .array(Array(items.suffix(limit)))
+        }
+        if case var .object(fields) = candles, case let .array(items)? = fields["recent"] {
+            fields["recent"] = .array(Array(items.suffix(limit)))
+            return .object(fields)
+        }
+        return candles
     }
 
     private static func compose(

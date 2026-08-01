@@ -99,6 +99,75 @@ final class ContextBudgeterTests: XCTestCase {
         XCTAssertFalse(budgeted.text.contains("callWall"), "options should have been trimmed first")
     }
 
+    /// AnalysisSnapshotBuilder.ts's real wire shape for candles is
+    /// `{ count, recent: Candle[] }` — an object wrapping the array, not a
+    /// bare array. The trim lever must look inside `recent`; a snapshot
+    /// with 50 real-sized candles under `recent` previously slipped past
+    /// every lever (candleCount saw a non-array top level and returned
+    /// nil), so budget was exceeded silently until the model rejected the
+    /// oversized request with exceededContextWindowSize.
+    func testOversizedRealShapedCandlesAreTrimmedViaTheRecentField() {
+        var snapshot = makeSnapshot(levelCount: 40)
+        let recent = JSONValue.array((0..<50).map { index in
+            .object([
+                "time": .number(Double(index)),
+                "open": .number(579.12),
+                "high": .number(580.45),
+                "low": .number(578.67),
+                "close": .number(579.89),
+                "volume": .number(123456),
+            ])
+        })
+        let realShapedCandles = JSONValue.object(["count": .number(50), "recent": recent])
+        snapshot = AnalysisSnapshotInput(
+            snapshotSchemaVersion: snapshot.snapshotSchemaVersion,
+            identity: snapshot.identity,
+            trigger: snapshot.trigger,
+            market: snapshot.market,
+            candles: realShapedCandles,
+            indicators: snapshot.indicators,
+            levels: snapshot.levels,
+            options: snapshot.options,
+            position: snapshot.position,
+            strategyPolicy: snapshot.strategyPolicy,
+            quality: snapshot.quality,
+            omissions: snapshot.omissions
+        )
+
+        let budgeted = ContextBudgeter.build(from: snapshot)
+        XCTAssertLessThanOrEqual(budgeted.text.count, ContextBudgeter.maxPromptCharacters)
+        XCTAssertTrue(budgeted.omissions.contains { $0.code == "candles-trimmed" })
+    }
+
+    /// POSITION is never trimmed by a lever (priority 1, "never silently
+    /// omitted") — if it alone is large enough to exceed budget after every
+    /// other lever is exhausted, the hard-truncation backstop must still
+    /// guarantee compliance rather than returning an oversized prompt.
+    func testHardTruncationBackstopCapsAnUntrimmableOversizedPosition() {
+        var snapshot = makeSnapshot(levelCount: 1, includeOptions: false, includeStrategyPolicy: false)
+        let hugePosition = JSONValue.object(
+            Dictionary(uniqueKeysWithValues: (0..<500).map { ("field\($0)", JSONValue.string(String(repeating: "x", count: 20))) })
+        )
+        snapshot = AnalysisSnapshotInput(
+            snapshotSchemaVersion: snapshot.snapshotSchemaVersion,
+            identity: snapshot.identity,
+            trigger: snapshot.trigger,
+            market: snapshot.market,
+            candles: .object(["count": .number(0), "recent": .array([])]),
+            indicators: snapshot.indicators,
+            levels: snapshot.levels,
+            options: nil,
+            position: hugePosition,
+            strategyPolicy: nil,
+            quality: snapshot.quality,
+            omissions: snapshot.omissions
+        )
+
+        let budgeted = ContextBudgeter.build(from: snapshot)
+        XCTAssertLessThanOrEqual(budgeted.text.count, ContextBudgeter.maxPromptCharacters)
+        XCTAssertTrue(budgeted.omissions.contains { $0.code == "prompt-truncated" })
+    }
+
     func testDeterministic() {
         let snapshot = makeSnapshot()
         let first = ContextBudgeter.build(from: snapshot).text

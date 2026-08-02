@@ -161,6 +161,17 @@ final class DTODecodingTests: XCTestCase {
         XCTAssertEqual(position.quantity, -2)
         XCTAssertEqual(position.assetClass, .option)
         XCTAssertEqual(position.unrealizedPnl, -20.0, accuracy: 1e-9)
+        XCTAssertNil(position.openedAt)
+    }
+
+    func testPosition_decodesOpenedAt() throws {
+        let dto = try decode(PositionDTO.self, """
+        {"symbol":"SPY260717C00503000","assetClass":"option","quantity":1,"avgPrice":1.5,"markPrice":1.6,"unrealizedPnl":10.0,"multiplier":100,"underlyingEntryPrice":502.4,"openedAt":"2026-07-17T14:30:00.000Z"}
+        """)
+        let position = try XCTUnwrap(Position(dto: dto))
+        XCTAssertEqual(position.underlyingEntryPrice, 502.4)
+        XCTAssertEqual(position.openedAt, DateParsing.dateTime("2026-07-17T14:30:00.000Z"))
+        XCTAssertNotNil(position.openedAt)
     }
 
     /// An unknown asset class must drop the position, not fall back to .option
@@ -218,6 +229,29 @@ final class DTODecodingTests: XCTestCase {
         XCTAssertEqual(selection["expiration"] as? String, "2026-07-17")
         // Nil fields must be omitted, not null (server validates explicit-only fields).
         XCTAssertNil(selection["strike"])
+        // Omitted otmOffset means the server default (+1), not null.
+        XCTAssertNil(selection["otmOffset"])
+    }
+
+    func testOrderRequest_encodesOtmOffsetWhenSet() throws {
+        let request = OrderRequestDTO(
+            underlying: "SPY",
+            assetClass: "option",
+            side: "buy",
+            quantity: 1,
+            orderType: "mid",
+            selection: OrderSelectionDTO(
+                mode: "auto_otm",
+                optionType: "put",
+                expiration: nil,
+                strike: nil,
+                otmOffset: 2
+            )
+        )
+        let data = try JSONEncoder().encode(request)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let selection = try XCTUnwrap(object["selection"] as? [String: Any])
+        XCTAssertEqual(selection["otmOffset"] as? Int, 2)
     }
 
     // MARK: - WebSocket messages

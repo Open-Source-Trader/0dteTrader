@@ -233,6 +233,10 @@ struct OrderSelectionDTO: Encodable, Equatable, Sendable {
     let optionType: String?
     let expiration: String?
     let strike: Double?
+    /// auto_otm only: strikes OTM from the ATM strike; 0 = ATM; nil (omitted)
+    /// means 1. Encoded as absent rather than null when nil, so servers
+    /// predating the field see the request shape they always did.
+    var otmOffset: Int? = nil
 }
 
 struct OrderRequestDTO: Encodable, Equatable, Sendable {
@@ -290,6 +294,9 @@ struct PositionDTO: Decodable, Equatable, Sendable {
     /// where the chart draws this position's entry line. Absent for positions
     /// opened before it was recorded, or outside the app.
     let underlyingEntryPrice: Double?
+    /// ISO-8601 time of the fill that opened the current position run. Absent
+    /// for positions opened before it was recorded, or outside the app.
+    let openedAt: String?
 }
 
 // MARK: - Chart trading

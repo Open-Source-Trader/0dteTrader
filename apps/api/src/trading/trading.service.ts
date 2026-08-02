@@ -15,7 +15,7 @@ import { BrokerError } from '../common/broker-error';
 import { timed } from '../common/timing';
 import { PrismaService } from '../prisma/prisma.service';
 import { OrderRequestDto } from './dto/order-request.dto';
-import { OrdersService } from './orders.service';
+import { OrdersService, type PositionAnchor } from './orders.service';
 
 type AuditAction = 'preview' | 'place' | 'cancel';
 
@@ -198,9 +198,9 @@ export class TradingService {
 
   /**
    * Broker positions, each annotated with the underlying price its opening
-   * fills happened at — the level the chart draws the entry line at. The
-   * annotation is best-effort: a position opened before the price was recorded
-   * (or outside this app) simply carries none.
+   * fills happened at — the level the chart draws the entry line at — and the
+   * time the position was opened. The annotations are best-effort: a position
+   * opened before they were recorded (or outside this app) simply carries none.
    */
   async getPositions(userId: string): Promise<Position[]> {
     const positions = await this.gateway.getPositions(userId);
@@ -210,10 +210,17 @@ export class TradingService {
         userId,
         positions.map((position) => position.symbol),
       )
-      .catch(() => new Map<string, number>());
+      .catch(() => new Map<string, PositionAnchor>());
     return positions.map((position) => {
-      const underlyingEntryPrice = anchors.get(position.symbol);
-      return underlyingEntryPrice === undefined ? position : { ...position, underlyingEntryPrice };
+      const anchor = anchors.get(position.symbol);
+      if (!anchor) return position;
+      return {
+        ...position,
+        ...(anchor.underlyingEntryPrice !== undefined && {
+          underlyingEntryPrice: anchor.underlyingEntryPrice,
+        }),
+        ...(anchor.openedAt && { openedAt: anchor.openedAt.toISOString() }),
+      };
     });
   }
 

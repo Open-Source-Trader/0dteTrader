@@ -18,6 +18,15 @@ interface BookEntry {
    *  underlying price was recorded contribute none, and must not be averaged
    *  in as zero. */
   underlyingQty: number;
+  /** When the fill that opened the current position run happened (the fill
+   *  where quantity last left zero). */
+  openedAt: Date | null;
+}
+
+/** What positionAnchors reports per open contract, for annotating Positions. */
+export interface PositionAnchor {
+  underlyingEntryPrice?: number;
+  openedAt?: Date;
 }
 
 /**
@@ -67,6 +76,7 @@ function applyFill(book: Map<string, BookEntry>, key: string, row: TradeOrder): 
     avgPrice: 0,
     avgUnderlying: 0,
     underlyingQty: 0,
+    openedAt: null,
   };
   const signed = row.side === 'buy' ? fillQuantity(row) : -fillQuantity(row);
   const size = Math.abs(signed);
@@ -82,6 +92,7 @@ function applyFill(book: Map<string, BookEntry>, key: string, row: TradeOrder): 
 
   if (position.quantity === 0 || Math.sign(position.quantity) === Math.sign(signed)) {
     // Opening or adding: blend the average cost.
+    if (position.quantity === 0) position.openedAt = row.placedAt;
     const totalQty = Math.abs(position.quantity) + size;
     position.avgPrice = (position.avgPrice * Math.abs(position.quantity) + price * size) / totalQty;
     if (underlying !== null) {
@@ -101,11 +112,13 @@ function applyFill(book: Map<string, BookEntry>, key: string, row: TradeOrder): 
       position.avgPrice = 0;
       position.avgUnderlying = 0;
       position.underlyingQty = 0;
+      position.openedAt = null;
     } else if (Math.sign(position.quantity) !== direction) {
       // Flipped: the remainder is a new position anchored on this fill.
       position.avgPrice = price;
       position.avgUnderlying = underlying ?? 0;
       position.underlyingQty = underlying === null ? 0 : Math.abs(position.quantity);
+      position.openedAt = row.placedAt;
     } else {
       // Partially closed: the average is unchanged, but it now backs less size.
       position.underlyingQty = Math.min(position.underlyingQty, Math.abs(position.quantity));
@@ -227,10 +240,14 @@ export class OrdersService implements OnModuleDestroy {
    * Scoped to the contracts the broker actually reports open (and to the user's
    * current environment), so this replays a handful of fills rather than the
    * user's whole order history. Contracts with no recorded underlying price
-   * (opened before the column existed, or outside the app) are omitted; the
-   * clients fall back to stamping the live price locally.
+   * (opened before the column existed, or outside the app) carry no price —
+   * the clients fall back to stamping the live price locally — but still
+   * report openedAt when their fills are on record.
    */
-  async positionAnchors(userId: string, contractSymbols: string[]): Promise<Map<string, number>> {
+  async positionAnchors(
+    userId: string,
+    contractSymbols: string[],
+  ): Promise<Map<string, PositionAnchor>> {
     if (contractSymbols.length === 0) return new Map();
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     const environment = user?.tradingMode === 'practice' ? 'practice' : 'live';
@@ -245,10 +262,14 @@ export class OrdersService implements OnModuleDestroy {
       if (isFill(row)) applyFill(book, row.contractSymbol, row);
     }
 
-    const anchors = new Map<string, number>();
+    const anchors = new Map<string, PositionAnchor>();
     for (const [symbol, entry] of book) {
-      if (entry.quantity !== 0 && entry.underlyingQty > 0) {
-        anchors.set(symbol, round2(entry.avgUnderlying));
+      if (entry.quantity === 0) continue;
+      const anchor: PositionAnchor = {};
+      if (entry.underlyingQty > 0) anchor.underlyingEntryPrice = round2(entry.avgUnderlying);
+      if (entry.openedAt) anchor.openedAt = entry.openedAt;
+      if (anchor.underlyingEntryPrice !== undefined || anchor.openedAt) {
+        anchors.set(symbol, anchor);
       }
     }
     return anchors;

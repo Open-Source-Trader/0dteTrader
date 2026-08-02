@@ -278,6 +278,9 @@ struct Position: Equatable, Sendable, Identifiable {
     /// Underlying price the position was opened at — the level the chart's
     /// entry line sits at. Nil when the server has no record of it.
     var underlyingEntryPrice: Double?
+    /// When the fill that opened the current position run happened. Nil when
+    /// the server has no record of it.
+    var openedAt: Date? = nil
 }
 
 extension Position {
@@ -293,7 +296,8 @@ extension Position {
             markPrice: dto.markPrice,
             unrealizedPnl: dto.unrealizedPnl,
             multiplier: dto.multiplier,
-            underlyingEntryPrice: dto.underlyingEntryPrice
+            underlyingEntryPrice: dto.underlyingEntryPrice,
+            openedAt: dto.openedAt.flatMap(DateParsing.dateTime)
         )
     }
 }

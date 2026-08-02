@@ -241,14 +241,19 @@ describe('OrdersService', () => {
       );
 
       // Quantity-weighted: (600×1 + 604×3) / 4
-      expect(await orders.positionAnchors(USER, [OCC])).toEqual(new Map([[OCC, 603]]));
+      const anchor = (await orders.positionAnchors(USER, [OCC])).get(OCC);
+      expect(anchor?.underlyingEntryPrice).toBe(603);
     });
 
-    it('omits a contract whose fills carry no underlying price', async () => {
-      // Opened before the column existed, or outside the app.
-      await orders.record(USER, fill({ side: 'buy', quantity: 1, filledPrice: 1.0 }));
+    it('carries openedAt but no price for fills without an underlying price', async () => {
+      // Opened before the column existed, or outside the app: no entry-line
+      // level, but the position still has an opening time.
+      const opening = fill({ side: 'buy', quantity: 1, filledPrice: 1.0 });
+      await orders.record(USER, opening);
 
-      expect(await orders.positionAnchors(USER, [OCC]).then((m) => m.size)).toBe(0);
+      const anchor = (await orders.positionAnchors(USER, [OCC])).get(OCC);
+      expect(anchor?.underlyingEntryPrice).toBeUndefined();
+      expect(anchor?.openedAt).toEqual(new Date(opening.timestamp));
     });
 
     it('blends only the fills that reported a price, never averaging a missing one in as zero', async () => {
@@ -259,7 +264,8 @@ describe('OrdersService', () => {
         604,
       );
 
-      expect(await orders.positionAnchors(USER, [OCC])).toEqual(new Map([[OCC, 604]]));
+      const anchor = (await orders.positionAnchors(USER, [OCC])).get(OCC);
+      expect(anchor?.underlyingEntryPrice).toBe(604);
     });
 
     it('leaves the anchor untouched when the position is only partially closed', async () => {
@@ -279,7 +285,8 @@ describe('OrdersService', () => {
         615,
       );
 
-      expect(await orders.positionAnchors(USER, [OCC])).toEqual(new Map([[OCC, 605]]));
+      const anchor = (await orders.positionAnchors(USER, [OCC])).get(OCC);
+      expect(anchor?.underlyingEntryPrice).toBe(605);
     });
 
     it('re-weights a later add against the remaining open quantity, not the closed one', async () => {
@@ -305,7 +312,8 @@ describe('OrdersService', () => {
       );
 
       // 2 open at 605 + 2 new at 620 — the closed 2 must not still carry weight.
-      expect(await orders.positionAnchors(USER, [OCC])).toEqual(new Map([[OCC, 612.5]]));
+      const anchor = (await orders.positionAnchors(USER, [OCC])).get(OCC);
+      expect(anchor?.underlyingEntryPrice).toBe(612.5);
     });
 
     it('drops the anchor once the position is flat', async () => {
@@ -336,7 +344,8 @@ describe('OrdersService', () => {
       );
 
       // Now short 2, opened at the price the reversal happened at.
-      expect(await orders.positionAnchors(USER, [OCC])).toEqual(new Map([[OCC, 610]]));
+      const anchor = (await orders.positionAnchors(USER, [OCC])).get(OCC);
+      expect(anchor?.underlyingEntryPrice).toBe(610);
     });
 
     it('only replays the contracts asked for, and none when asked for none', async () => {
@@ -352,8 +361,67 @@ describe('OrdersService', () => {
         500,
       );
 
-      expect(await orders.positionAnchors(USER, [other])).toEqual(new Map([[other, 500]]));
+      const anchors = await orders.positionAnchors(USER, [other]);
+      expect(anchors.size).toBe(1);
+      expect(anchors.get(other)?.underlyingEntryPrice).toBe(500);
       expect(await orders.positionAnchors(USER, [])).toEqual(new Map());
+    });
+
+    it('stamps openedAt from the opening fill and keeps it across adds', async () => {
+      const opening = fill({ side: 'buy', quantity: 1, filledPrice: 1.0 });
+      await orders.recordUnderlyingPrice(USER, opening, 600);
+      await orders.recordUnderlyingPrice(
+        USER,
+        fill({ side: 'buy', quantity: 3, filledPrice: 1.2 }),
+        604,
+      );
+
+      const anchor = (await orders.positionAnchors(USER, [OCC])).get(OCC);
+      expect(anchor?.openedAt).toEqual(new Date(opening.timestamp));
+    });
+
+    it('keeps openedAt across a partial close', async () => {
+      const opening = fill({ side: 'buy', quantity: 2, filledPrice: 1.0 });
+      await orders.recordUnderlyingPrice(USER, opening, 600);
+      await orders.recordUnderlyingPrice(
+        USER,
+        fill({ side: 'sell', quantity: 1, filledPrice: 1.5 }),
+        610,
+      );
+
+      const anchor = (await orders.positionAnchors(USER, [OCC])).get(OCC);
+      expect(anchor?.openedAt).toEqual(new Date(opening.timestamp));
+    });
+
+    it('resets openedAt when a position closes and reopens', async () => {
+      await orders.recordUnderlyingPrice(
+        USER,
+        fill({ side: 'buy', quantity: 1, filledPrice: 1.0 }),
+        600,
+      );
+      await orders.recordUnderlyingPrice(
+        USER,
+        fill({ side: 'sell', quantity: 1, filledPrice: 1.5 }),
+        610,
+      );
+      const reopening = fill({ side: 'buy', quantity: 1, filledPrice: 1.1 });
+      await orders.recordUnderlyingPrice(USER, reopening, 620);
+
+      const anchor = (await orders.positionAnchors(USER, [OCC])).get(OCC);
+      expect(anchor?.openedAt).toEqual(new Date(reopening.timestamp));
+    });
+
+    it('re-anchors openedAt on the flipping fill when a position reverses', async () => {
+      await orders.recordUnderlyingPrice(
+        USER,
+        fill({ side: 'buy', quantity: 1, filledPrice: 1.0 }),
+        600,
+      );
+      const flipping = fill({ side: 'sell', quantity: 3, filledPrice: 1.5 });
+      await orders.recordUnderlyingPrice(USER, flipping, 610);
+
+      const anchor = (await orders.positionAnchors(USER, [OCC])).get(OCC);
+      expect(anchor?.openedAt).toEqual(new Date(flipping.timestamp));
     });
 
     it('does not anchor a live position on a practice fill', async () => {

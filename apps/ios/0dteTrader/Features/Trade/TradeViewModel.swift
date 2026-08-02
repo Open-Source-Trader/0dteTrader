@@ -509,11 +509,16 @@ final class TradeViewModel: ObservableObject {
         // The chain resolver only knows the loaded expiration; the position's
         // own OCC symbol names the leg exactly, so any broker option position
         // stays closable from the account-wide drawer.
-        let leg: (underlying: String, expiration: String, strike: Double, optionType: OptionType)
+        let leg: OccSymbol.Parsed
         if let contract = optionContractResolver?(position.symbol) {
-            leg = (contract.underlying, contract.expiration, contract.strike, contract.optionType)
+            leg = OccSymbol.Parsed(
+                underlying: contract.underlying,
+                expiration: contract.expiration,
+                optionType: contract.optionType,
+                strike: contract.strike
+            )
         } else if let parsed = OccSymbol.parse(position.symbol) {
-            leg = (parsed.underlying, parsed.expiration, parsed.strike, parsed.optionType)
+            leg = parsed
         } else {
             showToast("Cannot resolve \(position.symbol) to close it.", style: .error)
             return

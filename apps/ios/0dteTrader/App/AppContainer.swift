@@ -60,7 +60,8 @@ final class AppContainer: ObservableObject {
     }
 
     func makeOptionsChainViewModel() -> OptionsChainViewModel {
-        OptionsChainViewModel(apiClient: apiClient)
+        let settings = settingsStore
+        return OptionsChainViewModel(apiClient: apiClient, autoOtmOffset: { settings.autoOtmOffset })
     }
 
     func makeTradeViewModel() -> TradeViewModel {

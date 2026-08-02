@@ -31,6 +31,7 @@ final class SettingsStore: @unchecked Sendable {
         static let appLockEnabled = "settings.appLockEnabled"
         static let tradingLocked = "settings.tradingLocked"
         static let bypassOrderConfirmation = "settings.bypassOrderConfirmation"
+        static let autoOtmOffset = "settings.autoOtmOffset"
     }
 
     /// Layout choice persists across launches (FR-12). Defaults to split view.
@@ -145,5 +146,16 @@ final class SettingsStore: @unchecked Sendable {
     var bypassOrderConfirmation: Bool {
         get { defaults.bool(forKey: Keys.bypassOrderConfirmation) }
         set { defaults.set(newValue, forKey: Keys.bypassOrderConfirmation) }
+    }
+
+    /// AUTO mode's OTM preference: strikes beyond the ATM anchor (0 = ATM,
+    /// default 1). Clamped on read so a stale or hand-edited value can never
+    /// walk AUTO off the strike ladder.
+    var autoOtmOffset: Int {
+        get {
+            guard defaults.object(forKey: Keys.autoOtmOffset) != nil else { return 1 }
+            return min(10, max(0, defaults.integer(forKey: Keys.autoOtmOffset)))
+        }
+        set { defaults.set(newValue, forKey: Keys.autoOtmOffset) }
     }
 }

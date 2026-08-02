@@ -69,6 +69,12 @@ final class ProfileViewModel: ObservableObject {
         didSet { settingsStore.bypassOrderConfirmation = bypassOrderConfirmation }
     }
 
+    /// AUTO mode's strikes-OTM preference (0 = ATM). The stepper caps at 5;
+    /// the store clamps 0...10 on read for stale values.
+    @Published var autoOtmOffset: Int {
+        didSet { settingsStore.autoOtmOffset = autoOtmOffset }
+    }
+
     private let apiClient: APIClient
     private let settingsStore: SettingsStore
     private let quoteSocket: QuoteSocketClient
@@ -86,6 +92,7 @@ final class ProfileViewModel: ObservableObject {
         self.onLogout = onLogout
         self.appLockEnabled = settingsStore.appLockEnabled
         self.bypassOrderConfirmation = settingsStore.bypassOrderConfirmation
+        self.autoOtmOffset = settingsStore.autoOtmOffset
     }
 
     /// True when the last `load()` failed. Kept separate from `errorMessage`

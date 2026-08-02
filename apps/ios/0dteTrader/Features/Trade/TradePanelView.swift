@@ -241,7 +241,18 @@ struct TradePanelView: View {
                         isOn: $chainViewModel.isAutoMode,
                         accent: .appAccent
                     )
-                    .accessibilityLabel("Auto +1 OTM selection")
+                    .accessibilityLabel("Auto OTM selection")
+
+                    // CURR trades only what is already held; with nothing held
+                    // for this underlying there is nothing for it to offer.
+                    HudToggleChip(
+                        title: "CURR",
+                        isOn: $chainViewModel.isCurrMode,
+                        accent: .appAccent
+                    )
+                    .disabled(!chainViewModel.hasHeldContracts)
+                    .opacity(chainViewModel.hasHeldContracts ? 1 : 0.55)
+                    .accessibilityLabel("Trade current position")
                 }
                 .disabled(tradingLocked)
                 .opacity(tradingLocked ? 0.55 : 1)

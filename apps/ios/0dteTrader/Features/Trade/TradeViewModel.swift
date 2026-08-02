@@ -181,7 +181,9 @@ final class TradeViewModel: ObservableObject {
         // guards against). Legs are resolved through `optionContractResolver`
         // rather than trusted from the chain's `selectedContract`, since that
         // is exactly the drifted AUTO pick we cannot use for the close's strike.
-        if side == .sell,
+        // CURR mode skips this entirely: its selection IS a held contract, so
+        // the drift this rescues cannot happen and the explicit pick must win.
+        if side == .sell, !chainViewModel.isCurrMode,
            let expiration = chainViewModel.selectedExpiration,
            case let heldLegs = positions.compactMap({ position -> (Position, OptionContract)? in
                guard position.quantity > 0,
@@ -245,15 +247,55 @@ final class TradeViewModel: ObservableObject {
             return
         }
 
-        if chainViewModel.isAutoMode {
+        // A sell that matched nothing above has nothing to close. Refuse it:
+        // falling through would open a short nobody asked for.
+        if side == .sell, !chainViewModel.isCurrMode {
+            showToast("No open position to sell", style: .error)
+            return
+        }
+
+        var orderQuantity = quantity
+        if chainViewModel.isCurrMode {
+            // CURR: the ticket names a held contract explicitly. Buys add to
+            // it; sells close part of it, clamped so a sell can never pass
+            // through zero into a short.
+            guard let contract = chainViewModel.selectedContract else {
+                showToast("Pick a held contract first.", style: .error)
+                return
+            }
+            selection = OrderSelectionDTO(
+                mode: "explicit",
+                optionType: contract.optionType.rawValue,
+                expiration: contract.expiration,
+                strike: contract.strike
+            )
+            let leg = "\(Format.strike(contract.strike))\(contract.optionType.shortName)"
+            if side == .sell {
+                let held = positions.first { $0.symbol == contract.symbol && $0.quantity > 0 }?.quantity ?? 0
+                guard held > 0 else {
+                    showToast("No open position to sell", style: .error)
+                    return
+                }
+                orderQuantity = min(quantity, held)
+                let sizeLabel = orderQuantity < held ? "\(orderQuantity) of \(held)" : "\(orderQuantity)"
+                summary = "CLOSE \(sizeLabel) · \(underlying) \(leg)"
+            } else {
+                summary = "\(underlying) \(contract.expiration) \(leg)"
+            }
+        } else if chainViewModel.isAutoMode {
+            let offset = chainViewModel.autoOtmOffset
             selection = OrderSelectionDTO(
                 mode: "auto_otm",
                 optionType: optionType.rawValue,
                 expiration: chainViewModel.selectedExpiration,
-                strike: nil
+                strike: nil,
+                // Omitted at the default so servers predating the field see
+                // the request shape they always did (they resolve +1 anyway).
+                otmOffset: offset == 1 ? nil : offset
             )
             let expirationLabel = chainViewModel.selectedExpiration ?? "nearest"
-            summary = "\(underlying) AUTO +1 OTM \(optionType.displayName) · exp \(expirationLabel)"
+            let offsetLabel = offset == 0 ? "ATM" : "+\(offset) OTM"
+            summary = "\(underlying) AUTO \(offsetLabel) \(optionType.displayName) · exp \(expirationLabel)"
         } else {
             guard let strike = chainViewModel.selectedStrike,
                   let expiration = chainViewModel.selectedExpiration
@@ -274,7 +316,7 @@ final class TradeViewModel: ObservableObject {
             underlying: underlying,
             assetClass: "option",
             side: side.rawValue,
-            quantity: quantity,
+            quantity: orderQuantity,
             orderType: orderType.rawValue,
             limitPrice: limitPrice,
             selection: selection

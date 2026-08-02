@@ -25,32 +25,65 @@ final class OptionsChainViewModel: ObservableObject {
     @Published var errorMessage: String?
 
     @Published var optionType: OptionType = .call
-    @Published var isAutoMode = true
+    @Published var isAutoMode = true {
+        didSet { if isAutoMode { isCurrMode = false } }
+    }
+    /// CURR mode: the ticket trades only contracts already held (FR follow-up
+    /// to AUTO). Mutually exclusive with AUTO — turning either on turns the
+    /// other off — and it filters the expiration/strike menus to holdings.
+    @Published var isCurrMode = false {
+        didSet {
+            guard isCurrMode != oldValue else { return }
+            if isCurrMode {
+                isAutoMode = false
+                preselectMostRecentHolding()
+            }
+        }
+    }
     @Published private(set) var selectedExpiration: String?
     @Published var selectedStrike: Double?
     /// Live last price of the underlying (wired from the quote stream);
     /// AUTO uses it over the chain-load snapshot.
     @Published var underlyingLast: Double?
 
+    /// Open positions for CURR mode's held-contract filter; wired by the
+    /// trade screen to the trade view model's live positions.
+    var positionsProvider: () -> [Position] = { [] }
+
     private let apiClient: APIClient
+    /// AUTO's strikes-OTM preference (Profile → AUTO selection); injected so
+    /// this view model never touches UserDefaults directly.
+    private let autoOtmOffsetProvider: () -> Int
     /// Expirations whose contracts are already present locally.
     private var loadedExpirations: Set<String> = []
     /// Bumped by every load(); in-flight fetches bail after each await when a
     /// newer load has started, so a slow response can't clobber a newer symbol.
     private var loadGeneration = 0
 
-    init(apiClient: APIClient) {
+    init(apiClient: APIClient, autoOtmOffset: @escaping () -> Int = { 1 }) {
         self.apiClient = apiClient
+        self.autoOtmOffsetProvider = autoOtmOffset
+    }
+
+    /// The offset AUTO is walking with right now — also what arm() sends so
+    /// the server resolves the same contract the panel shows.
+    var autoOtmOffset: Int {
+        autoOtmOffsetProvider()
     }
 
     var expirations: [String] {
-        chain?.expirations ?? []
+        if isCurrMode {
+            return Array(Set(heldContracts.map(\.expiration))).sorted()
+        }
+        return chain?.expirations ?? []
     }
 
-    /// Sorted unique strikes for the selected expiration + call/put.
+    /// Sorted unique strikes for the selected expiration + call/put. CURR
+    /// mode narrows the pool to held contracts.
     var strikes: [Double] {
         guard let chain, let selectedExpiration else { return [] }
-        let values = chain.contracts
+        let pool = isCurrMode ? heldContracts : chain.contracts
+        let values = pool
             .filter { $0.optionType == optionType && $0.expiration == selectedExpiration }
             .map(\.strike)
         return Array(Set(values)).sorted()
@@ -63,13 +96,22 @@ final class OptionsChainViewModel: ObservableObject {
             chain: chain,
             optionType: optionType,
             expiration: selectedExpiration,
-            last: underlyingLast
+            last: underlyingLast,
+            otmOffset: autoOtmOffsetProvider()
         )
     }
 
-    /// The contract the ticket resolves to: AUTO's pick, or the manually
-    /// selected expiration+strike in manual mode.
+    /// The contract the ticket resolves to: AUTO's pick, a held contract in
+    /// CURR mode, or the manually selected expiration+strike otherwise.
     var selectedContract: OptionContract? {
+        if isCurrMode {
+            guard let selectedExpiration, let selectedStrike else { return nil }
+            return heldContracts.first {
+                $0.optionType == optionType
+                    && $0.expiration == selectedExpiration
+                    && $0.strike == selectedStrike
+            }
+        }
         if isAutoMode {
             return autoContract
         }
@@ -79,6 +121,51 @@ final class OptionsChainViewModel: ObservableObject {
                 && $0.expiration == selectedExpiration
                 && $0.strike == selectedStrike
         }
+    }
+
+    // MARK: - CURR mode holdings
+
+    /// Held (long) positions resolved to contracts on the loaded chain for
+    /// the chart's underlying — what CURR mode lets the panel pick from. A
+    /// position whose contract the chain cannot identify is left out, same as
+    /// the flatten path's resolver.
+    private var heldLegs: [(position: Position, contract: OptionContract)] {
+        guard let chain else { return [] }
+        return positionsProvider().compactMap { position in
+            guard position.quantity > 0,
+                  let contract = chain.contracts.first(where: { $0.symbol == position.symbol }),
+                  contract.underlying == underlying
+            else { return nil }
+            return (position, contract)
+        }
+    }
+
+    var heldContracts: [OptionContract] {
+        heldLegs.map(\.contract)
+    }
+
+    /// Whether CURR has anything to offer — the chip disables itself otherwise.
+    var hasHeldContracts: Bool {
+        !heldLegs.isEmpty
+    }
+
+    /// CURR just switched on: land the pickers on the most recently opened
+    /// holding (max `openedAt`; when no position carries a record, the first
+    /// held one).
+    private func preselectMostRecentHolding() {
+        let legs = heldLegs
+        guard !legs.isEmpty else { return }
+        let mostRecent: (position: Position, contract: OptionContract)
+        if legs.contains(where: { $0.position.openedAt != nil }) {
+            mostRecent = legs.max { lhs, rhs in
+                (lhs.position.openedAt ?? .distantPast) < (rhs.position.openedAt ?? .distantPast)
+            } ?? legs[0]
+        } else {
+            mostRecent = legs[0]
+        }
+        optionType = mostRecent.contract.optionType
+        selectedExpiration = mostRecent.contract.expiration
+        selectedStrike = mostRecent.contract.strike
     }
 
     #if DEBUG
@@ -209,6 +296,13 @@ final class OptionsChainViewModel: ObservableObject {
         guard expiration != selectedExpiration else { return }
         selectedExpiration = expiration
         selectedStrike = nil
+        if isCurrMode {
+            // Held contracts are already on the chain (that is what qualified
+            // them), so nothing to fetch — land on the first held strike
+            // rather than reseeding from AUTO's possibly un-held pick.
+            selectedStrike = strikes.first
+            return
+        }
         Task { await ensureContracts(for: expiration) }
     }
 

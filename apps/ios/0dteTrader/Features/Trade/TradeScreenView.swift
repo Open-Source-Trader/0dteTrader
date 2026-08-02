@@ -220,6 +220,8 @@ struct TradeScreenView: View {
                 chainViewModel.chain?.contracts.first { $0.symbol == symbol }
             }
             tradeViewModel.isSocketConnected = { container.quoteSocket.connectionState == .connected }
+            // CURR mode filters the chain's menus to held contracts.
+            chainViewModel.positionsProvider = { tradeViewModel.positions }
             // The overlay needs the same chain lookup the flatten path uses:
             // an entry line only draws for a contract the chain can identify.
             chartTrading.contractResolver = { symbol in

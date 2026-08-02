@@ -3,11 +3,14 @@ import XCTest
 
 @MainActor
 final class TradeViewModelArmTests: XCTestCase {
-    private func makeViewModels() -> (TradeViewModel, OptionsChainViewModel) {
+    private func makeViewModels(autoOtmOffset: Int = 1) -> (TradeViewModel, OptionsChainViewModel) {
         let baseURL = URL(string: "http://localhost:0")!
         let sessionStore = SessionStore(keychainStore: KeychainStore(service: "test.arm"), baseURL: baseURL)
         let apiClient = APIClient(baseURL: baseURL, sessionStore: sessionStore)
-        return (TradeViewModel(apiClient: apiClient), OptionsChainViewModel(apiClient: apiClient))
+        return (
+            TradeViewModel(apiClient: apiClient),
+            OptionsChainViewModel(apiClient: apiClient, autoOtmOffset: { autoOtmOffset })
+        )
     }
 
     func testArm_autoOTM_encodesServerSideSelection() {
@@ -22,6 +25,28 @@ final class TradeViewModelArmTests: XCTestCase {
         XCTAssertEqual(request?.selection.mode, "auto_otm")
         XCTAssertEqual(request?.selection.optionType, "call")
         XCTAssertNil(request?.selection.strike)
+        // The default offset is omitted so older servers see the old shape.
+        XCTAssertNil(request?.selection.otmOffset)
+    }
+
+    func testArm_autoCarriesConfiguredOtmOffset() {
+        let (tradeViewModel, chainViewModel) = makeViewModels(autoOtmOffset: 2)
+        chainViewModel.isAutoMode = true
+
+        tradeViewModel.arm(side: .buy, underlying: "SPY", chainViewModel: chainViewModel)
+
+        XCTAssertEqual(tradeViewModel.armedTicket?.request.selection.otmOffset, 2)
+        XCTAssertEqual(tradeViewModel.armedTicket?.summary.contains("+2 OTM"), true)
+    }
+
+    func testArm_autoOffsetZero_sendsZeroAndSaysATM() {
+        let (tradeViewModel, chainViewModel) = makeViewModels(autoOtmOffset: 0)
+        chainViewModel.isAutoMode = true
+
+        tradeViewModel.arm(side: .buy, underlying: "SPY", chainViewModel: chainViewModel)
+
+        XCTAssertEqual(tradeViewModel.armedTicket?.request.selection.otmOffset, 0)
+        XCTAssertEqual(tradeViewModel.armedTicket?.summary.contains("AUTO ATM"), true)
     }
 
     // MARK: - Selling into an open position
@@ -129,7 +154,9 @@ final class TradeViewModelArmTests: XCTestCase {
         XCTAssertEqual(tradeViewModel.armedTicket?.summary.contains("CLOSE"), false)
     }
 
-    func testArm_sellOpensAShortWhenThePositionIsADifferentContract() {
+    /// SELL is only ever a close in this app: with no matching long to close,
+    /// the arm refuses rather than opening a short nobody asked for.
+    func testArm_sellWithOnlyANonMatchingPosition_refusesInsteadOfShorting() {
         let (tradeViewModel, chainViewModel) = makeViewModels()
         selectContract(tradeViewModel, chainViewModel)
         tradeViewModel.setPositionsForTesting([position(3, symbol: "SPY260727P00500000")])
@@ -137,8 +164,19 @@ final class TradeViewModelArmTests: XCTestCase {
 
         tradeViewModel.arm(side: .sell, underlying: "SPY", chainViewModel: chainViewModel)
 
-        XCTAssertEqual(tradeViewModel.armedTicket?.request.quantity, 1)
-        XCTAssertEqual(tradeViewModel.armedTicket?.summary.contains("CLOSE"), false)
+        XCTAssertNil(tradeViewModel.armedTicket)
+        XCTAssertEqual(tradeViewModel.toast?.message, "No open position to sell")
+    }
+
+    func testArm_sellWithNothingHeld_toastsAndArmsNothing() {
+        let (tradeViewModel, chainViewModel) = makeViewModels()
+        selectContract(tradeViewModel, chainViewModel)
+        tradeViewModel.setQuantity(1)
+
+        tradeViewModel.arm(side: .sell, underlying: "SPY", chainViewModel: chainViewModel)
+
+        XCTAssertNil(tradeViewModel.armedTicket)
+        XCTAssertEqual(tradeViewModel.toast?.message, "No open position to sell")
     }
 
     /// Reproduces the reported incident: AUTO mode's live strike has drifted
@@ -236,7 +274,96 @@ final class TradeViewModelArmTests: XCTestCase {
 
         tradeViewModel.arm(side: .sell, underlying: "SPY", chainViewModel: chainViewModel)
 
-        XCTAssertEqual(tradeViewModel.armedTicket?.request.quantity, 1)
+        // A short is not something a SELL closes — and selling would only
+        // deepen it, so the arm refuses outright.
+        XCTAssertNil(tradeViewModel.armedTicket)
+        XCTAssertEqual(tradeViewModel.toast?.message, "No open position to sell")
+    }
+
+    // MARK: - CURR mode
+
+    /// Seeds the chain + positions and switches CURR on, wired the way
+    /// `TradeScreenView` does it (`positionsProvider` → live positions).
+    private func enableCurr(
+        _ tradeViewModel: TradeViewModel,
+        _ chainViewModel: OptionsChainViewModel,
+        contracts: [OptionContract] = [TradeViewModelArmTests.contract],
+        positions: [Position]
+    ) {
+        selectContract(tradeViewModel, chainViewModel, contracts: contracts)
+        tradeViewModel.setPositionsForTesting(positions)
+        chainViewModel.positionsProvider = { tradeViewModel.positions }
+        chainViewModel.isCurrMode = true
+    }
+
+    func testArm_currBuy_armsExplicitAddForHeldContract() {
+        let (tradeViewModel, chainViewModel) = makeViewModels()
+        enableCurr(tradeViewModel, chainViewModel, positions: [position(2)])
+        tradeViewModel.setQuantity(1)
+
+        tradeViewModel.arm(side: .buy, underlying: "SPY", chainViewModel: chainViewModel)
+
+        let request = tradeViewModel.armedTicket?.request
+        XCTAssertEqual(request?.selection.mode, "explicit")
+        XCTAssertEqual(request?.selection.strike, 505)
+        XCTAssertEqual(request?.quantity, 1)
+        XCTAssertEqual(tradeViewModel.armedTicket?.summary.contains("CLOSE"), false)
+    }
+
+    func testArm_currSell_clampsToHeldQuantity() {
+        let (tradeViewModel, chainViewModel) = makeViewModels()
+        enableCurr(tradeViewModel, chainViewModel, positions: [position(2)])
+        tradeViewModel.setQuantity(10)
+
+        tradeViewModel.arm(side: .sell, underlying: "SPY", chainViewModel: chainViewModel)
+
+        let ticket = tradeViewModel.armedTicket
+        XCTAssertEqual(ticket?.request.quantity, 2)
+        XCTAssertEqual(ticket?.request.selection.mode, "explicit")
+        XCTAssertEqual(ticket?.summary.hasPrefix("CLOSE 2"), true)
+    }
+
+    func testArm_currSell_partialCloseSaysOfTotal() {
+        let (tradeViewModel, chainViewModel) = makeViewModels()
+        enableCurr(tradeViewModel, chainViewModel, positions: [position(10)])
+        tradeViewModel.setQuantity(3)
+
+        tradeViewModel.arm(side: .sell, underlying: "SPY", chainViewModel: chainViewModel)
+
+        XCTAssertEqual(tradeViewModel.armedTicket?.request.quantity, 3)
+        XCTAssertEqual(tradeViewModel.armedTicket?.summary.contains("CLOSE 3 of 10"), true)
+    }
+
+    /// Leg-matching would close the highest-P/L leg; CURR must instead sell
+    /// exactly the contract the panel has selected.
+    func testArm_currSell_bypassesLegMatching() {
+        let (tradeViewModel, chainViewModel) = makeViewModels()
+        let secondCall = OptionContract(
+            symbol: "SPY260727C00495000",
+            underlying: "SPY",
+            expiration: Self.contract.expiration,
+            strike: 495,
+            optionType: .call,
+            bid: 2.0,
+            ask: 2.02,
+            last: 2.01
+        )
+        var highPnlLeg = position(3, symbol: secondCall.symbol)
+        highPnlLeg.unrealizedPnl = 50
+        // CURR preselects the first holding (no openedAt on either) — the
+        // 505, whose P/L is lower than the 495's.
+        enableCurr(
+            tradeViewModel,
+            chainViewModel,
+            contracts: [Self.contract, secondCall],
+            positions: [position(2), highPnlLeg]
+        )
+        tradeViewModel.setQuantity(2)
+
+        tradeViewModel.arm(side: .sell, underlying: "SPY", chainViewModel: chainViewModel)
+
+        XCTAssertEqual(tradeViewModel.armedTicket?.request.selection.strike, 505)
+        XCTAssertEqual(tradeViewModel.armedTicket?.request.quantity, 2)
     }
 
     func testArm_bypass_submitsDirectlyWithoutArmingTicket() {

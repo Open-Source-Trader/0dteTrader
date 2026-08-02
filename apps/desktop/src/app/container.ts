@@ -46,6 +46,8 @@ export class AppContainer {
     this.tradeStore = new TradeStore(this.apiClient);
     // CURR mode reads the open positions TradeStore owns.
     this.chainStore.positionsProvider = () => this.tradeStore.getState().positions;
+    // Success/info toasts obey the Profile toggle; errors always show.
+    this.tradeStore.toastPolicy = () => this.settingsStore.toastsEnabled;
     this.drawingsStore = new DrawingsStore();
     this.chartOrdersStore = new ChartOrdersStore(this.apiClient);
   }

@@ -104,6 +104,13 @@ export class TradeStore extends Store<TradeStoreState> {
    */
   isSocketConnected: (() => boolean) | null = null;
 
+  /**
+   * Governs success/info toasts (Profile › In-app toasts); error toasts always
+   * show — a swallowed failure is one the user acts on without knowing it
+   * failed. Wired from the container; null (treated as enabled) in tests.
+   */
+  toastPolicy: (() => boolean) | null = null;
+
   constructor(private readonly apiClient: ApiClient) {
     super({
       quantity: 1,
@@ -626,6 +633,8 @@ export class TradeStore extends Store<TradeStoreState> {
 
   /** FIFO queue: a new toast never clobbers one that's on screen. */
   showToast(message: string, style: ToastStyle): void {
+    // The toggle governs success/info only — errors always surface.
+    if (style !== 'error' && this.toastPolicy?.() === false) return;
     this.toastQueue.push({ id: nextId++, message, style });
     if (this.getState().toast !== null) return; // one is already showing
     this.advanceToastQueue();

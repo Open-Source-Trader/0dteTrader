@@ -559,6 +559,26 @@ describe('TradeStore.cancelArmedOrder — the confirm popup dismissed', () => {
   });
 });
 
+describe('TradeStore.showToast — the toast toggle', () => {
+  it('suppresses success/info when the policy is off, but errors always show', () => {
+    const store = makeStore();
+    store.toastPolicy = () => false;
+
+    store.showToast('order filled', 'success');
+    store.showToast('order cancelled', 'info');
+    expect(store.getState().toast).toBeNull();
+
+    store.showToast('order rejected', 'error');
+    expect(store.getState().toast?.message).toBe('order rejected');
+  });
+
+  it('shows everything while the policy is on (or unwired)', () => {
+    const store = makeStore();
+    store.showToast('order filled', 'success');
+    expect(store.getState().toast?.message).toBe('order filled');
+  });
+});
+
 describe('TradeStore.applyContractQuote', () => {
   it('updates the matching position mark and P/L', () => {
     const store = makeStore();

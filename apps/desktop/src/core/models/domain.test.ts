@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { narrowToChartOrderType } from '@0dtetrader/shared-types';
-import { midPrice, orderPricingDescription, orderTypeDisplayName } from './domain';
+import {
+  midPrice,
+  orderPricingDescription,
+  orderStatusHistoryLabel,
+  orderTypeDisplayName,
+} from './domain';
 
 describe('midPrice', () => {
   it('averages bid and ask rounded to pennies', () => {
@@ -59,5 +64,19 @@ describe('order-type labels', () => {
   it('prints an unrecognised stored value as it came', () => {
     // History rows predate this union and are read back as raw strings.
     expect(orderTypeDisplayName('limit')).toBe('limit');
+  });
+});
+
+describe('orderStatusHistoryLabel', () => {
+  it('renders resting orders as Waiting (display only; wire values unchanged)', () => {
+    expect(orderStatusHistoryLabel('submitted')).toBe('Waiting');
+    expect(orderStatusHistoryLabel('partially_filled')).toBe('Waiting · partial fill');
+  });
+
+  it('leaves terminal and unknown statuses on the shared display names', () => {
+    expect(orderStatusHistoryLabel('filled')).toBe('Filled');
+    expect(orderStatusHistoryLabel('cancelled')).toBe('Cancelled');
+    expect(orderStatusHistoryLabel('rejected')).toBe('Rejected');
+    expect(orderStatusHistoryLabel('weird_broker_state')).toBe('Unknown');
   });
 });

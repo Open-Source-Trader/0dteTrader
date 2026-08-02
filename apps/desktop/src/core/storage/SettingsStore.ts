@@ -30,6 +30,8 @@ export class SettingsStore {
     bypassOrderConfirmation: 'settings.bypassOrderConfirmation',
     keyboardShortcutsEnabled: 'settings.keyboardShortcutsEnabled',
     autoOtmOffset: 'settings.autoOtmOffset',
+    toastsEnabled: 'settings.toastsEnabled',
+    systemNotificationsEnabled: 'settings.systemNotificationsEnabled',
   };
 
   get layoutMode(): TradeLayout {
@@ -150,6 +152,27 @@ export class SettingsStore {
 
   set keyboardShortcutsEnabled(value: boolean) {
     localStorage.setItem(SettingsStore.keys.keyboardShortcutsEnabled, String(value));
+  }
+
+  /** In-app success/info toasts. Error toasts always show regardless. */
+  get toastsEnabled(): boolean {
+    const stored = localStorage.getItem(SettingsStore.keys.toastsEnabled);
+    return stored === null ? true : stored === 'true';
+  }
+
+  set toastsEnabled(value: boolean) {
+    localStorage.setItem(SettingsStore.keys.toastsEnabled, String(value));
+  }
+
+  /** OS notifications for terminal order statuses and chart-order fires,
+   *  shown only while the window is unfocused. */
+  get systemNotificationsEnabled(): boolean {
+    const stored = localStorage.getItem(SettingsStore.keys.systemNotificationsEnabled);
+    return stored === null ? true : stored === 'true';
+  }
+
+  set systemNotificationsEnabled(value: boolean) {
+    localStorage.setItem(SettingsStore.keys.systemNotificationsEnabled, String(value));
   }
 
   /** AUTO selection: strikes out of the money from the ATM anchor (0 = ATM

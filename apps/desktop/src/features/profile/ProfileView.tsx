@@ -692,10 +692,24 @@ function ProfileViewContent({
     () => container.settingsStore.keyboardShortcutsEnabled,
   );
   const [autoOtmOffset, setAutoOtmOffset] = useState(() => container.settingsStore.autoOtmOffset);
+  const [toastsEnabled, setToastsEnabled] = useState(() => container.settingsStore.toastsEnabled);
+  const [systemNotificationsEnabled, setSystemNotificationsEnabled] = useState(
+    () => container.settingsStore.systemNotificationsEnabled,
+  );
 
   const handleBypassChange = (on: boolean) => {
     setBypassConfirmation(on);
     container.settingsStore.bypassOrderConfirmation = on;
+  };
+
+  const handleToastsChange = (on: boolean) => {
+    setToastsEnabled(on);
+    container.settingsStore.toastsEnabled = on;
+  };
+
+  const handleSystemNotificationsChange = (on: boolean) => {
+    setSystemNotificationsEnabled(on);
+    container.settingsStore.systemNotificationsEnabled = on;
   };
 
   const handleAutoOtmOffsetChange = (value: string) => {
@@ -790,6 +804,33 @@ function ProfileViewContent({
           <div className="section-footer">
             How far AUTO picks from the at-the-money strike: +N OTM from ATM, or ATM itself. Applies
             to new orders on this device.
+          </div>
+        </div>
+
+        {/* Notifications */}
+        <div className="grouped-section">
+          <div className="section-header">Notifications</div>
+          <div className="section-card">
+            <div className="grouped-row">
+              <span>In-app toasts</span>
+              <span style={{ marginLeft: 'auto' }}>
+                <Toggle on={toastsEnabled} onChange={handleToastsChange} />
+              </span>
+            </div>
+            <div className="grouped-row">
+              <span>System notifications</span>
+              <span style={{ marginLeft: 'auto' }}>
+                <Toggle
+                  on={systemNotificationsEnabled}
+                  onChange={handleSystemNotificationsChange}
+                />
+              </span>
+            </div>
+          </div>
+          <div className="section-footer">
+            Toasts cover order confirmations and info; error toasts always show. System
+            notifications report fills, rejections, cancels and chart-order fires while the app is
+            in the background.
           </div>
         </div>
 

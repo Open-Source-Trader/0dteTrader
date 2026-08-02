@@ -11,6 +11,8 @@ import { narrowToChartOrderType } from '@0dtetrader/shared-types';
 import { useContainer } from '../../app/container';
 import { useLayoutBreakpoint } from '../../app/useLayoutBreakpoint';
 import { shallowEqual, useStore } from '../../core/observable';
+import type { NotifierDeps } from '../../core/notifications';
+import { notifyChartOrder, notifyOrderUpdate } from '../../core/notifications';
 import { AlertDialog } from '../../design/components/AlertDialog';
 import { NavBar } from '../../design/components/NavBar';
 import { Format } from '../../design/format';
@@ -174,11 +176,22 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
         .chain?.contracts.find((contract: OptionContract) => contract.symbol === symbol);
     tradeStore.isSocketConnected = () => quoteSocket.getState().connectionState === 'connected';
     void chartOrdersStore.load();
-    const offOrders = quoteSocket.onOrderUpdate((update) => tradeStore.handleOrderUpdate(update));
+    // OS notifications while the window is unfocused (the toast covers the
+    // focused case); the preference is read at fire time.
+    const notifier: NotifierDeps = {
+      enabled: () => settingsStore.systemNotificationsEnabled,
+      hasFocus: () => document.hasFocus(),
+      notification: typeof Notification === 'undefined' ? null : Notification,
+    };
+    const offOrders = quoteSocket.onOrderUpdate((update) => {
+      tradeStore.handleOrderUpdate(update);
+      notifyOrderUpdate(notifier, update);
+    });
     // The server-side watcher fires lines with the app closed or backgrounded;
     // these pushes are how the chart learns about it.
     const offChartOrders = quoteSocket.onChartOrder((order) => {
       chartOrdersStore.applyServerUpdate(order);
+      notifyChartOrder(notifier, order);
       // A fired line means a real order went out — refresh positions so the
       // entry line appears without waiting for the next poll.
       void tradeStore.refreshTradingData();
@@ -194,7 +207,7 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
       offChartOrders();
       offReconnect();
     };
-  }, [chartStore, tradeStore, chainStore, chartOrdersStore, quoteSocket]);
+  }, [chartStore, tradeStore, chainStore, chartOrdersStore, quoteSocket, settingsStore]);
 
   useEffect(() => {
     void chainStore.load(chart.symbol);

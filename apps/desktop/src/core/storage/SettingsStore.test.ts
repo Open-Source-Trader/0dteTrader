@@ -183,6 +183,15 @@ describe('SettingsStore boolean device preferences', () => {
     new SettingsStore().keyboardShortcutsEnabled = true;
     expect(new SettingsStore().keyboardShortcutsEnabled).toBe(true);
   });
+
+  it('defaults toasts and system notifications to on, and round-trips both', () => {
+    expect(new SettingsStore().toastsEnabled).toBe(true);
+    expect(new SettingsStore().systemNotificationsEnabled).toBe(true);
+    new SettingsStore().toastsEnabled = false;
+    expect(new SettingsStore().toastsEnabled).toBe(false);
+    new SettingsStore().systemNotificationsEnabled = false;
+    expect(new SettingsStore().systemNotificationsEnabled).toBe(false);
+  });
 });
 
 describe('SettingsStore AUTO OTM offset', () => {

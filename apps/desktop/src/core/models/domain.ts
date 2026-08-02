@@ -83,3 +83,14 @@ export function orderStatusDisplayName(status: OrderStatus | string): string {
       return 'Unknown';
   }
 }
+
+/**
+ * History-row label: an order still resting at the broker reads as "Waiting"
+ * rather than its wire status name. Display only — the wire values are
+ * unchanged and toasts keep the status names.
+ */
+export function orderStatusHistoryLabel(status: OrderStatus | string): string {
+  if (status === 'submitted') return 'Waiting';
+  if (status === 'partially_filled') return 'Waiting · partial fill';
+  return orderStatusDisplayName(status);
+}

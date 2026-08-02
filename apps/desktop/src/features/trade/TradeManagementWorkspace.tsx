@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type {
   ChartOrder,
   ChartOrderDraft,
@@ -18,7 +18,9 @@ import {
   orderTypeDisplayName,
   sideDisplayName,
 } from '../../core/models/domain';
-import { bracketLegDraft, isWorking } from '../chart/chartOrders';
+import { isPriceInputShape, parsePriceInput } from '../../core/models/priceInput';
+import { useStore } from '../../core/observable';
+import { bracketLegDraft, isWorking, orderTypeLabel } from '../chart/chartOrders';
 import { defaultBracketLevel } from './bracketDefaults';
 import { selectPositionExpiryBreakEven } from './expiryBreakEven';
 import {
@@ -27,6 +29,8 @@ import {
   pnlPercent,
   signedCurrency,
   timeInTrade,
+  type StopTargetDraft,
+  type StopTargetEditorStore,
 } from './TradeManagementWorkspaceModel';
 
 export type TradeWorkspaceTab = 'positions' | 'orders' | 'recent';
@@ -60,6 +64,13 @@ interface TradeManagementWorkspaceProps {
    *  side of a market that has moved. Null (no live quote) blocks Set. */
   underlyingPrice?: number | null;
   resolveContract: (symbol: string) => OptionContract | null;
+  /** Workspace-owned stop/target editing session (the docked editor). */
+  editor: StopTargetEditorStore;
+  /** Chart's current symbol and visible price domain, for "Show on chart". */
+  chartSymbol: string;
+  visiblePriceRange: { min: number; max: number } | null;
+  /** Asks the chart to keep `price` in view; null clears the reveal. */
+  onRevealPrice: (price: number | null) => void;
   locked?: boolean;
 }
 
@@ -147,9 +158,18 @@ export function TradeManagementWorkspace({
   chartTradingEnabled = true,
   underlyingPrice = null,
   resolveContract,
+  editor,
+  chartSymbol,
+  visiblePriceRange,
+  onRevealPrice,
   locked = false,
 }: TradeManagementWorkspaceProps) {
   const [tab, setTab] = useState<TradeWorkspaceTab>('positions');
+  const editorState = useStore(editor);
+  // A reveal belongs to one editing session: closing the editor (or switching
+  // legs) hands the viewport back.
+  const editingId = editorState.draft?.id ?? null;
+  useEffect(() => () => onRevealPrice(null), [editingId, onRevealPrice]);
   const [positionPendingClose, setPositionPendingClose] = useState<Position | null>(null);
   const [positionPendingTrim, setPositionPendingTrim] = useState<Position | null>(null);
   const [orderPendingCancel, setOrderPendingCancel] = useState<OrderResult | null>(null);
@@ -180,14 +200,18 @@ export function TradeManagementWorkspace({
     legActionBlockedReason = 'Live price unavailable';
   }
 
-  /** Edit selects the existing line (the chart's selection/drag UX takes it
-   *  from there); Set creates the missing OCO leg at its default level,
+  /** Edit opens the workspace's docked editor — the chart line can sit
+   *  outside the visible price domain, or the whole order-line layer can be
+   *  off, and the leg must stay editable either way — while still selecting
+   *  the line when the layer is up, so the drag UX keeps working alongside
+   *  the typed one. Set creates the missing OCO leg at its default level,
    *  anchored on the live price so it lands on the correct side of it. */
   const setOrEditLeg = (kind: 'stop' | 'target') => {
     if (!activePosition || !activeMeta) return;
     const existing = kind === 'stop' ? activeMeta.stop : activeMeta.target;
     if (existing) {
-      onSelectChartOrder(existing);
+      editor.begin(existing.id);
+      if (chartTradingEnabled) onSelectChartOrder(existing);
       return;
     }
     const { contract } = activeMeta;
@@ -317,32 +341,20 @@ export function TradeManagementWorkspace({
             </button>
             <button
               className="desktop-positions-action"
-              disabled={
-                locked ||
-                !chartTradingEnabled ||
-                (!activeMeta.stop && legActionBlockedReason !== null)
-              }
-              title={
-                activeMeta.stop && chartTradingEnabled
-                  ? undefined
-                  : (legActionBlockedReason ?? undefined)
-              }
+              // Editing an EXISTING leg no longer depends on the chart: the
+              // docked editor works with the line off-domain or the whole
+              // layer disabled. Only creating a new line keeps the
+              // chart-side preconditions.
+              disabled={activeMeta.stop ? locked : locked || legActionBlockedReason !== null}
+              title={activeMeta.stop ? undefined : (legActionBlockedReason ?? undefined)}
               onClick={() => setOrEditLeg('stop')}
             >
               {activeMeta.stop ? 'Edit stop' : 'Set stop'}
             </button>
             <button
               className="desktop-positions-action"
-              disabled={
-                locked ||
-                !chartTradingEnabled ||
-                (!activeMeta.target && legActionBlockedReason !== null)
-              }
-              title={
-                activeMeta.target && chartTradingEnabled
-                  ? undefined
-                  : (legActionBlockedReason ?? undefined)
-              }
+              disabled={activeMeta.target ? locked : locked || legActionBlockedReason !== null}
+              title={activeMeta.target ? undefined : (legActionBlockedReason ?? undefined)}
               onClick={() => setOrEditLeg('target')}
             >
               {activeMeta.target ? 'Edit target' : 'Set target'}
@@ -355,6 +367,31 @@ export function TradeManagementWorkspace({
               Cancel related orders
             </button>
           </div>
+        </div>
+      ) : null}
+
+      {editorState.draft ? (
+        <StopTargetEditorPanel
+          editor={editor}
+          draft={editorState.draft}
+          priceText={editorState.priceText}
+          quantity={editorState.quantity}
+          saving={editorState.saving}
+          saveError={editorState.saveError}
+          chartOrders={chartOrders}
+          chartSymbol={chartSymbol}
+          visiblePriceRange={visiblePriceRange}
+          onRevealPrice={onRevealPrice}
+          resolveContract={resolveContract}
+          locked={locked}
+        />
+      ) : null}
+      {editorState.staleNotice ? (
+        <div className="trade-leg-editor trade-leg-editor--stale" role="status">
+          <span>{editorState.staleNotice}</span>
+          <button className="desktop-positions-action" onClick={() => editor.dismissStaleNotice()}>
+            Dismiss
+          </button>
         </div>
       ) : null}
 
@@ -490,6 +527,117 @@ export function TradeManagementWorkspace({
         />
       ) : null}
     </section>
+  );
+}
+
+/**
+ * Docked stop/target editor. Opened from the strip's Edit buttons and owned by
+ * the workspace, so a leg whose line sits outside the chart's visible price
+ * domain is still editable; the line itself stays the drag surface. Values are
+ * resolved from `chartOrders` by the draft's id, so a store refresh replacing
+ * row instances changes nothing here.
+ */
+function StopTargetEditorPanel({
+  editor,
+  draft,
+  priceText,
+  quantity,
+  saving,
+  saveError,
+  chartOrders,
+  chartSymbol,
+  visiblePriceRange,
+  onRevealPrice,
+  resolveContract,
+  locked,
+}: {
+  editor: StopTargetEditorStore;
+  draft: StopTargetDraft;
+  priceText: string;
+  quantity: number;
+  saving: boolean;
+  saveError: string | null;
+  chartOrders: ChartOrder[];
+  chartSymbol: string;
+  visiblePriceRange: { min: number; max: number } | null;
+  onRevealPrice: (price: number | null) => void;
+  resolveContract: (symbol: string) => OptionContract | null;
+  locked: boolean;
+}) {
+  const contract = resolveContract(draft.contractSymbol);
+  const label = contract
+    ? `${contract.underlying} ${Format.strike(contract.strike)}${optionTypeShortName(contract.optionType)}`
+    : draft.contractSymbol;
+  const priceValid = parsePriceInput(priceText) !== null;
+  // The line sits at the live trigger price, not the draft's text — that is
+  // the level "Show on chart" has to bring into view.
+  const livePrice =
+    chartOrders.find((order) => order.id === draft.id)?.triggerPrice ?? draft.triggerPrice;
+  const offChart =
+    draft.underlying === chartSymbol &&
+    visiblePriceRange !== null &&
+    (livePrice < visiblePriceRange.min || livePrice > visiblePriceRange.max);
+  return (
+    <div
+      className="trade-leg-editor"
+      data-testid="stop-target-editor"
+      aria-label={`Edit ${draft.kind === 'target' ? 'target' : 'stop'} order`}
+    >
+      <span className="trade-leg-editor__title">
+        Edit {draft.kind === 'target' ? 'target' : 'stop'} · {label}
+      </span>
+      <span className="trade-leg-editor__meta numeric">
+        {sideDisplayName(draft.side)} · {orderTypeLabel(draft.orderType)}
+      </span>
+      <label className="trade-leg-editor__field">
+        Trigger
+        <input
+          type="text"
+          inputMode="decimal"
+          value={priceText}
+          aria-label="Trigger price"
+          aria-invalid={!priceValid}
+          onChange={(event) => {
+            // Same shape gate as the placement window's level field — see
+            // priceInput.ts for why the raw text is held.
+            if (isPriceInputShape(event.target.value)) editor.setPriceText(event.target.value);
+          }}
+        />
+      </label>
+      <label className="trade-leg-editor__field">
+        Qty
+        <input
+          type="number"
+          min={1}
+          max={1000}
+          value={quantity}
+          aria-label="Quantity"
+          onChange={(event) =>
+            editor.setQuantity(Math.max(1, Math.min(1000, Number(event.target.value) || 1)))
+          }
+        />
+      </label>
+      {offChart ? (
+        <button className="desktop-positions-action" onClick={() => onRevealPrice(livePrice)}>
+          Show on chart
+        </button>
+      ) : null}
+      <button
+        className="desktop-positions-action"
+        disabled={locked || saving || !priceValid}
+        onClick={() => void editor.save()}
+      >
+        {saving ? 'Saving…' : 'Save'}
+      </button>
+      <button className="desktop-positions-action" onClick={() => editor.cancel()}>
+        Cancel
+      </button>
+      {saveError ? (
+        <span className="trade-leg-editor__error" role="alert">
+          {saveError}
+        </span>
+      ) : null}
+    </div>
   );
 }
 

@@ -2709,6 +2709,57 @@
   min-height: 28px;
 }
 
+/* Docked stop/target editor: one row under the position strip. The chart
+   line stays the drag surface; this is the type-a-number one, so it must
+   work with the line outside the chart's visible price domain. */
+.trade-leg-editor {
+  flex: none;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 6px 10px;
+  border-bottom: var(--border-hairline) solid var(--hud-stroke-dim);
+  background: var(--app-surface);
+  font-size: var(--fs-caption-desktop);
+}
+
+.trade-leg-editor__title {
+  font-weight: 800;
+}
+
+.trade-leg-editor__meta {
+  color: var(--label-secondary);
+}
+
+.trade-leg-editor__field {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--label-secondary);
+}
+
+.trade-leg-editor__field input {
+  width: 72px;
+  padding: 3px 6px;
+  border: var(--border-hairline) solid var(--hud-stroke-dim);
+  background: var(--app-background);
+  color: var(--label-primary);
+  font-family: var(--font-mono);
+}
+
+.trade-leg-editor__field input[aria-invalid='true'] {
+  border-color: var(--sell-red);
+}
+
+.trade-leg-editor__error {
+  color: var(--sell-red);
+}
+
+.trade-leg-editor--stale {
+  color: var(--label-secondary);
+}
+
 .trade-management-expanded {
   flex: 1;
   min-height: 0;

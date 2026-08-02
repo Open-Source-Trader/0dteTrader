@@ -2,6 +2,8 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { ChartOrder, OptionContract, OrderResult, Position } from '@0dtetrader/shared-types';
+import type { ApiClient } from '../../core/api/ApiClient';
+import { ChartOrdersStore } from '../chart/chartOrders';
 import { TradeManagementWorkspace } from './TradeManagementWorkspace';
 import {
   dayPnl,
@@ -9,6 +11,7 @@ import {
   moveStopToEntryRequest,
   pnlPercent,
   signedCurrency,
+  StopTargetEditorStore,
   timeInTrade,
 } from './TradeManagementWorkspaceModel';
 
@@ -76,6 +79,28 @@ const stop: ChartOrder = {
   lastError: null,
 };
 
+const target: ChartOrder = { ...stop, id: 'target-1', kind: 'target', triggerPrice: 2.75 };
+
+/** ChartOrdersStore over a mocked ApiClient, same shape as chartOrders.test.ts. */
+function makeChartOrdersStore(orders: ChartOrder[] = []) {
+  const api = {
+    chartOrders: vi.fn(async () => orders),
+    updateChartOrder: vi.fn(async (id: string, patch: Record<string, unknown>) => ({
+      ...(orders.find((order) => order.id === id) ?? stop),
+      ...patch,
+    })),
+    cancelChartOrder: vi.fn(async () => undefined),
+  };
+  return { api, store: new ChartOrdersStore(api as unknown as ApiClient) };
+}
+
+/** A loaded store plus an editor session over it. */
+async function seededEditor(orders: ChartOrder[]) {
+  const { api, store } = makeChartOrdersStore(orders);
+  await store.load();
+  return { api, store, editor: new StopTargetEditorStore(store) };
+}
+
 function renderWorkspace(overrides: Partial<Parameters<typeof TradeManagementWorkspace>[0]> = {}) {
   return renderToStaticMarkup(
     createElement(TradeManagementWorkspace, {
@@ -95,6 +120,10 @@ function renderWorkspace(overrides: Partial<Parameters<typeof TradeManagementWor
       defaultOrderType: 'mid',
       underlyingPrice: 640,
       resolveContract: () => null,
+      editor: new StopTargetEditorStore(makeChartOrdersStore().store),
+      chartSymbol: 'SPY',
+      visiblePriceRange: null,
+      onRevealPrice: () => undefined,
       ...overrides,
     }),
   );
@@ -299,7 +328,7 @@ describe('TradeManagementWorkspace rendering', () => {
     }
   });
 
-  it('disables stop/target actions while Chart Trading is off — the layer they hand off to is unmounted', () => {
+  it('keeps Edit usable with Chart Trading off; only chart-side actions disable', () => {
     const markup = renderWorkspace({
       positions: [{ ...position, underlyingEntryPrice: 636.4 }],
       chartOrders: [stop],
@@ -307,10 +336,14 @@ describe('TradeManagementWorkspace rendering', () => {
       chartTradingEnabled: false,
     });
 
-    for (const label of ['Move stop to entry', 'Edit stop', 'Set target']) {
+    // Creating a line or handing off to the line layer needs the layer;
+    // editing an EXISTING leg goes through the docked editor and must not —
+    // the chart being off (or the line off-domain) cannot strand the order.
+    for (const label of ['Move stop to entry', 'Set target']) {
       expect(buttonTag(markup, label)).toContain('disabled');
       expect(buttonTag(markup, label)).toContain('Enable Chart Trading in chart settings first');
     }
+    expect(buttonTag(markup, 'Edit stop')).not.toContain('disabled');
   });
 
   it('disables exit buttons while the position has a pending request', () => {
@@ -324,5 +357,189 @@ describe('TradeManagementWorkspace rendering', () => {
 
     expect(markup).toContain('disabled=""');
     expect(close).not.toHaveBeenCalled();
+  });
+});
+
+describe('workspace stop/target editor', () => {
+  it('enables Edit for an existing leg instead of pointing at the chart', () => {
+    const markup = renderWorkspace({
+      positions: [position],
+      chartOrders: [stop, target],
+      resolveContract: () => contract,
+    });
+
+    expect(markup).toContain('desktop-positions-action">Edit stop');
+    expect(markup).toContain('desktop-positions-action">Edit target');
+    expect(markup).not.toContain('Use chart order lines');
+  });
+
+  it('opens a docked editor for a visible stop, keeping the chart-line selection', async () => {
+    const { store, editor } = await seededEditor([stop]);
+
+    editor.begin('stop-1');
+
+    expect(store.getState().selectedId).toBe('stop-1');
+    expect(editor.getState().draft).toMatchObject({
+      id: 'stop-1',
+      kind: 'stop',
+      side: 'sell',
+      orderType: 'market',
+      triggerPrice: 1.5,
+      quantity: 1,
+    });
+    const markup = renderWorkspace({
+      positions: [position],
+      chartOrders: [stop],
+      resolveContract: () => contract,
+      editor,
+    });
+    expect(markup).toContain('stop-target-editor');
+    expect(markup).toContain('Edit stop · SPY 729C');
+    expect(markup).toContain('value="1.5"');
+  });
+
+  it('opens the same editor for a visible target', async () => {
+    const { editor } = await seededEditor([target]);
+
+    editor.begin('target-1');
+
+    const markup = renderWorkspace({
+      positions: [position],
+      chartOrders: [target],
+      resolveContract: () => contract,
+      editor,
+    });
+    expect(markup).toContain('Edit target · SPY 729C');
+    expect(markup).toContain('value="2.75"');
+  });
+
+  it('still opens for a stop below the visible domain, and offers Show on chart', async () => {
+    const { editor } = await seededEditor([stop]);
+    editor.begin('stop-1');
+
+    const markup = renderWorkspace({
+      positions: [position],
+      chartOrders: [stop],
+      resolveContract: () => contract,
+      editor,
+      visiblePriceRange: { min: 400, max: 500 },
+    });
+
+    expect(markup).toContain('stop-target-editor');
+    expect(markup).toContain('Show on chart');
+  });
+
+  it('offers Show on chart only off-domain and only for the charted underlying', async () => {
+    const { editor } = await seededEditor([stop]);
+    editor.begin('stop-1');
+    const base = {
+      positions: [position],
+      chartOrders: [stop],
+      resolveContract: () => contract,
+      editor,
+    };
+
+    const inDomain = renderWorkspace({ ...base, visiblePriceRange: { min: 1, max: 2 } });
+    expect(inDomain).not.toContain('Show on chart');
+
+    const otherChart = renderWorkspace({
+      ...base,
+      chartSymbol: 'QQQ',
+      visiblePriceRange: { min: 400, max: 500 },
+    });
+    expect(otherChart).not.toContain('Show on chart');
+  });
+
+  it('saves by id with the edited trigger price (line visibility is irrelevant)', async () => {
+    const { api, editor } = await seededEditor([stop]);
+    editor.begin('stop-1');
+
+    editor.setPriceText('2.25');
+    await editor.save();
+
+    expect(api.updateChartOrder).toHaveBeenCalledWith('stop-1', { triggerPrice: 2.25 });
+    expect(editor.getState().draft).toBeNull();
+  });
+
+  it('patches quantity too — the update API supports it', async () => {
+    const { api, editor } = await seededEditor([stop]);
+    editor.begin('stop-1');
+
+    editor.setQuantity(3);
+    await editor.save();
+
+    expect(api.updateChartOrder).toHaveBeenCalledWith('stop-1', { quantity: 3 });
+  });
+
+  it('cancel discards the draft without touching the order', async () => {
+    const { api, store, editor } = await seededEditor([stop]);
+    editor.begin('stop-1');
+    editor.setPriceText('9.99');
+
+    editor.cancel();
+
+    expect(api.updateChartOrder).not.toHaveBeenCalled();
+    expect(editor.getState().draft).toBeNull();
+    expect(store.getState().selectedId).toBeNull();
+    expect(store.byId('stop-1')?.triggerPrice).toBe(1.5);
+  });
+
+  it('closes with a stale notice when the leg fires mid-edit', async () => {
+    const { editor, store } = await seededEditor([stop]);
+    editor.begin('stop-1');
+
+    store.applyServerUpdate({ ...stop, status: 'triggered', brokerOrderId: 'B-1' });
+
+    expect(editor.getState().draft).toBeNull();
+    expect(editor.getState().staleNotice).toContain('This stop fired while you were editing');
+    const markup = renderWorkspace({ editor });
+    expect(markup).toContain('role="status"');
+    expect(markup).toContain('This stop fired while you were editing');
+  });
+
+  it('closes with a stale notice when the leg is cancelled mid-edit', async () => {
+    const { editor, store } = await seededEditor([target]);
+    editor.begin('target-1');
+
+    store.applyServerUpdate({ ...target, status: 'cancelled' });
+
+    expect(editor.getState().draft).toBeNull();
+    expect(editor.getState().staleNotice).toContain('This target is no longer working');
+  });
+
+  it('survives a refresh replacing row instances — the session is keyed by id', async () => {
+    const { api, store, editor } = await seededEditor([stop]);
+    editor.begin('stop-1');
+
+    api.chartOrders.mockResolvedValueOnce([{ ...stop }]); // fresh instances, same id
+    await store.load();
+
+    expect(editor.getState().draft?.id).toBe('stop-1');
+    editor.setPriceText('2.25');
+    await editor.save();
+    expect(api.updateChartOrder).toHaveBeenCalledWith('stop-1', { triggerPrice: 2.25 });
+  });
+
+  it('keeps the draft up and surfaces the store error on a failed save', async () => {
+    const { api, editor } = await seededEditor([stop]);
+    editor.begin('stop-1');
+    api.updateChartOrder.mockRejectedValueOnce(new Error('level already crossed'));
+
+    editor.setPriceText('2.25');
+    await editor.save();
+
+    expect(editor.getState().draft?.id).toBe('stop-1');
+    expect(editor.getState().saveError).toBe('level already crossed');
+    const markup = renderWorkspace({ chartOrders: [stop], editor });
+    expect(markup).toContain('level already crossed');
+  });
+
+  it('refuses to begin for a missing or non-working id', async () => {
+    const { editor } = await seededEditor([{ ...stop, status: 'triggered' }]);
+
+    editor.begin('nope');
+    editor.begin('stop-1');
+
+    expect(editor.getState().draft).toBeNull();
   });
 });

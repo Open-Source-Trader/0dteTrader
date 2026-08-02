@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react';
+import { useCallback, useEffect, useMemo } from 'react';
 import { timed } from '../../core/timing';
 import type { ChartInterval, TradingMode } from '@0dtetrader/shared-types';
 import type { ApiClient } from '../../core/api/ApiClient';
@@ -103,7 +103,15 @@ export function ChartView({
     indicatorSettings,
     twcSettings,
     optionsAnalytics,
+    revealPrice,
   } = useStore(store);
+
+  // Stable: the reporting effect in CandleChart re-subscribes when this
+  // changes, and it must not do that on every render.
+  const onVisiblePriceRange = useCallback(
+    (range: { min: number; max: number } | null) => store.setVisiblePriceRange(range),
+    [store],
+  );
 
   const optionsAnalyticsState = useOptionsAnalytics(
     apiClient,
@@ -450,6 +458,8 @@ export function ChartView({
               bid={dense ? (quote?.bid ?? null) : null}
               ask={dense ? (quote?.ask ?? null) : null}
               chartTrading={chartTrading}
+              revealPrice={revealPrice}
+              onVisiblePriceRange={onVisiblePriceRange}
             />
             {isLoading && candles.length === 0 && (
               <div className="chart-skeleton" aria-hidden="true">

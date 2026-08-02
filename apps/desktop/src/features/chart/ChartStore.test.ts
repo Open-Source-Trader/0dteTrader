@@ -323,8 +323,60 @@ describe('chartChromeSlice', () => {
     const store = makeStore();
     const slice = chartChromeSlice(store.getState());
     expect(Object.keys(slice).sort()).toEqual(
-      ['errorMessage', 'indicatorSettings', 'optionsAnalytics', 'symbol', 'twcSettings'].sort(),
+      [
+        'errorMessage',
+        'indicatorSettings',
+        'optionsAnalytics',
+        'symbol',
+        'twcSettings',
+        'visiblePriceRange',
+      ].sort(),
     );
+  });
+});
+
+describe('ChartStore price reveal ("Show on chart")', () => {
+  it('stores the reveal price and clears it, with the visible range, on a symbol switch', () => {
+    const store = makeStore();
+    store.setRevealPrice(497.5);
+    store.setVisiblePriceRange({ min: 500, max: 510 });
+    expect(store.getState().revealPrice).toBe(497.5);
+    expect(store.getState().visiblePriceRange).toEqual({ min: 500, max: 510 });
+
+    store.selectSymbol('QQQ');
+
+    expect(store.getState().revealPrice).toBeNull();
+    expect(store.getState().visiblePriceRange).toBeNull();
+  });
+
+  it('clearing the reveal is what lets the chart restore its viewport', () => {
+    const store = makeStore();
+    store.setRevealPrice(497.5);
+    store.setRevealPrice(null);
+    expect(store.getState().revealPrice).toBeNull();
+  });
+
+  it('drops sub-epsilon visible-range jitter without notifying subscribers', () => {
+    const store = makeStore();
+    store.setVisiblePriceRange({ min: 100, max: 110 });
+    let notifications = 0;
+    store.subscribe(() => {
+      notifications += 1;
+    });
+
+    // 0.1% of the span: the per-tick autoscale wobble this gate exists for.
+    store.setVisiblePriceRange({ min: 100.01, max: 110.01 });
+    expect(notifications).toBe(0);
+    expect(store.getState().visiblePriceRange).toEqual({ min: 100, max: 110 });
+
+    // A real pan lands.
+    store.setVisiblePriceRange({ min: 102, max: 112 });
+    expect(notifications).toBe(1);
+    expect(store.getState().visiblePriceRange).toEqual({ min: 102, max: 112 });
+
+    // The chart tearing down reports null, which must always land.
+    store.setVisiblePriceRange(null);
+    expect(store.getState().visiblePriceRange).toBeNull();
   });
 });
 

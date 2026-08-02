@@ -41,7 +41,10 @@ import { ProfileView } from '../profile/ProfileView';
 import { DesktopTradeTicket } from './DesktopTradeTicket';
 import { FloatingTradeButtons } from './FloatingTradeButtons';
 import { TradeManagementWorkspace } from './TradeManagementWorkspace';
-import { desktopTradeWorkspaceHeight } from './TradeManagementWorkspaceModel';
+import {
+  desktopTradeWorkspaceHeight,
+  StopTargetEditorStore,
+} from './TradeManagementWorkspaceModel';
 import { HistoryView } from './HistoryView';
 import { OrderConfirmPopup } from './OrderConfirmPopup';
 import { PositionsStrip } from './PositionsStrip';
@@ -121,6 +124,9 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
   const [orderPendingCancel, setOrderPendingCancel] = useState<ChartOrder | null>(null);
   const [me, setMe] = useState<Me | null>(null);
   const [desktopWorkspaceExpanded, setDesktopWorkspaceExpanded] = useState(false);
+  // Workspace-owned stop/target editing session; created here so it survives
+  // the workspace collapsing and expanding.
+  const [stopTargetEditor] = useState(() => new StopTargetEditorStore(chartOrdersStore));
   const nextMode: TradingMode = tradingMode === 'live' ? 'practice' : 'live';
 
   // Active trading provider (from /v1/me) and whether it has credentials
@@ -421,6 +427,11 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
       chainStore.getState().chain?.contracts.find((contract) => contract.symbol === symbol) ?? null,
     [chainStore],
   );
+  // Stable: the workspace clears the reveal from an effect keyed on this.
+  const revealChartPrice = useCallback(
+    (price: number | null) => chartStore.setRevealPrice(price),
+    [chartStore],
+  );
   const hasDesktopActivity = trade.positions.length > 0 || trade.openOrders.length > 0;
   const desktopWorkspaceHeight = desktopTradeWorkspaceHeight({
     expanded: desktopWorkspaceExpanded,
@@ -447,6 +458,10 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
       chartTradingEnabled={chartTradingSettings.enabled}
       underlyingPrice={chain.underlyingLast}
       resolveContract={resolveOptionContract}
+      editor={stopTargetEditor}
+      chartSymbol={chart.symbol}
+      visiblePriceRange={chart.visiblePriceRange}
+      onRevealPrice={revealChartPrice}
       locked={locked}
     />
   );

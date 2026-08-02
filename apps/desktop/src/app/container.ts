@@ -42,7 +42,7 @@ export class AppContainer {
       this.quoteSocket,
     );
     this.chartStore = new ChartStore(this.apiClient, this.quoteSocket, this.settingsStore);
-    this.chainStore = new ChainStore(this.apiClient);
+    this.chainStore = new ChainStore(this.apiClient, this.settingsStore);
     this.tradeStore = new TradeStore(this.apiClient);
     this.drawingsStore = new DrawingsStore();
     this.chartOrdersStore = new ChartOrdersStore(this.apiClient);

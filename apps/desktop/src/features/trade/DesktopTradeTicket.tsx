@@ -192,7 +192,7 @@ export function DesktopTradeTicket({
             type="button"
             className={`desktop-mode-button desktop-mode-button--auto${chain.isAutoMode ? ' selected' : ''}`}
             onClick={() => chainStore.setAutoMode(!chain.isAutoMode)}
-            aria-label="Auto +1 OTM selection"
+            aria-label="Auto OTM selection"
             aria-pressed={chain.isAutoMode}
           >
             Auto

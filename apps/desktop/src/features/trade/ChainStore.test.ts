@@ -32,7 +32,10 @@ interface Deferred {
 }
 
 /** ChainStore with an optionsChain stub that resolves only on command. */
-function makeDeferredStore(): { store: ChainStore; pending: Map<string, Deferred> } {
+function makeDeferredStore(settings?: { autoOtmOffset: number }): {
+  store: ChainStore;
+  pending: Map<string, Deferred>;
+} {
   const pending = new Map<string, Deferred>();
   const apiClient = {
     optionsChain: (underlying: string) =>
@@ -40,7 +43,7 @@ function makeDeferredStore(): { store: ChainStore; pending: Map<string, Deferred
         pending.set(underlying, { resolve });
       }),
   } as unknown as ApiClient;
-  return { store: new ChainStore(apiClient), pending };
+  return { store: new ChainStore(apiClient, settings), pending };
 }
 
 async function flushMicrotasks(): Promise<void> {
@@ -71,15 +74,28 @@ describe('ChainStore.load', () => {
     const { store, pending } = makeDeferredStore();
     const loading = store.load('SPY');
     await flushMicrotasks();
-    pending.get('SPY')!.resolve(chainDto('SPY', [499, 501, 503], 500));
+    pending.get('SPY')!.resolve(chainDto('SPY', [499, 501, 503, 505], 500));
     await loading;
 
-    // Snapshot price 500 → +1 OTM call is 501.
-    expect(store.autoContract?.strike).toBe(501);
-
-    // Live price crosses 501 → AUTO must move to 503.
-    store.setUnderlyingLast(502.5);
+    // Snapshot price 500 → ATM 501 (equidistant tie toward OTM) → +1 is 503.
     expect(store.autoContract?.strike).toBe(503);
+
+    // Live price crosses 502 → ATM 503 → AUTO must move to 505.
+    store.setUnderlyingLast(502.5);
+    expect(store.autoContract?.strike).toBe(505);
+  });
+
+  it('autoContract honors the injected AUTO-offset preference', async () => {
+    const { store, pending } = makeDeferredStore({ autoOtmOffset: 2 });
+    const loading = store.load('SPY');
+    await flushMicrotasks();
+    pending.get('SPY')!.resolve(chainDto('SPY', [499, 501, 503, 505], 500));
+    await loading;
+    store.setUnderlyingLast(500.4);
+
+    // ATM 501 → +2 rungs up the call ladder.
+    expect(store.autoOtmOffset).toBe(2);
+    expect(store.autoContract?.strike).toBe(505);
   });
 
   it('refresh() updates quotes and underlying price without touching selections', async () => {
@@ -119,8 +135,8 @@ describe('ChainStore.load', () => {
     const state = store.getState();
     expect(state.chain?.underlying).toBe('SPY');
     expect(state.selectedExpiration).toBe(EXPIRATION);
-    // +1 OTM call above the 500 underlying price.
-    expect(state.selectedStrike).toBe(501);
+    // ATM 501 (tie toward OTM at the 500 underlying price) → +1 OTM is 503.
+    expect(state.selectedStrike).toBe(503);
   });
 });
 

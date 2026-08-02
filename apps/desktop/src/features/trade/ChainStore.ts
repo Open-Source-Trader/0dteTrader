@@ -2,6 +2,7 @@ import type { OptionContract, OptionType, OptionsChain, Quote } from '@0dtetrade
 import type { ApiClient } from '../../core/api/ApiClient';
 import { errorMessage } from '../../core/api/ApiError';
 import { Store } from '../../core/observable';
+import type { SettingsStore } from '../../core/storage/SettingsStore';
 import { nearestExpiration, selectAutoOTM } from './autoContractSelector';
 
 interface ChainStoreState {
@@ -32,7 +33,11 @@ export class ChainStore extends Store<ChainStoreState> {
    */
   private loadGeneration = 0;
 
-  constructor(private readonly apiClient: ApiClient) {
+  constructor(
+    private readonly apiClient: ApiClient,
+    /** AUTO-offset preference source; absent (tests) falls back to +1. */
+    private readonly settings?: Pick<SettingsStore, 'autoOtmOffset'>,
+  ) {
     super({
       underlying: '',
       chain: null,
@@ -63,11 +68,16 @@ export class ChainStore extends Store<ChainStoreState> {
     return [...new Set(values)].sort((a, b) => a - b);
   }
 
+  /** AUTO's configured distance from the ATM anchor (Profile preference). */
+  get autoOtmOffset(): number {
+    return this.settings?.autoOtmOffset ?? 1;
+  }
+
   /** The contract AUTO mode would trade right now. */
   get autoContract(): OptionContract | null {
     const { chain, optionType, selectedExpiration, underlyingLast } = this.getState();
     if (!chain) return null;
-    return selectAutoOTM(chain, optionType, selectedExpiration, underlyingLast);
+    return selectAutoOTM(chain, optionType, selectedExpiration, underlyingLast, this.autoOtmOffset);
   }
 
   /** The contract the ticket resolves to (AUTO pick, or manual exp+strike). */

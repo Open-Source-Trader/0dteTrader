@@ -253,7 +253,7 @@ export function TradePanel({
             <button
               className={chain.isAutoMode ? 'hud-toggle-chip on' : 'hud-toggle-chip'}
               onClick={() => chainStore.setAutoMode(!chain.isAutoMode)}
-              aria-label="Auto +1 OTM selection"
+              aria-label="Auto OTM selection"
               aria-pressed={chain.isAutoMode}
             >
               {chain.isAutoMode ? <CheckmarkIcon size={11} /> : null}

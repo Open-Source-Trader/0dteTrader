@@ -283,14 +283,19 @@ export class TradeStore extends Store<TradeStoreState> {
     }
 
     if (chainState.isAutoMode) {
+      // Sending the offset pins the server to the exact contract the panel
+      // shows, rather than whatever its own default would resolve to.
+      const otmOffset = chainStore.autoOtmOffset;
       selection = {
         mode: 'auto_otm',
         optionType,
         expiration: chainState.selectedExpiration ?? undefined,
+        otmOffset,
       };
       const expirationLabel = chainState.selectedExpiration ?? 'nearest';
       const typeName = optionType === 'call' ? 'Call' : 'Put';
-      summary = `${underlying} AUTO +1 OTM ${typeName} · exp ${expirationLabel}`;
+      const offsetLabel = otmOffset === 0 ? 'ATM' : `+${otmOffset} OTM`;
+      summary = `${underlying} AUTO ${offsetLabel} ${typeName} · exp ${expirationLabel}`;
     } else {
       const strike = chainState.selectedStrike;
       const expiration = chainState.selectedExpiration;

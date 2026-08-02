@@ -691,10 +691,17 @@ function ProfileViewContent({
   const [shortcutsEnabled, setShortcutsEnabled] = useState(
     () => container.settingsStore.keyboardShortcutsEnabled,
   );
+  const [autoOtmOffset, setAutoOtmOffset] = useState(() => container.settingsStore.autoOtmOffset);
 
   const handleBypassChange = (on: boolean) => {
     setBypassConfirmation(on);
     container.settingsStore.bypassOrderConfirmation = on;
+  };
+
+  const handleAutoOtmOffsetChange = (value: string) => {
+    const offset = Number(value);
+    setAutoOtmOffset(offset);
+    container.settingsStore.autoOtmOffset = offset;
   };
 
   const handleShortcutsChange = (on: boolean) => {
@@ -758,6 +765,31 @@ function ProfileViewContent({
           <div className="section-footer">
             When on, tapping Buy or Sell places the order immediately without the confirmation step.
             This device only.
+          </div>
+        </div>
+
+        {/* AUTO selection: strikes OTM from the ATM anchor. */}
+        <div className="grouped-section">
+          <div className="section-header">AUTO selection</div>
+          <div className="section-card">
+            <div className="grouped-row">
+              <SegmentedControl
+                options={[
+                  { value: '0', label: 'ATM' },
+                  { value: '1', label: '+1' },
+                  { value: '2', label: '+2' },
+                  { value: '3', label: '+3' },
+                  { value: '4', label: '+4' },
+                  { value: '5', label: '+5' },
+                ]}
+                value={String(autoOtmOffset)}
+                onChange={handleAutoOtmOffsetChange}
+              />
+            </div>
+          </div>
+          <div className="section-footer">
+            How far AUTO picks from the at-the-money strike: +N OTM from ATM, or ATM itself. Applies
+            to new orders on this device.
           </div>
         </div>
 

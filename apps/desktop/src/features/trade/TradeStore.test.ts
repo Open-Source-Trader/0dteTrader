@@ -49,10 +49,11 @@ function withResolver(store: TradeStore, contracts: OptionContract[]): TradeStor
   return store;
 }
 
-/** Minimal ChainStore double: arm() only reads getState(). Auto mode avoids
- *  the explicit strike/expiration guard. */
-function autoModeChainStore(): ChainStore {
+/** Minimal ChainStore double: arm() only reads getState() and the AUTO
+ *  offset. Auto mode avoids the explicit strike/expiration guard. */
+function autoModeChainStore(autoOtmOffset = 1): ChainStore {
   return {
+    autoOtmOffset,
     getState: () => ({
       optionType: 'call' as const,
       isAutoMode: true,
@@ -263,6 +264,26 @@ describe('TradeStore.arm — selling into an open position', () => {
     expect(ticket?.request.selection).toMatchObject({ strike: 495 });
     expect(ticket?.request.quantity).toBe(3);
     expect(ticket?.summary).toContain('CLOSE 3 of 5');
+  });
+});
+
+describe('TradeStore.arm — AUTO selection offset', () => {
+  it('sends the configured otmOffset so the server resolves what the panel shows', () => {
+    const store = makeStore();
+    store.arm('buy', 'SPY', autoModeChainStore(2));
+
+    const ticket = store.getState().armedTicket;
+    expect(ticket?.request.selection).toMatchObject({ mode: 'auto_otm', otmOffset: 2 });
+    expect(ticket?.summary).toContain('AUTO +2 OTM');
+  });
+
+  it('labels offset 0 as ATM', () => {
+    const store = makeStore();
+    store.arm('buy', 'SPY', autoModeChainStore(0));
+
+    const ticket = store.getState().armedTicket;
+    expect(ticket?.request.selection).toMatchObject({ mode: 'auto_otm', otmOffset: 0 });
+    expect(ticket?.summary).toContain('AUTO ATM');
   });
 });
 

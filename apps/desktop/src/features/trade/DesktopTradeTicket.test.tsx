@@ -100,7 +100,7 @@ describe('DesktopTradeTicket right rail order', () => {
       markup.indexOf('desktop-ticket-action-row'),
     );
     expect((markup.match(/0DTE \/ Expiry|2026-07-29 · 0DTE/g) ?? []).length).toBe(1);
-    expect((markup.match(/aria-label="Auto \+1 OTM selection"/g) ?? []).length).toBe(1);
+    expect((markup.match(/aria-label="Auto OTM selection"/g) ?? []).length).toBe(1);
     expect((markup.match(/Select call contract/g) ?? []).length).toBe(1);
     expect((markup.match(/Select put contract/g) ?? []).length).toBe(1);
     expect(markup).not.toContain('≈');
@@ -277,15 +277,19 @@ describe('DesktopTradeTicket CALL/PUT selection', () => {
     expect(markup).not.toContain('>$728.02<');
   });
 
-  it('AUTO mode keeps previous behavior: optionType drives auto +1 OTM selection', () => {
+  it('AUTO mode: optionType drives the ATM-walk direction (calls up, puts down)', () => {
     const { chainStore } = makeStores({ isAutoMode: true });
-    chainStore.setUnderlyingLast(729.5);
+    const prevCall = { ...call, symbol: 'SPY260729C00728000', strike: 728 };
+    const prevPut = { ...put, symbol: 'SPY260729P00728000', strike: 728 };
+    chainStore.getState().chain!.contracts.push(prevCall, prevPut);
+    chainStore.setUnderlyingLast(729.2);
 
+    // ATM anchor 729 → calls step up to 730, puts step down to 728.
     expect(chainStore.autoContract?.symbol).toBe(nextCall.symbol);
     chainStore.setOptionType('put');
     expect(chainStore.getState().selectedStrike).toBe(729);
-    expect(chainStore.autoContract?.symbol).toBe(put.symbol);
-    expect(chainStore.selectedContract?.symbol).toBe(put.symbol);
+    expect(chainStore.autoContract?.symbol).toBe(prevPut.symbol);
+    expect(chainStore.selectedContract?.symbol).toBe(prevPut.symbol);
   });
 });
 

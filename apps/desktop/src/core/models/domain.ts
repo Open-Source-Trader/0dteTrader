@@ -1,4 +1,10 @@
-import type { OptionType, OrderSide, OrderStatus, OrderType } from '@0dtetrader/shared-types';
+import type {
+  OptionContract,
+  OptionType,
+  OrderSide,
+  OrderStatus,
+  OrderType,
+} from '@0dtetrader/shared-types';
 
 /**
  * `(bid + ask) / 2` rounded to pennies (PriceMath.swift). Advisory only.
@@ -9,6 +15,17 @@ export function midPrice(bid: number, ask: number, precision = 2): number | null
   if (!(bid > 0) || !(ask > 0) || bid > ask) return null;
   const factor = Math.pow(10, precision);
   return Math.round(((bid + ask) / 2) * factor) / factor;
+}
+
+/**
+ * No quote on any of bid/ask/last — a CURR leg synthesized from its OCC
+ * symbol before its expiration's contracts load. Every trading gate (split
+ * panel, desktop rail, fullscreen buttons/shortcuts) disables on it so a
+ * 0.00 display is never tradeable; TradeStore.arm keeps a matching guard as
+ * the backstop.
+ */
+export function quotesPending(contract: OptionContract | null): boolean {
+  return contract !== null && contract.bid <= 0 && contract.ask <= 0 && contract.last <= 0;
 }
 
 export function oppositeSide(side: OrderSide): OrderSide {

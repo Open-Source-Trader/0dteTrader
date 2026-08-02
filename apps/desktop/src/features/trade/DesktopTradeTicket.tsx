@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { OptionContract, OrderSide, OrderType } from '@0dtetrader/shared-types';
 import { useStore } from '../../core/observable';
 import { dayString } from '../../core/models/dates';
-import { midPrice } from '../../core/models/domain';
+import { midPrice, quotesPending } from '../../core/models/domain';
 import { isPriceInputShape, parsePriceInput } from '../../core/models/priceInput';
 import { AnchoredPopup } from '../../design/components/Menu';
 import { MinusIcon, PlusIcon } from '../../design/icons';
@@ -125,13 +125,17 @@ export function DesktopTradeTicket({
   const hasSellableLeg =
     tradeStore.sellableHeldLegs(chain.underlying, chain.selectedExpiration, chain.optionType)
       .length > 0;
+  // `premium !== null` alone does not cover the Custom mode: a typed price
+  // supplies a premium even when the leg itself has no quotes yet, so the
+  // zero-quote CURR gate needs its own term here.
   const canSubmit =
     selectedContract !== null &&
     !locked &&
     !trade.isSubmitting &&
     !trade.armedTicket &&
     tradeStore.canArm &&
-    premium !== null;
+    premium !== null &&
+    !quotesPending(selectedContract);
   const canBuy = canSubmit;
   const canSell = canSubmit && hasSellableLeg;
 

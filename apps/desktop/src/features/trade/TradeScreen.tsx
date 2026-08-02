@@ -10,6 +10,7 @@ import type {
 import { narrowToChartOrderType } from '@0dtetrader/shared-types';
 import { useContainer } from '../../app/container';
 import { useLayoutBreakpoint } from '../../app/useLayoutBreakpoint';
+import { quotesPending } from '../../core/models/domain';
 import { shallowEqual, useStore } from '../../core/observable';
 import type { NotifierDeps } from '../../core/notifications';
 import { notifyChartOrder, notifyOrderUpdate } from '../../core/notifications';
@@ -329,7 +330,14 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
 
   // Same gate as the split-layout TradePanel's Buy/Sell buttons; the lock
   // disables every order-placing control while leaving the chart untouched.
-  const canTrade = chainStore.selectedContract !== null && !locked;
+  // canArm covers Custom-with-no-price (selectable in split, persists across
+  // a layout toggle); quotesPending covers a CURR leg synthesized before its
+  // expiration's contracts load.
+  const canTrade =
+    chainStore.selectedContract !== null &&
+    !locked &&
+    tradeStore.canArm &&
+    !quotesPending(chainStore.selectedContract);
 
   // Desktop-grid-only keyboard layer: Cmd/Ctrl+K always opens the symbol
   // command palette; B/S arm an order and L toggles the lock, gated by the
@@ -356,6 +364,10 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
     disabledReason = 'Market data unavailable — check credentials in Profile';
   } else if (!chainStore.selectedContract) {
     disabledReason = 'Select an option contract to trade';
+  } else if (quotesPending(chainStore.selectedContract)) {
+    disabledReason = 'Quotes are still loading for this contract';
+  } else if (!tradeStore.canArm) {
+    disabledReason = 'Enter a custom limit price';
   }
 
   // Fixed split sized by sub-pane count (0/1/2): each pane takes chart

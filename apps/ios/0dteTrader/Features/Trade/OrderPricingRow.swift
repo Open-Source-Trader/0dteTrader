@@ -47,9 +47,11 @@ struct OrderPricingRow: View {
         let contract = chainViewModel.selectedContract
         return HStack(spacing: AppSpacing.xs) {
             customPriceSegment
-            quoteSegment(.bid, "Bid", contract.map { Format.price($0.bid) })
+            // Zero quotes (a CURR leg whose expiration is still loading) dash
+            // rather than reading as a tradeable 0.00.
+            quoteSegment(.bid, "Bid", contract.flatMap { $0.bid > 0 ? Format.price($0.bid) : nil })
             quoteSegment(.mid, "Mid", contract?.mid.map { Format.price($0) })
-            quoteSegment(.ask, "Ask", contract.map { Format.price($0.ask) })
+            quoteSegment(.ask, "Ask", contract.flatMap { $0.ask > 0 ? Format.price($0.ask) : nil })
             labelSegment(.market, "Market")
         }
         .hudSegmentTrack()

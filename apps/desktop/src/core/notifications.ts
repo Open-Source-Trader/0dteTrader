@@ -27,8 +27,14 @@ const TERMINAL_ORDER_STATUSES = new Set<string>(['filled', 'rejected', 'cancelle
 
 function fire(deps: NotifierDeps, title: string, body: string): boolean {
   if (deps.notification === null || !deps.enabled() || deps.hasFocus()) return false;
-  new deps.notification(title, { body });
-  return true;
+  try {
+    new deps.notification(title, { body });
+    return true;
+  } catch {
+    // Constructor present but notifications blocked or unsupported — a missed
+    // push is never worth crashing the socket handler that carried the event.
+    return false;
+  }
 }
 
 /** Order-update push: notifies terminal statuses only (filled/rejected/cancelled). */

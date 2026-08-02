@@ -89,6 +89,17 @@ describe('notifyOrderUpdate', () => {
   it('tolerates a platform without the Notification API', () => {
     expect(notifyOrderUpdate(deps({ notification: null }), orderUpdate('filled'))).toBe(false);
   });
+
+  it('swallows a constructor that throws (notifications blocked at runtime)', () => {
+    class BlockedNotification {
+      constructor() {
+        throw new Error('Notifications are blocked');
+      }
+    }
+    expect(
+      notifyOrderUpdate(deps({ notification: BlockedNotification }), orderUpdate('filled')),
+    ).toBe(false);
+  });
 });
 
 describe('notifyChartOrder', () => {

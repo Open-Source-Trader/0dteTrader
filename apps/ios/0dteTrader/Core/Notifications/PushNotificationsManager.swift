@@ -90,10 +90,18 @@ final class PushNotificationsManager: NSObject {
     /// AppDelegate forward: APNs granted a token — upload it.
     func didRegisterForRemoteNotifications(deviceToken: Data) {
         let token = PushTokenEncoding.hexString(deviceToken)
+        // A late APNs callback can land after the user opted out; uploading
+        // then would leave the server registered post-opt-out.
+        guard settingsStore.pushNotificationsEnabled, !token.isEmpty else { return }
         Task {
             do {
                 try await apiClient.registerDevice(token: token)
-                settingsStore.pushDeviceToken = token
+                if settingsStore.pushNotificationsEnabled {
+                    settingsStore.pushDeviceToken = token
+                } else {
+                    // Opted out while the upload was in flight — undo it.
+                    try? await apiClient.unregisterDevice(token: token)
+                }
             } catch {
                 // Best-effort: registration retries on the next launch or
                 // toggle; pushes are auxiliary to the in-app order stream.

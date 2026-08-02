@@ -299,6 +299,15 @@ struct PositionDTO: Decodable, Equatable, Sendable {
     let openedAt: String?
 }
 
+// MARK: - Push notifications
+
+/// Device push registration (POST /v1/notifications/devices).
+struct DeviceRegistrationDTO: Encodable, Equatable, Sendable {
+    /// Lowercase-hex APNs device token.
+    let token: String
+    let platform: String
+}
+
 // MARK: - Chart trading
 
 struct ChartOrderDTO: Decodable, Equatable, Sendable {

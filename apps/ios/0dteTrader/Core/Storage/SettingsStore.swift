@@ -33,6 +33,8 @@ final class SettingsStore: @unchecked Sendable {
         static let bypassOrderConfirmation = "settings.bypassOrderConfirmation"
         static let autoOtmOffset = "settings.autoOtmOffset"
         static let toastsEnabled = "settings.toastsEnabled"
+        static let pushNotificationsEnabled = "settings.pushNotificationsEnabled"
+        static let pushDeviceToken = "settings.pushDeviceToken"
     }
 
     /// Layout choice persists across launches (FR-12). Defaults to split view.
@@ -168,5 +170,18 @@ final class SettingsStore: @unchecked Sendable {
             return min(10, max(0, defaults.integer(forKey: Keys.autoOtmOffset)))
         }
         set { defaults.set(newValue, forKey: Keys.autoOtmOffset) }
+    }
+
+    /// Push notifications for order events. Off until the user opts in.
+    var pushNotificationsEnabled: Bool {
+        get { defaults.bool(forKey: Keys.pushNotificationsEnabled) }
+        set { defaults.set(newValue, forKey: Keys.pushNotificationsEnabled) }
+    }
+
+    /// The APNs token (lowercase hex) last uploaded to the server, kept so
+    /// disabling can DELETE it even after a relaunch.
+    var pushDeviceToken: String? {
+        get { defaults.string(forKey: Keys.pushDeviceToken) }
+        set { defaults.set(newValue, forKey: Keys.pushDeviceToken) }
     }
 }

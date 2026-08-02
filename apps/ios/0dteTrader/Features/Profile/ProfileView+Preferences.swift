@@ -9,9 +9,40 @@ extension ProfileView {
             sectionHeader("Preferences", icon: "slider.horizontal.3")
             autoOffsetRow
             toastsRow
+            pushRow
         }
         .padding(AppSpacing.lg)
         .hudCard(glow: false)
+    }
+
+    private var pushRow: some View {
+        HStack {
+            HStack(spacing: AppSpacing.sm) {
+                Image(systemName: "bell.and.waves.left.and.right")
+                    .foregroundStyle(Color.appAccent)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Push notifications")
+                        .font(.panelLabel)
+                        .foregroundStyle(.white)
+                    Text("Order fills and rejections while the app is closed.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Spacer()
+            Toggle("", isOn: Binding(
+                get: { viewModel.pushNotificationsEnabled },
+                set: { viewModel.setPushNotificationsEnabled($0) }
+            ))
+            .labelsHidden()
+            .tint(Color.appAccent)
+        }
+        .padding(AppSpacing.md)
+        .background(Color.appSurface, in: HudPanelShape(chamfer: 6))
+        .overlay(
+            HudPanelShape(chamfer: 6)
+                .strokeBorder(Color.hudStrokeDim, lineWidth: 1)
+        )
     }
 
     private var toastsRow: some View {

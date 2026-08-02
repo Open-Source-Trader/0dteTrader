@@ -25,6 +25,15 @@ targets:
     deploymentTarget: '17.0'
     sources:
       - path: 0dteTrader
+        excludes:
+          - 0dteTrader.entitlements
+    # aps-environment for push notifications. XcodeGen regenerates the file
+    # from `properties` and sets CODE_SIGN_ENTITLEMENTS; simulator builds
+    # ignore the entitlement (no provisioning check there).
+    entitlements:
+      path: 0dteTrader/0dteTrader.entitlements
+      properties:
+        aps-environment: development
     dependencies:
       - package: Charts
         product: DGCharts

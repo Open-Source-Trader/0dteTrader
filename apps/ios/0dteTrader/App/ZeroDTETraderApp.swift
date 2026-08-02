@@ -4,6 +4,9 @@ import SwiftUI
 struct ZeroDTETraderApp: App {
     @StateObject private var serverConfig: ServerConfigStore
     @State private var container: AppContainer
+    /// APNs registration callbacks only arrive on a UIApplicationDelegate;
+    /// this one forwards them to the container's push manager.
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     init() {
         let serverConfig = ServerConfigStore()
@@ -20,6 +23,11 @@ struct ZeroDTETraderApp: App {
                 .environmentObject(serverConfig)
                 .onChange(of: serverConfig.baseURL) { _, newBaseURL in
                     container = AppContainer(baseURL: newBaseURL)
+                    appDelegate.pushNotifications = container.pushNotifications
+                }
+                .onAppear {
+                    appDelegate.pushNotifications = container.pushNotifications
+                    container.pushNotifications.start()
                 }
                 .tint(.appAccent)
                 // The HUD theme has no light variant.

@@ -12,6 +12,7 @@ final class AppContainer: ObservableObject {
     let apiClient: APIClient
     let quoteSocket: QuoteSocketClient
     let appLockManager: AppLockManager
+    let pushNotifications: PushNotificationsManager
     private let urlSession: URLSession
 
     init(baseURL: URL) {
@@ -25,16 +26,19 @@ final class AppContainer: ObservableObject {
         let urlSession = URLSession(configuration: .default, delegate: pinningDelegate, delegateQueue: nil)
         let sessionStore = SessionStore(keychainStore: keychain, baseURL: baseURL, urlSession: urlSession)
 
+        let apiClient = APIClient(baseURL: baseURL, sessionStore: sessionStore, urlSession: urlSession)
+
         self.urlSession = urlSession
         self.baseURL = baseURL
         self.settingsStore = settings
         self.keychainStore = keychain
         self.sessionStore = sessionStore
-        self.apiClient = APIClient(baseURL: baseURL, sessionStore: sessionStore, urlSession: urlSession)
+        self.apiClient = apiClient
         self.quoteSocket = QuoteSocketClient(streamURL: ServerConfigStore.streamURL(for: baseURL), urlSession: urlSession) {
             try await sessionStore.accessTokenOrRefresh()
         }
         self.appLockManager = AppLockManager(settingsStore: settings)
+        self.pushNotifications = PushNotificationsManager(apiClient: apiClient, settingsStore: settings)
     }
 
     deinit {
@@ -81,6 +85,7 @@ final class AppContainer: ObservableObject {
             apiClient: apiClient,
             settingsStore: settingsStore,
             quoteSocket: quoteSocket,
+            pushNotifications: pushNotifications,
             onLogout: onLogout
         )
     }

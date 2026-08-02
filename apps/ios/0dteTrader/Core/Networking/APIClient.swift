@@ -281,6 +281,20 @@ struct APIClient: @unchecked Sendable {
         try await request(Endpoint(method: .get, path: "v1/positions"))
     }
 
+    // MARK: - Push notification devices
+
+    /// Registers this device's APNs token (204). Idempotent server-side, so
+    /// re-registering on every launch is safe.
+    func registerDevice(token: String) async throws {
+        let endpoint = Endpoint(method: .post, path: "v1/notifications/devices")
+        try await requestVoid(endpoint, body: encode(DeviceRegistrationDTO(token: token, platform: "ios")))
+    }
+
+    /// Removes a previously registered token (204).
+    func unregisterDevice(token: String) async throws {
+        try await requestVoid(Endpoint(method: .delete, path: "v1/notifications/devices/\(token)"))
+    }
+
     // MARK: - Chart trading
 
     func chartOrders() async throws -> [ChartOrderDTO] {

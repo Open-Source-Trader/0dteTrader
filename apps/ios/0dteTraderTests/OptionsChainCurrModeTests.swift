@@ -115,18 +115,70 @@ final class OptionsChainCurrModeTests: XCTestCase {
         XCTAssertEqual(viewModel.optionType, .call)
     }
 
-    func testCurrPreselectFallsBackToFirstHoldingWithoutOpenedAt() {
+    /// The CALL/PUT toggle is the user's: enabling CURR with CALL selected
+    /// stays on calls when one is held, even when a put was listed first.
+    func testCurrPreselectPrefersTheToggledSide() {
         let viewModel = makeViewModel()
         seedChain(viewModel)
         viewModel.positionsProvider = { [
             self.position(self.putNear500.symbol),
             self.position(self.callFar510.symbol),
         ] }
+        XCTAssertEqual(viewModel.optionType, .call)
 
         viewModel.isCurrMode = true
 
-        XCTAssertEqual(viewModel.selectedContract?.symbol, putNear500.symbol)
+        XCTAssertEqual(viewModel.selectedContract?.symbol, callFar510.symbol)
+        XCTAssertEqual(viewModel.optionType, .call)
+    }
+
+    /// Only a side with nothing held flips the toggle on enable.
+    func testCurrEnableFlipsSideOnlyWhenToggledSideHoldsNothing() {
+        let viewModel = makeViewModel()
+        seedChain(viewModel)
+        viewModel.positionsProvider = { [self.position(self.putNear500.symbol)] }
+        XCTAssertEqual(viewModel.optionType, .call)
+
+        viewModel.isCurrMode = true
+
         XCTAssertEqual(viewModel.optionType, .put)
+        XCTAssertEqual(viewModel.selectedContract?.symbol, putNear500.symbol)
+    }
+
+    // MARK: - CALL/PUT toggle inside CURR
+
+    func testTogglingSideInCurrRepreselectsThatSidesHolding() {
+        let viewModel = makeViewModel()
+        seedChain(viewModel)
+        viewModel.positionsProvider = { [
+            self.position(self.callNear505.symbol),
+            self.position(self.putNear500.symbol),
+        ] }
+        viewModel.isCurrMode = true
+        XCTAssertEqual(viewModel.selectedContract?.symbol, callNear505.symbol)
+
+        viewModel.optionType = .put
+
+        XCTAssertEqual(viewModel.expirations, [expirationNear])
+        XCTAssertEqual(viewModel.strikes, [500])
+        XCTAssertEqual(viewModel.selectedContract?.symbol, putNear500.symbol)
+
+        viewModel.optionType = .call
+
+        XCTAssertEqual(viewModel.selectedContract?.symbol, callNear505.symbol)
+    }
+
+    func testTogglingToAnUnheldSideClearsTheSelection() {
+        let viewModel = makeViewModel()
+        seedChain(viewModel)
+        viewModel.positionsProvider = { [self.position(self.callNear505.symbol)] }
+        viewModel.isCurrMode = true
+
+        viewModel.optionType = .put
+
+        XCTAssertTrue(viewModel.expirations.isEmpty)
+        XCTAssertTrue(viewModel.strikes.isEmpty)
+        XCTAssertNil(viewModel.selectedContract)
     }
 
     // MARK: - Expiration change inside CURR

@@ -24,19 +24,27 @@ final class OptionsChainViewModel: ObservableObject {
     @Published private(set) var isLoading = false
     @Published var errorMessage: String?
 
-    @Published var optionType: OptionType = .call
+    @Published var optionType: OptionType = .call {
+        didSet {
+            guard optionType != oldValue, isCurrMode else { return }
+            // CURR follows the CALL/PUT toggle: flipping sides re-lands the
+            // pickers on that side's most recent holding (or clears them).
+            preselectHolding(on: optionType)
+        }
+    }
     @Published var isAutoMode = true {
         didSet { if isAutoMode { isCurrMode = false } }
     }
-    /// CURR mode: the ticket trades only contracts already held (FR follow-up
-    /// to AUTO). Mutually exclusive with AUTO — turning either on turns the
-    /// other off — and it filters the expiration/strike menus to holdings.
+    /// CURR mode: the ticket trades only contracts already held, on whichever
+    /// side the CALL/PUT toggle selects. Mutually exclusive with AUTO —
+    /// turning either on turns the other off — and it filters the
+    /// expiration/strike menus to that side's holdings.
     @Published var isCurrMode = false {
         didSet {
             guard isCurrMode != oldValue else { return }
             if isCurrMode {
                 isAutoMode = false
-                preselectMostRecentHolding()
+                preselectSideOrFlip()
             }
         }
     }
@@ -73,7 +81,8 @@ final class OptionsChainViewModel: ObservableObject {
 
     var expirations: [String] {
         if isCurrMode {
-            return Array(Set(heldContracts.map(\.expiration))).sorted()
+            let sideContracts = heldContracts.filter { $0.optionType == optionType }
+            return Array(Set(sideContracts.map(\.expiration))).sorted()
         }
         return chain?.expirations ?? []
     }
@@ -149,23 +158,41 @@ final class OptionsChainViewModel: ObservableObject {
         !heldLegs.isEmpty
     }
 
-    /// CURR just switched on: land the pickers on the most recently opened
-    /// holding (max `openedAt`; when no position carries a record, the first
-    /// held one).
-    private func preselectMostRecentHolding() {
-        let legs = heldLegs
-        guard !legs.isEmpty else { return }
-        let mostRecent: (position: Position, contract: OptionContract)
-        if legs.contains(where: { $0.position.openedAt != nil }) {
-            mostRecent = legs.max { lhs, rhs in
-                (lhs.position.openedAt ?? .distantPast) < (rhs.position.openedAt ?? .distantPast)
-            } ?? legs[0]
-        } else {
-            mostRecent = legs[0]
+    /// CURR just switched on: keep the toggled side when it has a holding and
+    /// land on its most recent leg; only when that side holds nothing does the
+    /// toggle flip to the side that does.
+    private func preselectSideOrFlip() {
+        if heldLegs.contains(where: { $0.contract.optionType == optionType }) {
+            preselectHolding(on: optionType)
+            return
         }
-        optionType = mostRecent.contract.optionType
-        selectedExpiration = mostRecent.contract.expiration
-        selectedStrike = mostRecent.contract.strike
+        guard let recent = mostRecentLeg(heldLegs) else { return }
+        // Setting the type runs its didSet, which preselects this same leg.
+        optionType = recent.contract.optionType
+    }
+
+    /// Lands the CURR pickers on `side`'s most recently opened holding; a side
+    /// with nothing held clears them, so no un-owned contract can resolve.
+    private func preselectHolding(on side: OptionType) {
+        guard let recent = mostRecentLeg(heldLegs.filter { $0.contract.optionType == side }) else {
+            selectedExpiration = nil
+            selectedStrike = nil
+            return
+        }
+        selectedExpiration = recent.contract.expiration
+        selectedStrike = recent.contract.strike
+    }
+
+    /// Most recently opened leg: max `openedAt`; when no position carries a
+    /// record, the first in the positions array wins.
+    private func mostRecentLeg(
+        _ legs: [(position: Position, contract: OptionContract)]
+    ) -> (position: Position, contract: OptionContract)? {
+        guard !legs.isEmpty else { return nil }
+        guard legs.contains(where: { $0.position.openedAt != nil }) else { return legs[0] }
+        return legs.max { lhs, rhs in
+            (lhs.position.openedAt ?? .distantPast) < (rhs.position.openedAt ?? .distantPast)
+        }
     }
 
     #if DEBUG
@@ -300,9 +327,13 @@ final class OptionsChainViewModel: ObservableObject {
         selectedStrike = nil
         if isCurrMode {
             // Held contracts are already on the chain (that is what qualified
-            // them), so nothing to fetch — land on the first held strike
-            // rather than reseeding from AUTO's possibly un-held pick.
-            selectedStrike = strikes.first
+            // them), so nothing to fetch — land on the selected side's most
+            // recent holding on that expiration. The CALL/PUT toggle stays
+            // the user's; it is never overridden here.
+            let legs = heldLegs.filter {
+                $0.contract.optionType == optionType && $0.contract.expiration == expiration
+            }
+            selectedStrike = mostRecentLeg(legs)?.contract.strike
             return
         }
         Task { await ensureContracts(for: expiration) }

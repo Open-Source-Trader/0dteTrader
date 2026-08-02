@@ -330,6 +330,17 @@ describe('TradeStore.arm — CURR mode (explicit owned leg)', () => {
     });
     expect(ticket?.summary).not.toContain('CLOSE');
   });
+
+  it('refuses a CURR buy when the named leg is not actually held', () => {
+    const store = withResolver(makeStore(), [CONTRACT]);
+    seedPositions(store, []);
+    store.setQuantity(1);
+
+    store.arm('buy', 'SPY', chainStub({ isCurrMode: true }));
+
+    expect(store.getState().armedTicket).toBeNull();
+    expect(store.getState().toast?.message).toBe('Pick an owned contract first.');
+  });
 });
 
 describe('TradeStore.arm — AUTO selection offset', () => {

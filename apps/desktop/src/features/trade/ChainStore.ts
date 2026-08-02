@@ -97,7 +97,15 @@ export class ChainStore extends Store<ChainStoreState> {
       }));
   }
 
-  /** Whether an open long exists for the chart underlying (CURR chip gate). */
+  /** CURR legs on the currently selected side — the CALL/PUT toggle picks
+   *  which holdings CURR is operating on. */
+  private currLegsOfSelectedType(): CurrLeg[] {
+    const { optionType } = this.getState();
+    return this.currLegs.filter((leg) => leg.contract.optionType === optionType);
+  }
+
+  /** Whether an open long exists for the chart underlying (CURR chip gate —
+   *  either side; the CALL/PUT toggle chooses which side inside the mode). */
   get hasCurrPositions(): boolean {
     return this.currLegs.length > 0;
   }
@@ -106,7 +114,9 @@ export class ChainStore extends Store<ChainStoreState> {
     const { chain, isCurrMode } = this.getState();
     if (!chain) return [];
     if (isCurrMode) {
-      return [...new Set(this.currLegs.map((leg) => leg.contract.expiration))].sort();
+      return [
+        ...new Set(this.currLegsOfSelectedType().map((leg) => leg.contract.expiration)),
+      ].sort();
     }
     return chain.expirations;
   }
@@ -140,11 +150,18 @@ export class ChainStore extends Store<ChainStoreState> {
 
   /** The contract the ticket resolves to (AUTO pick, or manual exp+strike). */
   get selectedContract(): OptionContract | null {
-    const { chain, isAutoMode, optionType, selectedExpiration, selectedStrike } = this.getState();
+    const { chain, isAutoMode, isCurrMode, optionType, selectedExpiration, selectedStrike } =
+      this.getState();
     if (isAutoMode) return this.autoContract;
     if (!chain || selectedExpiration === null || selectedStrike === null) return null;
+    // CURR resolves among owned legs only: a selection left over from before
+    // the mode (or from the other side of the CALL/PUT toggle) must never
+    // quietly resolve to a contract the user does not hold.
+    const pool = isCurrMode
+      ? this.currLegsOfSelectedType().map((leg) => leg.contract)
+      : chain.contracts;
     return (
-      chain.contracts.find(
+      pool.find(
         (contract) =>
           contract.optionType === optionType &&
           contract.expiration === selectedExpiration &&
@@ -155,6 +172,9 @@ export class ChainStore extends Store<ChainStoreState> {
 
   setOptionType(optionType: OptionType): void {
     this.set({ optionType });
+    // CURR follows the CALL/PUT toggle: flipping sides re-lands the pickers on
+    // that side's most recent holding (or clears them when none is held).
+    if (this.getState().isCurrMode) this.preselectCurrLeg();
   }
 
   setAutoMode(isAutoMode: boolean): void {
@@ -162,22 +182,36 @@ export class ChainStore extends Store<ChainStoreState> {
     this.set(isAutoMode ? { isAutoMode, isCurrMode: false } : { isAutoMode });
   }
 
-  /** CURR mode: restrict the pickers to currently-owned contracts. Turning it
-   *  on leaves AUTO and preselects the most recently opened position. */
+  /** CURR mode: restrict the pickers to currently-owned contracts on the
+   *  selected side. Turning it on leaves AUTO and preselects the most
+   *  recently opened holding — of the toggled side when one is held there,
+   *  else flipping the toggle to the side that is. */
   setCurrMode(isCurrMode: boolean): void {
     if (!isCurrMode) {
       this.set({ isCurrMode: false });
       return;
     }
     this.set({ isCurrMode: true, isAutoMode: false });
-    const recent = mostRecentLeg(this.currLegs);
-    if (recent) {
-      this.set({
-        optionType: recent.contract.optionType,
-        selectedExpiration: recent.contract.expiration,
-        selectedStrike: recent.contract.strike,
-      });
+    if (this.currLegsOfSelectedType().length === 0) {
+      const recent = mostRecentLeg(this.currLegs);
+      if (recent) this.set({ optionType: recent.contract.optionType });
     }
+    this.preselectCurrLeg();
+  }
+
+  /** Lands the CURR pickers on the selected side's most recently opened
+   *  holding; a side with nothing held clears them (menus go empty and the
+   *  ticket refuses to arm rather than resolving an un-owned contract). */
+  private preselectCurrLeg(): void {
+    const recent = mostRecentLeg(this.currLegsOfSelectedType());
+    this.set(
+      recent
+        ? {
+            selectedExpiration: recent.contract.expiration,
+            selectedStrike: recent.contract.strike,
+          }
+        : { selectedExpiration: null, selectedStrike: null },
+    );
   }
 
   /** Live tick for the chain's underlying (wired from the quote stream). */
@@ -290,17 +324,13 @@ export class ChainStore extends Store<ChainStoreState> {
     if (expiration === this.getState().selectedExpiration) return;
     this.set({ selectedExpiration: expiration, selectedStrike: null });
     if (this.getState().isCurrMode) {
-      // CURR: land on the most recently opened owned leg of that expiration
-      // rather than leaving the strike empty (its menu only lists owned ones).
+      // CURR: land on the selected side's most recently opened leg of that
+      // expiration rather than leaving the strike empty (its menu only lists
+      // owned ones). The CALL/PUT toggle stays the user's — never overridden.
       const recent = mostRecentLeg(
-        this.currLegs.filter((leg) => leg.contract.expiration === expiration),
+        this.currLegsOfSelectedType().filter((leg) => leg.contract.expiration === expiration),
       );
-      if (recent) {
-        this.set({
-          optionType: recent.contract.optionType,
-          selectedStrike: recent.contract.strike,
-        });
-      }
+      if (recent) this.set({ selectedStrike: recent.contract.strike });
     }
     void this.ensureContracts(expiration);
   }

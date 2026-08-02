@@ -254,10 +254,12 @@ export class TradeStore extends Store<TradeStoreState> {
 
     const expiration = chainState.selectedExpiration;
 
-    // CURR mode: the user named the exact owned leg, so the sell-to-close
-    // leg-matching heuristic below is bypassed — sell that contract, clamped
-    // to what is actually held.
-    if (side === 'sell' && chainState.isCurrMode) {
+    // CURR mode: the user named the exact owned leg (on the side the CALL/PUT
+    // toggle selects), so the sell-to-close leg-matching heuristic below is
+    // bypassed — buys add to that contract, sells close part of it clamped to
+    // what is actually held. Both sides insist the leg really is held: CURR
+    // must never quietly trade a contract the account does not own.
+    if (chainState.isCurrMode) {
       const strike = chainState.selectedStrike;
       if (strike === null || expiration === null) {
         this.showToast('Pick an owned contract first.', 'error');
@@ -275,13 +277,20 @@ export class TradeStore extends Store<TradeStoreState> {
           : sum;
       }, 0);
       if (heldQuantity <= 0) {
-        this.showToast('No open position to sell', 'error');
+        this.showToast(
+          side === 'sell' ? 'No open position to sell' : 'Pick an owned contract first.',
+          'error',
+        );
         return;
       }
-      const closeQuantity = Math.min(quantity, heldQuantity);
       const shortName = optionType === 'call' ? 'C' : 'P';
+      const orderQuantity = side === 'sell' ? Math.min(quantity, heldQuantity) : quantity;
       const sizeLabel =
-        closeQuantity < heldQuantity ? `${closeQuantity} of ${heldQuantity}` : `${closeQuantity}`;
+        orderQuantity < heldQuantity ? `${orderQuantity} of ${heldQuantity}` : `${orderQuantity}`;
+      const summaryLabel =
+        side === 'sell'
+          ? `CLOSE ${sizeLabel} · ${underlying} ${Format.strike(strike)}${shortName}`
+          : `${underlying} ${expiration} ${Format.strike(strike)}${shortName}`;
       this.set({
         armedTicket: {
           id: nextId++,
@@ -289,14 +298,14 @@ export class TradeStore extends Store<TradeStoreState> {
             underlying,
             assetClass: 'option',
             side,
-            quantity: closeQuantity,
+            quantity: orderQuantity,
             orderType,
             limitPrice,
             selection: { mode: 'explicit', optionType, expiration, strike },
           },
           idempotencyKey: newIdempotencyKey(),
           side,
-          summary: `CLOSE ${sizeLabel} · ${underlying} ${Format.strike(strike)}${shortName}`,
+          summary: summaryLabel,
         },
         preview: null,
         previewError: null,

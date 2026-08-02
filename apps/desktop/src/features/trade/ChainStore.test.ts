@@ -240,6 +240,80 @@ describe('ChainStore CURR mode', () => {
     const held = await loadedCurrStore([long(contract('SPY', 499).symbol, 1)]);
     expect(held.hasCurrPositions).toBe(true);
   });
+
+  const PUT_SYMBOL = 'SPY990115P501';
+
+  function currChainWithPut(): OptionsChain {
+    const dto = currChainDto();
+    dto.contracts.push({ ...contract('SPY', 501), symbol: PUT_SYMBOL, optionType: 'put' });
+    return dto;
+  }
+
+  async function loadedMixedStore(positions: Position[]): Promise<ChainStore> {
+    const { store, pending } = makeDeferredStore();
+    store.positionsProvider = () => positions;
+    const loading = store.load('SPY');
+    await flushMicrotasks();
+    pending.get('SPY')!.resolve(currChainWithPut());
+    await loading;
+    return store;
+  }
+
+  it('the CALL/PUT toggle picks which side CURR operates on', async () => {
+    const store = await loadedMixedStore([
+      long(contract('SPY', 499).symbol, 1, '2026-08-01T10:00:00Z'),
+      long(PUT_SYMBOL, 2, '2026-08-01T11:00:00Z'),
+    ]);
+
+    // CALL selected: enabling CURR stays on calls even though the put is the
+    // more recent position — the toggle is the user's, never overridden.
+    store.setCurrMode(true);
+    expect(store.getState().optionType).toBe('call');
+    expect(store.strikes).toEqual([499]);
+    expect(store.getState().selectedStrike).toBe(499);
+
+    // Flip to PUT: menus and preselection move to the owned put.
+    store.setOptionType('put');
+    expect(store.strikes).toEqual([501]);
+    expect(store.getState().selectedStrike).toBe(501);
+    expect(store.selectedContract?.symbol).toBe(PUT_SYMBOL);
+  });
+
+  it('flipping to a side with nothing held clears the selection and resolves no contract', async () => {
+    const store = await loadedMixedStore([long(contract('SPY', 499).symbol, 1)]);
+    store.setCurrMode(true);
+
+    store.setOptionType('put');
+
+    expect(store.expirations).toEqual([]);
+    expect(store.strikes).toEqual([]);
+    expect(store.getState().selectedStrike).toBeNull();
+    expect(store.selectedContract).toBeNull();
+  });
+
+  it('enabling CURR flips the side only when the toggled side has nothing held', async () => {
+    const store = await loadedMixedStore([long(PUT_SYMBOL, 1)]);
+    expect(store.getState().optionType).toBe('call');
+
+    store.setCurrMode(true);
+
+    expect(store.getState().optionType).toBe('put');
+    expect(store.getState().selectedStrike).toBe(501);
+  });
+
+  it('CURR never resolves a contract that is not held, even with a stale selection', async () => {
+    const store = await loadedMixedStore([long(PUT_SYMBOL, 1)]);
+    // Manual (non-CURR) selection of the un-owned 499 call…
+    store.setAutoMode(false);
+    store.selectExpiration(EXPIRATION);
+    store.selectStrike(499);
+    expect(store.selectedContract?.strike).toBe(499);
+
+    // …must not survive into CURR as a tradeable pick.
+    store.setCurrMode(true);
+    store.setOptionType('call');
+    expect(store.selectedContract).toBeNull();
+  });
 });
 
 describe('ChainStore.applyContractQuote', () => {

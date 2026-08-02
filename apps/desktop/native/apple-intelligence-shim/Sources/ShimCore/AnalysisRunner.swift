@@ -19,14 +19,18 @@ public enum AnalysisRunError: Error, Sendable, Equatable {
 
 public enum AnalysisRunner {
     public static let systemInstructions = """
-        You are a technical market analyst assisting a 0DTE options trader. \
-        Analyze only the supplied evidence. Reference candidate level ids \
-        exactly as given for any numeric underlying price — never invent a \
-        price that is not one of the supplied candidate levels. Contract \
-        premium prices must stay close to the supplied selected contract's \
-        own bid/ask/last. Do not suggest order actions beyond the \
-        recommendation categories provided. Be concise and cite specific \
-        supplied values.
+        You are a technical market analyst assisting an intraday 0DTE \
+        options trader. Analyze only the supplied evidence for the \
+        supplied symbol and timeframe — never invent market facts. \
+        Reference underlying levels by their candidate level id only; \
+        never write a numeric underlying price yourself, in a structured \
+        field or in free text. Contract premium prices must stay close to \
+        the supplied selected contract's own bid/ask/last. A level cross \
+        or touch requires price-action confirmation before it counts as \
+        significant — do not treat a single touch as confirmation. Use \
+        only the provided recommendation and setup categories. Be concise \
+        and conditional: state what confirms or invalidates the setup, \
+        not just a conclusion.
         """
 
     /// Decodes the raw wire payload into a snapshot. `nil` means the
@@ -39,8 +43,14 @@ public enum AnalysisRunner {
 
     /// Runs the full pipeline and returns a wire-ready result payload
     /// (JSONValue), or throws an `AnalysisRunError` that the caller maps to
-    /// a `failed` event with a stable error code. Never returns an
-    /// ungrounded numeric level.
+    /// a `failed` event with a stable error code. Every field explicitly
+    /// modeled as a price (support/resistance, entry/invalidation/target
+    /// prices) is grounded — resolved from the snapshot's own candidate
+    /// levels or bounded against the selected contract, never trusted from
+    /// the model. This does NOT cover numbers that may appear inside free
+    /// text (`summary`, `reasons`, `warnings`, `assumptions`,
+    /// `holdConditions`, `exitConditions`) — those are prose the model
+    /// produces and are not validated as numeric claims.
     ///
     /// `analysisId` reuses the caller's requestId — one analysis run
     /// produces at most one result, so a separate id would only be another
@@ -91,15 +101,18 @@ public enum AnalysisRunner {
         if isCancelled() { throw CancellationError() }
 
         let generated = response.content
-        let candidateIds = Set(snapshot.levels.map(\.id))
+        let candidatePrices = Dictionary(
+            snapshot.levels.map { ($0.id, $0.price) },
+            uniquingKeysWith: { first, _ in first }
+        )
 
         let support = GroundingValidator.groundOrReject(
-            generated.support.map { GroundingValidator.LevelReference(levelId: $0.levelId, price: $0.price) },
-            candidateIds: candidateIds
+            levelId: generated.support?.levelId,
+            candidatePrices: candidatePrices
         )
         let resistance = GroundingValidator.groundOrReject(
-            generated.resistance.map { GroundingValidator.LevelReference(levelId: $0.levelId, price: $0.price) },
-            candidateIds: candidateIds
+            levelId: generated.resistance?.levelId,
+            candidatePrices: candidatePrices
         )
 
         let recommendation = budgeted.downgradedToObservationOnly ? "wait" : generated.recommendation.rawValue
@@ -135,7 +148,7 @@ public enum AnalysisRunner {
             let snapshotId = snapshot.identity.snapshotId
             if let groundedPlan = groundTradeDeskPlan(
                 plan,
-                candidateIds: candidateIds,
+                candidatePrices: candidatePrices,
                 contractReference: contractReference,
                 snapshotId: snapshotId
             ) {
@@ -168,29 +181,35 @@ public enum AnalysisRunner {
     }
 
     /// Grounds every price-bearing field in a generated trade-desk plan
-    /// before it is trusted: underlying prices against the supplied
-    /// candidate levels (GroundingValidator.groundOrReject, same mechanism
-    /// as support/resistance), contract-premium prices against the supplied
-    /// selected contract's own reference price
-    /// (GroundingValidator.groundOrRejectContractPrice). A field that fails
-    /// grounding is omitted, never trusted at face value or replaced with a
-    /// guess. `evidenceId`/`snapshotId` are attached here, not asked of the
-    /// model, since it has no reason to invent either.
+    /// before it is trusted. Underlying prices are resolved from
+    /// `candidatePrices[levelId]` — the model supplies only an id, never a
+    /// price, so there is no generated underlying number to distrust in the
+    /// first place (GroundingValidator.groundOrReject). Contract-premium
+    /// prices have no id to key off, so they're bounded against the
+    /// supplied selected contract's own reference price instead
+    /// (GroundingValidator.groundOrRejectContractPrice) — that field IS a
+    /// generated number, just one checked against a numeric bound rather
+    /// than resolved by lookup. A field that fails grounding is omitted,
+    /// never trusted at face value or replaced with a guess.
+    /// `evidenceId`/`snapshotId` are attached here, not asked of the model.
     @available(macOS 26, *)
     private static func groundTradeDeskPlan(
         _ plan: GeneratedTradeDeskPlan,
-        candidateIds: Set<String>,
+        candidatePrices: [String: Double],
         contractReference: Double?,
         snapshotId: String
     ) -> JSONValue? {
         func groundedLevel(_ ref: GeneratedLevelReference?) -> JSONValue? {
-            guard let ref, candidateIds.contains(ref.levelId) else { return nil }
+            guard let grounded = GroundingValidator.groundOrReject(
+                levelId: ref?.levelId,
+                candidatePrices: candidatePrices
+            ) else { return nil }
             return .object([
-                "value": .number(ref.price),
+                "value": .number(grounded.price),
                 "priceDomain": .string("underlying"),
-                "evidenceId": .string(ref.levelId),
+                "evidenceId": .string(grounded.levelId),
                 "snapshotId": .string(snapshotId),
-                "levelId": .string(ref.levelId),
+                "levelId": .string(grounded.levelId),
             ])
         }
 
@@ -209,10 +228,11 @@ public enum AnalysisRunner {
         var entryObject: [String: JSONValue] = [:]
         if let entry = plan.entry {
             if let underlying = entry.underlying,
-               candidateIds.contains(underlying.lowLevelId), candidateIds.contains(underlying.highLevelId) {
+               let lowPrice = candidatePrices[underlying.lowLevelId],
+               let highPrice = candidatePrices[underlying.highLevelId] {
                 entryObject["underlying"] = .object([
-                    "low": .number(underlying.low),
-                    "high": .number(underlying.high),
+                    "low": .number(min(lowPrice, highPrice)),
+                    "high": .number(max(lowPrice, highPrice)),
                     "priceDomain": .string("underlying"),
                     "evidenceId": .string(underlying.lowLevelId),
                     "snapshotId": .string(snapshotId),

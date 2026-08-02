@@ -2,27 +2,40 @@ import XCTest
 @testable import ShimCore
 
 final class GroundingValidatorTests: XCTestCase {
-    func testKeepsAReferenceMatchingASuppliedCandidate() {
-        let reference = GroundingValidator.LevelReference(levelId: "lvl-1", price: 400)
-        let result = GroundingValidator.groundOrReject(reference, candidateIds: ["lvl-1", "lvl-2"])
-        XCTAssertEqual(result, reference)
+    func testResolvesTheCandidatesOwnPriceForAMatchingId() {
+        let result = GroundingValidator.groundOrReject(
+            levelId: "lvl-1",
+            candidatePrices: ["lvl-1": 400, "lvl-2": 410]
+        )
+        XCTAssertEqual(result, GroundingValidator.LevelReference(levelId: "lvl-1", price: 400))
     }
 
     func testRejectsAGeneratedLevelWithNoMatchingCandidate() {
-        let reference = GroundingValidator.LevelReference(levelId: "ghost-level", price: 401)
-        let result = GroundingValidator.groundOrReject(reference, candidateIds: ["lvl-1", "lvl-2"])
+        let result = GroundingValidator.groundOrReject(
+            levelId: "ghost-level",
+            candidatePrices: ["lvl-1": 400, "lvl-2": 410]
+        )
         XCTAssertNil(result)
     }
 
-    func testNilReferencePassesThroughAsNil() {
-        let result = GroundingValidator.groundOrReject(nil, candidateIds: ["lvl-1"])
+    func testNilLevelIdPassesThroughAsNil() {
+        let result = GroundingValidator.groundOrReject(levelId: nil, candidatePrices: ["lvl-1": 400])
         XCTAssertNil(result)
     }
 
     func testEmptyCandidateSetRejectsEveryReference() {
-        let reference = GroundingValidator.LevelReference(levelId: "lvl-1", price: 400)
-        let result = GroundingValidator.groundOrReject(reference, candidateIds: [])
+        let result = GroundingValidator.groundOrReject(levelId: "lvl-1", candidatePrices: [:])
         XCTAssertNil(result)
+    }
+
+    /// The security-relevant case: there is no generated price parameter to
+    /// pass at all — the API only accepts an id, so a caller cannot even
+    /// attempt to supply a fabricated price alongside a valid id. Resolution
+    /// always reflects the snapshot's own value for that id.
+    func testResolvedPriceAlwaysComesFromTheCandidateNeverFromAnExternalValue() {
+        let candidatePrices = ["lvl-1": 578.5]
+        let result = GroundingValidator.groundOrReject(levelId: "lvl-1", candidatePrices: candidatePrices)
+        XCTAssertEqual(result?.price, 578.5)
     }
 
     func testKeepsAContractPriceWithinAGenerousMultipleOfTheReference() {

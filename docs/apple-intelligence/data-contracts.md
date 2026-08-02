@@ -137,14 +137,13 @@ A `tradeDeskPlan.action` is only valid when its required fields are present. A p
 
 ## Grounding rule
 
-Every recommended numeric level must reference:
+Every underlying price the model refers to must be identified by a supplied candidate-level id — the model never generates the price itself, even alongside a valid id. The runner resolves the actual price from the snapshot's own candidate levels by that id; a generated number is never trusted, whether or not it's paired with a real id. An id that doesn't match any supplied candidate is rejected outright, and so is the price that would have gone with it.
 
-- a supplied candidate-level identifier; or
-- a deterministic strategy-rule identifier with supplied operands.
+Contract-premium prices have no candidate-level id to match against, so they're grounded differently: bounded against the supplied selected contract's own bid/ask/last reference price (rejected if no contract was supplied, or if the price falls far outside a plausible multiple of that reference). Unlike underlying prices, these ARE generated numbers — just numbers checked against a bound rather than resolved by lookup, since there's no candidate list to look them up in.
 
-A generated number without grounding is invalid. Reject the structured result or downgrade it to observation-only output. Never silently accept an ungrounded level.
+A field that fails grounding is omitted, never trusted at face value or replaced with a guess. Reject the structured result or downgrade it to observation-only output when grounding fails for a required field.
 
-`tradeDeskPlan` prices ground the same way, with one addition: contract-premium prices have no candidate-level identifier to match, so they are grounded against the supplied selected contract's own bid/ask/last reference price instead (rejected if no contract was supplied, or if the price falls far outside a plausible multiple of that reference).
+**Scope**: this rule covers only fields explicitly modeled as a price (support/resistance, entry/invalidation/target prices). It does not — and cannot, without prose-level number extraction — cover numbers that might appear inside free-text fields (`summary`, `reasons`, `warnings`, `assumptions`, `holdConditions`, `exitConditions`). The system prompt instructs the model not to write numeric underlying prices in free text, but that's a prompting convention, not an enforced guarantee the way structured-field grounding is.
 
 ## Confidence rule
 

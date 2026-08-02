@@ -29,17 +29,16 @@ enum GeneratedBias: String, Sendable {
 }
 
 /// A generated numeric level reference. `levelId` must match a candidate
-/// level supplied in the snapshot — this struct only carries what the model
-/// produced; `GroundingValidator` checks the match afterward. A `levelId`
+/// level supplied in the snapshot. The model emits only the id — never a
+/// price — so there is no generated number to distrust: the runner always
+/// resolves the actual price from `snapshot.levels[levelId]`. A `levelId`
 /// that doesn't match any supplied candidate makes the whole reference
-/// ungrounded and it is dropped, never trusted at face value.
+/// ungrounded and it is dropped.
 @available(macOS 26, *)
 @Generable
 struct GeneratedLevelReference: Sendable {
     @Guide(description: "Must exactly match the id of one of the supplied candidate levels")
     var levelId: String
-    @Guide(description: "The price of the referenced candidate level, copied from that candidate")
-    var price: Double
 }
 
 @available(macOS 26, *)
@@ -48,15 +47,19 @@ enum GeneratedTradeDeskAction: String, Sendable {
     case wait, enter, hold, scale, exit, avoid
 }
 
+/// Underlying price zones/levels are grounded by id only — the model
+/// never generates the price itself, even paired with a valid id. The
+/// runner resolves the actual price from `snapshot.levels[id]`, so a
+/// generated number can't slip through attached to a correct id. This is
+/// also fewer tokens than asking the model to restate prices it already
+/// received.
 @available(macOS 26, *)
 @Generable
 struct GeneratedUnderlyingZone: Sendable {
     @Guide(description: "Must match a supplied candidate level id")
     var lowLevelId: String
-    var low: Double
     @Guide(description: "Must match a supplied candidate level id")
     var highLevelId: String
-    var high: Double
 }
 
 @available(macOS 26, *)
@@ -165,7 +168,8 @@ struct GeneratedAnalysis: Sendable {
 #endif
 
 /// Grounding rule (data-contracts.md): every recommended numeric level must
-/// reference a supplied candidate-level identifier. Runs regardless of
+/// reference a supplied candidate-level identifier, AND its price must come
+/// from that candidate, never from the model. Runs regardless of
 /// FoundationModels availability so it stays testable on every platform.
 public enum GroundingValidator {
     public struct LevelReference: Sendable, Equatable {
@@ -178,16 +182,17 @@ public enum GroundingValidator {
         }
     }
 
-    /// Returns the reference unchanged if `levelId` matches a supplied
-    /// candidate, or nil if it does not — an ungrounded level must never be
-    /// silently promoted to the result.
+    /// Resolves `levelId` to a `LevelReference` carrying the *candidate's*
+    /// price (never a model-generated one), or nil if `levelId` doesn't
+    /// match any supplied candidate. A model pairing a valid id with a
+    /// fabricated price cannot slip through, because no generated price is
+    /// ever consulted in the first place.
     public static func groundOrReject(
-        _ reference: LevelReference?,
-        candidateIds: Set<String>
+        levelId: String?,
+        candidatePrices: [String: Double]
     ) -> LevelReference? {
-        guard let reference else { return nil }
-        guard candidateIds.contains(reference.levelId) else { return nil }
-        return reference
+        guard let levelId, let price = candidatePrices[levelId] else { return nil }
+        return LevelReference(levelId: levelId, price: price)
     }
 
     /// Contract-premium prices have no candidate-level id to match against

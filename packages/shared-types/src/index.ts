@@ -422,6 +422,13 @@ export interface OrderSelection {
   expiration?: string;
   /** Explicit option orders only. */
   strike?: number;
+  /**
+   * auto_otm only: how many strikes out of the money to step from the ATM
+   * strike (the one closest to the live underlying price). 0 selects the ATM
+   * strike itself; omitted means 1. Servers predating this field strip it in
+   * validation, silently degrading to the default rather than erroring.
+   */
+  otmOffset?: number;
 }
 
 export interface OrderRequest {
@@ -488,6 +495,12 @@ export interface Position {
    * positions opened before this was recorded, or outside the app.
    */
   underlyingEntryPrice?: number;
+  /**
+   * ISO-8601 time of the fill that opened the current position run (the fill
+   * where quantity last left zero). Absent for positions opened before this
+   * was recorded, or outside the app.
+   */
+  openedAt?: string;
 }
 
 /** A historical order with the realized P/L its fill produced (closing fills only). */
@@ -629,6 +642,21 @@ export function bracketKindFor(
 ): 'target' | 'stop' {
   const profitable = (price - entryPrice) * positionProfitDirection(optionType, quantity) > 0;
   return profitable ? 'target' : 'stop';
+}
+
+// ---------------------------------------------------------------------------
+// Notifications
+// ---------------------------------------------------------------------------
+
+/**
+ * A device registered for push notifications. Registration is an idempotent
+ * upsert keyed on `token`; re-registering an existing token moves it to the
+ * calling account. The server prunes tokens APNs reports as dead.
+ */
+export interface DeviceRegistration {
+  /** Hex-encoded APNs device token. */
+  token: string;
+  platform: 'ios';
 }
 
 // ---------------------------------------------------------------------------

@@ -407,6 +407,26 @@ paths:
             content: { application/json: { schema: { $ref: '#/components/schemas/ChartOrder' } } },
           }
         '404': { description: No such chart order }
+  /notifications/devices:
+    post:
+      tags: [notifications]
+      security: [{ bearerAuth: [] }]
+      description: Registers a device for push notifications. Idempotent upsert keyed on the token; re-registering an existing token moves it to the calling account.
+      requestBody:
+        required: true
+        content:
+          { application/json: { schema: { $ref: '#/components/schemas/DeviceRegistration' } } }
+      responses:
+        '204': { description: Registered }
+  /notifications/devices/{token}:
+    delete:
+      tags: [notifications]
+      security: [{ bearerAuth: [] }]
+      description: Unregisters a device. Scoped to the calling account; deleting a token that is absent or owned elsewhere is a no-op.
+      parameters:
+        - { name: token, in: path, required: true, schema: { type: string } }
+      responses:
+        '204': { description: Unregistered }
 components:
   securitySchemes:
     bearerAuth: { type: http, scheme: bearer, bearerFormat: JWT }
@@ -553,6 +573,13 @@ components:
             optionType: { type: string, enum: [call, put] }
             expiration: { type: string, format: date }
             strike: { type: number }
+            otmOffset:
+              {
+                type: integer,
+                minimum: 0,
+                maximum: 10,
+                description: 'auto_otm only: strikes out of the money from the ATM strike (closest to the live price); 0 = ATM; omitted means 1',
+              }
     OrderPreview:
       type: object
       properties:
@@ -714,6 +741,18 @@ components:
             type: number,
             description: Quantity-weighted price of the UNDERLYING across the fills that opened this position — where the chart draws the entry line. Absent for positions opened before it was recorded or outside the app,
           }
+        openedAt:
+          {
+            type: string,
+            format: date-time,
+            description: Time of the fill that opened the current position run (where quantity last left zero). Absent for positions opened before it was recorded or outside the app,
+          }
+    DeviceRegistration:
+      type: object
+      required: [token, platform]
+      properties:
+        token: { type: string, description: Hex-encoded APNs device token }
+        platform: { type: string, enum: [ios] }
     OptionsAnalyticsCoverage:
       type: object
       required: [contractsTotal, contractsIncluded, ratio]

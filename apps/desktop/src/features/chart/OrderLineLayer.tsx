@@ -16,7 +16,13 @@ import { positionsForUnderlying } from './positionsForUnderlying';
 import { isPointerClaimed } from './chartPointerClaim';
 import type { ChartCandle } from './ChartStore';
 import type { ChartOrdersStore } from './chartOrders';
-import { isWorking, kindLabel, orderTypeLabel } from './chartOrders';
+import {
+  bracketLegDraft,
+  isWorking,
+  kindLabel,
+  orderTypeLabel,
+  workingBracketSiblings,
+} from './chartOrders';
 import type { ChartTradingSettings } from './chartTradingSettings';
 import { OrderPlacementPopover } from './OrderPlacementPopover';
 import {
@@ -867,41 +873,28 @@ export function OrderLineLayer({
       entry.price,
       price,
     );
-    const siblings = store
-      .getState()
-      .orders.filter(
-        (order) =>
-          order.contractSymbol === entry.position.symbol &&
-          order.ocoGroupId !== null &&
-          order.status === 'working',
-      );
     // A leg of the same kind already exists (e.g. a second drag above entry on
     // a long call, both classified 'target'): move it to the new level rather
     // than creating a second one. The OCO group cancels siblings by
     // membership, not by kind, so two targets sharing a group would silently
     // retire one of them on fire — the user would lose whichever the market
     // did not reach first with no warning.
+    const siblings = workingBracketSiblings(store.getState().orders, entry.position.symbol);
     const sameKind = siblings.find((order) => order.kind === kind);
     if (sameKind) {
       await store.move(sameKind.id, round2(price));
       return;
     }
-    // Both legs of one position share a group, so filling either retires the
-    // other. Reuse the group an existing leg already established.
-    const existing = siblings[0];
-    await store.create({
-      underlying: entry.contract.underlying,
-      triggerPrice: round2(price),
-      // Closing an existing position: the opposite side, sized to it.
-      side: entry.position.quantity > 0 ? 'sell' : 'buy',
-      quantity: Math.abs(entry.position.quantity),
-      orderType: latest.current.defaultOrderType,
-      kind,
-      optionType: entry.contract.optionType,
-      expiration: entry.contract.expiration,
-      strike: entry.contract.strike,
-      ocoGroupId: existing?.ocoGroupId ?? crypto.randomUUID(),
-    });
+    await store.create(
+      bracketLegDraft({
+        contract: entry.contract,
+        position: entry.position,
+        triggerPrice: round2(price),
+        kind,
+        orderType: latest.current.defaultOrderType,
+        orders: store.getState().orders,
+      }),
+    );
   };
 
   return (

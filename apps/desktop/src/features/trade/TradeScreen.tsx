@@ -428,6 +428,10 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
       onTrimPosition={(position) => void tradeStore.trimHalf(position)}
       onCancelOrder={(order) => void tradeStore.cancel(order)}
       onCancelChartOrder={(order) => void chartOrdersStore.cancel(order.id)}
+      onMoveChartOrder={(order, price) => void chartOrdersStore.move(order.id, price)}
+      onSelectChartOrder={(order) => chartOrdersStore.select(order.id)}
+      onCreateChartOrder={(draft) => void chartOrdersStore.create(draft)}
+      defaultOrderType={narrowToChartOrderType(trade.orderType)}
       resolveContract={resolveOptionContract}
       locked={locked}
     />
@@ -755,6 +759,11 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
                   onChangeTwcSettings={(settings) => chartStore.setTwcSettings(settings)}
                   optionsAnalytics={chart.optionsAnalytics}
                   onChangeOptionsAnalytics={(settings) => chartStore.setOptionsAnalytics(settings)}
+                  chartTrading={chartTradingSettings}
+                  onChangeChartTrading={(settings) => {
+                    settingsStore.chartTrading = settings;
+                    setChartTradingSettings(settings);
+                  }}
                 />
               ),
             },

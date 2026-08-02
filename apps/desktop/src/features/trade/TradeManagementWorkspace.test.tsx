@@ -6,8 +6,10 @@ import { TradeManagementWorkspace } from './TradeManagementWorkspace';
 import {
   dayPnl,
   desktopTradeWorkspaceHeight,
+  moveStopToEntryRequest,
   pnlPercent,
   signedCurrency,
+  timeInTrade,
 } from './TradeManagementWorkspaceModel';
 
 const contract: OptionContract = {
@@ -87,11 +89,47 @@ function renderWorkspace(overrides: Partial<Parameters<typeof TradeManagementWor
       onTrimPosition: () => undefined,
       onCancelOrder: () => undefined,
       onCancelChartOrder: () => undefined,
+      onMoveChartOrder: () => undefined,
+      onSelectChartOrder: () => undefined,
+      onCreateChartOrder: () => undefined,
+      defaultOrderType: 'mid',
       resolveContract: () => null,
       ...overrides,
     }),
   );
 }
+
+/** The rendered tag for the action button whose visible label is `label`. */
+function buttonTag(markup: string, label: string): string {
+  return markup.match(new RegExp(`<button[^>]*>${label}</button>`))?.[0] ?? '';
+}
+
+describe('timeInTrade', () => {
+  const NOW = Date.parse('2026-07-29T15:00:00Z');
+
+  it('formats minutes and hours since the run opened', () => {
+    expect(timeInTrade({ ...position, openedAt: '2026-07-29T14:56:00Z' }, NOW)).toBe('4m');
+    expect(timeInTrade({ ...position, openedAt: '2026-07-29T13:48:00Z' }, NOW)).toBe('1h 12m');
+  });
+
+  it('dashes when openedAt is missing or unparseable', () => {
+    expect(timeInTrade(position, NOW)).toBe('—');
+    expect(timeInTrade({ ...position, openedAt: 'not-a-time' }, NOW)).toBe('—');
+  });
+});
+
+describe('moveStopToEntryRequest', () => {
+  const anchored: Position = { ...position, underlyingEntryPrice: 636.4 };
+
+  it('moves the stop line to the underlying entry price', () => {
+    expect(moveStopToEntryRequest(anchored, stop)).toEqual({ order: stop, triggerPrice: 636.4 });
+  });
+
+  it('is unavailable without a stop line or without an entry anchor', () => {
+    expect(moveStopToEntryRequest(anchored, null)).toBeNull();
+    expect(moveStopToEntryRequest(position, stop)).toBeNull();
+  });
+});
 
 describe('TradeManagementWorkspace helpers', () => {
   it('collapses while flat and expands to resize the chart area', () => {
@@ -162,6 +200,57 @@ describe('TradeManagementWorkspace rendering', () => {
 
     expect(markup).toContain('Stop —');
     expect(markup).toContain('Target —');
+  });
+
+  it('enables stop/target actions once a stop line and entry anchor exist', () => {
+    const markup = renderWorkspace({
+      positions: [{ ...position, underlyingEntryPrice: 636.4 }],
+      chartOrders: [stop],
+      resolveContract: () => contract,
+    });
+
+    expect(buttonTag(markup, 'Move stop to entry')).not.toContain('disabled');
+    expect(buttonTag(markup, 'Edit stop')).not.toContain('disabled');
+    // No target line yet → Set target, creatable from the entry anchor.
+    expect(buttonTag(markup, 'Set target')).not.toContain('disabled');
+    expect(markup).not.toContain('Set stop');
+    expect(markup).not.toContain('Edit target');
+  });
+
+  it('disables Move stop to entry without a stop line, and Set legs without an entry anchor', () => {
+    // No stop line (entry anchor present): move disabled, Set stop enabled.
+    const noStop = renderWorkspace({
+      positions: [{ ...position, underlyingEntryPrice: 636.4 }],
+      resolveContract: () => contract,
+    });
+    expect(buttonTag(noStop, 'Move stop to entry')).toContain('disabled');
+    expect(buttonTag(noStop, 'Move stop to entry')).toContain('Set a stop line on the chart');
+    expect(buttonTag(noStop, 'Set stop')).not.toContain('disabled');
+
+    // No entry anchor: nothing to move to, and no level to create a leg at —
+    // but an existing line stays editable (selection needs no anchor).
+    const noAnchor = renderWorkspace({
+      positions: [position],
+      chartOrders: [stop],
+      resolveContract: () => contract,
+    });
+    expect(buttonTag(noAnchor, 'Move stop to entry')).toContain('disabled');
+    expect(buttonTag(noAnchor, 'Move stop to entry')).toContain('Entry price unknown');
+    expect(buttonTag(noAnchor, 'Set target')).toContain('disabled');
+    expect(buttonTag(noAnchor, 'Edit stop')).not.toContain('disabled');
+  });
+
+  it('locks every stop/target action alongside the rest of the workspace', () => {
+    const markup = renderWorkspace({
+      positions: [{ ...position, underlyingEntryPrice: 636.4 }],
+      chartOrders: [stop],
+      resolveContract: () => contract,
+      locked: true,
+    });
+
+    for (const label of ['Move stop to entry', 'Edit stop', 'Set target']) {
+      expect(buttonTag(markup, label)).toContain('disabled');
+    }
   });
 
   it('disables exit buttons while the position has a pending request', () => {

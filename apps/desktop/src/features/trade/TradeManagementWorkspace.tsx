@@ -1,5 +1,12 @@
 import { useMemo, useState } from 'react';
-import type { ChartOrder, OptionContract, OrderResult, Position } from '@0dtetrader/shared-types';
+import type {
+  ChartOrder,
+  ChartOrderDraft,
+  ChartOrderType,
+  OptionContract,
+  OrderResult,
+  Position,
+} from '@0dtetrader/shared-types';
 import { AlertDialog } from '../../design/components/AlertDialog';
 import { Spinner } from '../../design/components/Spinner';
 import { Format } from '../../design/format';
@@ -10,9 +17,16 @@ import {
   orderTypeDisplayName,
   sideDisplayName,
 } from '../../core/models/domain';
-import { isWorking } from '../chart/chartOrders';
+import { bracketLegDraft, isWorking } from '../chart/chartOrders';
+import { defaultBracketLevel } from './bracketDefaults';
 import { selectPositionExpiryBreakEven } from './expiryBreakEven';
-import { dayPnl, pnlPercent, signedCurrency } from './TradeManagementWorkspaceModel';
+import {
+  dayPnl,
+  moveStopToEntryRequest,
+  pnlPercent,
+  signedCurrency,
+  timeInTrade,
+} from './TradeManagementWorkspaceModel';
 
 export type TradeWorkspaceTab = 'positions' | 'orders' | 'recent';
 
@@ -27,6 +41,15 @@ interface TradeManagementWorkspaceProps {
   onTrimPosition: (position: Position) => void;
   onCancelOrder: (order: OrderResult) => void;
   onCancelChartOrder: (order: ChartOrder) => void;
+  /** Moves a working chart line to a new level (Move stop to entry). */
+  onMoveChartOrder: (order: ChartOrder, triggerPrice: number) => void;
+  /** Selects a line on the chart — Edit stop/target hands off to the
+   *  existing selection/drag UX rather than growing its own editor. */
+  onSelectChartOrder: (order: ChartOrder) => void;
+  /** Creates a new bracket leg (Set stop / Set target). */
+  onCreateChartOrder: (draft: ChartOrderDraft) => void;
+  /** Execution type a new leg inherits — the ticket's, already narrowed. */
+  defaultOrderType: ChartOrderType;
   resolveContract: (symbol: string) => OptionContract | null;
   locked?: boolean;
 }
@@ -42,8 +65,14 @@ interface PositionMeta {
   relatedChartOrders: ChartOrder[];
 }
 
-function timeInTrade(): string {
-  return '—';
+/** Tooltip for a disabled "Move stop to entry"; undefined while it is usable. */
+function moveStopBlockedReason(
+  stop: ChartOrder | null,
+  entryPrice: number | undefined,
+): string | undefined {
+  if (!stop) return 'Set a stop line on the chart first';
+  if (entryPrice === undefined) return 'Entry price unknown';
+  return undefined;
 }
 
 function positionLabel(position: Position, contract: OptionContract | null): string {
@@ -95,6 +124,10 @@ export function TradeManagementWorkspace({
   onTrimPosition,
   onCancelOrder,
   onCancelChartOrder,
+  onMoveChartOrder,
+  onSelectChartOrder,
+  onCreateChartOrder,
+  defaultOrderType,
   resolveContract,
   locked = false,
 }: TradeManagementWorkspaceProps) {
@@ -119,6 +152,43 @@ export function TradeManagementWorkspace({
   const activeMeta = activePosition ? metas.get(activePosition.symbol) : null;
   const totalDayPnl = dayPnl(positions);
   const activeWorking = activePosition ? workingSymbols.includes(activePosition.symbol) : false;
+  const activeEntryPrice = activePosition?.underlyingEntryPrice;
+
+  // Why a Set stop/target could not create a leg right now; null means it can.
+  let legActionBlockedReason: string | null = null;
+  if (!activeMeta?.contract) {
+    legActionBlockedReason = "Open this contract's chart to manage its lines";
+  } else if (activeEntryPrice === undefined) {
+    legActionBlockedReason = 'Entry price unknown';
+  }
+
+  /** Edit selects the existing line (the chart's selection/drag UX takes it
+   *  from there); Set creates the missing OCO leg at its default level. */
+  const setOrEditLeg = (kind: 'stop' | 'target') => {
+    if (!activePosition || !activeMeta) return;
+    const existing = kind === 'stop' ? activeMeta.stop : activeMeta.target;
+    if (existing) {
+      onSelectChartOrder(existing);
+      return;
+    }
+    const { contract } = activeMeta;
+    if (!contract || activeEntryPrice === undefined) return;
+    onCreateChartOrder(
+      bracketLegDraft({
+        contract,
+        position: activePosition,
+        triggerPrice: defaultBracketLevel(
+          kind,
+          contract.optionType,
+          activePosition.quantity,
+          activeEntryPrice,
+        ),
+        kind,
+        orderType: defaultOrderType,
+        orders: chartOrders,
+      }),
+    );
+  };
 
   let expandedBody: React.ReactNode;
   if (tab === 'positions') {
@@ -175,7 +245,7 @@ export function TradeManagementWorkspace({
             <span>Expiry B/E {priceOrDash(activeMeta.expiryBreakEven)}</span>
             <span>Stop {priceOrDash(activeMeta.stop?.triggerPrice)}</span>
             <span>Target {priceOrDash(activeMeta.target?.triggerPrice)}</span>
-            <span>Time in trade {timeInTrade()}</span>
+            <span>Time in trade {timeInTrade(activePosition)}</span>
           </div>
           <div className="trade-position-strip__actions">
             <button
@@ -194,22 +264,28 @@ export function TradeManagementWorkspace({
             </button>
             <button
               className="desktop-positions-action"
-              disabled
-              title="Set a stop line on the chart first"
+              disabled={locked || moveStopToEntryRequest(activePosition, activeMeta.stop) === null}
+              title={moveStopBlockedReason(activeMeta.stop, activeEntryPrice)}
+              onClick={() => {
+                const request = moveStopToEntryRequest(activePosition, activeMeta.stop);
+                if (request) onMoveChartOrder(request.order, request.triggerPrice);
+              }}
             >
               Move stop to entry
             </button>
             <button
               className="desktop-positions-action"
-              disabled
-              title="Use chart order lines to set or edit stops"
+              disabled={locked || (!activeMeta.stop && legActionBlockedReason !== null)}
+              title={activeMeta.stop ? undefined : (legActionBlockedReason ?? undefined)}
+              onClick={() => setOrEditLeg('stop')}
             >
               {activeMeta.stop ? 'Edit stop' : 'Set stop'}
             </button>
             <button
               className="desktop-positions-action"
-              disabled
-              title="Use chart order lines to set or edit targets"
+              disabled={locked || (!activeMeta.target && legActionBlockedReason !== null)}
+              title={activeMeta.target ? undefined : (legActionBlockedReason ?? undefined)}
+              onClick={() => setOrEditLeg('target')}
             >
               {activeMeta.target ? 'Edit target' : 'Set target'}
             </button>
@@ -433,7 +509,7 @@ function PositionsTable({
                 {priceOrDash(meta?.target?.triggerPrice)}
               </td>
               <td className="numeric" style={{ textAlign: 'right' }}>
-                {timeInTrade()}
+                {timeInTrade(position)}
               </td>
               <td style={{ textAlign: 'right' }}>
                 <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>

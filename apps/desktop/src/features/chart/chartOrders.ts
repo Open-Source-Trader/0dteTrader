@@ -3,6 +3,8 @@ import type {
   ChartOrderDraft,
   ChartOrderKind,
   ChartOrderType,
+  OptionContract,
+  Position,
 } from '@0dtetrader/shared-types';
 import { chartOrderCrossed } from '@0dtetrader/shared-types';
 import type { ApiClient } from '../../core/api/ApiClient';
@@ -250,6 +252,47 @@ export class ChartOrdersStore extends Store<ChartOrdersState> {
 
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/** Working lines already protecting `contractSymbol` inside an OCO group. */
+export function workingBracketSiblings(orders: ChartOrder[], contractSymbol: string): ChartOrder[] {
+  return orders.filter(
+    (order) =>
+      order.contractSymbol === contractSymbol && order.ocoGroupId !== null && isWorking(order),
+  );
+}
+
+/**
+ * Draft for a new bracket leg (target/stop) protecting an existing position:
+ * the opposite side, sized to the full position. Both legs of one position
+ * share an OCO group, so filling either retires the other — the draft reuses
+ * the group an existing working sibling already established, else mints a new
+ * one. Shared by the chart's bracket drag and the trade-management
+ * workspace's Set stop / Set target actions, so the group-reuse rule lives in
+ * exactly one place.
+ */
+export function bracketLegDraft(input: {
+  contract: OptionContract;
+  position: Position;
+  triggerPrice: number;
+  kind: ChartOrderKind;
+  orderType: ChartOrderType;
+  /** All known lines; the sibling scan filters them itself. */
+  orders: ChartOrder[];
+}): ChartOrderDraft {
+  const siblings = workingBracketSiblings(input.orders, input.position.symbol);
+  return {
+    underlying: input.contract.underlying,
+    triggerPrice: input.triggerPrice,
+    side: input.position.quantity > 0 ? 'sell' : 'buy',
+    quantity: Math.abs(input.position.quantity),
+    orderType: input.orderType,
+    kind: input.kind,
+    optionType: input.contract.optionType,
+    expiration: input.contract.expiration,
+    strike: input.contract.strike,
+    ocoGroupId: siblings[0]?.ocoGroupId ?? crypto.randomUUID(),
+  };
 }
 
 /** Short label for the kind pill: the line's colour already carries most of this. */

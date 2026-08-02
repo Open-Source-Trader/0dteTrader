@@ -472,4 +472,105 @@ describe('AnalysisStore', () => {
       expect(analyzeMock).toHaveBeenCalledTimes(2);
     });
   });
+
+  describe('action hysteresis', () => {
+    /** Runs one analyze()/completed round trip and returns the resulting
+     * state — the test's unit of "one sample". */
+    async function analyzeOnce(
+      store: AnalysisStore,
+      emit: (event: NativeEventPayload) => void,
+      overrides: { snapshotSequence: number; payload: Record<string, unknown> },
+    ) {
+      await store.analyze(makeSnapshot({ snapshotSequence: overrides.snapshotSequence }));
+      const requestId = store.getState().activeRequestId;
+      emit({
+        protocolVersion: 1,
+        requestId: requestId!,
+        event: 'completed',
+        payload: validResultPayload({
+          context: {
+            symbol: 'SPY',
+            timeframe: '5m',
+            snapshotSequence: overrides.snapshotSequence,
+            positionVersion: 0,
+          },
+          ...overrides.payload,
+        }),
+      });
+      return store.getState();
+    }
+
+    it('promotes the first-ever result immediately, with nothing pending', async () => {
+      const { bridge, emit } = makeFakeBridge();
+      const store = new AnalysisStore(bridge);
+      store.start();
+
+      const state = await analyzeOnce(store, emit, {
+        snapshotSequence: 1,
+        payload: { recommendation: 'hold' },
+      });
+
+      expect(state.latestResult?.recommendation).toBe('hold');
+      expect(state.pendingActionChange).toBeNull();
+    });
+
+    it('holds a lone contrary action instead of flipping immediately', async () => {
+      const { bridge, emit } = makeFakeBridge();
+      const store = new AnalysisStore(bridge);
+      store.start();
+
+      await analyzeOnce(store, emit, { snapshotSequence: 1, payload: { recommendation: 'hold' } });
+      const afterSecond = await analyzeOnce(store, emit, {
+        snapshotSequence: 2,
+        payload: { analysisId: 'a2', recommendation: 'exit', summary: 'fresh prose' },
+      });
+
+      // Action stays held at 'hold' — a single contrary sample is not enough.
+      expect(afterSecond.latestResult?.recommendation).toBe('hold');
+      // But freshness (prose) still visibly updates, per the product
+      // requirement that advice stay up to date as markets run.
+      expect(afterSecond.latestResult?.summary).toBe('fresh prose');
+      expect(afterSecond.pendingActionChange).toEqual({ action: 'exit' });
+    });
+
+    it('confirms and promotes a changed action once seen twice in a row', async () => {
+      const { bridge, emit } = makeFakeBridge();
+      const store = new AnalysisStore(bridge);
+      store.start();
+
+      await analyzeOnce(store, emit, { snapshotSequence: 1, payload: { recommendation: 'hold' } });
+      await analyzeOnce(store, emit, {
+        snapshotSequence: 2,
+        payload: { analysisId: 'a2', recommendation: 'exit' },
+      });
+      const afterThird = await analyzeOnce(store, emit, {
+        snapshotSequence: 3,
+        payload: { analysisId: 'a3', recommendation: 'exit' },
+      });
+
+      expect(afterThird.latestResult?.recommendation).toBe('exit');
+      expect(afterThird.latestResult?.analysisId).toBe('a3');
+      expect(afterThird.pendingActionChange).toBeNull();
+    });
+
+    it('does not accumulate partial confirmation across two different candidates', async () => {
+      const { bridge, emit } = makeFakeBridge();
+      const store = new AnalysisStore(bridge);
+      store.start();
+
+      await analyzeOnce(store, emit, { snapshotSequence: 1, payload: { recommendation: 'hold' } });
+      await analyzeOnce(store, emit, {
+        snapshotSequence: 2,
+        payload: { analysisId: 'a2', recommendation: 'exit' },
+      });
+      const afterThird = await analyzeOnce(store, emit, {
+        snapshotSequence: 3,
+        payload: { analysisId: 'a3', recommendation: 'avoid' },
+      });
+
+      // Two different contrary candidates in a row — neither confirmed.
+      expect(afterThird.latestResult?.recommendation).toBe('hold');
+      expect(afterThird.pendingActionChange).toEqual({ action: 'avoid' });
+    });
+  });
 });

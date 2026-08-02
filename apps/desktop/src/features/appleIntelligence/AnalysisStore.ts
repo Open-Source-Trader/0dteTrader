@@ -3,6 +3,13 @@ import type {
   AppleIntelligenceBridge,
   NativeEventPayload,
 } from '../../core/desktop/appleIntelligence';
+import {
+  advanceActionHysteresis,
+  decideActionHysteresis,
+  hysteresisKey,
+  synthesizeHeldResult,
+  type ActionHysteresisState,
+} from './actionHysteresis';
 import { isResultCurrent } from './stalenessGate';
 import {
   enforceTradeDeskInvariants,
@@ -16,6 +23,7 @@ import type {
   AnalysisContextIdentity,
   AnalysisResult,
   AnalysisSnapshot,
+  TradeDeskAction,
   TriggerKind,
   TriggerPriority,
 } from './types';
@@ -44,6 +52,13 @@ interface AnalysisStoreState {
   history: HistoryEntry[];
   queueDepth: number;
   lastAnalysisDurationMs: number | null;
+  /** A differing action seen in the latest sample but not yet confirmed
+   * (actionHysteresis.ts) — `latestResult`'s action is still the
+   * previously-confirmed one; this surfaces the candidate so the UI can
+   * show "confirming" feedback without changing the primary action badge.
+   * `null` when the latest sample matched the confirmed action (nothing
+   * pending) or promoted immediately (threshold crossed / no prior state). */
+  pendingActionChange: { action: TradeDeskAction } | null;
 }
 
 /**
@@ -59,6 +74,12 @@ export class AnalysisStore extends Store<AnalysisStoreState> {
   private lastSnapshot: AnalysisSnapshot | null = null;
   private readonly scheduler = new AnalysisScheduler();
   private requestStartedAt: number | null = null;
+  /** Tracks the confirmed action per instrument (actionHysteresis.ts) so a
+   * lone contrary sample doesn't flip current guidance — the model's
+   * prose/confidence may vary call to call, but the action a trader would
+   * act on must not, absent a real crossed threshold or a confirmed repeat.
+   * `null` until the first result for the current instrument is promoted. */
+  private hysteresisState: ActionHysteresisState | null = null;
 
   constructor(private readonly bridge: AppleIntelligenceBridge | null) {
     super({
@@ -74,6 +95,7 @@ export class AnalysisStore extends Store<AnalysisStoreState> {
       history: [],
       queueDepth: 0,
       lastAnalysisDurationMs: null,
+      pendingActionChange: null,
     });
   }
 
@@ -236,20 +258,37 @@ export class AnalysisStore extends Store<AnalysisStoreState> {
    * snapshot is current *right now*, which may differ from the result's own
    * `context` if a newer request was already submitted by the time this one
    * completed. A result may update current guidance only when its context
-   * still matches. */
+   * still matches. Current results additionally pass through action
+   * hysteresis (actionHysteresis.ts) before promotion: a lone contrary
+   * sample is held back rather than immediately flipping the action a
+   * trader would act on. */
   private promoteResult(result: AnalysisResult, currentContext: AnalysisContextIdentity): void {
     const isCurrent = isResultCurrent(result.context, currentContext);
 
     this.pushHistory({ result, wasPromoted: isCurrent });
-    if (isCurrent) {
-      // Current: safe to update guidance. Stale: retained above for
-      // diagnostics/history only, per lifecycle-and-concurrency.md — it
-      // must never replace current guidance.
-      this.set({
-        latestResult: result,
-        latestTriggerKind: this.lastSnapshot?.trigger.kind ?? null,
-      });
-    }
+    if (!isCurrent) return;
+    // Current: safe to update guidance. Stale: retained above for
+    // diagnostics/history only, per lifecycle-and-concurrency.md — it
+    // must never replace current guidance.
+
+    const snapshot = this.lastSnapshot;
+    if (!snapshot) return;
+
+    const key = hysteresisKey(snapshot);
+    const state = this.hysteresisState?.key === key ? this.hysteresisState : null;
+    const decision = decideActionHysteresis(state, result, snapshot);
+    this.hysteresisState = advanceActionHysteresis(state, result, snapshot, decision);
+
+    const promoted =
+      decision.kind === 'hold' ? synthesizeHeldResult(state!.confirmedResult, result) : result;
+    const pendingActionChange =
+      decision.kind === 'hold' ? { action: decision.pendingAction } : null;
+
+    this.set({
+      latestResult: promoted,
+      latestTriggerKind: snapshot.trigger.kind,
+      pendingActionChange,
+    });
   }
 
   private pushHistory(entry: HistoryEntry): void {

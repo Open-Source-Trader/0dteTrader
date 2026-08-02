@@ -44,6 +44,7 @@ export function TradeDeskPanel({
       isAnalyzing: state.isAnalyzing,
       latestResult: state.latestResult,
       errorMessage: state.errorMessage,
+      pendingActionChange: state.pendingActionChange,
     }),
     shallowEqual,
   );
@@ -157,6 +158,14 @@ export function TradeDeskPanel({
       >
         <span className="trade-desk__eyebrow">AI TRADE DESK</span>
         {presentation ? <TradeDeskActionBadge presentation={presentation} /> : null}
+        {viewState.pendingActionChange ? (
+          <span
+            className="trade-desk__pending-action"
+            title={`New signal: ${viewState.pendingActionChange.label} — confirming`}
+          >
+            → {viewState.pendingActionChange.label}?
+          </span>
+        ) : null}
         <span className="trade-desk__header-spacer" />
         {presentation?.entry?.preferredContractPrice ? (
           <span className="trade-desk__entry-chip numeric">

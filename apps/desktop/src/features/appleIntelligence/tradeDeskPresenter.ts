@@ -7,6 +7,7 @@ import type {
   AnalysisContextIdentity,
   AnalysisResult,
   MarketAnalysisState,
+  TradeDeskAction,
   TradeDeskPlan,
 } from './types';
 
@@ -89,6 +90,12 @@ export interface TradeDeskViewState {
    * Defaults to `live` when the caller doesn't supply one, so existing
    * callers/tests are unaffected. */
   marketSessionState: MarketAnalysisState;
+  /** A differing action seen in the latest sample but not yet confirmed
+   * (AnalysisStore's action hysteresis) — the primary action badge still
+   * shows the held/confirmed action; this surfaces the candidate so the
+   * panel can show "confirming" feedback without flipping the badge on a
+   * single contrary sample. */
+  pendingActionChange?: { action: TradeDeskAction; label: string };
 }
 
 export interface TradeDeskPresentationLimits {
@@ -121,6 +128,7 @@ export interface BuildTradeDeskViewStateInput {
   disabled?: boolean;
   limits?: Partial<TradeDeskPresentationLimits>;
   marketSessionState?: MarketAnalysisState;
+  pendingActionChange?: { action: TradeDeskAction } | null;
 }
 
 export function buildTradeDeskViewState(input: BuildTradeDeskViewStateInput): TradeDeskViewState {
@@ -204,12 +212,19 @@ export function buildTradeDeskViewState(input: BuildTradeDeskViewStateInput): Tr
   // downgrade the applicable-price suggestion rather than the result itself.
   const canApplySuggestedPrice =
     marketSessionState === 'live' && Boolean(visiblePresentation.applicablePriceSuggestion);
+  const pendingActionChange = input.pendingActionChange
+    ? {
+        action: input.pendingActionChange.action,
+        label: pendingActionLabel(input.pendingActionChange.action),
+      }
+    : undefined;
   return {
     status: 'current',
     presentation: visiblePresentation,
     generatedAt: input.latestResult.generatedAt,
     canApplySuggestedPrice,
     marketSessionState,
+    pendingActionChange,
   };
 }
 
@@ -505,6 +520,14 @@ function actionLabel(action: TradeDeskPresentationAction): string {
     default:
       return action.toUpperCase();
   }
+}
+
+/** A pending candidate has no `scaleAdvice` direction to normalize against
+ * (it hasn't been confirmed/promoted yet), so it labels plainly rather than
+ * splitting into SCALE IN/OUT the way `actionLabel` does for a promoted
+ * action. */
+function pendingActionLabel(action: TradeDeskAction): string {
+  return action.toUpperCase();
 }
 
 function roleLabel(role: PresentedTarget['role']): string {

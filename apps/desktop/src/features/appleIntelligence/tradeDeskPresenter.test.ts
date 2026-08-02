@@ -343,4 +343,16 @@ describe('buildTradeDeskViewState', () => {
     // absent), never split.
     expect(legacyOnly.presentation?.applicablePriceSuggestion).toBeUndefined();
   });
+
+  it('has no pendingActionChange when nothing is pending', () => {
+    expect(current().pendingActionChange).toBeUndefined();
+  });
+
+  it('surfaces a pendingActionChange without altering the primary action badge', () => {
+    const state = current({ pendingActionChange: { action: 'exit' } });
+    expect(state.pendingActionChange).toEqual({ action: 'exit', label: 'EXIT' });
+    // The badge itself still reflects the held/confirmed result's action,
+    // not the pending candidate.
+    expect(state.presentation?.action).toBe(result().tradeDeskPlan!.action);
+  });
 });

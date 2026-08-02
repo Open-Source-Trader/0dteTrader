@@ -2923,6 +2923,16 @@
   color: var(--label-primary);
 }
 
+.trade-desk__pending-action {
+  flex: none;
+  color: var(--label-secondary);
+  font-size: var(--fs-caption2-desktop);
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  opacity: 0.85;
+}
+
 .trade-desk__collapsed-line,
 .trade-desk__collapsed-empty {
   flex: none;

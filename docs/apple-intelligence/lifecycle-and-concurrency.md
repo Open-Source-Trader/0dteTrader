@@ -112,7 +112,21 @@ A result may update current guidance only when its immutable context still match
 
 A stale result may be retained for local diagnostics or history. It must never replace current guidance.
 
-Every manual "Refresh" invokes a fresh model generation — there is no result cache keyed on snapshot content. A cache was tried and reverted: live market/candle data ticks on nearly every capture (quote bid/ask, the in-progress candle's OHLCV), so "semantically unchanged" essentially never occurred while markets were open, making a content-hash cache both ineffective (rarely hit) and confusing (a rare hit produced no visible feedback, reading as "Refresh does nothing"). Repeated variance across manual refreshes is expected — the model samples independently each call — and is a product/UX concern (e.g. surfacing confidence or showing prior results for comparison), not something to paper over with silent result reuse.
+Every manual "Refresh" invokes a fresh model generation — there is no result cache keyed on snapshot content. A cache was tried and reverted: live market/candle data ticks on nearly every capture (quote bid/ask, the in-progress candle's OHLCV), so "semantically unchanged" essentially never occurred while markets were open, making a content-hash cache both ineffective (rarely hit) and confusing (a rare hit produced no visible feedback, reading as "Refresh does nothing"). Prose, confidence, and reasoning are expected to vary between independently-sampled calls — see "Action hysteresis" below for what must NOT vary.
+
+## Action hysteresis
+
+Generation is inherently non-deterministic — the same market snapshot can legitimately produce different prose or confidence on two consecutive calls. What must not vary from sampling noise alone is the decision itself: `enter`/`hold`/`exit`/`wait`/`avoid`/`scale`. A trader acting on the Trade Desk must not see the action flip between calls just because the model sampled differently on structurally unchanged market data.
+
+This is hysteresis on the model's own action call (`actionHysteresis.ts`), not a deterministic rule engine replacing it — the model still decides; `AnalysisStore.promoteResult` just declines to promote a lone contrary sample into current guidance until it's either confirmed or backed by a real, checkable trigger:
+
+- **A fresh result's action matches the currently-confirmed action** — promoted immediately, no friction.
+- **The live price has actually crossed a threshold the _held_ result's own grounded `tradeDeskPlan.invalidation.underlying` drew** — promoted immediately; this is a real market move, not noise. Only `enter`/`hold`/`exit` ever have a grounded invalidation to check against; a differing `scale`/`wait`/`avoid` candidate never gets this fast path.
+- **Otherwise** — the differing action becomes a pending candidate. It's held back (current guidance stays on the previously-confirmed action) until the _same_ candidate action appears in a second consecutive result, at which point it's confirmed and promoted. A third result with yet another different action resets pending tracking to the newest candidate — no partial credit accumulates across different candidates.
+
+While a candidate is held back, the promoted result is synthesized: prose/confidence/timestamp come from the fresh sample (so the panel still visibly updates as the market runs — advice stays up to date even while the action itself is stable), but the action and its action-specific structured fields (entry, invalidation, targets, management) come from the held result, since those are meaningless paired with a different action's prose. The pending candidate is surfaced to the UI (`AnalysisStoreState.pendingActionChange`) so the panel can show "confirming" feedback without moving the primary action badge.
+
+The hysteresis tracker is keyed by `symbol:timeframe:selectedContractSymbol` and resets on change — switching instruments starts fresh rather than holding a new instrument's action behind an unrelated prior instrument's state.
 
 ## Crash-loop policy
 

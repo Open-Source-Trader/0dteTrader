@@ -112,16 +112,29 @@ final class TradeReadinessTests: XCTestCase {
     /// same inputs, so their readiness is identical by construction — this
     /// pins the equivalence for the whole matrix.
     func testReadinessIsLayoutIndependent() {
-        let cases: [(OptionContract?, Bool, Bool)] = [
-            (nil, false, true),
-            (contract(bid: 0, ask: 0), false, true),
-            (contract(bid: 0.55, ask: 0.6), false, true),
-            (contract(bid: 0.55, ask: 0.6), true, true),
-            (contract(bid: 0, ask: 0.6), false, false),
+        struct Inputs {
+            let contract: OptionContract?
+            let locked: Bool
+            let canArm: Bool
+        }
+        let cases: [Inputs] = [
+            Inputs(contract: nil, locked: false, canArm: true),
+            Inputs(contract: contract(bid: 0, ask: 0), locked: false, canArm: true),
+            Inputs(contract: contract(bid: 0.55, ask: 0.6), locked: false, canArm: true),
+            Inputs(contract: contract(bid: 0.55, ask: 0.6), locked: true, canArm: true),
+            Inputs(contract: contract(bid: 0, ask: 0.6), locked: false, canArm: false),
         ]
-        for (selected, locked, canArm) in cases {
-            let split = TradeReadiness.canTrade(contract: selected, locked: locked, canArm: canArm)
-            let fullscreen = TradeReadiness.canTrade(contract: selected, locked: locked, canArm: canArm)
+        for inputs in cases {
+            let split = TradeReadiness.canTrade(
+                contract: inputs.contract,
+                locked: inputs.locked,
+                canArm: inputs.canArm
+            )
+            let fullscreen = TradeReadiness.canTrade(
+                contract: inputs.contract,
+                locked: inputs.locked,
+                canArm: inputs.canArm
+            )
             XCTAssertEqual(split, fullscreen)
         }
     }

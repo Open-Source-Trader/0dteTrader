@@ -10,6 +10,11 @@ protocol RemoteNotificationRegistry {
 }
 
 struct UIApplicationRemoteNotificationRegistry: RemoteNotificationRegistry {
+    /// Explicitly nonisolated: the @MainActor protocol conformance would
+    /// otherwise isolate the implicit memberwise init too, and this type is
+    /// constructed as a DEFAULT ARGUMENT (a nonisolated context) below.
+    nonisolated init() {}
+
     func registerForRemoteNotifications() {
         UIApplication.shared.registerForRemoteNotifications()
     }

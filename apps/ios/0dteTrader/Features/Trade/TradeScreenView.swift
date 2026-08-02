@@ -433,6 +433,12 @@ struct TradeScreenView: View {
                                 .onChange(of: proxy.size.height) { _, height in tradePanelHeight = height }
                         }
                     }
+                    // Swipe left (or tap the chevron) for the positions drawer.
+                    .modifier(PositionsPanelPresentation(
+                        tradeViewModel: tradeViewModel,
+                        chartOrders: chartOrdersModel,
+                        tradingLocked: tradingLocked || needsProviderConfig
+                    ))
                     .layoutPriority(1)
                     // Drawn offset, not layout: the panel slides up over the
                     // chart just far enough to bring the price field clear of

@@ -485,7 +485,25 @@ final class TradeViewModel: ObservableObject {
 
     /// Tap-to-flatten: opposite-side market order for the full position size.
     func flatten(_ position: Position) async {
-        guard position.quantity != 0 else { return }
+        await exit(position, quantity: abs(position.quantity), action: "Flatten")
+    }
+
+    /// Partial scale-out: opposite-side market order for half the position.
+    /// Rounds down, like the desktop's `TradeStore.trimHalf` — a 1-lot has
+    /// nothing to trim, so it no-ops.
+    func trimHalf(_ position: Position) async {
+        await exit(position, quantity: Self.trimQuantity(position.quantity), action: "Trim")
+    }
+
+    /// Half the position, rounded down — the quantity `trimHalf` sends.
+    nonisolated static func trimQuantity(_ positionQuantity: Int) -> Int {
+        abs(positionQuantity) / 2
+    }
+
+    /// Opposite-side market order reducing `position` by `quantity`
+    /// (clamped to the position size). Shared by flatten and trimHalf.
+    private func exit(_ position: Position, quantity: Int, action: String) async {
+        guard position.quantity != 0, quantity > 0 else { return }
         guard !workingSymbols.contains(position.symbol) else { return }
 
         guard let contract = optionContractResolver?(position.symbol) else {
@@ -500,7 +518,7 @@ final class TradeViewModel: ObservableObject {
             underlying: contract.underlying,
             assetClass: "option",
             side: side.rawValue,
-            quantity: abs(position.quantity),
+            quantity: min(quantity, abs(position.quantity)),
             orderType: OrderType.market.rawValue,
             limitPrice: nil,
             selection: OrderSelectionDTO(
@@ -516,7 +534,7 @@ final class TradeViewModel: ObservableObject {
                 idempotencyKey: UUID().uuidString
             ))
             showToast(
-                "Flatten \(position.symbol) — \(result.status.displayName)",
+                "\(action) \(position.symbol) — \(result.status.displayName)",
                 style: result.status == .rejected ? .error : .success
             )
             // See submitOrder: the placement's own orderUpdate push refreshes

@@ -182,6 +182,11 @@ model TradeOrder {
   orderType      String
   limitPrice     Float?
   filledPrice    Float?
+  // When the order's FIRST execution happened: the broker's execution
+  // timestamp when reported, else when the fill was observed. Anchors
+  // Position.openedAt. Null for rows recorded before this column existed —
+  // readers fall back to placedAt.
+  filledAt       DateTime?
   // Price of the UNDERLYING when the order was placed. Feeds the chart's entry
   // line, which is drawn on the underlying's scale, not the contract's. Null
   // for orders placed before this was recorded.

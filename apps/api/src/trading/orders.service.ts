@@ -19,7 +19,8 @@ interface BookEntry {
    *  in as zero. */
   underlyingQty: number;
   /** When the fill that opened the current position run happened (the fill
-   *  where quantity last left zero). */
+   *  where quantity last left zero). Execution time (`filledAt`); legacy rows
+   *  recorded before fill timestamps fall back to placement time. */
   openedAt: Date | null;
 }
 
@@ -58,6 +59,28 @@ function isFill(row: TradeOrder): boolean {
   );
 }
 
+/** The isFill test for an incoming event, before it becomes a row. */
+function isFillEvent(order: OrderResult): boolean {
+  return (
+    order.filledPrice !== undefined &&
+    (order.filledQuantity ?? order.quantity) > 0 &&
+    (order.status === 'filled' ||
+      order.status === 'partially_filled' ||
+      (order.status === 'cancelled' && order.filledQuantity !== undefined))
+  );
+}
+
+/**
+ * When a fill event executed: the broker's execution timestamp when the
+ * gateway reports one, else the moment the fill was observed — the closest
+ * verified time to execution. Never the order's placement time: a resting
+ * limit can fill long after it was placed.
+ */
+function fillTimeOf(order: OrderResult): Date {
+  const reported = order.filledAt ? new Date(order.filledAt) : null;
+  return reported !== null && !Number.isNaN(reported.getTime()) ? reported : new Date();
+}
+
 /**
  * Applies one fill to the running average-cost book, returning the realized
  * P/L it produced (null for opening or adding fills).
@@ -92,7 +115,9 @@ function applyFill(book: Map<string, BookEntry>, key: string, row: TradeOrder): 
 
   if (position.quantity === 0 || Math.sign(position.quantity) === Math.sign(signed)) {
     // Opening or adding: blend the average cost.
-    if (position.quantity === 0) position.openedAt = row.placedAt;
+    // Legacy rows carry no fill timestamp; placement time is the closest
+    // persisted moment, not a verified execution time.
+    if (position.quantity === 0) position.openedAt = row.filledAt ?? row.placedAt;
     const totalQty = Math.abs(position.quantity) + size;
     position.avgPrice = (position.avgPrice * Math.abs(position.quantity) + price * size) / totalQty;
     if (underlying !== null) {
@@ -118,7 +143,7 @@ function applyFill(book: Map<string, BookEntry>, key: string, row: TradeOrder): 
       position.avgPrice = price;
       position.avgUnderlying = underlying ?? 0;
       position.underlyingQty = underlying === null ? 0 : Math.abs(position.quantity);
-      position.openedAt = row.placedAt;
+      position.openedAt = row.filledAt ?? row.placedAt;
     } else {
       // Partially closed: the average is unchanged, but it now backs less size.
       position.underlyingQty = Math.min(position.underlyingQty, Math.abs(position.quantity));
@@ -175,6 +200,7 @@ export class OrdersService implements OnModuleDestroy {
       orderType: order.orderType,
       limitPrice: order.limitPrice ?? null,
       filledPrice: order.filledPrice ?? null,
+      filledAt: isFillEvent(order) ? fillTimeOf(order) : null,
       underlyingPrice: underlyingPrice ?? null,
       status: order.status,
       placedAt: Number.isNaN(placedAt.getTime()) ? new Date() : placedAt,
@@ -191,6 +217,17 @@ export class OrdersService implements OnModuleDestroy {
         filledPrice: order.filledPrice ?? null,
         filledQuantity: order.filledQuantity ?? null,
       },
+    });
+    if (!isFillEvent(order)) return;
+    // First fill wins: openedAt anchors on the execution that made the
+    // position quantity nonzero, so a later fill event (or a re-poll of the
+    // same fill) must never move an existing timestamp. An upsert's update
+    // clause cannot see the existing row, so the stamp is this separate
+    // conditional write — the `filledAt: null` guard makes it atomic under
+    // concurrent events (the loser's WHERE matches no rows).
+    await this.prisma.tradeOrder.updateMany({
+      where: { id: order.orderId, filledAt: null },
+      data: { filledAt: fillTimeOf(order) },
     });
   }
 

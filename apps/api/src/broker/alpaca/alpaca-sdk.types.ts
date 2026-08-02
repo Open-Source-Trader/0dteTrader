@@ -57,6 +57,7 @@ export interface SdkOrder {
   filled_avg_price?: string | number | null;
   limit_price?: string | number | null;
   submitted_at?: string | number | Date;
+  filled_at?: string | number | Date | null;
 }
 
 export interface SdkPosition {

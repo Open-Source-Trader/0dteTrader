@@ -54,6 +54,7 @@ export function toOrderResult(order: AccountOrderRecord): OrderResult {
     ...(Number.isFinite(limitPrice ?? NaN) ? { limitPrice } : {}),
     ...(Number.isFinite(filledPrice ?? NaN) ? { filledPrice } : {}),
     ...(Number.isFinite(filledQuantity ?? NaN) ? { filledQuantity } : {}),
+    ...(order.time_executed ? { filledAt: order.time_executed } : {}),
     timestamp: order.time_placed ?? new Date().toISOString(),
   };
 }

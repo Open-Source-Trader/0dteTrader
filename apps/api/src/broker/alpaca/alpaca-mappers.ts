@@ -129,6 +129,10 @@ export function toOrderResult(order: SdkOrder, orderId?: string): OrderResult {
         ? num(order.filled_avg_price)
         : undefined,
     filledQuantity: num(order.filled_qty),
+    filledAt:
+      order.filled_at !== null && order.filled_at !== undefined
+        ? isoFrom(order.filled_at)
+        : undefined,
     timestamp: isoFrom(order.submitted_at),
   };
 }

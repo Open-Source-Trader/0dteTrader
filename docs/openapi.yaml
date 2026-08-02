@@ -606,7 +606,13 @@ components:
             type: number,
             description: Broker-reported executed quantity (partial fills); absent when the broker gives only the order quantity,
           }
-        timestamp: { type: string, format: date-time }
+        filledAt:
+          {
+            type: string,
+            format: date-time,
+            description: Broker-reported execution time; absent when the broker reports no execution timestamp,
+          }
+        timestamp: { type: string, format: date-time, description: Order placement time }
     TradeHistoryEntry:
       allOf:
         - $ref: '#/components/schemas/OrderResult'
@@ -745,7 +751,7 @@ components:
           {
             type: string,
             format: date-time,
-            description: Time of the fill that opened the current position run (where quantity last left zero). Absent for positions opened before it was recorded or outside the app,
+            description: ISO-8601 UTC time of the first fill of the current position lifecycle (where quantity last left zero) — execution time; never order placement/submission time. Legacy rows recorded before fill timestamps were stored fall back to the opening order's placement time. Absent for positions opened before it was recorded or outside the app,
           }
     DeviceRegistration:
       type: object

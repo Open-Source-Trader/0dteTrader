@@ -476,7 +476,10 @@ export interface OrderResult {
   /** Executed quantity when the broker reports it (partial fills). Absent
    *  when the broker gives only the order quantity. */
   filledQuantity?: number;
-  /** ISO-8601 date-time. */
+  /** Broker-reported execution time (ISO-8601), when the broker provides one.
+   *  Absent when the broker reports no execution timestamp. */
+  filledAt?: string;
+  /** ISO-8601 date-time of order placement. */
   timestamp: string;
 }
 
@@ -496,11 +499,11 @@ export interface Position {
    */
   underlyingEntryPrice?: number;
   /**
-   * ISO-8601 time of the fill that opened the current position run (the fill
-   * where quantity last left zero). This is the opening ORDER's placement
-   * timestamp — the closest persisted moment to execution; a resting limit
-   * that filled much later than it was placed reads as its placement time.
-   * Absent for positions opened before this was recorded, or outside the app.
+   * ISO-8601 UTC time of the first fill of the current position lifecycle (the
+   * fill where quantity last left zero) — execution time, never order
+   * placement/submission time. Legacy rows recorded before fill timestamps
+   * were stored fall back to the opening order's placement time. Absent for
+   * positions opened before this was recorded, or outside the app.
    */
   openedAt?: string;
 }

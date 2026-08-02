@@ -10,6 +10,7 @@ let orderSeq = 0;
 
 function fill(overrides: Partial<OrderResult> = {}): OrderResult {
   orderSeq += 1;
+  const placed = 1_752_000_000_000 + orderSeq * 60_000;
   return {
     orderId: `O-${orderSeq}`,
     status: 'filled',
@@ -18,7 +19,10 @@ function fill(overrides: Partial<OrderResult> = {}): OrderResult {
     quantity: 1,
     orderType: 'market',
     filledPrice: 1.0,
-    timestamp: new Date(1_752_000_000_000 + orderSeq * 60_000).toISOString(),
+    timestamp: new Date(placed).toISOString(),
+    // Broker-reported execution: deliberately later than placement, so an
+    // assertion anchored on the wrong timestamp fails loudly.
+    filledAt: new Date(placed + 30_000).toISOString(),
     ...overrides,
   };
 }
@@ -253,7 +257,7 @@ describe('OrdersService', () => {
 
       const anchor = (await orders.positionAnchors(USER, [OCC])).get(OCC);
       expect(anchor?.underlyingEntryPrice).toBeUndefined();
-      expect(anchor?.openedAt).toEqual(new Date(opening.timestamp));
+      expect(anchor?.openedAt).toEqual(new Date(opening.filledAt!));
     });
 
     it('blends only the fills that reported a price, never averaging a missing one in as zero', async () => {
@@ -377,7 +381,7 @@ describe('OrdersService', () => {
       );
 
       const anchor = (await orders.positionAnchors(USER, [OCC])).get(OCC);
-      expect(anchor?.openedAt).toEqual(new Date(opening.timestamp));
+      expect(anchor?.openedAt).toEqual(new Date(opening.filledAt!));
     });
 
     it('keeps openedAt across a partial close', async () => {
@@ -390,7 +394,7 @@ describe('OrdersService', () => {
       );
 
       const anchor = (await orders.positionAnchors(USER, [OCC])).get(OCC);
-      expect(anchor?.openedAt).toEqual(new Date(opening.timestamp));
+      expect(anchor?.openedAt).toEqual(new Date(opening.filledAt!));
     });
 
     it('resets openedAt when a position closes and reopens', async () => {
@@ -408,7 +412,7 @@ describe('OrdersService', () => {
       await orders.recordUnderlyingPrice(USER, reopening, 620);
 
       const anchor = (await orders.positionAnchors(USER, [OCC])).get(OCC);
-      expect(anchor?.openedAt).toEqual(new Date(reopening.timestamp));
+      expect(anchor?.openedAt).toEqual(new Date(reopening.filledAt!));
     });
 
     it('re-anchors openedAt on the flipping fill when a position reverses', async () => {
@@ -421,7 +425,66 @@ describe('OrdersService', () => {
       await orders.recordUnderlyingPrice(USER, flipping, 610);
 
       const anchor = (await orders.positionAnchors(USER, [OCC])).get(OCC);
-      expect(anchor?.openedAt).toEqual(new Date(flipping.timestamp));
+      expect(anchor?.openedAt).toEqual(new Date(flipping.filledAt!));
+    });
+
+    it('anchors openedAt on the execution time, never the placement time', async () => {
+      // A resting limit placed at 14:00 that filled three minutes later must
+      // report the fill, not the placement, as the position's opening.
+      const placed = new Date('2026-08-02T14:00:00.000Z');
+      const executed = new Date('2026-08-02T14:03:00.000Z');
+      await orders.record(
+        USER,
+        fill({ timestamp: placed.toISOString(), filledAt: executed.toISOString() }),
+      );
+
+      const anchor = (await orders.positionAnchors(USER, [OCC])).get(OCC);
+      expect(anchor?.openedAt).toEqual(executed);
+    });
+
+    it('keeps the first fill time when later fill events arrive (first fill wins)', async () => {
+      const t1 = new Date('2026-08-02T14:03:00.000Z');
+      const t2 = new Date('2026-08-02T14:09:00.000Z');
+      const order = fill({
+        status: 'partially_filled',
+        quantity: 4,
+        filledQuantity: 1,
+        filledAt: t1.toISOString(),
+      });
+      await orders.record(USER, order);
+      await orders.record(USER, {
+        ...order,
+        status: 'filled',
+        filledQuantity: 4,
+        filledAt: t2.toISOString(),
+      });
+
+      expect(prisma.tradeOrders.find((o) => o.id === order.orderId).filledAt).toEqual(t1);
+      const anchor = (await orders.positionAnchors(USER, [OCC])).get(OCC);
+      expect(anchor?.openedAt).toEqual(t1);
+    });
+
+    it('stamps the observation time when the broker reports no execution timestamp', async () => {
+      const observed = new Date('2026-08-02T14:05:00.000Z');
+      jest.useFakeTimers({ now: observed });
+      try {
+        await orders.record(USER, fill({ filledAt: undefined }));
+      } finally {
+        jest.useRealTimers();
+      }
+
+      const anchor = (await orders.positionAnchors(USER, [OCC])).get(OCC);
+      expect(anchor?.openedAt).toEqual(observed);
+    });
+
+    it('falls back to placement time for legacy rows recorded before fill timestamps', async () => {
+      const opening = fill();
+      await orders.record(USER, opening);
+      // A row persisted before the filledAt column existed carries none.
+      prisma.tradeOrders.find((o) => o.id === opening.orderId).filledAt = null;
+
+      const anchor = (await orders.positionAnchors(USER, [OCC])).get(OCC);
+      expect(anchor?.openedAt).toEqual(new Date(opening.timestamp));
     });
 
     it('does not anchor a live position on a practice fill', async () => {

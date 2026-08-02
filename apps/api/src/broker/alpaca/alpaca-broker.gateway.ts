@@ -444,6 +444,7 @@ export class AlpacaBrokerGateway implements BrokerGateway, MarketDataProvider {
             ...result,
             status: detail.status,
             filledPrice: detail.filledPrice ?? result.filledPrice,
+            filledAt: detail.filledAt,
           });
           return;
         }

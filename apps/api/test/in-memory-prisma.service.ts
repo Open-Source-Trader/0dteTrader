@@ -266,6 +266,16 @@ export class InMemoryPrismaService {
       }
       return rows;
     },
+    updateMany: async ({ where, data }: any) => {
+      let count = 0;
+      for (const row of this.tradeOrders) {
+        if (matches(row, where)) {
+          Object.assign(row, definedOnly(data), { updatedAt: new Date() });
+          count += 1;
+        }
+      }
+      return { count };
+    },
   };
 
   readonly optionsAnalyticsSnapshotRecord = {

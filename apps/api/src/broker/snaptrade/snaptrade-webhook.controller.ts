@@ -235,6 +235,7 @@ export class SnapTradeWebhookController {
     limitPrice?: number;
     filledPrice?: number;
     filledQuantity?: number;
+    filledAt?: string;
     timestamp: string;
   } {
     const status = this.mapStatus(order['status'] as string | undefined);
@@ -250,6 +251,8 @@ export class SnapTradeWebhookController {
       limitPrice: order['limit_price'] ? Number(order['limit_price']) : undefined,
       filledPrice: order['execution_price'] ? Number(order['execution_price']) : undefined,
       filledQuantity: order['filled_quantity'] ? Number(order['filled_quantity']) : undefined,
+      filledAt:
+        typeof order['time_executed'] === 'string' ? (order['time_executed'] as string) : undefined,
       timestamp: (order['time_placed'] as string) ?? new Date().toISOString(),
     };
   }

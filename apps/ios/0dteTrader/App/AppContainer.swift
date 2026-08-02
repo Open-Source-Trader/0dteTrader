@@ -38,7 +38,11 @@ final class AppContainer: ObservableObject {
             try await sessionStore.accessTokenOrRefresh()
         }
         self.appLockManager = AppLockManager(settingsStore: settings)
-        self.pushNotifications = PushNotificationsManager(apiClient: apiClient, settingsStore: settings)
+        self.pushNotifications = PushNotificationsManager(
+            apiClient: apiClient,
+            settingsStore: settings,
+            serverKey: baseURL.absoluteString
+        )
     }
 
     deinit {

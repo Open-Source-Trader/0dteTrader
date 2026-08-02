@@ -56,4 +56,26 @@ final class PushNotificationsTests: XCTestCase {
     func testAuthorizationDenied_revertsTheToggle() {
         XCTAssertEqual(PushRegistrationFlow.onAuthorization(granted: false), .revertToggle)
     }
+
+    // MARK: - Per-server token slots
+
+    /// The retry handle is keyed per server: writing one server's slot must
+    /// never disturb another's, and clearing removes only its own. This is
+    /// what lets a server switch skip teardown entirely — the departed
+    /// server's handle survives for its next sign-in to sweep.
+    func testPushDeviceToken_slotsAreIsolatedPerServer() throws {
+        let suiteName = "test.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let store = SettingsStore(defaults: defaults)
+
+        store.setPushDeviceToken("aa11", server: "https://a.example")
+        store.setPushDeviceToken("bb22", server: "https://b.example")
+        XCTAssertEqual(store.pushDeviceToken(server: "https://a.example"), "aa11")
+        XCTAssertEqual(store.pushDeviceToken(server: "https://b.example"), "bb22")
+
+        store.setPushDeviceToken(nil, server: "https://a.example")
+        XCTAssertNil(store.pushDeviceToken(server: "https://a.example"))
+        XCTAssertEqual(store.pushDeviceToken(server: "https://b.example"), "bb22")
+    }
 }

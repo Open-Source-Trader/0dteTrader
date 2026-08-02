@@ -178,10 +178,21 @@ final class SettingsStore: @unchecked Sendable {
         set { defaults.set(newValue, forKey: Keys.pushNotificationsEnabled) }
     }
 
-    /// The APNs token (lowercase hex) last uploaded to the server, kept so
-    /// disabling can DELETE it even after a relaunch.
-    var pushDeviceToken: String? {
-        get { defaults.string(forKey: Keys.pushDeviceToken) }
-        set { defaults.set(newValue, forKey: Keys.pushDeviceToken) }
+    /// The APNs token (lowercase hex) last uploaded to a given server, kept
+    /// so a later DELETE can retry even after a relaunch. Keyed PER SERVER:
+    /// the device token is device-scoped and may be registered with several
+    /// backends at once, and each registration needs its own retry handle —
+    /// a single shared slot loses the old server's handle on a server switch.
+    func pushDeviceToken(server: String) -> String? {
+        defaults.string(forKey: "\(Keys.pushDeviceToken).\(server)")
+    }
+
+    func setPushDeviceToken(_ token: String?, server: String) {
+        let key = "\(Keys.pushDeviceToken).\(server)"
+        if let token {
+            defaults.set(token, forKey: key)
+        } else {
+            defaults.removeObject(forKey: key)
+        }
     }
 }

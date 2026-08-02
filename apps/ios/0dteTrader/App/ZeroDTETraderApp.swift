@@ -22,10 +22,11 @@ struct ZeroDTETraderApp: App {
                 .id(ObjectIdentifier(container))
                 .environmentObject(serverConfig)
                 .onChange(of: serverConfig.baseURL) { _, newBaseURL in
-                    // Best-effort push teardown against the departing server —
-                    // its registration is unreachable once the base URL flips.
-                    let departing = container
-                    Task { await departing.pushNotifications.handleLogout() }
+                    // No push teardown here on purpose: the switch UI is only
+                    // reachable while unauthenticated, so a DELETE against the
+                    // departing server could never authenticate. Its token
+                    // slot is per-server and survives — the next sign-in THERE
+                    // sweeps or re-upserts it (see PushNotificationsManager).
                     container = AppContainer(baseURL: newBaseURL)
                     appDelegate.pushNotifications = container.pushNotifications
                 }

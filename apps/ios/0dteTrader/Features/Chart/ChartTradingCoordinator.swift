@@ -118,7 +118,11 @@ final class ChartTradingCoordinator: ObservableObject, OrderLineOverlayDelegate 
     }
 
     func orderLineOverlayDidRequestPlacement(at price: Double) {
-        guard let contract = selectedContract() else { return }
+        // Backstop behind the overlay's `canPlaceChartOrder` gate: whatever
+        // the overlay believed when the tap landed, a placement card must
+        // never open for an unquoted contract — a CURR leg synthesized from
+        // its OCC symbol is selected long before its quotes exist.
+        guard let contract = selectedContract(), contract.hasTradeableQuote else { return }
         placementRequest = OrderPlacementRequest(price: rounded(price), contract: contract)
     }
 

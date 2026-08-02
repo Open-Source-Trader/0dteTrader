@@ -174,6 +174,14 @@ struct OptionContract: Equatable, Sendable, Identifiable {
 
     /// Indicative mid price from the current quote pair; nil when the quote is unusable.
     var mid: Double? { PriceMath.midPrice(bid: bid, ask: ask) }
+
+    /// Whether this contract carries a quote an order could be priced from.
+    /// One live side is enough — an option with no bid but a valid ask may
+    /// still be buyable. False for the all-zero placeholder a CURR leg
+    /// synthesizes before its expiration's contracts load, and for junk
+    /// (negative/NaN) quotes; `last` deliberately does not count — a stale
+    /// print is not a market.
+    var hasTradeableQuote: Bool { bid > 0 || ask > 0 }
 }
 
 extension OptionContract {

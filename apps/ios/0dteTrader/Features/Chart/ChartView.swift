@@ -53,9 +53,11 @@ struct ChartView: View {
     var chartOrders: ChartOrdersModel?
     var chartTradingSettings: ChartTradingSettings = .default
     var entryLines: [EntryLineModel] = []
-    /// Whether there is a contract for a new line to trade. No contract, no
-    /// placement guide: the handle would take the tap and arm nothing.
-    var hasSelectedContract: Bool = false
+    /// Whether a new line may be placed at all — `TradeReadiness`'s chart
+    /// gate: a selected contract WITH a live quote, and trading unlocked. No
+    /// quoted contract, no placement guide: the handle would take the tap
+    /// and arm nothing (or price off a 0.00 placeholder).
+    var canPlaceChartOrder: Bool = false
     /// The open placement card and everything done with it; nil means no card
     /// is open — the guide may still be showing.
     var placement: PlacementCardBinding?
@@ -84,7 +86,7 @@ struct ChartView: View {
         chartOrders: ChartOrdersModel? = nil,
         chartTradingSettings: ChartTradingSettings = .default,
         entryLines: [EntryLineModel] = [],
-        hasSelectedContract: Bool = false,
+        canPlaceChartOrder: Bool = false,
         placement: PlacementCardBinding? = nil,
         orderLineDelegate: OrderLineOverlayDelegate? = nil,
         onTripleTap: @escaping () -> Void = {}
@@ -100,7 +102,7 @@ struct ChartView: View {
         self.chartOrders = chartOrders
         self.chartTradingSettings = chartTradingSettings
         self.entryLines = entryLines
-        self.hasSelectedContract = hasSelectedContract
+        self.canPlaceChartOrder = canPlaceChartOrder
         self.placement = placement
         self.orderLineDelegate = orderLineDelegate
         self.onTripleTap = onTripleTap
@@ -130,7 +132,7 @@ struct ChartView: View {
                     chartOrdersModel: chartOrders,
                     chartTradingSettings: chartTradingSettings,
                     entryLines: entryLines,
-                    hasSelectedContract: hasSelectedContract,
+                    canPlaceChartOrder: canPlaceChartOrder,
                     placementPrice: placement?.request.price,
                     orderLineDelegate: orderLineDelegate,
                     onTripleTap: onTripleTap,

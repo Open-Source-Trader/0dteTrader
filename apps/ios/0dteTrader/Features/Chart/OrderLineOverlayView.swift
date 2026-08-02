@@ -142,13 +142,15 @@ final class OrderLineOverlayView: UIView {
         }
     }
 
-    /// Whether there is a contract for a new line to trade. Without one
-    /// `ChartTradingCoordinator` drops the placement request on the floor, so
-    /// the guide is suppressed rather than drawn as an affordance that does
-    /// nothing. Desktop gates its guide on the same condition.
-    var hasSelectedContract: Bool = false {
+    /// Whether a new line may be placed: a QUOTED contract is selected and
+    /// trading is unlocked (`TradeReadiness.canPlaceChartOrder`). Without
+    /// that, `ChartTradingCoordinator` would drop the placement request on
+    /// the floor, so the guide is suppressed rather than drawn as an
+    /// affordance that does nothing. Selection alone is not enough — a CURR
+    /// leg awaiting its expiration's quotes must not take placement taps.
+    var canPlaceChartOrder: Bool = false {
         didSet {
-            guard hasSelectedContract != oldValue else { return }
+            guard canPlaceChartOrder != oldValue else { return }
             setNeedsDisplay()
         }
     }

@@ -206,6 +206,49 @@ final class ChartTradingCoordinatorCancelTests: XCTestCase {
         XCTAssertNil(coordinator.orderPendingCancel)
         XCTAssertNil(orders.order(id: "co-1"))
     }
+
+    /// The coordinator is the backstop behind the overlay's placement gate: a
+    /// zero-quote contract (the CURR placeholder) must not open a card even
+    /// if a tap slips through.
+    func testRequestPlacement_zeroQuoteContract_opensNoCard() {
+        let (coordinator, _) = makeCoordinator()
+        coordinator.selectedContract = {
+            OptionContract(
+                symbol: "SPY260727C00505000",
+                underlying: "SPY",
+                expiration: "2026-07-27",
+                strike: 505,
+                optionType: .call,
+                bid: 0,
+                ask: 0,
+                last: 0
+            )
+        }
+
+        coordinator.orderLineOverlayDidRequestPlacement(at: 504.5)
+
+        XCTAssertNil(coordinator.placementRequest)
+    }
+
+    func testRequestPlacement_quotedContract_opensTheCard() {
+        let (coordinator, _) = makeCoordinator()
+        coordinator.selectedContract = {
+            OptionContract(
+                symbol: "SPY260727C00505000",
+                underlying: "SPY",
+                expiration: "2026-07-27",
+                strike: 505,
+                optionType: .call,
+                bid: 1.0,
+                ask: 1.02,
+                last: 1.01
+            )
+        }
+
+        coordinator.orderLineOverlayDidRequestPlacement(at: 504.5)
+
+        XCTAssertEqual(coordinator.placementRequest?.price, 504.5)
+    }
 }
 
 final class ChartOrderLabelTests: XCTestCase {

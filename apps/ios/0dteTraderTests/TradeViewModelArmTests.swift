@@ -349,7 +349,81 @@ final class TradeViewModelArmTests: XCTestCase {
         tradeViewModel.arm(side: .sell, underlying: "SPY", chainViewModel: chainViewModel)
 
         XCTAssertNil(tradeViewModel.armedTicket)
-        XCTAssertEqual(tradeViewModel.toast?.message, "Quotes are still loading for that expiration.")
+        XCTAssertEqual(tradeViewModel.toast?.message, "Quotes are unavailable for this contract.")
+    }
+
+    // MARK: - Quote-readiness backstop (behind the UI gates)
+
+    /// A contract with both sides dead — the synthesized CURR placeholder —
+    /// is refused before any ticket, preview, or request exists, for BUY and
+    /// SELL alike, whatever pricing mode is selected.
+    func testArm_zeroQuoteContract_refusedForBothSides() {
+        let dead = OptionContract(
+            symbol: Self.contract.symbol,
+            underlying: "SPY",
+            expiration: Self.contract.expiration,
+            strike: Self.contract.strike,
+            optionType: .call,
+            bid: 0,
+            ask: 0,
+            last: 1.01 // a stale print is not a market
+        )
+        for side in [OrderSide.buy, OrderSide.sell] {
+            let (tradeViewModel, chainViewModel) = makeViewModels()
+            selectContract(tradeViewModel, chainViewModel, contracts: [dead])
+            tradeViewModel.setPositionsForTesting([position(2)])
+            tradeViewModel.orderType = .market
+
+            tradeViewModel.arm(side: side, underlying: "SPY", chainViewModel: chainViewModel)
+
+            XCTAssertNil(tradeViewModel.armedTicket, "\(side) armed a quoteless contract")
+            XCTAssertEqual(tradeViewModel.toast?.message, "Quotes are unavailable for this contract.")
+        }
+    }
+
+    /// Typing a custom price does not turn an unresolved placeholder into a
+    /// tradeable contract — the refusal fires before the custom-price path.
+    func testArm_zeroQuoteContract_customPriceDoesNotBypassTheRefusal() {
+        let dead = OptionContract(
+            symbol: Self.contract.symbol,
+            underlying: "SPY",
+            expiration: Self.contract.expiration,
+            strike: Self.contract.strike,
+            optionType: .call,
+            bid: 0,
+            ask: 0,
+            last: 0
+        )
+        let (tradeViewModel, chainViewModel) = makeViewModels()
+        selectContract(tradeViewModel, chainViewModel, contracts: [dead])
+        tradeViewModel.orderType = .custom
+        tradeViewModel.setCustomLimitPrice(1.25)
+
+        tradeViewModel.arm(side: .buy, underlying: "SPY", chainViewModel: chainViewModel)
+
+        XCTAssertNil(tradeViewModel.armedTicket)
+        XCTAssertEqual(tradeViewModel.toast?.message, "Quotes are unavailable for this contract.")
+    }
+
+    /// One live side is a market: no bid but a valid ask must still arm.
+    func testArm_oneSidedQuote_stillArms() {
+        let askOnly = OptionContract(
+            symbol: Self.contract.symbol,
+            underlying: "SPY",
+            expiration: Self.contract.expiration,
+            strike: Self.contract.strike,
+            optionType: .call,
+            bid: 0,
+            ask: 1.05,
+            last: 0
+        )
+        let (tradeViewModel, chainViewModel) = makeViewModels()
+        selectContract(tradeViewModel, chainViewModel, contracts: [askOnly])
+        tradeViewModel.orderType = .market
+
+        tradeViewModel.arm(side: .buy, underlying: "SPY", chainViewModel: chainViewModel)
+
+        XCTAssertNotNil(tradeViewModel.armedTicket)
     }
 
     /// Leg-matching would close the highest-P/L leg; CURR must instead sell

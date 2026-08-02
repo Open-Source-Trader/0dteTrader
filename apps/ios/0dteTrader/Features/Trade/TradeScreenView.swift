@@ -518,7 +518,10 @@ struct TradeScreenView: View {
                 positions: tradeViewModel.positions,
                 symbol: chartViewModel.symbol
             ),
-            hasSelectedContract: chainViewModel.selectedContract != nil,
+            canPlaceChartOrder: TradeReadiness.canPlaceChartOrder(
+                contract: chainViewModel.selectedContract,
+                locked: tradingLocked || needsProviderConfig
+            ),
             placement: chartTrading.placementRequest.map { request in
                 PlacementCardBinding(
                     request: request,
@@ -618,10 +621,17 @@ struct TradeScreenView: View {
         { Task { await chainViewModel.load(underlying: chartViewModel.symbol) } }
     }
 
-    /// Same gate as the split-layout TradePanelView's Buy/Sell buttons; the lock
-    /// disables every order-placing control while leaving the chart untouched.
+    /// Same gate as the split-layout TradePanelView's Buy/Sell buttons —
+    /// literally, via `TradeReadiness` — so the fullscreen floating buttons
+    /// can never accept a contract the panel would refuse (an unquoted CURR
+    /// placeholder, a custom price still untyped). The lock disables every
+    /// order-placing control while leaving the chart untouched.
     private var canTrade: Bool {
-        chainViewModel.selectedContract != nil && !tradingLocked && !needsProviderConfig
+        TradeReadiness.canTrade(
+            contract: chainViewModel.selectedContract,
+            locked: tradingLocked || needsProviderConfig,
+            canArm: tradeViewModel.canArm
+        )
     }
 
     // MARK: - Provider-aware copy + empty state

@@ -167,6 +167,18 @@ final class TradeViewModel: ObservableObject {
         let summary: String
         let optionType = chainViewModel.optionType
 
+        // Backstop behind every UI gate (`TradeReadiness` disables the
+        // buttons first): a selected contract without a live quote — the
+        // placeholder a CURR leg synthesizes before its expiration's
+        // contracts load — is refused with a specific error before a ticket,
+        // premium, preview, or request exists. A typed custom price does not
+        // bypass this: it changes the requested price, not whether the
+        // contract is a validated, quoted option.
+        if let selected = chainViewModel.selectedContract, !selected.hasTradeableQuote {
+            showToast("Quotes are unavailable for this contract.", style: .error)
+            return
+        }
+
         // Sent only for `.custom`; the server rejects it alongside any other
         // variant, because those four are priced from its own quote.
         let limitPrice = orderType == .custom ? customLimitPrice : nil
@@ -265,12 +277,6 @@ final class TradeViewModel: ObservableObject {
             // through zero into a short.
             guard let contract = chainViewModel.selectedContract else {
                 showToast("Pick a held contract first.", style: .error)
-                return
-            }
-            // A leg resolved from its OCC symbol has no quotes until its
-            // expiration's contracts load — never trade off a 0.00 display.
-            if contract.bid <= 0, contract.ask <= 0, contract.last <= 0 {
-                showToast("Quotes are still loading for that expiration.", style: .error)
                 return
             }
             selection = OrderSelectionDTO(

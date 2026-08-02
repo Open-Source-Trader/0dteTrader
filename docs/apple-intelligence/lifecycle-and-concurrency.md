@@ -112,11 +112,7 @@ A result may update current guidance only when its immutable context still match
 
 A stale result may be retained for local diagnostics or history. It must never replace current guidance.
 
-## Repeated-analysis cache
-
-A manual "Refresh" on semantically unchanged market state must not always produce a new, independently-sampled generation — the renderer keeps a small bounded cache (`AnalysisStore.contentCache`, last 10 entries) of validated results keyed by a content hash of the snapshot's semantic fields (`computeSnapshotContentHash`, `snapshotContentHash.ts`), excluding capture-time bookkeeping (`capturedAt`, `snapshotSequence`, `snapshotId`) that changes on every capture regardless of market state.
-
-On a cache hit, the cached result's price/action/plan data is reused unchanged, but its `context` is re-stamped to the newly-captured snapshot's identity before being run through the same staleness gate as a fresh completion — a cache hit never bypasses the gate, it only skips the round-trip to the model. The cache is populated only after a fresh result has passed structural validation, grounding, and the decision-invariant check (`data-contracts.md` "Decision invariants").
+Every manual "Refresh" invokes a fresh model generation — there is no result cache keyed on snapshot content. A cache was tried and reverted: live market/candle data ticks on nearly every capture (quote bid/ask, the in-progress candle's OHLCV), so "semantically unchanged" essentially never occurred while markets were open, making a content-hash cache both ineffective (rarely hit) and confusing (a rare hit produced no visible feedback, reading as "Refresh does nothing"). Repeated variance across manual refreshes is expected — the model samples independently each call — and is a product/UX concern (e.g. surfacing confidence or showing prior results for comparison), not something to paper over with silent result reuse.
 
 ## Crash-loop policy
 

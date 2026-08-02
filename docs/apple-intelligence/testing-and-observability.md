@@ -6,19 +6,19 @@ This file owns required test layers, failure injection, operational metrics, and
 
 ## Test matrix
 
-| Layer                    | Required coverage                                                                                                                                                                    |
-| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Pure domain              | Trigger policy, priority, replacement, dedupe, staleness, snapshot normalization, omission policy, trade-desk decision invariants, snapshot content-hash cache, market session state |
-| Protocol contracts       | Golden fixtures decoded by TypeScript and Swift; malformed lines; unknown messages; max size; invalid numbers                                                                        |
-| Transport                | Fragmented chunks; multiple lines per chunk; partial line; backpressure; stderr noise; child exit                                                                                    |
-| Supervisor               | Handshake timeout; version mismatch; legitimate unavailability; crash loop; graceful shutdown                                                                                        |
-| Swift                    | Availability mapping; budgeter; omission declarations; structured output validation; cancellation                                                                                    |
-| Main-process integration | Fake shim executable; request routing; deadlines; owner window destruction; stale response                                                                                           |
-| Real native smoke        | Supported macOS Foundation Models path                                                                                                                                               |
-| Packaging                | Binary exists; executable; signed; correct architecture; starts from packaged location                                                                                               |
-| Security architecture    | Forbidden imports; no generic bridge; no AI-to-order dependency; sanitized environment                                                                                               |
-| Failure injection        | Hung model; malformed stdout; oversized event; duplicate terminal; sequence reversal; crash mid-stream                                                                               |
-| Regression fixtures      | PR #54 overflow, gaps, ambiguous keys, omitted data, stale position versions                                                                                                         |
+| Layer                    | Required coverage                                                                                                                                       |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Pure domain              | Trigger policy, priority, replacement, dedupe, staleness, snapshot normalization, omission policy, trade-desk decision invariants, market session state |
+| Protocol contracts       | Golden fixtures decoded by TypeScript and Swift; malformed lines; unknown messages; max size; invalid numbers                                           |
+| Transport                | Fragmented chunks; multiple lines per chunk; partial line; backpressure; stderr noise; child exit                                                       |
+| Supervisor               | Handshake timeout; version mismatch; legitimate unavailability; crash loop; graceful shutdown                                                           |
+| Swift                    | Availability mapping; budgeter; omission declarations; structured output validation; cancellation                                                       |
+| Main-process integration | Fake shim executable; request routing; deadlines; owner window destruction; stale response                                                              |
+| Real native smoke        | Supported macOS Foundation Models path                                                                                                                  |
+| Packaging                | Binary exists; executable; signed; correct architecture; starts from packaged location                                                                  |
+| Security architecture    | Forbidden imports; no generic bridge; no AI-to-order dependency; sanitized environment                                                                  |
+| Failure injection        | Hung model; malformed stdout; oversized event; duplicate terminal; sequence reversal; crash mid-stream                                                  |
+| Regression fixtures      | PR #54 overflow, gaps, ambiguous keys, omitted data, stale position versions                                                                            |
 
 ## Fake shim
 

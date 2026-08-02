@@ -11,7 +11,6 @@ import {
   rejectUngroundedLevels,
 } from './validation';
 import { AnalysisScheduler, shouldPreempt, type QueuedWork } from './AnalysisScheduler';
-import { computeSnapshotContentHash } from './snapshotContentHash';
 import type {
   AIAvailability,
   AnalysisContextIdentity,
@@ -22,7 +21,6 @@ import type {
 } from './types';
 
 const MAX_HISTORY = 20;
-const MAX_CONTENT_CACHE = 10;
 
 export interface HistoryEntry {
   result: AnalysisResult;
@@ -61,13 +59,6 @@ export class AnalysisStore extends Store<AnalysisStoreState> {
   private lastSnapshot: AnalysisSnapshot | null = null;
   private readonly scheduler = new AnalysisScheduler();
   private requestStartedAt: number | null = null;
-  /** Bounded cache of validated results keyed by snapshot content hash
-   * (lifecycle-and-concurrency.md "repeated-analysis cache") — a Refresh on
-   * semantically unchanged market state reuses the cached assessment
-   * instead of invoking the model again. Never bypasses the staleness gate:
-   * a cache hit is re-promoted through the same isResultCurrent check as a
-   * fresh completion, just with a rebuilt context. */
-  private readonly contentCache = new Map<string, AnalysisResult>();
 
   constructor(private readonly bridge: AppleIntelligenceBridge | null) {
     super({
@@ -149,23 +140,6 @@ export class AnalysisStore extends Store<AnalysisStoreState> {
   private async runNow(work: QueuedWork): Promise<void> {
     if (!this.bridge) return;
     this.lastSnapshot = work.snapshot;
-
-    const contentHash = computeSnapshotContentHash(work.snapshot);
-    const cached = this.contentCache.get(contentHash);
-    if (cached) {
-      this.set({ isAnalyzing: true, activePriority: work.priority, errorMessage: null });
-      // Re-stamp the cached result's identity onto the current snapshot's —
-      // the market state is semantically identical (that's the cache-key
-      // match) but the snapshot itself is a new capture, so its identity is
-      // what "current" now means. This is the only field mutation trusted
-      // on a cache hit; the plan/prices themselves are the model's own
-      // untouched validated output.
-      const restamped: AnalysisResult = { ...cached, context: contextFromSnapshot(work.snapshot) };
-      this.promoteResult(restamped, contextFromSnapshot(work.snapshot));
-      this.finishActive();
-      return;
-    }
-
     this.requestStartedAt = Date.now();
     this.set({ isAnalyzing: true, activePriority: work.priority, errorMessage: null });
     const { requestId } = await this.bridge.analyze({
@@ -229,20 +203,11 @@ export class AnalysisStore extends Store<AnalysisStoreState> {
     const validated = this.validateResult(result, this.lastSnapshot);
     if (!validated) return;
 
-    const contentHash = computeSnapshotContentHash(this.lastSnapshot);
-    this.contentCache.set(contentHash, validated);
-    if (this.contentCache.size > MAX_CONTENT_CACHE) {
-      const oldestKey = this.contentCache.keys().next().value;
-      if (oldestKey !== undefined) this.contentCache.delete(oldestKey);
-    }
-
     this.promoteResult(validated, contextFromSnapshot(this.lastSnapshot));
   }
 
-  /** Structural + grounding + decision-invariant validation shared by a
-   * fresh completion and a cache-hit replay — a cached result was already
-   * validated once when first produced, but re-validating here keeps the
-   * two paths identical rather than trusting cache contents blindly. */
+  /** Structural + grounding + decision-invariant validation applied to
+   * every completed result before it can be promoted to current guidance. */
   private validateResult(
     result: AnalysisResult,
     snapshot: AnalysisSnapshot,
@@ -269,10 +234,9 @@ export class AnalysisStore extends Store<AnalysisStoreState> {
   /** Applies the staleness gate and promotes/records a validated result
    * against `currentContext` — the authoritative identity of whatever
    * snapshot is current *right now*, which may differ from the result's own
-   * `context` (a fresh completion's context reflects what was actually
-   * analyzed, possibly already superseded; a cache-hit's context is a prior
-   * capture's identity entirely). The gate compares the two rather than
-   * trusting either alone, so a cache hit can never bypass it. */
+   * `context` if a newer request was already submitted by the time this one
+   * completed. A result may update current guidance only when its context
+   * still matches. */
   private promoteResult(result: AnalysisResult, currentContext: AnalysisContextIdentity): void {
     const isCurrent = isResultCurrent(result.context, currentContext);
 

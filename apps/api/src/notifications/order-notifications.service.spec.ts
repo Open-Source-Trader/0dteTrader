@@ -101,10 +101,50 @@ describe('OrderNotificationsService', () => {
     });
   });
 
-  it('prefixes practice-mode pushes', async () => {
+  it('prefixes practice-mode pushes (current mode as the fallback when no row exists yet)', async () => {
     prisma.users.find((u) => u.id === userId).tradingMode = 'practice';
     await service.handleOrderUpdate(userId, orderResult({ status: 'rejected' }));
     expect(apns.sent[0].title).toBe('PRACTICE · Order rejected');
+  });
+
+  it("labels by the order's recorded environment, not the user's current mode", async () => {
+    // A practice order… pushed after the user switched to live.
+    prisma.tradeOrders.push({
+      id: 'O-1',
+      userId,
+      environment: 'practice',
+      contractSymbol: 'SPY260717C00505000',
+      placedAt: new Date(),
+    });
+    prisma.users.find((u) => u.id === userId).tradingMode = 'live';
+
+    await service.handleOrderUpdate(userId, orderResult());
+
+    expect(apns.sent[0].title).toBe('PRACTICE · Order filled');
+  });
+
+  it('a live order stays unprefixed even while the user sits in practice mode', async () => {
+    prisma.tradeOrders.push({
+      id: 'O-1',
+      userId,
+      environment: 'live',
+      contractSymbol: 'SPY260717C00505000',
+      placedAt: new Date(),
+    });
+    prisma.users.find((u) => u.id === userId).tradingMode = 'practice';
+
+    await service.handleOrderUpdate(userId, orderResult());
+
+    expect(apns.sent[0].title).toBe('Order filled');
+  });
+
+  it("chart-order pushes wear the line's recorded environment", async () => {
+    prisma.chartOrders.push({ id: 'line-1', userId, environment: 'practice' });
+    prisma.users.find((u) => u.id === userId).tradingMode = 'live';
+
+    await service.handleChartOrder(userId, chartOrder());
+
+    expect(apns.sent[0].title).toBe('PRACTICE · Chart order fired');
   });
 
   it('prunes a token APNs reports dead', async () => {

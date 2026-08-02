@@ -62,6 +62,10 @@ export class OrderNotificationsService implements OnModuleDestroy {
       userId,
       titles[order.status] as string,
       `${order.side.toUpperCase()} ${order.quantity} ${order.contractSymbol}${price}`,
+      async () => {
+        const row = await this.prisma.tradeOrder.findUnique({ where: { id: order.orderId } });
+        return row?.environment ?? null;
+      },
     );
   }
 
@@ -75,14 +79,32 @@ export class OrderNotificationsService implements OnModuleDestroy {
       title,
       `${order.side.toUpperCase()} ${order.quantity} ${order.contractSymbol} — ` +
         `${order.underlying} crossed ${order.triggerPrice}`,
+      async () => {
+        const row = await this.prisma.chartOrder.findUnique({ where: { id: order.id } });
+        return row?.environment ?? null;
+      },
     );
   }
 
-  private async notify(userId: string, title: string, body: string): Promise<void> {
+  private async notify(
+    userId: string,
+    title: string,
+    body: string,
+    /** The environment stamped on the persisted order — immutable, unlike the
+     *  user's current mode. A live fill pushed after switching to practice
+     *  (or vice versa) must wear the label of the account it traded in. */
+    recordedEnvironment: () => Promise<string | null>,
+  ): Promise<void> {
     const tokens = await this.devices.listForUser(userId);
     if (tokens.length === 0) return;
-    const user = await this.prisma.user.findUnique({ where: { id: userId } });
-    const fullTitle = user?.tradingMode === 'practice' ? `PRACTICE · ${title}` : title;
+    let environment = await recordedEnvironment();
+    if (environment === null) {
+      // The row may not be written yet (this subscriber and the persister ride
+      // the same bus); the user's current mode is the closest answer left.
+      const user = await this.prisma.user.findUnique({ where: { id: userId } });
+      environment = user?.tradingMode === 'practice' ? 'practice' : 'live';
+    }
+    const fullTitle = environment === 'practice' ? `PRACTICE · ${title}` : title;
     for (const device of tokens) {
       const result = await this.apns.send(device.token, { title: fullTitle, body });
       if (isDeadToken(result)) {

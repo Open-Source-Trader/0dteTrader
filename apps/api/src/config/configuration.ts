@@ -225,5 +225,16 @@ export function validateEnv(config: Record<string, unknown>): Record<string, unk
     }
   }
 
+  // An enabled APNs sender with a missing credential would fail on the first
+  // push, hours after boot — surface the misconfiguration at startup instead.
+  if (enabled(process.env.APNS_ENABLED, false)) {
+    if (!process.env.APNS_KEY_ID || !process.env.APNS_TEAM_ID) {
+      throw new Error('APNS_ENABLED requires APNS_KEY_ID and APNS_TEAM_ID');
+    }
+    if (!process.env.APNS_KEY && !process.env.APNS_KEY_PATH) {
+      throw new Error('APNS_ENABLED requires the .p8 key via APNS_KEY or APNS_KEY_PATH');
+    }
+  }
+
   return config;
 }

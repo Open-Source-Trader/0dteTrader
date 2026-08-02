@@ -497,8 +497,10 @@ export interface Position {
   underlyingEntryPrice?: number;
   /**
    * ISO-8601 time of the fill that opened the current position run (the fill
-   * where quantity last left zero). Absent for positions opened before this
-   * was recorded, or outside the app.
+   * where quantity last left zero). This is the opening ORDER's placement
+   * timestamp — the closest persisted moment to execution; a resting limit
+   * that filled much later than it was placed reads as its placement time.
+   * Absent for positions opened before this was recorded, or outside the app.
    */
   openedAt?: string;
 }

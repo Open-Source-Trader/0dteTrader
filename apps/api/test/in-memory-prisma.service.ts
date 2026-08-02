@@ -246,6 +246,7 @@ export class InMemoryPrismaService {
   };
 
   readonly tradeOrder = {
+    findUnique: async ({ where }: any) => this.tradeOrders.find((o) => o.id === where.id) ?? null,
     upsert: async ({ where, create, update }: any) => {
       const existing = this.tradeOrders.find((o) => o.id === where.id);
       if (existing) {

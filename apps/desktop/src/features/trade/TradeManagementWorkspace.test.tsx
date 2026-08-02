@@ -93,6 +93,7 @@ function renderWorkspace(overrides: Partial<Parameters<typeof TradeManagementWor
       onSelectChartOrder: () => undefined,
       onCreateChartOrder: () => undefined,
       defaultOrderType: 'mid',
+      underlyingPrice: 640,
       resolveContract: () => null,
       ...overrides,
     }),
@@ -217,7 +218,7 @@ describe('TradeManagementWorkspace rendering', () => {
     expect(markup).not.toContain('Edit target');
   });
 
-  it('disables Move stop to entry without a stop line, and Set legs without an entry anchor', () => {
+  it('disables Move stop to entry without a stop line or entry anchor', () => {
     // No stop line (entry anchor present): move disabled, Set stop enabled.
     const noStop = renderWorkspace({
       positions: [{ ...position, underlyingEntryPrice: 636.4 }],
@@ -227,8 +228,8 @@ describe('TradeManagementWorkspace rendering', () => {
     expect(buttonTag(noStop, 'Move stop to entry')).toContain('Set a stop line on the chart');
     expect(buttonTag(noStop, 'Set stop')).not.toContain('disabled');
 
-    // No entry anchor: nothing to move to, and no level to create a leg at —
-    // but an existing line stays editable (selection needs no anchor).
+    // No entry anchor: nothing to move a stop TO — but Set legs anchor on the
+    // live price, so they stay available, as does editing an existing line.
     const noAnchor = renderWorkspace({
       positions: [position],
       chartOrders: [stop],
@@ -236,8 +237,20 @@ describe('TradeManagementWorkspace rendering', () => {
     });
     expect(buttonTag(noAnchor, 'Move stop to entry')).toContain('disabled');
     expect(buttonTag(noAnchor, 'Move stop to entry')).toContain('Entry price unknown');
-    expect(buttonTag(noAnchor, 'Set target')).toContain('disabled');
+    expect(buttonTag(noAnchor, 'Set target')).not.toContain('disabled');
     expect(buttonTag(noAnchor, 'Edit stop')).not.toContain('disabled');
+  });
+
+  it('disables Set legs while there is no live underlying price to anchor on', () => {
+    const markup = renderWorkspace({
+      positions: [{ ...position, underlyingEntryPrice: 636.4 }],
+      resolveContract: () => contract,
+      underlyingPrice: null,
+    });
+
+    expect(buttonTag(markup, 'Set stop')).toContain('disabled');
+    expect(buttonTag(markup, 'Set stop')).toContain('Live price unavailable');
+    expect(buttonTag(markup, 'Set target')).toContain('disabled');
   });
 
   it('locks every stop/target action alongside the rest of the workspace', () => {

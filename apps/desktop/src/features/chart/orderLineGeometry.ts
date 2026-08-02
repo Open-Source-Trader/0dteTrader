@@ -68,6 +68,11 @@ export function layoutRow(
 export function pillAt(row: LineRow, x: number, y: number, slopY = 0): PillKey | null {
   if (Math.abs(y - row.y) > ROW_HEIGHT / 2 + slopY) return null;
   for (const pill of row.pills) {
+    // The label pill is a readout, not a control — transparent to pointers,
+    // so the chart keeps pan/zoom underneath it (the iOS overlay does the
+    // same). Claiming it here would dead-zone the chart under every entry
+    // line's contract tag.
+    if (pill.key === 'label') continue;
     // Each pill claims half the gap on either side: neighbours meet exactly at
     // the midpoint, so no point belongs to two of them.
     if (x >= pill.x - PILL_GAP / 2 && x <= pill.x + pill.width + PILL_GAP / 2) {

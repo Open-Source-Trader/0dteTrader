@@ -54,6 +54,10 @@ interface TradeManagementWorkspaceProps {
    *  the stop/target actions — which hand off to that layer or create lines
    *  it would draw — disable rather than acting on an invisible surface. */
   chartTradingEnabled?: boolean;
+  /** Live last price of the chart underlying. New stop/target legs default to
+   *  a level relative to it — anchoring on the entry would arm on the wrong
+   *  side of a market that has moved. Null (no live quote) blocks Set. */
+  underlyingPrice?: number | null;
   resolveContract: (symbol: string) => OptionContract | null;
   locked?: boolean;
 }
@@ -133,6 +137,7 @@ export function TradeManagementWorkspace({
   onCreateChartOrder,
   defaultOrderType,
   chartTradingEnabled = true,
+  underlyingPrice = null,
   resolveContract,
   locked = false,
 }: TradeManagementWorkspaceProps) {
@@ -165,12 +170,13 @@ export function TradeManagementWorkspace({
     legActionBlockedReason = 'Enable Chart Trading in chart settings first';
   } else if (!activeMeta?.contract) {
     legActionBlockedReason = "Open this contract's chart to manage its lines";
-  } else if (activeEntryPrice === undefined) {
-    legActionBlockedReason = 'Entry price unknown';
+  } else if (underlyingPrice === null) {
+    legActionBlockedReason = 'Live price unavailable';
   }
 
   /** Edit selects the existing line (the chart's selection/drag UX takes it
-   *  from there); Set creates the missing OCO leg at its default level. */
+   *  from there); Set creates the missing OCO leg at its default level,
+   *  anchored on the live price so it lands on the correct side of it. */
   const setOrEditLeg = (kind: 'stop' | 'target') => {
     if (!activePosition || !activeMeta) return;
     const existing = kind === 'stop' ? activeMeta.stop : activeMeta.target;
@@ -179,7 +185,7 @@ export function TradeManagementWorkspace({
       return;
     }
     const { contract } = activeMeta;
-    if (!contract || activeEntryPrice === undefined) return;
+    if (!contract || underlyingPrice === null) return;
     onCreateChartOrder(
       bracketLegDraft({
         contract,
@@ -188,7 +194,7 @@ export function TradeManagementWorkspace({
           kind,
           contract.optionType,
           activePosition.quantity,
-          activeEntryPrice,
+          underlyingPrice,
         ),
         kind,
         orderType: defaultOrderType,

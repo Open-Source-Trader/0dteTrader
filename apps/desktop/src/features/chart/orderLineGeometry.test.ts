@@ -60,6 +60,24 @@ describe('pillAt', () => {
     }
   });
 
+  it('treats the label pill as transparent so the chart keeps pan/zoom under it', () => {
+    const pills = layoutRow(
+      [
+        { key: 'label', label: '500C 0DTE' },
+        { key: 'quantity', label: '+1' },
+        { key: 'close', label: '✕' },
+      ],
+      measure,
+      400,
+    );
+    const line = { id: 'entry:X', y: 100, pills, left: pills[0].x };
+    const label = pills.find((p) => p.key === 'label')!;
+    const quantity = pills.find((p) => p.key === 'quantity')!;
+
+    expect(pillAt(line, label.x + label.width / 2, 100)).toBeNull();
+    expect(pillAt(line, quantity.x + quantity.width / 2, 100)).toBe('quantity');
+  });
+
   it('never lets the execution pill steal the cancel tap', () => {
     const line = row(100);
     const orderType = line.pills.find((p) => p.key === 'orderType')!;

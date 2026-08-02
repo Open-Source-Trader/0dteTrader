@@ -433,6 +433,7 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
       onCreateChartOrder={(draft) => void chartOrdersStore.create(draft)}
       defaultOrderType={narrowToChartOrderType(trade.orderType)}
       chartTradingEnabled={chartTradingSettings.enabled}
+      underlyingPrice={chain.underlyingLast}
       resolveContract={resolveOptionContract}
       locked={locked}
     />

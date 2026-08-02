@@ -22,6 +22,10 @@ struct ZeroDTETraderApp: App {
                 .id(ObjectIdentifier(container))
                 .environmentObject(serverConfig)
                 .onChange(of: serverConfig.baseURL) { _, newBaseURL in
+                    // Best-effort push teardown against the departing server —
+                    // its registration is unreachable once the base URL flips.
+                    let departing = container
+                    Task { await departing.pushNotifications.handleLogout() }
                     container = AppContainer(baseURL: newBaseURL)
                     appDelegate.pushNotifications = container.pushNotifications
                 }

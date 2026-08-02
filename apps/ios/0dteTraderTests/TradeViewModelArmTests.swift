@@ -334,6 +334,24 @@ final class TradeViewModelArmTests: XCTestCase {
         XCTAssertEqual(tradeViewModel.armedTicket?.summary.contains("CLOSE 3 of 10"), true)
     }
 
+    /// A holding resolved from its OCC symbol carries zero quotes until its
+    /// expiration's contracts load — the ticket must refuse to arm off a
+    /// 0.00 display rather than trade blind.
+    func testArm_currRefusesWhileQuotesStillLoading() {
+        let (tradeViewModel, chainViewModel) = makeViewModels()
+        selectContract(tradeViewModel, chainViewModel)
+        let occ = "SPY990122C00510000" // not on the seeded chain
+        tradeViewModel.setPositionsForTesting([position(2, symbol: occ)])
+        chainViewModel.positionsProvider = { tradeViewModel.positions }
+        chainViewModel.isCurrMode = true
+        tradeViewModel.setQuantity(1)
+
+        tradeViewModel.arm(side: .sell, underlying: "SPY", chainViewModel: chainViewModel)
+
+        XCTAssertNil(tradeViewModel.armedTicket)
+        XCTAssertEqual(tradeViewModel.toast?.message, "Quotes are still loading for that expiration.")
+    }
+
     /// Leg-matching would close the highest-P/L leg; CURR must instead sell
     /// exactly the contract the panel has selected.
     func testArm_currSell_bypassesLegMatching() {

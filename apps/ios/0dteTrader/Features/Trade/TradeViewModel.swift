@@ -267,6 +267,12 @@ final class TradeViewModel: ObservableObject {
                 showToast("Pick a held contract first.", style: .error)
                 return
             }
+            // A leg resolved from its OCC symbol has no quotes until its
+            // expiration's contracts load — never trade off a 0.00 display.
+            if contract.bid <= 0, contract.ask <= 0, contract.last <= 0 {
+                showToast("Quotes are still loading for that expiration.", style: .error)
+                return
+            }
             selection = OrderSelectionDTO(
                 mode: "explicit",
                 optionType: contract.optionType.rawValue,

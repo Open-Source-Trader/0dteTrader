@@ -273,10 +273,8 @@ final class ProfileViewModel: ObservableObject {
     }
 
     func logout() async {
-        // While this account's credentials are still valid: unregister the
-        // device token, so the next account on this device never receives the
-        // previous account's order pushes.
-        await pushNotifications?.handleLogout()
+        // Push teardown lives in RootView's signOut(), which every sign-out
+        // route — this one included — funnels through.
         await onLogout()
     }
 

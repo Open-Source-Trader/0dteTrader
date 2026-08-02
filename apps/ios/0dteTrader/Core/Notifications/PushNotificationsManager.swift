@@ -41,11 +41,14 @@ enum PushRegistrationFlow {
 final class PushNotificationsManager: NSObject {
     private let apiClient: APIClient
     private let settingsStore: SettingsStore
-    /// Serializes overlapping toggle flips: each `setEnabled` claims a new
-    /// generation and abandons its continuation when a newer flip has taken
-    /// over — otherwise a slow OFF's teardown could land after a quick ON's
-    /// registration and leave the toggle on with APNs unregistered.
-    private var toggleGeneration = 0
+    /// Chains every registration/teardown so their NETWORK calls cannot
+    /// interleave: a client-side abort of a superseded flip is not enough,
+    /// because its DELETE was already in flight and could land at the server
+    /// after the newer flip's re-registration POST for the same token —
+    /// silently unregistering a device whose toggle reads on. Each operation
+    /// awaits its predecessor; a superseded one exits before touching the
+    /// network.
+    private var operationChain: Task<Void, Never>?
 
     init(apiClient: APIClient, settingsStore: SettingsStore) {
         self.apiClient = apiClient
@@ -57,25 +60,47 @@ final class PushNotificationsManager: NSObject {
         UNUserNotificationCenter.current().delegate = self
     }
 
-    /// App launch: with the toggle on, re-register so the server always holds
-    /// a current token — APNs tokens can rotate between launches.
+    /// Authenticated-screen appear: with the toggle on, re-register so the
+    /// server always holds a current token under the CURRENT account — APNs
+    /// tokens rotate between launches, and a login after a logout re-binds
+    /// the device here. With the toggle off, sweep any registration an
+    /// earlier session left stranded (a session expiry dies with no valid
+    /// credentials to DELETE with; unregistration is possession-authorized
+    /// server-side, so the new login's credentials clear it).
     func start() {
-        guard settingsStore.pushNotificationsEnabled else { return }
-        UIApplication.shared.registerForRemoteNotifications()
+        if settingsStore.pushNotificationsEnabled {
+            UIApplication.shared.registerForRemoteNotifications()
+            return
+        }
+        guard let stranded = settingsStore.pushDeviceToken else { return }
+        enqueue { [apiClient, settingsStore] in
+            try? await apiClient.unregisterDevice(token: stranded)
+            settingsStore.pushDeviceToken = nil
+        }
     }
 
     /// The Profile toggle. Enabling asks for authorization then registers;
     /// a denial reverts the stored setting (the caller re-reads it).
     /// Disabling deletes the uploaded token server-side, then stops APNs.
+    /// The work runs on the operation chain; a flip superseded by a newer one
+    /// exits before its network call, so rapid OFF→ON can never end with the
+    /// OFF's DELETE landing after the ON's re-registration.
     func setEnabled(_ enabled: Bool) async {
-        toggleGeneration += 1
-        let generation = toggleGeneration
         settingsStore.pushNotificationsEnabled = enabled
+        await enqueue { [weak self] in
+            await self?.apply(enabled: enabled)
+        }.value
+    }
+
+    private func apply(enabled: Bool) async {
+        // Superseded by a newer flip: leave the network alone — the newer
+        // operation, queued behind this one, expresses the current intent.
+        guard settingsStore.pushNotificationsEnabled == enabled else { return }
         switch PushRegistrationFlow.onToggle(enabled: enabled, uploadedToken: settingsStore.pushDeviceToken) {
         case .requestAuthorization:
             let granted = (try? await UNUserNotificationCenter.current()
                 .requestAuthorization(options: [.alert, .sound, .badge])) ?? false
-            guard generation == toggleGeneration else { return }
+            guard settingsStore.pushNotificationsEnabled else { return }
             switch PushRegistrationFlow.onAuthorization(granted: granted) {
             case .registerWithAPNs:
                 UIApplication.shared.registerForRemoteNotifications()
@@ -87,37 +112,53 @@ final class PushNotificationsManager: NSObject {
                 // Best-effort: a failed DELETE leaves a token the server will
                 // prune when its pushes start bouncing.
                 try? await apiClient.unregisterDevice(token: uploadedToken)
-                guard generation == toggleGeneration else { return }
                 settingsStore.pushDeviceToken = nil
             }
-            guard generation == toggleGeneration else { return }
+            guard !settingsStore.pushNotificationsEnabled else { return }
             UIApplication.shared.unregisterForRemoteNotifications()
         default:
             break
         }
     }
 
-    /// Logout teardown, called while the departing account's credentials are
-    /// still valid: the token registration belongs to the ACCOUNT, and the
-    /// next login on this device must not inherit its pushes. The preference
-    /// itself is device-level and survives; the next authenticated `start()`
-    /// re-registers under the new account.
+    /// Sign-out teardown, called from EVERY sign-out route (Profile logout,
+    /// the app-lock escape hatch, a server switch) while the departing
+    /// account's credentials are still valid: the token registration belongs
+    /// to the ACCOUNT, and the next login on this device must not inherit its
+    /// pushes. The preference itself is device-level and survives; the next
+    /// authenticated `start()` re-registers under the new account.
     func handleLogout() async {
-        toggleGeneration += 1
-        if let token = settingsStore.pushDeviceToken {
-            try? await apiClient.unregisterDevice(token: token)
-            settingsStore.pushDeviceToken = nil
-        }
-        UIApplication.shared.unregisterForRemoteNotifications()
+        await enqueue { [apiClient, settingsStore] in
+            if let token = settingsStore.pushDeviceToken {
+                try? await apiClient.unregisterDevice(token: token)
+                settingsStore.pushDeviceToken = nil
+            }
+            UIApplication.shared.unregisterForRemoteNotifications()
+        }.value
     }
 
-    /// AppDelegate forward: APNs granted a token — upload it.
+    /// Appends an operation to the chain and returns its task. Operations run
+    /// strictly one after another, in enqueue order.
+    @discardableResult
+    private func enqueue(_ operation: @escaping @MainActor () async -> Void) -> Task<Void, Never> {
+        let previous = operationChain
+        let task = Task { @MainActor in
+            await previous?.value
+            await operation()
+        }
+        operationChain = task
+        return task
+    }
+
+    /// AppDelegate forward: APNs granted a token — upload it. Runs on the
+    /// operation chain so the POST can never interleave with a teardown's
+    /// DELETE; a late callback after opt-out is dropped, and an opt-out that
+    /// raced the upload gets its registration undone.
     func didRegisterForRemoteNotifications(deviceToken: Data) {
         let token = PushTokenEncoding.hexString(deviceToken)
-        // A late APNs callback can land after the user opted out; uploading
-        // then would leave the server registered post-opt-out.
         guard settingsStore.pushNotificationsEnabled, !token.isEmpty else { return }
-        Task {
+        enqueue { [apiClient, settingsStore] in
+            guard settingsStore.pushNotificationsEnabled else { return }
             do {
                 try await apiClient.registerDevice(token: token)
                 if settingsStore.pushNotificationsEnabled {

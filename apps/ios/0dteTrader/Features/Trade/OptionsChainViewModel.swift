@@ -185,8 +185,10 @@ final class OptionsChainViewModel: ObservableObject {
         loadGeneration += 1
         let gen = loadGeneration
         if self.underlying != underlying {
-            // New underlying: reset selection state.
+            // New underlying: reset selection state. CURR is per-underlying —
+            // the owned legs it was scoped to belong to the old symbol.
             chain = nil
+            isCurrMode = false
             selectedExpiration = nil
             selectedStrike = nil
             underlyingLast = nil

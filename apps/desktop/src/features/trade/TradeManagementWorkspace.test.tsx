@@ -253,6 +253,20 @@ describe('TradeManagementWorkspace rendering', () => {
     }
   });
 
+  it('disables stop/target actions while Chart Trading is off — the layer they hand off to is unmounted', () => {
+    const markup = renderWorkspace({
+      positions: [{ ...position, underlyingEntryPrice: 636.4 }],
+      chartOrders: [stop],
+      resolveContract: () => contract,
+      chartTradingEnabled: false,
+    });
+
+    for (const label of ['Move stop to entry', 'Edit stop', 'Set target']) {
+      expect(buttonTag(markup, label)).toContain('disabled');
+      expect(buttonTag(markup, label)).toContain('Enable Chart Trading in chart settings first');
+    }
+  });
+
   it('disables exit buttons while the position has a pending request', () => {
     const close = vi.fn();
     const markup = renderWorkspace({

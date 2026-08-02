@@ -100,7 +100,10 @@ export class ApnsClient {
       const finish = (result: ApnsSendResult): void => {
         if (settled) return;
         settled = true;
-        session.close();
+        // destroy(), not close(): close() waits for open streams, so a
+        // timed-out request whose stream never ends would leak the session
+        // and its socket. Every path through here already has its answer.
+        session.destroy();
         resolve(result);
       };
       session.on('error', (err: Error) => finish({ status: 0, reason: err.message }));

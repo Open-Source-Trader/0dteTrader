@@ -50,6 +50,10 @@ interface TradeManagementWorkspaceProps {
   onCreateChartOrder: (draft: ChartOrderDraft) => void;
   /** Execution type a new leg inherits — the ticket's, already narrowed. */
   defaultOrderType: ChartOrderType;
+  /** Settings › Chart Trading. Off unmounts the chart's order-line layer, so
+   *  the stop/target actions — which hand off to that layer or create lines
+   *  it would draw — disable rather than acting on an invisible surface. */
+  chartTradingEnabled?: boolean;
   resolveContract: (symbol: string) => OptionContract | null;
   locked?: boolean;
 }
@@ -128,6 +132,7 @@ export function TradeManagementWorkspace({
   onSelectChartOrder,
   onCreateChartOrder,
   defaultOrderType,
+  chartTradingEnabled = true,
   resolveContract,
   locked = false,
 }: TradeManagementWorkspaceProps) {
@@ -156,7 +161,9 @@ export function TradeManagementWorkspace({
 
   // Why a Set stop/target could not create a leg right now; null means it can.
   let legActionBlockedReason: string | null = null;
-  if (!activeMeta?.contract) {
+  if (!chartTradingEnabled) {
+    legActionBlockedReason = 'Enable Chart Trading in chart settings first';
+  } else if (!activeMeta?.contract) {
     legActionBlockedReason = "Open this contract's chart to manage its lines";
   } else if (activeEntryPrice === undefined) {
     legActionBlockedReason = 'Entry price unknown';
@@ -264,8 +271,16 @@ export function TradeManagementWorkspace({
             </button>
             <button
               className="desktop-positions-action"
-              disabled={locked || moveStopToEntryRequest(activePosition, activeMeta.stop) === null}
-              title={moveStopBlockedReason(activeMeta.stop, activeEntryPrice)}
+              disabled={
+                locked ||
+                !chartTradingEnabled ||
+                moveStopToEntryRequest(activePosition, activeMeta.stop) === null
+              }
+              title={
+                chartTradingEnabled
+                  ? moveStopBlockedReason(activeMeta.stop, activeEntryPrice)
+                  : 'Enable Chart Trading in chart settings first'
+              }
               onClick={() => {
                 const request = moveStopToEntryRequest(activePosition, activeMeta.stop);
                 if (request) onMoveChartOrder(request.order, request.triggerPrice);
@@ -275,16 +290,32 @@ export function TradeManagementWorkspace({
             </button>
             <button
               className="desktop-positions-action"
-              disabled={locked || (!activeMeta.stop && legActionBlockedReason !== null)}
-              title={activeMeta.stop ? undefined : (legActionBlockedReason ?? undefined)}
+              disabled={
+                locked ||
+                !chartTradingEnabled ||
+                (!activeMeta.stop && legActionBlockedReason !== null)
+              }
+              title={
+                activeMeta.stop && chartTradingEnabled
+                  ? undefined
+                  : (legActionBlockedReason ?? undefined)
+              }
               onClick={() => setOrEditLeg('stop')}
             >
               {activeMeta.stop ? 'Edit stop' : 'Set stop'}
             </button>
             <button
               className="desktop-positions-action"
-              disabled={locked || (!activeMeta.target && legActionBlockedReason !== null)}
-              title={activeMeta.target ? undefined : (legActionBlockedReason ?? undefined)}
+              disabled={
+                locked ||
+                !chartTradingEnabled ||
+                (!activeMeta.target && legActionBlockedReason !== null)
+              }
+              title={
+                activeMeta.target && chartTradingEnabled
+                  ? undefined
+                  : (legActionBlockedReason ?? undefined)
+              }
               onClick={() => setOrEditLeg('target')}
             >
               {activeMeta.target ? 'Edit target' : 'Set target'}

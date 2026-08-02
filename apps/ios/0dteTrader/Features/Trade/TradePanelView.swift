@@ -245,13 +245,17 @@ struct TradePanelView: View {
 
                     // CURR trades only what is already held; with nothing held
                     // for this underlying there is nothing for it to offer.
+                    // Only disabled while OFF — flattening the last position
+                    // with CURR active must not trap the chip in the on state.
                     HudToggleChip(
                         title: "CURR",
                         isOn: $chainViewModel.isCurrMode,
                         accent: .appAccent
                     )
-                    .disabled(!chainViewModel.hasHeldContracts)
-                    .opacity(chainViewModel.hasHeldContracts ? 1 : 0.55)
+                    .disabled(!chainViewModel.isCurrMode && !chainViewModel.hasHeldContracts)
+                    .opacity(
+                        chainViewModel.isCurrMode || chainViewModel.hasHeldContracts ? 1 : 0.55
+                    )
                     .accessibilityLabel("Trade current position")
                 }
                 .disabled(tradingLocked)

@@ -8,9 +8,37 @@ extension ProfileView {
         VStack(alignment: .leading, spacing: AppSpacing.md) {
             sectionHeader("Preferences", icon: "slider.horizontal.3")
             autoOffsetRow
+            toastsRow
         }
         .padding(AppSpacing.lg)
         .hudCard(glow: false)
+    }
+
+    private var toastsRow: some View {
+        HStack {
+            HStack(spacing: AppSpacing.sm) {
+                Image(systemName: "bell.badge")
+                    .foregroundStyle(Color.appAccent)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("In-app toasts")
+                        .font(.panelLabel)
+                        .foregroundStyle(.white)
+                    Text("Success and status banners. Errors always show.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Spacer()
+            Toggle("", isOn: $viewModel.toastsEnabled)
+                .labelsHidden()
+                .tint(Color.appAccent)
+        }
+        .padding(AppSpacing.md)
+        .background(Color.appSurface, in: HudPanelShape(chamfer: 6))
+        .overlay(
+            HudPanelShape(chamfer: 6)
+                .strokeBorder(Color.hudStrokeDim, lineWidth: 1)
+        )
     }
 
     private var autoOffsetRow: some View {

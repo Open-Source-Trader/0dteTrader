@@ -32,6 +32,7 @@ final class SettingsStore: @unchecked Sendable {
         static let tradingLocked = "settings.tradingLocked"
         static let bypassOrderConfirmation = "settings.bypassOrderConfirmation"
         static let autoOtmOffset = "settings.autoOtmOffset"
+        static let toastsEnabled = "settings.toastsEnabled"
     }
 
     /// Layout choice persists across launches (FR-12). Defaults to split view.
@@ -146,6 +147,16 @@ final class SettingsStore: @unchecked Sendable {
     var bypassOrderConfirmation: Bool {
         get { defaults.bool(forKey: Keys.bypassOrderConfirmation) }
         set { defaults.set(newValue, forKey: Keys.bypassOrderConfirmation) }
+    }
+
+    /// Success/info toast banners (default on). Gates those styles only —
+    /// error toasts always show.
+    var toastsEnabled: Bool {
+        get {
+            guard defaults.object(forKey: Keys.toastsEnabled) != nil else { return true }
+            return defaults.bool(forKey: Keys.toastsEnabled)
+        }
+        set { defaults.set(newValue, forKey: Keys.toastsEnabled) }
     }
 
     /// AUTO mode's OTM preference: strikes beyond the ATM anchor (0 = ATM,

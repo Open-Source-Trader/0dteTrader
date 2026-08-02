@@ -75,6 +75,10 @@ final class TradeViewModel: ObservableObject {
     /// nil (treated as disconnected) only in previews/tests.
     var isSocketConnected: (() -> Bool)?
 
+    /// Gates success/info toasts (Profile → in-app toasts). Error toasts
+    /// always show regardless. Nil (previews/tests) means show everything.
+    var toastPolicy: (() -> Bool)?
+
     /// Coalesces concurrent refreshes: an order placement's submitted and
     /// terminal-status pushes can each trigger one in quick succession, so a
     /// call already running is awaited rather than duplicated, with at most
@@ -560,6 +564,8 @@ final class TradeViewModel: ObservableObject {
     private var toastQueue: [Toast] = []
 
     func showToast(_ message: String, style: Toast.Style) {
+        // Errors always surface; only the routine chatter is gated.
+        if style != .error, toastPolicy?() == false { return }
         let toast = Toast(message: message, style: style)
         if style == .success {
             Haptics.success()

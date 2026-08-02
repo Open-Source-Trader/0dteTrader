@@ -75,6 +75,11 @@ final class ProfileViewModel: ObservableObject {
         didSet { settingsStore.autoOtmOffset = autoOtmOffset }
     }
 
+    /// Success/info toast banners on the trade screen. Errors always show.
+    @Published var toastsEnabled: Bool {
+        didSet { settingsStore.toastsEnabled = toastsEnabled }
+    }
+
     private let apiClient: APIClient
     private let settingsStore: SettingsStore
     private let quoteSocket: QuoteSocketClient
@@ -93,6 +98,7 @@ final class ProfileViewModel: ObservableObject {
         self.appLockEnabled = settingsStore.appLockEnabled
         self.bypassOrderConfirmation = settingsStore.bypassOrderConfirmation
         self.autoOtmOffset = settingsStore.autoOtmOffset
+        self.toastsEnabled = settingsStore.toastsEnabled
     }
 
     /// True when the last `load()` failed. Kept separate from `errorMessage`

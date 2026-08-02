@@ -38,6 +38,9 @@ struct OrderLineStroke {
 
 /// Which control within a row a touch landed on.
 enum OrderLinePill: Equatable {
+    /// Entry rows only: "500C 0DTE" — names the contract. Not a control, so
+    /// hit-testing skips it and the chart keeps pan/zoom underneath.
+    case label
     case quantity
     case kind
     case orderType
@@ -281,7 +284,9 @@ final class OrderLineOverlayView: UIView {
     private func hitTest(at point: CGPoint) -> (row: OrderLineRow, pill: OrderLinePill?)? {
         // Nearest row first, so stacked lines resolve to the one under the finger.
         for row in rows.sorted(by: { abs($0.y - point.y) < abs($1.y - point.y) }) {
-            for layout in row.pills where layout.touchFrame.contains(point) {
+            // The label pill is a readout, not a control — skipped here so a
+            // touch on it falls through to the chart's own pan and zoom.
+            for layout in row.pills where layout.pill != .label && layout.touchFrame.contains(point) {
                 return (row, layout.pill)
             }
             if abs(point.y - row.y) <= AppOrderLine.lineHitSlop,
@@ -432,11 +437,15 @@ final class OrderLineOverlayView: UIView {
         // the bracket legs are what actually get adjusted.
         for entry in entryLines {
             guard let y = yPixel(for: entry.price) else { continue }
-            let color = entry.position.unrealizedPnl >= 0 ? positiveColor : negativeColor
+            // The stroke wears the contract's type colour (call blue, put
+            // red); only the P/L pill keeps profit-sign colouring.
+            let stroke = EntryLineStyle.strokeColor(for: entry.contract.optionType)
+            let pnlColor = entry.position.unrealizedPnl >= 0 ? positiveColor : negativeColor
             let row = layoutRow(
                 target: .entry(entry.position.symbol),
                 y: y,
                 labels: [
+                    (.label, EntryLineStyle.label(for: entry.contract)),
                     (.quantity, Format.signedQuantity(entry.position.quantity)),
                     (.pnl, "\(Format.signedPrice(entry.position.unrealizedPnl)) USD"),
                     (.close, "✕"),
@@ -446,13 +455,21 @@ final class OrderLineOverlayView: UIView {
 
             strokeRowLine(
                 row,
-                style: OrderLineStroke(color: color, width: AppOrderLine.strokeEntry, dash: []),
+                style: OrderLineStroke(color: stroke, width: AppOrderLine.strokeEntry, dash: []),
                 in: context
             )
             for layout in row.pills {
-                // The P/L reads as a value, not a control, so it is outlined.
-                let filled = layout.pill != .pnl
-                renderPill(layout, fill: filled ? color : nil, accent: color, in: context)
+                switch layout.pill {
+                case .pnl:
+                    // P/L reads as a value, not a control — outlined, and the
+                    // one pill still coloured by profit sign.
+                    renderPill(layout, fill: nil, accent: pnlColor, in: context)
+                case .label:
+                    // A readout too: outlined in the type colour.
+                    renderPill(layout, fill: nil, accent: stroke, in: context)
+                default:
+                    renderPill(layout, fill: stroke, accent: stroke, in: context)
+                }
             }
         }
 
@@ -548,7 +565,9 @@ final class OrderLineOverlayView: UIView {
             for layout in row.pills {
                 let element = UIAccessibilityElement(accessibilityContainer: self)
                 element.accessibilityLabel = accessibilityLabel(for: row.target, pill: layout.pill)
-                element.accessibilityTraits = .button
+                // The label pill is a readout, not a control (hit-testing
+                // skips it too).
+                element.accessibilityTraits = layout.pill == .label ? .staticText : .button
                 element.accessibilityFrameInContainerSpace = layout.touchFrame
                 elements.append(element)
             }
@@ -563,13 +582,16 @@ final class OrderLineOverlayView: UIView {
             guard let entry = entryLines.first(where: { $0.position.symbol == symbol }) else {
                 return "Position"
             }
+            let contractLabel = EntryLineStyle.label(for: entry.contract)
             switch pill {
+            case .label:
+                return "\(contractLabel) entry line"
             case .close:
-                return "Close \(symbol) position"
+                return "Close \(contractLabel) position"
             case .pnl:
-                return "\(symbol) profit and loss \(Format.signedPrice(entry.position.unrealizedPnl))"
+                return "\(contractLabel) profit and loss \(Format.signedPrice(entry.position.unrealizedPnl))"
             default:
-                return "\(symbol) quantity \(entry.position.quantity)"
+                return "\(contractLabel) quantity \(entry.position.quantity)"
             }
         case .order(let id):
             guard let order = model?.order(id: id) else { return "Order line" }

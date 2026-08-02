@@ -27,13 +27,7 @@ targets:
       - path: 0dteTrader
         excludes:
           - 0dteTrader.entitlements
-    # aps-environment for push notifications. XcodeGen regenerates the file
-    # from `properties` and sets CODE_SIGN_ENTITLEMENTS; simulator builds
-    # ignore the entitlement (no provisioning check there).
-    entitlements:
-      path: 0dteTrader/0dteTrader.entitlements
-      properties:
-        aps-environment: development
+          - 0dteTrader-production.entitlements
     dependencies:
       - package: Charts
         product: DGCharts
@@ -49,6 +43,18 @@ targets:
         TARGETED_DEVICE_FAMILY: '1'
         CODE_SIGN_STYLE: Automatic
         DEVELOPMENT_TEAM: X3Q9GMD432
+      # aps-environment must match how the build is signed: development-signed
+      # builds mint sandbox APNs tokens, TestFlight/App Store builds production
+      # ones — and the server's APNS_HOST must pair with them (sandbox host for
+      # Debug, api.push.apple.com for Staging/Release). One committed
+      # entitlements file per environment; simulator builds ignore it.
+      configs:
+        Debug:
+          CODE_SIGN_ENTITLEMENTS: 0dteTrader/0dteTrader.entitlements
+        Staging:
+          CODE_SIGN_ENTITLEMENTS: 0dteTrader/0dteTrader-production.entitlements
+        Release:
+          CODE_SIGN_ENTITLEMENTS: 0dteTrader/0dteTrader-production.entitlements
     configFiles:
       Debug: Configurations/Debug.xcconfig
       Staging: Configurations/Staging.xcconfig

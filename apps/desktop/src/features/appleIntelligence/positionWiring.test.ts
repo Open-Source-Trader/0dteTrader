@@ -58,7 +58,13 @@ function makeHarness(
     positions = next;
     listeners.forEach((listener) => listener());
   };
-  return { deps, setPositions, submitted };
+  /** Fires the subscription without changing the positions array reference
+   * — simulates a toast/unrelated TradeStore set() that notifies every
+   * subscriber but never touches positions. */
+  const notify = () => {
+    listeners.forEach((listener) => listener());
+  };
+  return { deps, setPositions, notify, submitted };
 }
 
 describe('connectPositionAnalysis', () => {
@@ -105,6 +111,20 @@ describe('connectPositionAnalysis', () => {
     connectPositionAnalysis(deps);
 
     setPositions([position()]);
+
+    expect(submitted).toEqual([]);
+  });
+
+  it('is a no-op for a notify whose positions array reference is unchanged (toast-only updates)', () => {
+    // TradeStore.subscribe() is whole-store: a toast queue/dismiss set()
+    // notifies every subscriber without touching `positions` at all — the
+    // array reference stays identical, unlike the "quantity picker" case
+    // above (a genuinely new array with the same content). Both must
+    // produce zero submissions, but this is the cheap-skip path.
+    const { deps, submitted, notify } = makeHarness('ready', [position()]);
+    connectPositionAnalysis(deps);
+
+    notify();
 
     expect(submitted).toEqual([]);
   });

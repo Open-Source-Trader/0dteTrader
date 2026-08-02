@@ -29,10 +29,20 @@ export interface PositionWiringDeps {
  * fires retroactively once the model recovers.
  */
 export function connectPositionAnalysis(deps: PositionWiringDeps): () => void {
-  let watch: PositionWatchState = initialPositionWatchState(deps.tradeStore.getState().positions);
+  let positions = deps.tradeStore.getState().positions;
+  let watch: PositionWatchState = initialPositionWatchState(positions);
 
   return deps.tradeStore.subscribe(() => {
-    const positions = deps.tradeStore.getState().positions;
+    const nextPositions = deps.tradeStore.getState().positions;
+    // TradeStore.subscribe() is whole-store (any set() call notifies every
+    // subscriber, including quote-tick markPrice updates and toast
+    // queue/dismiss changes that never touch `positions`) — skip the diff
+    // entirely when the array reference itself hasn't changed, rather than
+    // re-running evaluatePositionEvents (which builds two Maps and iterates
+    // every position) on every unrelated store update.
+    if (nextPositions === positions) return;
+    positions = nextPositions;
+
     const evaluated = evaluatePositionEvents(watch, positions);
     watch = evaluated.state;
     if (evaluated.events.length === 0) return;

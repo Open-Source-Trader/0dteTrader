@@ -1388,6 +1388,19 @@
   background: rgba(46, 143, 255, 0.1);
 }
 
+.desktop-mode-button--curr.selected {
+  color: var(--app-accent-text);
+  border-color: color-mix(in srgb, var(--app-accent) 55%, transparent);
+  background: rgba(46, 143, 255, 0.1);
+}
+
+/* CURR without an open long on the underlying: nothing to pick from. */
+.desktop-mode-button:disabled {
+  color: var(--label-secondary);
+  opacity: 0.45;
+  cursor: default;
+}
+
 .desktop-mode-button--call.selected {
   color: var(--buy-green);
   border-color: color-mix(in srgb, var(--buy-green) 55%, transparent);

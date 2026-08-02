@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { OptionContract, OptionsChain } from '@0dtetrader/shared-types';
+import type { OptionContract, OptionsChain, Position } from '@0dtetrader/shared-types';
 import type { ApiClient } from '../../core/api/ApiClient';
 import { ChainStore } from './ChainStore';
 
@@ -137,6 +137,108 @@ describe('ChainStore.load', () => {
     expect(state.selectedExpiration).toBe(EXPIRATION);
     // ATM 501 (tie toward OTM at the 500 underlying price) → +1 OTM is 503.
     expect(state.selectedStrike).toBe(503);
+  });
+});
+
+describe('ChainStore CURR mode', () => {
+  const EXP2 = '2099-01-22';
+  const FAR_CALL_SYMBOL = 'SPY990122C505';
+
+  /** Near expiration calls at 499/501/503 plus one call on a far expiration. */
+  function currChainDto(): OptionsChain {
+    const dto = chainDto('SPY', [499, 501, 503], 500);
+    dto.expirations = [EXPIRATION, EXP2];
+    dto.contracts.push({
+      ...contract('SPY', 505),
+      symbol: FAR_CALL_SYMBOL,
+      expiration: EXP2,
+    });
+    return dto;
+  }
+
+  function long(symbol: string, quantity: number, openedAt?: string): Position {
+    return {
+      symbol,
+      assetClass: 'option',
+      quantity,
+      avgPrice: 1,
+      markPrice: 1.2,
+      unrealizedPnl: 10,
+      multiplier: 100,
+      openedAt,
+    };
+  }
+
+  async function loadedCurrStore(positions: Position[]): Promise<ChainStore> {
+    const { store, pending } = makeDeferredStore();
+    store.positionsProvider = () => positions;
+    const loading = store.load('SPY');
+    await flushMicrotasks();
+    pending.get('SPY')!.resolve(currChainDto());
+    await loading;
+    return store;
+  }
+
+  it('menus list only owned longs, and the most recent position is preselected', async () => {
+    const store = await loadedCurrStore([
+      long(contract('SPY', 499).symbol, 1, '2026-08-01T10:00:00Z'),
+      long(FAR_CALL_SYMBOL, 1, '2026-08-01T11:00:00Z'),
+      long(contract('SPY', 503).symbol, -2), // short: never CURR-selectable
+      long('QQQ990115C400', 5), // not resolvable in this chain
+    ]);
+
+    store.setCurrMode(true);
+
+    // Most recent (by openedAt) is the far call → its leg is preselected.
+    expect(store.getState().selectedExpiration).toBe(EXP2);
+    expect(store.getState().selectedStrike).toBe(505);
+    expect(store.expirations).toEqual([EXPIRATION, EXP2]);
+    expect(store.strikes).toEqual([505]);
+
+    // Switching to the near expiration lists (and lands on) the owned 499
+    // only — not the full 499/501/503 ladder.
+    store.selectExpiration(EXPIRATION);
+    expect(store.strikes).toEqual([499]);
+    expect(store.getState().selectedStrike).toBe(499);
+
+    // CURR off: the full chain menus come back.
+    store.setCurrMode(false);
+    expect(store.expirations).toEqual([EXPIRATION, EXP2]);
+    expect(store.strikes).toEqual([499, 501, 503]);
+  });
+
+  it('preselect falls back to the first position when openedAt is unknown', async () => {
+    const store = await loadedCurrStore([
+      long(contract('SPY', 501).symbol, 1),
+      long(contract('SPY', 499).symbol, 2),
+    ]);
+
+    store.setCurrMode(true);
+
+    expect(store.getState().selectedExpiration).toBe(EXPIRATION);
+    expect(store.getState().selectedStrike).toBe(501);
+  });
+
+  it('CURR and AUTO are mutually exclusive', async () => {
+    const store = await loadedCurrStore([long(contract('SPY', 499).symbol, 1)]);
+    expect(store.getState().isAutoMode).toBe(true);
+
+    store.setCurrMode(true);
+    expect(store.getState()).toMatchObject({ isAutoMode: false, isCurrMode: true });
+
+    store.setAutoMode(true);
+    expect(store.getState()).toMatchObject({ isAutoMode: true, isCurrMode: false });
+  });
+
+  it('hasCurrPositions requires an open long resolvable on this underlying', async () => {
+    const none = await loadedCurrStore([]);
+    expect(none.hasCurrPositions).toBe(false);
+
+    const shortOnly = await loadedCurrStore([long(contract('SPY', 499).symbol, -1)]);
+    expect(shortOnly.hasCurrPositions).toBe(false);
+
+    const held = await loadedCurrStore([long(contract('SPY', 499).symbol, 1)]);
+    expect(held.hasCurrPositions).toBe(true);
   });
 });
 

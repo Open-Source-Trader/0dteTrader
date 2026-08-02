@@ -1,5 +1,6 @@
 import type {
   OptionContract,
+  OptionType,
   OrderPreview,
   OrderRequest,
   OrderResult,
@@ -191,6 +192,35 @@ export class TradeStore extends Store<TradeStoreState> {
   // MARK: - Arm (step 1)
 
   /**
+   * Held long legs the panel's current selection could close: same underlying
+   * + expiration + right, any strike. Matching on strike would miss a held
+   * position whenever AUTO's live OTM pick has drifted off the strike actually
+   * held. Legs are resolved through `optionContractResolver` rather than
+   * trusted from `chainStore.selectedContract`, since that is exactly the
+   * drifted AUTO pick we cannot use for the close's strike. Shared by arm()
+   * and the SELL buttons' disabled predicate, so gate and action agree.
+   */
+  sellableHeldLegs(
+    underlying: string,
+    expiration: string | null,
+    optionType: OptionType,
+  ): { position: Position; contract: OptionContract }[] {
+    if (!expiration) return [];
+    return this.getState()
+      .positions.map((position) => {
+        const contract = this.optionContractResolver?.(position.symbol);
+        return contract &&
+          contract.underlying === underlying &&
+          contract.expiration === expiration &&
+          contract.optionType === optionType &&
+          position.quantity > 0
+          ? { position, contract }
+          : null;
+      })
+      .filter((leg): leg is { position: Position; contract: OptionContract } => leg !== null);
+  }
+
+  /**
    * Builds the OrderRequest + idempotency key. Normally opens the confirm
    * sheet; when `bypassConfirmation` is set (Profile → Skip order confirmation)
    * it submits the order immediately, skipping the sheet.
@@ -215,31 +245,71 @@ export class TradeStore extends Store<TradeStoreState> {
     const chainState = chainStore.getState();
     const optionType = chainState.optionType;
 
-    // Selling closes (part of) a held position rather than opening a short
-    // when the panel's selected right (put/call) and expiration match a held
-    // position — regardless of which strike AUTO mode currently points at.
-    // Matching on strike would miss a held position whenever AUTO's live OTM
-    // pick has drifted off the strike actually held, silently falling through
-    // to the open-order branch below and stacking a naked position on top of
-    // the one the user meant to close. Legs are resolved through
-    // `optionContractResolver` rather than trusted from `chainStore.selectedContract`,
-    // since that is exactly the drifted AUTO pick we cannot use for the close's strike.
     const expiration = chainState.selectedExpiration;
+
+    // CURR mode: the user named the exact owned leg, so the sell-to-close
+    // leg-matching heuristic below is bypassed — sell that contract, clamped
+    // to what is actually held.
+    if (side === 'sell' && chainState.isCurrMode) {
+      const strike = chainState.selectedStrike;
+      if (strike === null || expiration === null) {
+        this.showToast('Pick an owned contract first.', 'error');
+        return;
+      }
+      const heldQuantity = this.getState().positions.reduce((sum, position) => {
+        const contract = this.optionContractResolver?.(position.symbol);
+        return contract &&
+          contract.underlying === underlying &&
+          contract.expiration === expiration &&
+          contract.optionType === optionType &&
+          contract.strike === strike &&
+          position.quantity > 0
+          ? sum + position.quantity
+          : sum;
+      }, 0);
+      if (heldQuantity <= 0) {
+        this.showToast('No open position to sell', 'error');
+        return;
+      }
+      const closeQuantity = Math.min(quantity, heldQuantity);
+      const shortName = optionType === 'call' ? 'C' : 'P';
+      const sizeLabel =
+        closeQuantity < heldQuantity ? `${closeQuantity} of ${heldQuantity}` : `${closeQuantity}`;
+      this.set({
+        armedTicket: {
+          id: nextId++,
+          request: {
+            underlying,
+            assetClass: 'option',
+            side,
+            quantity: closeQuantity,
+            orderType,
+            limitPrice,
+            selection: { mode: 'explicit', optionType, expiration, strike },
+          },
+          idempotencyKey: newIdempotencyKey(),
+          side,
+          summary: `CLOSE ${sizeLabel} · ${underlying} ${Format.strike(strike)}${shortName}`,
+        },
+        preview: null,
+        previewError: null,
+      });
+      void this.loadPreview();
+      return;
+    }
+
+    // Selling closes (part of) a held position when the panel's selected
+    // right (put/call) and expiration match one — regardless of which strike
+    // AUTO mode currently points at (see sellableHeldLegs). With no matching
+    // leg the sell is refused outright below: this app only sells to close,
+    // never into a naked short.
     const heldLegs =
-      side === 'sell' && expiration
-        ? this.getState()
-            .positions.map((position) => {
-              const contract = this.optionContractResolver?.(position.symbol);
-              return contract &&
-                contract.underlying === underlying &&
-                contract.expiration === expiration &&
-                contract.optionType === optionType &&
-                position.quantity > 0
-                ? { position, contract }
-                : null;
-            })
-            .filter((leg): leg is { position: Position; contract: OptionContract } => leg !== null)
-        : [];
+      side === 'sell' ? this.sellableHeldLegs(underlying, expiration, optionType) : [];
+
+    if (side === 'sell' && heldLegs.length === 0) {
+      this.showToast('No open position to sell', 'error');
+      return;
+    }
 
     if (heldLegs.length > 0) {
       // Highest unrealized P/L first: scale out of the most profitable leg

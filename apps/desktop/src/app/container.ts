@@ -44,6 +44,8 @@ export class AppContainer {
     this.chartStore = new ChartStore(this.apiClient, this.quoteSocket, this.settingsStore);
     this.chainStore = new ChainStore(this.apiClient, this.settingsStore);
     this.tradeStore = new TradeStore(this.apiClient);
+    // CURR mode reads the open positions TradeStore owns.
+    this.chainStore.positionsProvider = () => this.tradeStore.getState().positions;
     this.drawingsStore = new DrawingsStore();
     this.chartOrdersStore = new ChartOrdersStore(this.apiClient);
   }

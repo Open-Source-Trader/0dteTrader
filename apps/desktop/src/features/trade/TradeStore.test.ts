@@ -31,6 +31,7 @@ function chainStub(overrides: Partial<Record<string, unknown>> = {}): ChainStore
     getState: () => ({
       optionType: 'call',
       isAutoMode: false,
+      isCurrMode: false,
       selectedExpiration: CONTRACT.expiration,
       selectedStrike: CONTRACT.strike,
       ...overrides,
@@ -148,25 +149,28 @@ describe('TradeStore.arm — selling into an open position', () => {
     expect(store.getState().armedTicket?.summary).not.toContain('CLOSE');
   });
 
-  it('opens a short when the held position is unresolvable (different/unknown contract)', () => {
+  it('refuses the sell when the held position is unresolvable (different/unknown contract)', () => {
     const store = withResolver(makeStore(), [CONTRACT]);
     seedPositions(store, [{ ...position(3), symbol: 'SPY260727P00500000' }]);
     store.setQuantity(1);
 
     store.arm('sell', 'SPY', chainStub());
 
-    expect(store.getState().armedTicket?.request.quantity).toBe(1);
-    expect(store.getState().armedTicket?.summary).not.toContain('CLOSE');
+    // No matching held leg no longer opens a short — the sell is refused.
+    expect(store.getState().armedTicket).toBeNull();
+    expect(store.getState().toast?.message).toBe('No open position to sell');
+    expect(store.getState().toast?.style).toBe('error');
   });
 
-  it('does not treat an existing short as something to close', () => {
+  it('refuses to sell against an existing short rather than stacking onto it', () => {
     const store = withResolver(makeStore(), [CONTRACT]);
     seedPositions(store, [position(-3)]);
     store.setQuantity(1);
 
     store.arm('sell', 'SPY', chainStub());
 
-    expect(store.getState().armedTicket?.request.quantity).toBe(1);
+    expect(store.getState().armedTicket).toBeNull();
+    expect(store.getState().toast?.message).toBe('No open position to sell');
   });
 
   // Reproduces the reported incident: AUTO mode's live strike has drifted off
@@ -264,6 +268,67 @@ describe('TradeStore.arm — selling into an open position', () => {
     expect(ticket?.request.selection).toMatchObject({ strike: 495 });
     expect(ticket?.request.quantity).toBe(3);
     expect(ticket?.summary).toContain('CLOSE 3 of 5');
+  });
+});
+
+describe('TradeStore.arm — CURR mode (explicit owned leg)', () => {
+  it('sells the named leg clamped to the held quantity', () => {
+    const store = withResolver(makeStore(), [CONTRACT]);
+    seedPositions(store, [position(2)]);
+    store.setQuantity(10);
+
+    store.arm('sell', 'SPY', chainStub({ isCurrMode: true }));
+
+    const ticket = store.getState().armedTicket;
+    expect(ticket?.request.quantity).toBe(2);
+    expect(ticket?.request.selection).toMatchObject({ mode: 'explicit', strike: 505 });
+    expect(ticket?.summary).toContain('CLOSE 2');
+  });
+
+  it('bypasses the leg-matching heuristic: sells the named strike, not the highest-P/L leg', () => {
+    const otherLeg: OptionContract = {
+      ...CONTRACT,
+      symbol: 'SPY260727C00500000',
+      strike: 500,
+    };
+    const store = withResolver(makeStore(), [CONTRACT, otherLeg]);
+    seedPositions(store, [
+      { ...position(2), unrealizedPnl: 5 },
+      { ...position(3), symbol: otherLeg.symbol, unrealizedPnl: 50 },
+    ]);
+    store.setQuantity(1);
+
+    // CURR names the 505 leg even though the 500 leg has the higher P/L.
+    store.arm('sell', 'SPY', chainStub({ isCurrMode: true }));
+
+    expect(store.getState().armedTicket?.request.selection).toMatchObject({ strike: 505 });
+  });
+
+  it('refuses a CURR sell when the named leg is not actually held', () => {
+    const store = withResolver(makeStore(), [CONTRACT]);
+    seedPositions(store, []);
+    store.setQuantity(1);
+
+    store.arm('sell', 'SPY', chainStub({ isCurrMode: true }));
+
+    expect(store.getState().armedTicket).toBeNull();
+    expect(store.getState().toast?.message).toBe('No open position to sell');
+  });
+
+  it('CURR buy arms an explicit add of the selected owned contract', () => {
+    const store = withResolver(makeStore(), [CONTRACT]);
+    seedPositions(store, [position(2)]);
+    store.setQuantity(3);
+
+    store.arm('buy', 'SPY', chainStub({ isCurrMode: true }));
+
+    const ticket = store.getState().armedTicket;
+    expect(ticket?.request).toMatchObject({
+      side: 'buy',
+      quantity: 3,
+      selection: { mode: 'explicit', optionType: 'call', strike: 505 },
+    });
+    expect(ticket?.summary).not.toContain('CLOSE');
   });
 });
 

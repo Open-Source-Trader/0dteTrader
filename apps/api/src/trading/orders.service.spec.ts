@@ -477,6 +477,31 @@ describe('OrdersService', () => {
       expect(anchor?.openedAt).toEqual(observed);
     });
 
+    it('normalizes an offset-bearing broker timestamp to the same UTC instant', async () => {
+      // Brokers report execution times in their own zone (SnapTrade's
+      // time_executed can carry -05:00). The stored instant — and the ISO
+      // UTC string clients receive — must be the same moment, not a
+      // wall-clock reading shifted across the boundary.
+      await orders.record(USER, fill({ filledAt: '2026-08-02T19:03:00-05:00' }));
+
+      const anchor = (await orders.positionAnchors(USER, [OCC])).get(OCC);
+      expect(anchor?.openedAt).toEqual(new Date('2026-08-03T00:03:00.000Z'));
+      expect(anchor?.openedAt?.toISOString()).toBe('2026-08-03T00:03:00.000Z');
+    });
+
+    it('falls back to observation time when the broker timestamp is unparseable', async () => {
+      const observed = new Date('2026-08-02T14:05:00.000Z');
+      jest.useFakeTimers({ now: observed });
+      try {
+        await orders.record(USER, fill({ filledAt: 'not-a-timestamp' }));
+      } finally {
+        jest.useRealTimers();
+      }
+
+      const anchor = (await orders.positionAnchors(USER, [OCC])).get(OCC);
+      expect(anchor?.openedAt).toEqual(observed);
+    });
+
     it('falls back to placement time for legacy rows recorded before fill timestamps', async () => {
       const opening = fill();
       await orders.record(USER, opening);

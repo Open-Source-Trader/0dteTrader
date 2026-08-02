@@ -288,7 +288,12 @@ export class TradingService {
       const quote = await timed(this.logger, 'trading.resolveAndValidate.quote', () =>
         this.gateway.getQuote(userId, dto.underlying),
       );
-      const contract = resolveAutoOtm(chain.contracts, selection.optionType, quote.last);
+      const contract = resolveAutoOtm(
+        chain.contracts,
+        selection.optionType,
+        quote.last,
+        selection.otmOffset,
+      );
       return {
         request: {
           ...dto,

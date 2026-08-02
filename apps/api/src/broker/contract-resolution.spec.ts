@@ -26,30 +26,44 @@ function chain(strikes: number[]): OptionContract[] {
   return strikes.flatMap((s) => [contract(s, 'call'), contract(s, 'put')]);
 }
 
+// This expectation table is mirrored verbatim by the desktop
+// (autoContractSelector.test.ts) and iOS (AutoContractSelectorTests.swift)
+// selector specs — the three implementations must agree strike-for-strike.
 describe('resolveAutoOtm', () => {
   const contracts = chain([100, 101, 102, 103]);
 
-  it('calls: lowest strike strictly above the last price', () => {
-    expect(resolveAutoOtm(contracts, 'call', 100.4).strike).toBe(101);
-    expect(resolveAutoOtm(contracts, 'call', 102.99).strike).toBe(103);
+  it('steps one strike out from the ATM strike by default', () => {
+    expect(resolveAutoOtm(contracts, 'call', 100.4).strike).toBe(101); // ATM 100
+    expect(resolveAutoOtm(contracts, 'call', 100.6).strike).toBe(102); // ATM 101
+    expect(resolveAutoOtm(contracts, 'put', 102.6).strike).toBe(102); // ATM 103
+    expect(resolveAutoOtm(contracts, 'put', 102.4).strike).toBe(101); // ATM 102
   });
 
-  it('puts: highest strike strictly below the last price', () => {
-    expect(resolveAutoOtm(contracts, 'put', 102.6).strike).toBe(102);
-    expect(resolveAutoOtm(contracts, 'put', 100.01).strike).toBe(100);
-  });
-
-  it('price exactly on a strike: that strike is excluded (calls go strictly above)', () => {
+  it('price exactly on a strike: that strike is the ATM anchor', () => {
     expect(resolveAutoOtm(contracts, 'call', 101).strike).toBe(102);
-  });
-
-  it('price exactly on a strike: puts go strictly below', () => {
     expect(resolveAutoOtm(contracts, 'put', 101).strike).toBe(100);
   });
 
-  it('throws a validation error when no contract qualifies', () => {
-    expect(() => resolveAutoOtm(contracts, 'call', 500)).toThrow(/No call contract/);
-    expect(() => resolveAutoOtm(contracts, 'put', 1)).toThrow(/No put contract/);
+  it('equidistant between strikes: the ATM anchor resolves toward the OTM side', () => {
+    expect(resolveAutoOtm(contracts, 'call', 101.5).strike).toBe(103); // ATM 102
+    expect(resolveAutoOtm(contracts, 'put', 101.5).strike).toBe(100); // ATM 101
+  });
+
+  it('otmOffset 0 selects the ATM strike itself', () => {
+    expect(resolveAutoOtm(contracts, 'call', 100.6, 0).strike).toBe(101);
+    expect(resolveAutoOtm(contracts, 'put', 100.6, 0).strike).toBe(101);
+  });
+
+  it('otmOffset 2 steps two strikes out', () => {
+    expect(resolveAutoOtm(contracts, 'call', 100.4, 2).strike).toBe(102);
+    expect(resolveAutoOtm(contracts, 'put', 102.6, 2).strike).toBe(101);
+  });
+
+  it('throws a validation error when the ladder runs out', () => {
+    expect(() => resolveAutoOtm(contracts, 'call', 102.99)).toThrow(/No call contract/);
+    expect(() => resolveAutoOtm(contracts, 'put', 100.01)).toThrow(/No put contract/);
+    expect(() => resolveAutoOtm(contracts, 'call', 100.4, 10)).toThrow(/No call contract/);
+    expect(() => resolveAutoOtm([], 'call', 100)).toThrow(/No call contract/);
   });
 });
 

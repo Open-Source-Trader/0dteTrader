@@ -72,6 +72,13 @@ export class OrderSelectionDto {
   @IsOptional()
   @IsNumber()
   strike?: number;
+
+  /** auto_otm only: strikes OTM from the ATM strike; 0 = ATM; omitted = 1. */
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(10)
+  otmOffset?: number;
 }
 
 export class OrderRequestDto {

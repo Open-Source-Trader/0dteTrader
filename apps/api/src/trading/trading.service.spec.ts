@@ -236,15 +236,49 @@ describe('TradingService', () => {
       const result = await trading.place(userId, autoOtmCall(), 'idem-auto-1');
       expect(result.status).toBe('filled');
 
-      // Server-side resolution: lowest call strike strictly above the last.
-      const strikes = [
-        ...new Set(chain.contracts.filter((c) => c.optionType === 'call').map((c) => c.strike)),
-      ].sort((a, b) => a - b);
-      const expected = strikes.find((s) => s > quote.last)!;
+      // Server-side resolution: the stub's last sits exactly on a strike, so
+      // that strike is the ATM anchor and the default offset steps one out.
       const sent = placeSpy.mock.calls[0][1] as OrderRequest;
       expect(sent.selection.mode).toBe('explicit');
-      expect(sent.selection.strike).toBe(expected);
+      expect(sent.selection.strike).toBe(quote.last + 1);
       expect(sent.selection.expiration).toBe(chain.expirations[0]);
+    });
+
+    it('honors selection.otmOffset when resolving auto_otm', async () => {
+      const placeSpy = jest.spyOn(gateway, 'placeOrder');
+      const quote = await gateway.getQuote(userId, 'SPY');
+
+      await trading.place(
+        userId,
+        autoOtmCall({
+          selection: { mode: 'auto_otm', optionType: 'call', otmOffset: 2 },
+        }),
+        'idem-auto-offset-1',
+      );
+      await trading.place(
+        userId,
+        autoOtmCall({
+          selection: { mode: 'auto_otm', optionType: 'put', otmOffset: 2 },
+        }),
+        'idem-auto-offset-2',
+      );
+      const sentCall = placeSpy.mock.calls[0][1] as OrderRequest;
+      const sentPut = placeSpy.mock.calls[1][1] as OrderRequest;
+      expect(sentCall.selection.strike).toBe(quote.last + 2);
+      expect(sentPut.selection.strike).toBe(quote.last - 2);
+    });
+
+    it('otmOffset 0 trades the ATM strike itself', async () => {
+      const quote = await gateway.getQuote(userId, 'SPY');
+      const preview = await trading.preview(
+        userId,
+        autoOtmCall({
+          selection: { mode: 'auto_otm', optionType: 'call', otmOffset: 0 },
+        }),
+      );
+      // The OCC symbol encodes the strike in thousandths.
+      const strike = Number(preview.resolved.contractSymbol.slice(-8)) / 1000;
+      expect(strike).toBe(quote.last);
     });
 
     it('defaults a missing expiration to the nearest one', async () => {

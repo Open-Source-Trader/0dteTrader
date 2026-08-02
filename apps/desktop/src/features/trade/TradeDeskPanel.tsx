@@ -135,10 +135,6 @@ export function TradeDeskPanel({
       setApplyError('No valid contract price suggestion.');
       return;
     }
-    if (viewState.presentation?.snapshotId !== suggestion.snapshotId) {
-      setApplyError('Assessment changed. Refresh Trade Desk.');
-      return;
-    }
     const result = tradeStore.applyTradeDeskPrice(
       { type: 'apply-trade-desk-price', suggestion },
       chainStore,

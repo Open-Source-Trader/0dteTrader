@@ -844,5 +844,22 @@ describe('0dteTrader API (e2e)', () => {
     expect(prisma.deviceTokens).toHaveLength(0);
     // Deleting an absent token is still a 204 no-op.
     await request(server).delete(`/v1/notifications/devices/${token}`).set(auth).expect(204);
+
+    // Possession-authorized: a DIFFERENT account presenting the token clears
+    // it — how a new login sweeps a registration a session expiry stranded.
+    await request(server)
+      .post('/v1/notifications/devices')
+      .set(auth)
+      .send({ token, platform: 'ios' })
+      .expect(204);
+    const other = await request(server)
+      .post('/v1/auth/register')
+      .send({ email: 'device-sweeper@example.com', password: 'sweeper-pass-1' })
+      .expect(200);
+    await request(server)
+      .delete(`/v1/notifications/devices/${token}`)
+      .set('Authorization', `Bearer ${other.body.accessToken}`)
+      .expect(204);
+    expect(prisma.deviceTokens).toHaveLength(0);
   });
 });

@@ -17,13 +17,14 @@ export class NotificationsController {
     await this.devices.register(user.userId, dto.token.toLowerCase(), dto.platform);
   }
 
-  /** Scoped to the caller; an absent or foreign token is a 204 no-op. */
+  /** Possession-authorized: presenting the token removes its registration
+   *  whoever owns it (see DevicesService.unregister); absent is a 204 no-op. */
   @Delete('devices/:token')
   @HttpCode(204)
   async unregister(
-    @CurrentUser() user: AuthenticatedUser,
+    @CurrentUser() _user: AuthenticatedUser,
     @Param('token') token: string,
   ): Promise<void> {
-    await this.devices.unregister(user.userId, token.toLowerCase());
+    await this.devices.unregister(token.toLowerCase());
   }
 }

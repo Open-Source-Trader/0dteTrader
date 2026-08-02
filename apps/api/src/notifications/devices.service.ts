@@ -18,9 +18,16 @@ export class DevicesService {
     });
   }
 
-  /** Scoped to the caller: deleting someone else's token is a no-op. */
-  async unregister(userId: string, token: string): Promise<void> {
-    await this.prisma.deviceToken.deleteMany({ where: { userId, token } });
+  /**
+   * Possession of the token authorizes removal, whoever owns the row: the
+   * holder of the device could re-register it to themselves anyway (the
+   * upsert moves it), and the next account signing in on a device must be
+   * able to clear a registration a session expiry stranded — the previous
+   * account's credentials are gone by then. Tokens are 64+ unguessable hex
+   * chars, so this is a capability, not an enumeration surface.
+   */
+  async unregister(token: string): Promise<void> {
+    await this.prune(token);
   }
 
   listForUser(userId: string): Promise<{ token: string; platform: string }[]> {

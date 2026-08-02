@@ -422,7 +422,7 @@ paths:
     delete:
       tags: [notifications]
       security: [{ bearerAuth: [] }]
-      description: Unregisters a device. Scoped to the calling account; deleting a token that is absent or owned elsewhere is a no-op.
+      description: Unregisters a device. Possession-authorized — presenting the token removes its registration whichever account owns it, so a new login can clear a registration a session expiry stranded. Deleting an absent token is a no-op.
       parameters:
         - { name: token, in: path, required: true, schema: { type: string } }
       responses:

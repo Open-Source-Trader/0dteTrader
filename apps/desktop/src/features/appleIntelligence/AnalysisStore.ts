@@ -164,11 +164,24 @@ export class AnalysisStore extends Store<AnalysisStoreState> {
     this.lastSnapshot = work.snapshot;
     this.requestStartedAt = Date.now();
     this.set({ isAnalyzing: true, activePriority: work.priority, errorMessage: null });
-    const { requestId } = await this.bridge.analyze({
-      requestId: crypto.randomUUID(),
-      payload: work.snapshot,
-    });
-    this.set({ activeRequestId: requestId });
+    try {
+      const { requestId } = await this.bridge.analyze({
+        requestId: crypto.randomUUID(),
+        payload: work.snapshot,
+      });
+      this.set({ activeRequestId: requestId });
+    } catch (error) {
+      // A rejected analyze() (IPC failure, main-process throw, sidecar
+      // crash mid-call) must not leave isAnalyzing stuck true with no
+      // activeRequestId — nothing would ever clear it, since there is no
+      // requestId for a future native event to match against.
+      this.set({
+        isAnalyzing: false,
+        activeRequestId: null,
+        activePriority: null,
+        errorMessage: error instanceof Error ? error.message : 'Analysis request failed to start.',
+      });
+    }
   }
 
   private async runNextQueued(): Promise<void> {
@@ -180,7 +193,14 @@ export class AnalysisStore extends Store<AnalysisStoreState> {
   async cancel(): Promise<void> {
     const { activeRequestId } = this.getState();
     if (!activeRequestId) return;
-    await this.bridge?.cancel(activeRequestId);
+    try {
+      await this.bridge?.cancel(activeRequestId);
+    } catch {
+      // A rejected cancel() (IPC failure, sidecar already gone) must not
+      // block the caller from proceeding — submitWork's preemption path
+      // (cancel() then runNow()) must still start the new work even when
+      // cancelling the old, likely-orphaned request failed.
+    }
   }
 
   /** Drops queued background work that can no longer affect the current
@@ -212,6 +232,14 @@ export class AnalysisStore extends Store<AnalysisStoreState> {
 
   private handleCompleted(payload: unknown): void {
     const durationMs = this.requestStartedAt ? Date.now() - this.requestStartedAt : null;
+    // Captured before finishActive(): finishActive() synchronously starts
+    // the next queued request (runNextQueued -> runNow), which reassigns
+    // this.lastSnapshot to the QUEUED work's snapshot before this function
+    // gets a chance to use it — runNow's work is synchronous up to its
+    // first await, so this isn't a race that only sometimes happens, it
+    // reassigns every time a queued request exists at completion time.
+    // Validating/promoting must use the snapshot that produced THIS result.
+    const completedSnapshot = this.lastSnapshot;
     this.finishActive();
     this.set({ lastAnalysisDurationMs: durationMs });
 
@@ -221,11 +249,11 @@ export class AnalysisStore extends Store<AnalysisStoreState> {
       return;
     }
 
-    if (!this.lastSnapshot) return;
-    const validated = this.validateResult(result, this.lastSnapshot);
+    if (!completedSnapshot) return;
+    const validated = this.validateResult(result, completedSnapshot);
     if (!validated) return;
 
-    this.promoteResult(validated, contextFromSnapshot(this.lastSnapshot));
+    this.promoteResult(validated, contextFromSnapshot(completedSnapshot), completedSnapshot);
   }
 
   /** Structural + grounding + decision-invariant validation applied to
@@ -262,7 +290,11 @@ export class AnalysisStore extends Store<AnalysisStoreState> {
    * hysteresis (actionHysteresis.ts) before promotion: a lone contrary
    * sample is held back rather than immediately flipping the action a
    * trader would act on. */
-  private promoteResult(result: AnalysisResult, currentContext: AnalysisContextIdentity): void {
+  private promoteResult(
+    result: AnalysisResult,
+    currentContext: AnalysisContextIdentity,
+    snapshot: AnalysisSnapshot,
+  ): void {
     const isCurrent = isResultCurrent(result.context, currentContext);
 
     this.pushHistory({ result, wasPromoted: isCurrent });
@@ -270,9 +302,6 @@ export class AnalysisStore extends Store<AnalysisStoreState> {
     // Current: safe to update guidance. Stale: retained above for
     // diagnostics/history only, per lifecycle-and-concurrency.md — it
     // must never replace current guidance.
-
-    const snapshot = this.lastSnapshot;
-    if (!snapshot) return;
 
     const key = hysteresisKey(snapshot);
     const state = this.hysteresisState?.key === key ? this.hysteresisState : null;

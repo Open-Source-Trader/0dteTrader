@@ -280,6 +280,70 @@ describe('AnalysisStore', () => {
     expect(cancelMock).not.toHaveBeenCalled();
   });
 
+  describe('bridge error handling', () => {
+    it('recovers from a rejected analyze() instead of leaving isAnalyzing stuck true', async () => {
+      const bridge: AppleIntelligenceBridge = {
+        getAvailability: vi.fn(async () => ({ state: 'ready' })),
+        analyze: vi.fn(async () => {
+          throw new Error('IPC channel closed');
+        }),
+        cancel: vi.fn(async () => undefined),
+        subscribe: () => () => undefined,
+      };
+      const store = new AnalysisStore(bridge);
+
+      await store.analyze(makeSnapshot());
+
+      expect(store.getState().isAnalyzing).toBe(false);
+      expect(store.getState().activeRequestId).toBeNull();
+      expect(store.getState().errorMessage).toBe('IPC channel closed');
+    });
+
+    it('allows a subsequent analyze() to proceed after a prior one rejected', async () => {
+      let shouldReject = true;
+      const analyzeMock = vi.fn(async ({ requestId }: { requestId: string }) => {
+        if (shouldReject) {
+          shouldReject = false;
+          throw new Error('boom');
+        }
+        return { requestId };
+      });
+      const bridge: AppleIntelligenceBridge = {
+        getAvailability: vi.fn(async () => ({ state: 'ready' })),
+        analyze: analyzeMock,
+        cancel: vi.fn(async () => undefined),
+        subscribe: () => () => undefined,
+      };
+      const store = new AnalysisStore(bridge);
+
+      await store.analyze(makeSnapshot({ snapshotId: 'first' }));
+      expect(store.getState().isAnalyzing).toBe(false);
+
+      await store.analyze(makeSnapshot({ snapshotId: 'second' }));
+      expect(analyzeMock).toHaveBeenCalledTimes(2);
+      expect(store.getState().isAnalyzing).toBe(true);
+      expect(store.getState().activeRequestId).toBeTruthy();
+    });
+
+    it('a rejected cancel() does not block the preempting request from starting', async () => {
+      const bridge: AppleIntelligenceBridge = {
+        getAvailability: vi.fn(async () => ({ state: 'ready' })),
+        analyze: vi.fn(async ({ requestId }: { requestId: string }) => ({ requestId })),
+        cancel: vi.fn(async () => {
+          throw new Error('already gone');
+        }),
+        subscribe: () => () => undefined,
+      };
+      const store = new AnalysisStore(bridge);
+
+      await store.analyze(makeSnapshot({ snapshotId: 'background-1' }), 'background');
+      await store.analyze(makeSnapshot({ snapshotId: 'manual-1' }), 'manual');
+
+      expect(store.getState().activePriority).toBe('manual');
+      expect(store.getState().isAnalyzing).toBe(true);
+    });
+  });
+
   describe('scheduling (Phase 4)', () => {
     it('queues a candle-close request submitted while manual work is active', async () => {
       const { bridge, analyzeMock } = makeFakeBridge();
@@ -311,6 +375,68 @@ describe('AnalysisStore', () => {
       expect(analyzeMock).toHaveBeenCalledTimes(2);
       expect(store.getState().queueDepth).toBe(0);
       expect(store.getState().isAnalyzing).toBe(true);
+    });
+
+    it('validates and promotes the completed request against its OWN snapshot, not the newly-dequeued one', async () => {
+      // Regression test: handleCompleted's finishActive() call synchronously
+      // starts the next queued request (runNextQueued -> runNow), which
+      // reassigns the store's internal snapshot reference before
+      // handleCompleted used to read it — grounding a result's levels
+      // against the wrong (queued) snapshot's candidate levels, and gating
+      // staleness/promotion against the wrong context entirely.
+      const { bridge, emit } = makeFakeBridge();
+      const store = new AnalysisStore(bridge);
+      store.start();
+
+      // The manual request's snapshot only grounds 'lvl-1' (makeSnapshot's default).
+      await store.analyze(makeSnapshot({ snapshotId: 'manual-1', snapshotSequence: 1 }), 'manual');
+      const firstRequestId = store.getState().activeRequestId;
+
+      // A queued candle-close snapshot with a DIFFERENT candidate level set
+      // — if the bug is present, the manual result gets validated/grounded
+      // against 'lvl-99' instead of 'lvl-1' and its support level is
+      // incorrectly dropped as "ungrounded".
+      const queuedSnapshot: AnalysisSnapshot = {
+        ...makeSnapshot({ snapshotId: 'candle-1', snapshotSequence: 2 }),
+        levels: [
+          {
+            id: 'lvl-99',
+            kind: 'pivot',
+            role: 'support',
+            price: 999,
+            evidence: 'different snapshot entirely',
+            testCount: 1,
+            recency: 'today',
+            strength: 0.9,
+            source: 'pivot-low',
+          },
+        ],
+      };
+      await store.submitCandleClose(queuedSnapshot);
+      expect(store.getState().queueDepth).toBe(1);
+
+      emit({
+        protocolVersion: 1,
+        requestId: firstRequestId!,
+        event: 'completed',
+        payload: validResultPayload({
+          analysisId: 'manual-result',
+          context: { symbol: 'SPY', timeframe: '5m', snapshotSequence: 1, positionVersion: 0 },
+          levels: { support: { levelId: 'lvl-1', price: 578.5 } },
+        }),
+      });
+
+      // Must be grounded against the manual request's own snapshot (lvl-1
+      // survives), promoted as current (snapshotSequence 1 matches what was
+      // actually analyzed), not discarded or mismatched against candle-1's
+      // snapshot (sequence 2, lvl-99).
+      expect(store.getState().latestResult?.analysisId).toBe('manual-result');
+      expect(store.getState().latestResult?.levels.support).toEqual({
+        levelId: 'lvl-1',
+        price: 578.5,
+      });
+      expect(store.getState().latestResult?.context.snapshotSequence).toBe(1);
+      expect(store.getState().errorMessage).toBeNull();
     });
 
     it('position-critical work preempts an active candle-close request', async () => {

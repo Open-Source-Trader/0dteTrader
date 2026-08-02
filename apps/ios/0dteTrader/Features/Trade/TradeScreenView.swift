@@ -216,10 +216,12 @@ struct TradeScreenView: View {
             }
         }
         .onAppear {
-            // Re-registers push for THIS account: a login after a logout (which
-            // unregistered the previous account's token) reaches here without
-            // relaunching the app. No-op with the toggle off.
-            container.pushNotifications.start()
+            // The one place push registration begins: this screen only
+            // appears authenticated, so the manager can sweep any retained
+            // registration with credentials that work and then re-register
+            // under THIS account. A login after a logout reaches here without
+            // relaunching the app.
+            container.pushNotifications.activateAfterAuthentication()
             tradeViewModel.optionContractResolver = { symbol in
                 chainViewModel.chain?.contracts.first { $0.symbol == symbol }
             }

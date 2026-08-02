@@ -15,7 +15,7 @@ final class AppContainer: ObservableObject {
     let pushNotifications: PushNotificationsManager
     private let urlSession: URLSession
 
-    init(baseURL: URL) {
+    init(baseURL: URL, pushCoordinator: PushRegistrationCoordinator) {
         let settings = SettingsStore()
         // Scoped per server origin so a refresh token issued by one server is
         // never sent to another after a runtime server change.
@@ -41,6 +41,7 @@ final class AppContainer: ObservableObject {
         self.pushNotifications = PushNotificationsManager(
             apiClient: apiClient,
             settingsStore: settings,
+            coordinator: pushCoordinator,
             serverKey: baseURL.absoluteString
         )
     }

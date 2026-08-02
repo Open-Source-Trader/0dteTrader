@@ -96,8 +96,10 @@ struct RootView: View {
     }
 
     /// Every sign-out route funnels here so push teardown can never be
-    /// skipped: the device-token registration belongs to the account, and it
-    /// must be cleared while that account's credentials still work.
+    /// skipped. `handleLogout` stops local APNs delivery synchronously and
+    /// then attempts the server-side DELETE while the departing account's
+    /// credentials still work; only after it returns does `logout()` clear
+    /// the local session, so the DELETE never races its own authentication.
     private func signOut() async {
         await container.pushNotifications.handleLogout()
         await authViewModel.logout()

@@ -8,8 +8,11 @@ import type {
 } from '@0dtetrader/shared-types';
 import { bracketKindFor } from '@0dtetrader/shared-types';
 import { useStore } from '../../core/observable';
+import { dayString } from '../../core/models/dates';
 import { Format } from '../../design/format';
 import { chartPalette } from './chartColors';
+import { entryLineLabel, entryLineStroke } from './entryLineStyle';
+import { positionsForUnderlying } from './positionsForUnderlying';
 import { isPointerClaimed } from './chartPointerClaim';
 import type { ChartCandle } from './ChartStore';
 import type { ChartOrdersStore } from './chartOrders';
@@ -163,11 +166,16 @@ export function OrderLineLayer({
   /** Open positions on this underlying that have an anchor to draw at. */
   const entryLines = (): EntryLine[] => {
     const { positions: current, resolveContract: resolve, symbol: sym } = latest.current;
+    // The shared underlying filter wants the contracts themselves; this layer
+    // holds a resolver, so materialise the resolvable ones first.
+    const contracts = current
+      .map((position) => resolve(position.symbol))
+      .filter((contract): contract is OptionContract => contract !== null);
     const lines: EntryLine[] = [];
-    for (const position of current) {
+    for (const position of positionsForUnderlying(current, sym, contracts)) {
       if (position.quantity === 0 || position.underlyingEntryPrice === undefined) continue;
       const contract = resolve(position.symbol);
-      if (!contract || contract.underlying !== sym) continue;
+      if (!contract) continue;
       lines.push({ position, contract, price: position.underlyingEntryPrice });
     }
     return lines;
@@ -301,13 +309,18 @@ export function OrderLineLayer({
 
       // Entry lines first, so a target or stop sitting on top of one wins the
       // pointer — the bracket legs are what you actually adjust.
+      const todayIso = dayString();
       for (const entry of entryLines()) {
         const y = series.priceToCoordinate(entry.price);
         if (y === null) continue;
-        const profitable = entry.position.unrealizedPnl >= 0;
-        const color = profitable ? colors.pnlPositive : colors.pnlNegative;
+        // The line wears the contract's direction (calls blue, puts red);
+        // only the P/L pill keeps profit-sign coloring.
+        const typeColor = entryLineStroke(entry.contract, colors);
+        const pnlColor =
+          entry.position.unrealizedPnl >= 0 ? colors.pnlPositive : colors.pnlNegative;
         const pills = layoutRow(
           [
+            { key: 'label', label: entryLineLabel(entry.contract, todayIso) },
             { key: 'quantity', label: Format.signedQuantity(entry.position.quantity) },
             {
               key: 'pnl',
@@ -321,21 +334,22 @@ export function OrderLineLayer({
         const row: LineRow = { id: `entry:${entry.position.symbol}`, y, pills, left: pills[0].x };
         rows.push(row);
 
-        ctx.strokeStyle = color;
+        ctx.strokeStyle = typeColor;
         ctx.lineWidth = 1.5;
         ctx.setLineDash([]);
         strokeRowLine(row);
 
         for (const p of pills) {
-          const isQuantity = p.key === 'quantity';
+          const filled = p.key === 'quantity' || p.key === 'close';
+          const color = p.key === 'pnl' ? pnlColor : typeColor;
           pill(
             ctx,
             p.x,
             y,
             p.width,
             p.label,
-            isQuantity || p.key === 'close' ? color : colors.tagText,
-            isQuantity || p.key === 'close' ? colors.tagText : color,
+            filled ? color : colors.tagText,
+            filled ? colors.tagText : color,
             hovered?.id === row.id && hovered.pill === p.key,
           );
         }
@@ -599,7 +613,7 @@ export function OrderLineLayer({
         void store.toggleOrderType(hit.row.id);
         return;
       }
-      if (hit.pill === 'quantity' || hit.pill === 'pnl') return; // labels, not controls
+      if (hit.pill === 'quantity' || hit.pill === 'pnl' || hit.pill === 'label') return; // labels, not controls
 
       // Line body: drag it.
       if (entryId) {

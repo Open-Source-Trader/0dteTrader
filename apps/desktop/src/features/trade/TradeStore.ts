@@ -266,6 +266,13 @@ export class TradeStore extends Store<TradeStoreState> {
         this.showToast('Pick an owned contract first.', 'error');
         return;
       }
+      // A leg resolved from its OCC symbol has no quotes until its
+      // expiration's contracts load — never trade off a 0.00 display.
+      const selected = chainStore.selectedContract;
+      if (selected && selected.bid <= 0 && selected.ask <= 0 && selected.last <= 0) {
+        this.showToast('Quotes are still loading for that expiration.', 'error');
+        return;
+      }
       const heldQuantity = this.getState().positions.reduce((sum, position) => {
         if (position.quantity <= 0) return sum;
         // The OCC symbol itself names the leg — the chain resolver only knows

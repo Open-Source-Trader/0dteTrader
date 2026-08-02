@@ -345,6 +345,24 @@ describe('TradeStore.arm — CURR mode (explicit owned leg)', () => {
     expect(ticket?.request.selection).toMatchObject({ mode: 'explicit', strike: 505 });
   });
 
+  it('refuses to arm while the CURR leg has no quotes yet (freshly OCC-resolved)', () => {
+    const store = withResolver(makeStore(), []);
+    seedPositions(store, [{ ...position(2), symbol: 'SPY260727C00505000' }]);
+    store.setQuantity(1);
+    const stub = chainStub({ isCurrMode: true });
+    (stub as unknown as { selectedContract: OptionContract }).selectedContract = {
+      ...CONTRACT,
+      bid: 0,
+      ask: 0,
+      last: 0,
+    };
+
+    store.arm('sell', 'SPY', stub);
+
+    expect(store.getState().armedTicket).toBeNull();
+    expect(store.getState().toast?.message).toBe('Quotes are still loading for that expiration.');
+  });
+
   it('refuses a CURR buy when the named leg is not actually held', () => {
     const store = withResolver(makeStore(), [CONTRACT]);
     seedPositions(store, []);

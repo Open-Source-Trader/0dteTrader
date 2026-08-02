@@ -4,6 +4,7 @@ import type {
   ChartOrderDraft,
   ChartOrderType,
   OptionContract,
+  OptionType,
   OrderResult,
   Position,
 } from '@0dtetrader/shared-types';
@@ -76,10 +77,17 @@ interface PositionMeta {
 /** Tooltip for a disabled "Move stop to entry"; undefined while it is usable. */
 function moveStopBlockedReason(
   stop: ChartOrder | null,
-  entryPrice: number | undefined,
+  position: Position,
+  optionType: OptionType | null,
+  underlyingPrice: number | null,
 ): string | undefined {
   if (!stop) return 'Set a stop line on the chart first';
-  if (entryPrice === undefined) return 'Entry price unknown';
+  if (position.underlyingEntryPrice === undefined) return 'Entry price unknown';
+  if (underlyingPrice === null) return 'Live price unavailable';
+  if (optionType === null) return "Open this contract's chart to manage its lines";
+  if (moveStopToEntryRequest(position, stop, underlyingPrice, optionType) === null) {
+    return 'Entry is on the profit side of the market — that would arm a recovery exit, not a stop';
+  }
   return undefined;
 }
 
@@ -162,8 +170,6 @@ export function TradeManagementWorkspace({
   const activeMeta = activePosition ? metas.get(activePosition.symbol) : null;
   const totalDayPnl = dayPnl(positions);
   const activeWorking = activePosition ? workingSymbols.includes(activePosition.symbol) : false;
-  const activeEntryPrice = activePosition?.underlyingEntryPrice;
-
   // Why a Set stop/target could not create a leg right now; null means it can.
   let legActionBlockedReason: string | null = null;
   if (!chartTradingEnabled) {
@@ -280,15 +286,30 @@ export function TradeManagementWorkspace({
               disabled={
                 locked ||
                 !chartTradingEnabled ||
-                moveStopToEntryRequest(activePosition, activeMeta.stop) === null
+                moveStopToEntryRequest(
+                  activePosition,
+                  activeMeta.stop,
+                  underlyingPrice,
+                  activeMeta.contract?.optionType ?? null,
+                ) === null
               }
               title={
                 chartTradingEnabled
-                  ? moveStopBlockedReason(activeMeta.stop, activeEntryPrice)
+                  ? moveStopBlockedReason(
+                      activeMeta.stop,
+                      activePosition,
+                      activeMeta.contract?.optionType ?? null,
+                      underlyingPrice,
+                    )
                   : 'Enable Chart Trading in chart settings first'
               }
               onClick={() => {
-                const request = moveStopToEntryRequest(activePosition, activeMeta.stop);
+                const request = moveStopToEntryRequest(
+                  activePosition,
+                  activeMeta.stop,
+                  underlyingPrice,
+                  activeMeta.contract?.optionType ?? null,
+                );
                 if (request) onMoveChartOrder(request.order, request.triggerPrice);
               }}
             >

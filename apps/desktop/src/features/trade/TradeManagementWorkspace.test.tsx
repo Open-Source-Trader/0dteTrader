@@ -122,13 +122,32 @@ describe('timeInTrade', () => {
 describe('moveStopToEntryRequest', () => {
   const anchored: Position = { ...position, underlyingEntryPrice: 636.4 };
 
-  it('moves the stop line to the underlying entry price', () => {
-    expect(moveStopToEntryRequest(anchored, stop)).toEqual({ order: stop, triggerPrice: 636.4 });
+  it('moves the stop line to the underlying entry price while the position is past it', () => {
+    expect(moveStopToEntryRequest(anchored, stop, 640, 'call')).toEqual({
+      order: stop,
+      triggerPrice: 636.4,
+    });
+    // A long put profits downward: past entry means the market BELOW it.
+    expect(moveStopToEntryRequest(anchored, stop, 630, 'put')).toEqual({
+      order: stop,
+      triggerPrice: 636.4,
+    });
   });
 
-  it('is unavailable without a stop line or without an entry anchor', () => {
-    expect(moveStopToEntryRequest(anchored, null)).toBeNull();
-    expect(moveStopToEntryRequest(position, stop)).toBeNull();
+  it('is unavailable without a stop line, entry anchor, live price, or option type', () => {
+    expect(moveStopToEntryRequest(anchored, null, 640, 'call')).toBeNull();
+    expect(moveStopToEntryRequest(position, stop, 640, 'call')).toBeNull();
+    expect(moveStopToEntryRequest(anchored, stop, null, 'call')).toBeNull();
+    expect(moveStopToEntryRequest(anchored, stop, 640, null)).toBeNull();
+  });
+
+  it('refuses while the entry sits on the profit side of the market — that would arm a recovery exit', () => {
+    // Long call under water: entry 636.4 with the market at 630. Moving the
+    // "stop" there would fire on the way back UP — a break-even exit, not a
+    // stop — so the request is unavailable.
+    expect(moveStopToEntryRequest(anchored, stop, 630, 'call')).toBeNull();
+    expect(moveStopToEntryRequest(anchored, stop, 636.4, 'call')).toBeNull();
+    expect(moveStopToEntryRequest(anchored, stop, 640, 'put')).toBeNull();
   });
 });
 
@@ -239,6 +258,20 @@ describe('TradeManagementWorkspace rendering', () => {
     expect(buttonTag(noAnchor, 'Move stop to entry')).toContain('Entry price unknown');
     expect(buttonTag(noAnchor, 'Set target')).not.toContain('disabled');
     expect(buttonTag(noAnchor, 'Edit stop')).not.toContain('disabled');
+  });
+
+  it('disables Move stop to entry while the position is not past its entry', () => {
+    const markup = renderWorkspace({
+      positions: [{ ...position, underlyingEntryPrice: 636.4 }],
+      chartOrders: [stop],
+      resolveContract: () => contract,
+      underlyingPrice: 630, // long call under water
+    });
+
+    expect(buttonTag(markup, 'Move stop to entry')).toContain('disabled');
+    expect(buttonTag(markup, 'Move stop to entry')).toContain('recovery exit');
+    // Set/Edit legs stay available — only the entry move is direction-gated.
+    expect(buttonTag(markup, 'Edit stop')).not.toContain('disabled');
   });
 
   it('disables Set legs while there is no live underlying price to anchor on', () => {

@@ -1,15 +1,25 @@
-import type { ChartOrder, Position } from '@0dtetrader/shared-types';
+import type { ChartOrder, OptionType, Position } from '@0dtetrader/shared-types';
+import { positionProfitDirection } from '@0dtetrader/shared-types';
 import { parseDateTime } from '../../core/models/dates';
 import { Format } from '../../design/format';
 
 /** What "Move stop to entry" would do: move `stop` to the position's
- *  underlying entry. Null when there is no stop line or no entry anchor —
- *  which is exactly when the button disables, so gate and action agree. */
+ *  underlying entry. Null when there is no stop line, no entry anchor, no
+ *  live price, no known option type — or when the entry is NOT on the loss
+ *  side of the live price: a "stop" moved to the profit side of the market
+ *  arms as a break-even recovery exit, firing when the position comes BACK,
+ *  which is the opposite of what the button's label promises. Null is exactly
+ *  when the button disables, so gate and action agree. */
 export function moveStopToEntryRequest(
   position: Position,
   stop: ChartOrder | null,
+  underlyingPrice: number | null,
+  optionType: OptionType | null,
 ): { order: ChartOrder; triggerPrice: number } | null {
   if (!stop || position.underlyingEntryPrice === undefined) return null;
+  if (underlyingPrice === null || optionType === null) return null;
+  const direction = positionProfitDirection(optionType, position.quantity);
+  if ((underlyingPrice - position.underlyingEntryPrice) * direction <= 0) return null;
   return { order: stop, triggerPrice: position.underlyingEntryPrice };
 }
 

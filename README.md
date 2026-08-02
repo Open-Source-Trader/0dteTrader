@@ -13,7 +13,7 @@ Rapid options quick-trade app backed by the official Webull OpenAPI for order ex
 - `packages/shared-types` — shared TypeScript contracts
 - `docs` — architecture, API spec, security model, Webull integration guide, runbook
 
-> **Risk warning:** Trading involves substantial risk of loss. This software places real orders when connected to a live brokerage account. Always validate against a paper (practice) account first. 0dteTrader is an order-entry and market-data tool, not financial or investment advice; the authors and contributors accept no liability for trading losses incurred while using it.
+> **⚠️ Risk warning — real money, real orders.** This software places **real orders** when connected to a live brokerage account, and 0DTE options can lose 100% of their value within minutes. It may contain bugs that affect order size, direction, strike, or timing. Always validate against a paper (practice) account first — and after every upgrade. 0dteTrader is an order-entry and market-data tool, not financial or investment advice; by using it you assume sole responsibility for all trading decisions and outcomes, and the authors and contributors accept no liability for any losses. Read the full [**DISCLAIMER**](DISCLAIMER.md) before connecting a brokerage account.
 
 ## Why I built this
 

@@ -13,6 +13,7 @@ import type {
 import type { ApiClient } from '../../core/api/ApiClient';
 import { errorMessage } from '../../core/api/ApiError';
 import { orderStatusDisplayName, sideDisplayName } from '../../core/models/domain';
+import { parseOccSymbol } from '../../core/models/occSymbol';
 import { roundToTick } from '../../core/models/priceInput';
 import { Store } from '../../core/observable';
 import { Format } from '../../design/format';
@@ -266,13 +267,16 @@ export class TradeStore extends Store<TradeStoreState> {
         return;
       }
       const heldQuantity = this.getState().positions.reduce((sum, position) => {
-        const contract = this.optionContractResolver?.(position.symbol);
+        if (position.quantity <= 0) return sum;
+        // The OCC symbol itself names the leg — the chain resolver only knows
+        // the loaded expiration, and CURR must close holdings on any of them.
+        const contract =
+          parseOccSymbol(position.symbol) ?? this.optionContractResolver?.(position.symbol);
         return contract &&
           contract.underlying === underlying &&
           contract.expiration === expiration &&
           contract.optionType === optionType &&
-          contract.strike === strike &&
-          position.quantity > 0
+          contract.strike === strike
           ? sum + position.quantity
           : sum;
       }, 0);
@@ -577,9 +581,13 @@ export class TradeStore extends Store<TradeStoreState> {
 
     try {
       const side: OrderSide = position.quantity > 0 ? 'sell' : 'buy';
-      const contract = this.optionContractResolver?.(position.symbol) ?? null;
+      // The chain resolver only knows the loaded expiration; the position's
+      // own OCC symbol names the leg exactly, so any broker option position
+      // stays closable from the workspace.
+      const contract =
+        this.optionContractResolver?.(position.symbol) ?? parseOccSymbol(position.symbol);
       if (!contract) {
-        this.showToast(`Open ${position.symbol}'s chart to manage this option.`, 'error');
+        this.showToast(`Cannot resolve ${position.symbol} to close it.`, 'error');
         return;
       }
       const selection: OrderSelection = {

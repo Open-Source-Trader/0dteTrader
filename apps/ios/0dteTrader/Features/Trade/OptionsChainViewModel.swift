@@ -134,17 +134,31 @@ final class OptionsChainViewModel: ObservableObject {
 
     // MARK: - CURR mode holdings
 
-    /// Held (long) positions resolved to contracts on the loaded chain for
-    /// the chart's underlying — what CURR mode lets the panel pick from. A
-    /// position whose contract the chain cannot identify is left out, same as
-    /// the flatten path's resolver.
+    /// Held (long) positions on the chart's underlying — what CURR mode lets
+    /// the panel pick from. Resolved through the loaded chain when possible
+    /// (live quotes), else from the OCC symbol itself: the chain only carries
+    /// one expiration's contracts at a time, and a holding on a not-yet
+    /// fetched expiration must still show up. Synthesized legs carry zero
+    /// quotes until their expiration loads.
     private var heldLegs: [(position: Position, contract: OptionContract)] {
         guard let chain else { return [] }
         return positionsProvider().compactMap { position in
-            guard position.quantity > 0,
-                  let contract = chain.contracts.first(where: { $0.symbol == position.symbol }),
-                  contract.underlying == underlying
+            guard position.quantity > 0 else { return nil }
+            if let onChain = chain.contracts.first(where: { $0.symbol == position.symbol }) {
+                return onChain.underlying == underlying ? (position, onChain) : nil
+            }
+            guard let parsed = OccSymbol.parse(position.symbol), parsed.underlying == underlying
             else { return nil }
+            let contract = OptionContract(
+                symbol: position.symbol,
+                underlying: parsed.underlying,
+                expiration: parsed.expiration,
+                strike: parsed.strike,
+                optionType: parsed.optionType,
+                bid: 0,
+                ask: 0,
+                last: 0
+            )
             return (position, contract)
         }
     }
@@ -181,6 +195,10 @@ final class OptionsChainViewModel: ObservableObject {
         }
         selectedExpiration = recent.contract.expiration
         selectedStrike = recent.contract.strike
+        // A holding on a not-yet-fetched expiration was resolved from its OCC
+        // symbol; fetch that expiration's contracts so quotes fill in.
+        let expiration = recent.contract.expiration
+        Task { await ensureContracts(for: expiration) }
     }
 
     /// Most recently opened leg: max `openedAt`; when no position carries a
@@ -326,15 +344,14 @@ final class OptionsChainViewModel: ObservableObject {
         selectedExpiration = expiration
         selectedStrike = nil
         if isCurrMode {
-            // Held contracts are already on the chain (that is what qualified
-            // them), so nothing to fetch — land on the selected side's most
-            // recent holding on that expiration. The CALL/PUT toggle stays
-            // the user's; it is never overridden here.
+            // Land on the selected side's most recent holding on that
+            // expiration. The CALL/PUT toggle stays the user's; it is never
+            // overridden here. Contracts still fetch below — a holding
+            // resolved from its OCC symbol has no quotes until they load.
             let legs = heldLegs.filter {
                 $0.contract.optionType == optionType && $0.contract.expiration == expiration
             }
             selectedStrike = mostRecentLeg(legs)?.contract.strike
-            return
         }
         Task { await ensureContracts(for: expiration) }
     }

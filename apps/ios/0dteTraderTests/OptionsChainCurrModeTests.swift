@@ -93,6 +93,23 @@ final class OptionsChainCurrModeTests: XCTestCase {
         XCTAssertEqual(viewModel.selectedContract?.symbol, callNear505.symbol)
     }
 
+    /// The chain only carries one expiration's contracts at a time; a holding
+    /// elsewhere must still be listed and selectable via its OCC symbol.
+    func testCurrDetectsHoldingsOnUnloadedExpirations() {
+        let viewModel = makeViewModel()
+        seedChain(viewModel)
+        let occ = "SPY990122C00510000" // 2099-01-22 — not among seeded contracts
+        viewModel.positionsProvider = { [self.position(occ)] }
+
+        XCTAssertTrue(viewModel.hasHeldContracts)
+        viewModel.isCurrMode = true
+
+        XCTAssertEqual(viewModel.expirations, ["2099-01-22"])
+        XCTAssertEqual(viewModel.selectedExpiration, "2099-01-22")
+        XCTAssertEqual(viewModel.selectedStrike, 510)
+        XCTAssertEqual(viewModel.selectedContract?.symbol, occ)
+    }
+
     // MARK: - Preselection
 
     func testCurrPreselectsMostRecentlyOpenedHolding() {

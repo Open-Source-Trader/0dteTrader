@@ -506,8 +506,16 @@ final class TradeViewModel: ObservableObject {
         guard position.quantity != 0, quantity > 0 else { return }
         guard !workingSymbols.contains(position.symbol) else { return }
 
-        guard let contract = optionContractResolver?(position.symbol) else {
-            showToast("Open \(position.symbol)'s chart to flatten this option.", style: .error)
+        // The chain resolver only knows the loaded expiration; the position's
+        // own OCC symbol names the leg exactly, so any broker option position
+        // stays closable from the account-wide drawer.
+        let leg: (underlying: String, expiration: String, strike: Double, optionType: OptionType)
+        if let contract = optionContractResolver?(position.symbol) {
+            leg = (contract.underlying, contract.expiration, contract.strike, contract.optionType)
+        } else if let parsed = OccSymbol.parse(position.symbol) {
+            leg = (parsed.underlying, parsed.expiration, parsed.strike, parsed.optionType)
+        } else {
+            showToast("Cannot resolve \(position.symbol) to close it.", style: .error)
             return
         }
         workingSymbols.insert(position.symbol)
@@ -515,7 +523,7 @@ final class TradeViewModel: ObservableObject {
 
         let side: OrderSide = position.quantity > 0 ? .sell : .buy
         let request = OrderRequestDTO(
-            underlying: contract.underlying,
+            underlying: leg.underlying,
             assetClass: "option",
             side: side.rawValue,
             quantity: min(quantity, abs(position.quantity)),
@@ -523,9 +531,9 @@ final class TradeViewModel: ObservableObject {
             limitPrice: nil,
             selection: OrderSelectionDTO(
                 mode: "explicit",
-                optionType: contract.optionType.rawValue,
-                expiration: contract.expiration,
-                strike: contract.strike
+                optionType: leg.optionType.rawValue,
+                expiration: leg.expiration,
+                strike: leg.strike
             )
         )
         do {

@@ -8,8 +8,8 @@ import type {
 import type { ApiClient } from '../../core/api/ApiClient';
 import { errorMessage } from '../../core/api/ApiError';
 import { Store } from '../../core/observable';
+import { parseOccSymbol } from '../../core/models/occSymbol';
 import type { SettingsStore } from '../../core/storage/SettingsStore';
-import { positionsForUnderlying } from '../chart/positionsForUnderlying';
 import { nearestExpiration, selectAutoOTM } from './autoContractSelector';
 
 interface ChainStoreState {
@@ -83,18 +83,40 @@ export class ChainStore extends Store<ChainStoreState> {
     });
   }
 
-  /** Owned long legs on this chain's underlying (CURR mode's universe). */
+  /** Owned long legs on this chain's underlying (CURR mode's universe).
+   *  Resolved through the loaded chain when possible (live quotes), else from
+   *  the OCC symbol itself — the chain only carries one expiration's contracts
+   *  at a time, and a holding on a not-yet-fetched expiration must still show
+   *  up. Synthesized legs carry zero quotes until their expiration loads. */
   get currLegs(): CurrLeg[] {
     const { chain, underlying } = this.getState();
     if (!chain) return [];
     const positions = this.positionsProvider?.() ?? [];
-    return positionsForUnderlying(positions, underlying, chain.contracts)
-      .filter((position) => position.quantity > 0)
-      .map((position) => ({
+    const legs: CurrLeg[] = [];
+    for (const position of positions) {
+      if (position.quantity <= 0) continue;
+      const onChain = chain.contracts.find((contract) => contract.symbol === position.symbol);
+      if (onChain) {
+        if (onChain.underlying === underlying) legs.push({ position, contract: onChain });
+        continue;
+      }
+      const parsed = parseOccSymbol(position.symbol);
+      if (!parsed || parsed.underlying !== underlying) continue;
+      legs.push({
         position,
-        // positionsForUnderlying only keeps positions it resolved in the chain.
-        contract: chain.contracts.find((contract) => contract.symbol === position.symbol)!,
-      }));
+        contract: {
+          symbol: position.symbol,
+          underlying: parsed.underlying,
+          expiration: parsed.expiration,
+          strike: parsed.strike,
+          optionType: parsed.optionType,
+          bid: 0,
+          ask: 0,
+          last: 0,
+        },
+      });
+    }
+    return legs;
   }
 
   /** CURR legs on the currently selected side — the CALL/PUT toggle picks
@@ -212,6 +234,9 @@ export class ChainStore extends Store<ChainStoreState> {
           }
         : { selectedExpiration: null, selectedStrike: null },
     );
+    // A holding on a not-yet-fetched expiration was resolved from its OCC
+    // symbol; fetch that expiration's contracts so quotes fill in.
+    if (recent) void this.ensureContracts(recent.contract.expiration);
   }
 
   /** Live tick for the chain's underlying (wired from the quote stream). */

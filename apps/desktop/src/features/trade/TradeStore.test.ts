@@ -331,6 +331,20 @@ describe('TradeStore.arm — CURR mode (explicit owned leg)', () => {
     expect(ticket?.summary).not.toContain('CLOSE');
   });
 
+  it('CURR sells a holding on an expiration the chain resolver does not know (OCC parse)', () => {
+    // The resolver only covers the loaded expiration; the position's OCC
+    // symbol still names the leg exactly.
+    const store = withResolver(makeStore(), []);
+    seedPositions(store, [{ ...position(2), symbol: 'SPY260727C00505000' }]);
+    store.setQuantity(1);
+
+    store.arm('sell', 'SPY', chainStub({ isCurrMode: true }));
+
+    const ticket = store.getState().armedTicket;
+    expect(ticket?.request.quantity).toBe(1);
+    expect(ticket?.request.selection).toMatchObject({ mode: 'explicit', strike: 505 });
+  });
+
   it('refuses a CURR buy when the named leg is not actually held', () => {
     const store = withResolver(makeStore(), [CONTRACT]);
     seedPositions(store, []);

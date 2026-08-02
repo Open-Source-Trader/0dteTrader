@@ -17,6 +17,10 @@ struct PositionsPanelPositionRow: Equatable, Identifiable {
     let pnlIsPositive: Bool
     /// A 1-lot has nothing to trim (half rounds down to zero).
     let canTrim: Bool
+    /// Whether Flatten/Trim can build a close order for this row — the leg
+    /// resolved through the chain or its own OCC symbol. False only for a
+    /// symbol in neither form, whose close the app cannot construct.
+    let actionable: Bool
 }
 
 enum PositionsPanelRowBuilder {
@@ -43,7 +47,21 @@ enum PositionsPanelRowBuilder {
                 }
             }
             .map { position in
+                // Chain contract when loaded, else the OCC symbol names the
+                // leg — either way the row can be labelled and closed.
                 let contract = contractResolver(position.symbol)
+                    ?? OccSymbol.parse(position.symbol).map { parsed in
+                        OptionContract(
+                            symbol: position.symbol,
+                            underlying: parsed.underlying,
+                            expiration: parsed.expiration,
+                            strike: parsed.strike,
+                            optionType: parsed.optionType,
+                            bid: 0,
+                            ask: 0,
+                            last: 0
+                        )
+                    }
                 return PositionsPanelPositionRow(
                     id: position.symbol,
                     label: contract.map { EntryLineStyle.label(for: $0, today: today) } ?? position.symbol,
@@ -52,7 +70,8 @@ enum PositionsPanelRowBuilder {
                     mark: Format.price(position.markPrice),
                     pnl: Format.signedPrice(position.unrealizedPnl),
                     pnlIsPositive: position.unrealizedPnl >= 0,
-                    canTrim: TradeViewModel.trimQuantity(position.quantity) > 0
+                    canTrim: TradeViewModel.trimQuantity(position.quantity) > 0,
+                    actionable: contract != nil
                 )
             }
     }

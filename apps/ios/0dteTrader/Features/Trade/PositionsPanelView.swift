@@ -231,8 +231,8 @@ struct PositionsPanelView: View {
                     }
                 }
             }
-            .disabled(tradingLocked || isWorking)
-            .opacity(tradingLocked || isWorking ? 0.55 : 1)
+            .disabled(tradingLocked || isWorking || !row.actionable)
+            .opacity(tradingLocked || isWorking || !row.actionable ? 0.55 : 1)
         }
         .accessibilityElement(children: .contain)
     }

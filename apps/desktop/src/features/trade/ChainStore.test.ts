@@ -301,6 +301,27 @@ describe('ChainStore CURR mode', () => {
     expect(store.getState().selectedStrike).toBe(501);
   });
 
+  it('detects holdings on expirations whose contracts are not loaded yet (OCC parse)', async () => {
+    // A held leg on 2099-01-22 while only 2099-01-15's contracts are loaded:
+    // the OCC symbol alone must be enough to list and preselect it.
+    const occ = 'SPY990122C00510000';
+    const { store, pending } = makeDeferredStore();
+    store.positionsProvider = () => [long(occ, 1)];
+    const loading = store.load('SPY');
+    await flushMicrotasks();
+    pending.get('SPY')!.resolve(chainDto('SPY', [499, 501, 503], 500));
+    await loading;
+
+    expect(store.hasCurrPositions).toBe(true);
+    store.setCurrMode(true);
+
+    expect(store.expirations).toEqual(['2099-01-22']);
+    expect(store.getState().selectedExpiration).toBe('2099-01-22');
+    expect(store.getState().selectedStrike).toBe(510);
+    expect(store.strikes).toEqual([510]);
+    expect(store.selectedContract?.symbol).toBe(occ);
+  });
+
   it('CURR never resolves a contract that is not held, even with a stale selection', async () => {
     const store = await loadedMixedStore([long(PUT_SYMBOL, 1)]);
     // Manual (non-CURR) selection of the un-owned 499 call…

@@ -59,16 +59,29 @@ final class PositionsPanelTests: XCTestCase {
         XCTAssertTrue(rows[0].pnlIsPositive)
     }
 
-    func testRowNegativePnlAndUnresolvedContractFallsBackToSymbol() {
+    func testRowUnresolvedByChainFallsBackToOccParseForLabelAndStaysActionable() {
         let rows = PositionsPanelRowBuilder.positionRows(
             positions: [position("SPY260808P00500000", unrealizedPnl: -18.5)],
             contractResolver: { _ in nil },
             today: today
         )
 
-        XCTAssertEqual(rows[0].label, "SPY260808P00500000")
+        // The chain does not know the symbol, but its OCC form does.
+        XCTAssertEqual(rows[0].label, "500P Aug 8")
         XCTAssertEqual(rows[0].pnl, "-18.50")
         XCTAssertFalse(rows[0].pnlIsPositive)
+        XCTAssertTrue(rows[0].actionable)
+    }
+
+    func testRowInNeitherChainNorOccFormIsLabelledRawAndNotActionable() {
+        let rows = PositionsPanelRowBuilder.positionRows(
+            positions: [position("MESU26")],
+            contractResolver: { _ in nil },
+            today: today
+        )
+
+        XCTAssertEqual(rows[0].label, "MESU26")
+        XCTAssertFalse(rows[0].actionable)
     }
 
     func testFlatPositionsAreDropped() {

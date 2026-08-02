@@ -167,18 +167,6 @@ final class TradeViewModel: ObservableObject {
         let summary: String
         let optionType = chainViewModel.optionType
 
-        // Backstop behind every UI gate (`TradeReadiness` disables the
-        // buttons first): a selected contract without a live quote — the
-        // placeholder a CURR leg synthesizes before its expiration's
-        // contracts load — is refused with a specific error before a ticket,
-        // premium, preview, or request exists. A typed custom price does not
-        // bypass this: it changes the requested price, not whether the
-        // contract is a validated, quoted option.
-        if let selected = chainViewModel.selectedContract, !selected.hasTradeableQuote {
-            showToast("Quotes are unavailable for this contract.", style: .error)
-            return
-        }
-
         // Sent only for `.custom`; the server rejects it alongside any other
         // variant, because those four are priced from its own quote.
         let limitPrice = orderType == .custom ? customLimitPrice : nil
@@ -230,6 +218,12 @@ final class TradeViewModel: ObservableObject {
             // tap SELL again to work through the rest, rather than the ticket
             // silently closing only part of the intended size.
             guard let firstClose = closes.first else { return }
+            // Validated against the leg actually being closed, not the
+            // chain's selection: this path deliberately ignores AUTO's
+            // drifted pick, so gating on that pick could refuse a perfectly
+            // quoted exit — the one refusal a position holder must never hit
+            // by accident.
+            guard refuseQuotelessContract(firstClose.contract) == false else { return }
             let closeQuantity = firstClose.quantity
             let sizeLabel = closeQuantity < totalHeld
                 ? "\(closeQuantity) of \(totalHeld)"
@@ -269,6 +263,16 @@ final class TradeViewModel: ObservableObject {
             showToast("No open position to sell", style: .error)
             return
         }
+
+        // Every remaining path prices off the chain's selection, so that is
+        // the contract to validate. Backstop behind the UI gates
+        // (`TradeReadiness` disables the buttons first): the all-zero
+        // placeholder a CURR leg synthesizes before its expiration's
+        // contracts load is refused before a ticket, premium, preview, or
+        // request exists. A typed custom price does not bypass it — that
+        // changes the requested price, not whether the contract is a
+        // validated, quoted option.
+        if refuseQuotelessContract(chainViewModel.selectedContract) { return }
 
         var orderQuantity = quantity
         if chainViewModel.isCurrMode {
@@ -358,6 +362,16 @@ final class TradeViewModel: ObservableObject {
         previewError = nil
         submitError = nil
         Task { await loadPreview() }
+    }
+
+    /// True (and toasts) when `contract` exists but carries no live quote on
+    /// either side. Nil passes: the chain has not resolved a contract yet and
+    /// the server does the resolving (AUTO, or an explicit strike whose
+    /// contracts are still loading).
+    private func refuseQuotelessContract(_ contract: OptionContract?) -> Bool {
+        guard let contract, !contract.hasTradeableQuote else { return false }
+        showToast("Quotes are unavailable for this contract.", style: .error)
+        return true
     }
 
     /// Submits without the confirm sheet (bypass path). Failures surface as a

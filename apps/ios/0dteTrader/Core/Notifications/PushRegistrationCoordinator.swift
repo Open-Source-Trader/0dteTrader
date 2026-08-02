@@ -53,18 +53,31 @@ final class PushRegistrationCoordinator {
     /// an async result stamped with an old generation can prove itself stale.
     private(set) var generation = 0
     private var sessionObserver: NSObjectProtocol?
+    /// One serial chain per server, held HERE rather than on the manager:
+    /// a container swap builds a new manager for the same server, and the
+    /// two must still serialize. The APNs token is device-scoped, so a
+    /// departed manager's DELETE and the new one's POST address the same
+    /// server row — only ordering can keep the survivor correct.
+    private var chains: [String: Task<Void, Never>] = [:]
 
     init(registry: RemoteNotificationRegistry = UIApplicationRemoteNotificationRegistry()) {
         self.registry = registry
         // Installed at the app level, not on any screen: a refresh-token
         // rejection can strike from any authenticated API call, and delivery
         // for the dead session must stop no matter which view made it.
+        //
+        // `[weak self]` on the OUTER block, not merely the inner Task: a
+        // capture list is evaluated when its closure is created, so an inner
+        // list forces the outer block to capture self — strongly, absent its
+        // own list — and NotificationCenter holds that block until
+        // removeObserver, which only deinit calls. The observer would keep
+        // the coordinator alive forever and make its own cleanup dead code.
         sessionObserver = NotificationCenter.default.addObserver(
             forName: .sessionDidBecomeUnauthenticated,
             object: nil,
             queue: .main
-        ) { _ in
-            Task { @MainActor [weak self] in self?.handleSessionExpired() }
+        ) { [weak self] _ in
+            Task { @MainActor in self?.handleSessionExpired() }
         }
     }
 
@@ -120,6 +133,33 @@ final class PushRegistrationCoordinator {
     func handleSessionExpired() {
         deactivate()
     }
+
+    // MARK: - Per-server operation chain
+
+    /// Appends server-side registration work to `serverKey`'s serial chain.
+    /// Operations for one server run strictly in enqueue order, ACROSS
+    /// manager instances — the guarantee a per-manager chain loses the
+    /// moment a server switch (or a switch back) replaces the container.
+    @discardableResult
+    func enqueue(
+        serverKey: String,
+        _ operation: @escaping @MainActor () async -> Void
+    ) -> Task<Void, Never> {
+        let previous = chains[serverKey]
+        let task = Task { @MainActor in
+            await previous?.value
+            await operation()
+        }
+        chains[serverKey] = task
+        return task
+    }
+
+    #if DEBUG
+    /// Awaits everything currently queued for one server (tests only).
+    func drainOperationsForTesting(serverKey: String) async {
+        await chains[serverKey]?.value
+    }
+    #endif
 
     // MARK: - APNs callbacks (AppDelegate forwards)
 

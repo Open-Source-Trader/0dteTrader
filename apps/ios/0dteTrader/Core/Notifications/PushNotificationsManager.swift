@@ -1,4 +1,4 @@
-import UIKit
+import Foundation
 import UserNotifications
 
 /// APNs device-token encoding, kept pure so it is testable without UIKit.
@@ -41,14 +41,6 @@ final class PushNotificationsManager: NSObject {
     /// Seam over `UNUserNotificationCenter.requestAuthorization` — the real
     /// one needs an app bundle that unit tests don't have.
     private let requestAuthorization: () async -> Bool
-    /// Chains every registration/teardown so their NETWORK calls cannot
-    /// interleave: each operation awaits its predecessor, and a superseded
-    /// one exits before touching the network. Local delivery is NOT chained —
-    /// the coordinator stops it synchronously — this chain is only the
-    /// server-side bookkeeping. Operations capture `self` strongly on
-    /// purpose: a departed era's op must still finish its own server's
-    /// bookkeeping.
-    private var operationChain: Task<Void, Never>?
 
     init(
         apiClient: DeviceRegistrationAPI,
@@ -107,6 +99,11 @@ final class PushNotificationsManager: NSObject {
     /// toggle on, begins a new era — APNs tokens rotate between launches, and
     /// a login after a logout re-binds the device here.
     func activateAfterAuthentication() {
+        // The era this intent belongs to. A logout, expiry, switch, or
+        // toggle-off landing before the queued work reaches its activation
+        // moves the counter — and delivery must NOT come back on for a
+        // session that ended while this operation was suspended mid-sweep.
+        let intent = coordinator.generation
         enqueue { [self] in
             // Swept only when this manager does NOT hold the active era: a
             // token in the slot then is a leftover (previous account, dead
@@ -119,7 +116,8 @@ final class PushNotificationsManager: NSObject {
                 // way, and the next activation retries the sweep.
                 await unregisterAndClear(retained)
             }
-            guard settingsStore.pushNotificationsEnabled else { return }
+            guard coordinator.generation == intent,
+                  settingsStore.pushNotificationsEnabled else { return }
             _ = coordinator.activate(serverKey: serverKey, manager: self)
         }
     }
@@ -200,23 +198,23 @@ final class PushNotificationsManager: NSObject {
     }
 
     #if DEBUG
-    /// Awaits every operation currently on the chain (tests only).
+    /// Awaits every operation currently queued for this server (tests only).
     func drainOperationsForTesting() async {
-        await operationChain?.value
+        await coordinator.drainOperationsForTesting(serverKey: serverKey)
     }
     #endif
 
-    /// Appends an operation to the chain and returns its task. Operations run
-    /// strictly one after another, in enqueue order.
+    /// Appends an operation to THIS SERVER's chain (owned by the coordinator,
+    /// so ordering survives a container swap) and returns its task. Their
+    /// NETWORK calls therefore cannot interleave: each operation awaits its
+    /// predecessor, and a superseded one exits before touching the network.
+    /// Local delivery is NOT chained — the coordinator stops it
+    /// synchronously — this chain is only the server-side bookkeeping.
+    /// Operations capture `self` strongly on purpose: a departed era's op
+    /// must still finish its own server's bookkeeping.
     @discardableResult
     private func enqueue(_ operation: @escaping @MainActor () async -> Void) -> Task<Void, Never> {
-        let previous = operationChain
-        let task = Task { @MainActor in
-            await previous?.value
-            await operation()
-        }
-        operationChain = task
-        return task
+        coordinator.enqueue(serverKey: serverKey, operation)
     }
 
     /// Coordinator forward: APNs granted a token for era `generation`. The

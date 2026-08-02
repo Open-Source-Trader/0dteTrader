@@ -26,6 +26,10 @@ private final class DeviceAPIFake: DeviceRegistrationAPI {
     /// Calls that completed successfully.
     private(set) var registered: [String] = []
     private(set) var unregistered: [String] = []
+    /// One interleaved log of COMPLETIONS across both calls — the only way
+    /// to tell "the DELETE finished before the POST started" from "both were
+    /// in flight together", which is exactly what serialization guarantees.
+    private(set) var completions: [String] = []
     var registerFails = false
     var unregisterFails = false
     var holdNextRegister = false
@@ -40,6 +44,7 @@ private final class DeviceAPIFake: DeviceRegistrationAPI {
         }
         if registerFails { throw Failure() }
         registered.append(token)
+        completions.append("register:\(token)")
     }
 
     func unregisterDevice(token: String) async throws {
@@ -50,6 +55,7 @@ private final class DeviceAPIFake: DeviceRegistrationAPI {
         }
         if unregisterFails { throw Failure() }
         unregistered.append(token)
+        completions.append("delete:\(token)")
     }
 
     func releaseHeld() {
@@ -314,28 +320,75 @@ final class PushNotificationsTests: XCTestCase {
         XCTAssertEqual(settings.pushDeviceToken(server: serverB), tokenHex)
     }
 
-    func testStaleDeleteSuccess_clearsOnlyTheTokenItDeleted() async {
+    /// The A→B→A hazard: a departed container's manager and its replacement
+    /// serve the SAME server, and the APNs token is device-scoped, so their
+    /// DELETE and POST address the same server row. Value-sensitive clearing
+    /// cannot separate them (the token value is identical) — only ordering
+    /// can, which is why the chain lives on the app-lifetime coordinator
+    /// rather than on the manager.
+    func testLateDeleteFromADepartedEra_cannotOutraceTheNewEraRegistration() async {
         settings.pushNotificationsEnabled = true
-        settings.setPushDeviceToken("tok1", server: serverA)
+        settings.setPushDeviceToken(tokenHex, server: serverA)
         api.holdNextUnregister = true
-        // A departed container's manager for the SAME server, mid-logout.
         let departed = makeManager(serverKey: serverA)
         let logout = Task { await departed.handleLogout() }
         await waitUntil { self.api.unregisterCalls.count == 1 }
 
-        // The replacement container's manager writes a newer token into the
-        // shared per-server slot.
+        // The replacement container's manager registers the same token while
+        // the departed manager's DELETE is still in flight.
         let current = makeManager(serverKey: serverA)
         _ = coordinator.activate(serverKey: serverA, manager: current)
         coordinator.didRegisterForRemoteNotifications(deviceToken: tokenData)
-        await current.drainOperationsForTesting()
-        XCTAssertEqual(settings.pushDeviceToken(server: serverA), tokenHex)
 
-        // The old DELETE finally succeeds — for "tok1", which the slot no
-        // longer holds. The newer token must survive.
         api.releaseHeld()
         await logout.value
+        await current.drainOperationsForTesting()
+
+        // The DELETE completed BEFORE the POST began, so the row that
+        // survives is the new era's — not a registration silently deleted by
+        // a predecessor.
+        XCTAssertEqual(api.completions, ["delete:\(tokenHex)", "register:\(tokenHex)"])
         XCTAssertEqual(settings.pushDeviceToken(server: serverA), tokenHex)
+    }
+
+    /// A stale DELETE that succeeds must clear only the token it named: the
+    /// slot may already hold a newer one.
+    func testStaleDeleteSuccess_clearsOnlyTheTokenItDeleted() async {
+        settings.pushNotificationsEnabled = true
+        settings.setPushDeviceToken("tok1", server: serverA)
+        let manager = makeManager(serverKey: serverA)
+        api.holdNextUnregister = true
+        let logout = Task { await manager.handleLogout() }
+        await waitUntil { self.api.unregisterCalls.count == 1 }
+
+        // A newer token lands in the slot while the DELETE is suspended.
+        settings.setPushDeviceToken("tok2", server: serverA)
+
+        api.releaseHeld()
+        await logout.value
+        XCTAssertEqual(settings.pushDeviceToken(server: serverA), "tok2")
+    }
+
+    /// An activation suspended mid-sweep must not switch delivery back on
+    /// when the session it belonged to ended while it waited.
+    func testQueuedActivation_doesNotResumeDeliveryAfterLogout() async {
+        settings.pushNotificationsEnabled = true
+        settings.setPushDeviceToken("old0", server: serverA)
+        api.holdNextUnregister = true
+        let manager = makeManager()
+        manager.activateAfterAuthentication()
+        await waitUntil { self.api.unregisterCalls.count == 1 }
+
+        // Logout lands while the activation's sweep is still suspended.
+        let logout = Task { await manager.handleLogout() }
+        await waitUntil { self.registry.unregisterCount == 1 }
+
+        api.releaseHeld()
+        await logout.value
+        await manager.drainOperationsForTesting()
+
+        XCTAssertEqual(registry.registerCount, 0)
+        XCTAssertFalse(coordinator.isCurrent(serverKey: serverA, generation: coordinator.generation))
     }
 
     func testTokenCallbackAfterDeactivation_isDroppedEntirely() async {

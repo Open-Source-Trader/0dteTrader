@@ -38,6 +38,7 @@ model User {
   brokerConnections BrokerConnection[]
   tradeOrders     TradeOrder[]
   chartOrders     ChartOrder[]
+  deviceTokens    DeviceToken[]
 
   @@map("users")
 }
@@ -276,6 +277,23 @@ model OptionsAnalyticsSnapshotRecord {
   @@unique([symbol, expiration, bucket, calculationVersion, resolutionMinutes], map: "options_analytics_snapshot_identity_key")
   @@index([resolutionMinutes, bucket])
   @@map("options_analytics_snapshots")
+}
+
+// A device registered for push notifications. `token` is globally unique —
+// re-registering an existing token moves it to the registering account (the
+// device changed users, and only its current owner should be notified). Rows
+// are pruned when APNs reports the token dead.
+model DeviceToken {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @db.Uuid
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  platform  String
+  token     String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@map("device_tokens")
 }
 
 model ScheduledJobLease {

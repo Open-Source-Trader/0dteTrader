@@ -13,6 +13,7 @@ import { PrismaClient } from '@prisma/client';
  *   orderAudit:       findUnique, create, findMany
  *   optionsAnalyticsSnapshotRecord: create, findMany, deleteMany
  *   scheduledJobLease: create, updateMany
+ *   deviceToken:      findMany, upsert, deleteMany
  */
 @Injectable()
 export class PrismaService extends PrismaClient implements OnModuleInit, OnModuleDestroy {

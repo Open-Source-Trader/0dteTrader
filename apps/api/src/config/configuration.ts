@@ -71,6 +71,22 @@ export interface AppConfig {
      *  with total platform usage, not one session. */
     quoteConcurrency: number;
   };
+  notifications: {
+    /** Master switch for the APNs sender; off means no pushes, ever. */
+    apnsEnabled: boolean;
+    /** APNs auth key id (the 10-char id of the .p8 key). */
+    apnsKeyId: string;
+    /** Apple developer team id. */
+    apnsTeamId: string;
+    /** The .p8 key as inline PEM content; wins over apnsKeyPath. */
+    apnsKey: string;
+    /** Path to the .p8 key file; used when apnsKey is empty. */
+    apnsKeyPath: string;
+    /** apns-topic header — the app's bundle id. */
+    apnsTopic: string;
+    /** https://api.sandbox.push.apple.com or https://api.push.apple.com. */
+    apnsHost: string;
+  };
 }
 
 function int(value: string | undefined, fallback: number): number {
@@ -152,6 +168,19 @@ export default (): AppConfig => ({
     tickMs: int(process.env.CHART_ORDER_WATCHER_TICK_MS, 1_000),
     staleQuoteMs: int(process.env.CHART_ORDER_STALE_QUOTE_MS, 10_000),
     quoteConcurrency: int(process.env.CHART_ORDER_WATCHER_QUOTE_CONCURRENCY, 20),
+  },
+  notifications: {
+    // Off by default: sending requires a provisioned APNs key, and an
+    // unconfigured sender must stay inert (tests never set APNS_ENABLED).
+    apnsEnabled: enabled(process.env.APNS_ENABLED, false),
+    apnsKeyId: process.env.APNS_KEY_ID || '',
+    apnsTeamId: process.env.APNS_TEAM_ID || '',
+    // The .p8 key, either inline (PEM content) or as a file path.
+    apnsKey: process.env.APNS_KEY || '',
+    apnsKeyPath: process.env.APNS_KEY_PATH || '',
+    apnsTopic: process.env.APNS_TOPIC || 'com.0dtetrader.app',
+    // Sandbox by default; set to https://api.push.apple.com for production.
+    apnsHost: process.env.APNS_HOST || 'https://api.sandbox.push.apple.com',
   },
 });
 

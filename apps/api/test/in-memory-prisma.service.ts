@@ -85,6 +85,7 @@ export class InMemoryPrismaService {
   readonly brokerCredentials: any[] = [];
   readonly brokerApiTokens: any[] = [];
   readonly brokerConnections: any[] = [];
+  readonly deviceTokens: any[] = [];
 
   readonly user = {
     findUnique: async ({ where }: any) => {
@@ -558,6 +559,28 @@ export class InMemoryPrismaService {
     },
   };
 
+  readonly deviceToken = {
+    findMany: async ({ where }: any = {}) => this.deviceTokens.filter((t) => matches(t, where)),
+    upsert: async ({ where, create, update }: any) => {
+      const existing = this.deviceTokens.find((t) => t.token === where.token);
+      if (existing) {
+        Object.assign(existing, definedOnly(update), { updatedAt: new Date() });
+        return existing;
+      }
+      const now = new Date();
+      const row = { id: randomUUID(), createdAt: now, updatedAt: now, ...create };
+      this.deviceTokens.push(row);
+      return row;
+    },
+    deleteMany: async ({ where }: any = {}) => {
+      const keep = this.deviceTokens.filter((t) => !matches(t, where));
+      const count = this.deviceTokens.length - keep.length;
+      this.deviceTokens.length = 0;
+      this.deviceTokens.push(...keep);
+      return { count };
+    },
+  };
+
   // Prisma lifecycle no-ops.
   async $connect(): Promise<void> {}
   async $disconnect(): Promise<void> {}
@@ -577,6 +600,7 @@ export class InMemoryPrismaService {
     this.brokerCredentials.length = 0;
     this.brokerApiTokens.length = 0;
     this.brokerConnections.length = 0;
+    this.deviceTokens.length = 0;
   }
 
   /** Test helper: flip the kill switch for a user. */

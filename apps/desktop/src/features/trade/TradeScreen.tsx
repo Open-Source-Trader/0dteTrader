@@ -41,6 +41,7 @@ import { ProfileView } from '../profile/ProfileView';
 import { DesktopTradeTicket } from './DesktopTradeTicket';
 import { FloatingTradeButtons } from './FloatingTradeButtons';
 import { GexHeatmapModal } from '../gexHeatmap/GexHeatmapModal';
+import { TradeDeskPanel } from './TradeDeskPanel';
 import { TradeManagementWorkspace } from './TradeManagementWorkspace';
 import {
   desktopTradeWorkspaceHeight,
@@ -103,6 +104,11 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
   // store snapshot would (ChartView, the other chartStore subscriber, still
   // gets those).
   const chart = useStore(chartStore, chartChromeSlice, shallowEqual);
+  const isQuoteStreamStale = useStore(
+    chartStore,
+    (state) => state.isStale,
+    (a, b) => a === b,
+  );
   const trade = useStore(tradeStore);
   const chain = useStore(chainStore); // Chain selection supplies the exact analytics expiration.
   const chartOrders = useStore(chartOrdersStore);
@@ -545,24 +551,48 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
     contentArea = (
       <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column' }}>
         <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
-          <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
-            <ChartView
-              store={chartStore}
-              drawingsStore={drawingsStore}
-              apiClient={apiClient}
-              onSymbolSearch={() => setShowSymbolSearch(true)}
-              onIndicatorSettings={() => setShowIndicatorSettings(true)}
-              tradingMode={tradingMode}
-              onToggleMode={() => setShowModeConfirmation(true)}
-              onToggleFullscreen={toggleLayout}
-              optionsAnalyticsExpiration={optionsAnalyticsExpiration}
-              chartTrading={chartTrading}
-              dense
-              positionsLocked={locked}
-              onToggleLock={toggleLock}
-              onShowHistory={() => setShowHistory(true)}
-              onShowProfile={() => setShowProfile(true)}
-              onShowGexHeatmap={() => setShowGexHeatmap(true)}
+          {/* Main workspace: chart takes all remaining vertical space above
+              a fixed-height AI Trade Desk band — the chart stays the
+              dominant surface and the band never resizes with model text. */}
+          <div
+            style={{
+              flex: 1,
+              minWidth: 0,
+              minHeight: 0,
+              display: 'flex',
+              flexDirection: 'column',
+              overflow: 'hidden',
+            }}
+          >
+            <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+              <ChartView
+                store={chartStore}
+                drawingsStore={drawingsStore}
+                apiClient={apiClient}
+                onSymbolSearch={() => setShowSymbolSearch(true)}
+                onIndicatorSettings={() => setShowIndicatorSettings(true)}
+                tradingMode={tradingMode}
+                onToggleMode={() => setShowModeConfirmation(true)}
+                onToggleFullscreen={toggleLayout}
+                optionsAnalyticsExpiration={optionsAnalyticsExpiration}
+                chartTrading={chartTrading}
+                dense
+                positionsLocked={locked}
+                onToggleLock={toggleLock}
+                onShowHistory={() => setShowHistory(true)}
+                onShowProfile={() => setShowProfile(true)}
+                onShowGexHeatmap={() => setShowGexHeatmap(true)}
+              />
+            </div>
+
+            <TradeDeskPanel
+              analysisStore={analysisStore}
+              tradeStore={tradeStore}
+              chainStore={chainStore}
+              selectedContract={chainStore.selectedContract}
+              buildSnapshot={buildCurrentAnalysisSnapshot}
+              locked={locked}
+              isQuoteStreamStale={isQuoteStreamStale}
             />
           </div>
 
@@ -580,10 +610,11 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
           <div
             style={{
               flex: `0 0 ${breakpoint === 'wide' ? '22%' : '30%'}`,
-              minWidth: 320,
+              minWidth: 380,
               minHeight: 0,
               display: 'flex',
               flexDirection: 'column',
+              overflow: 'hidden',
             }}
           >
             <DesktopTradeTicket
@@ -591,9 +622,6 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
               chainStore={chainStore}
               onArm={arm}
               locked={locked}
-              analysisStore={analysisStore}
-              buildAnalysisSnapshot={buildCurrentAnalysisSnapshot}
-              chartStore={chartStore}
             />
           </div>
         </div>

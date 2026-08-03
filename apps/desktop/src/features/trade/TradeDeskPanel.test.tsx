@@ -1,6 +1,6 @@
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { describe, expect, it, vi, beforeAll, afterAll } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { ApiClient } from '../../core/api/ApiClient';
 import { AnalysisStore } from '../appleIntelligence/AnalysisStore';
 import type { AnalysisSnapshot, AnalysisResult } from '../appleIntelligence/types';
@@ -130,12 +130,31 @@ function makeStores(result: AnalysisResult | null = makeResult()) {
 }
 
 function markup({
-  expanded = false,
   result = makeResult(),
   isQuoteStreamStale = false,
-}: { expanded?: boolean; result?: AnalysisResult | null; isQuoteStreamStale?: boolean } = {}) {
+  hasPosition = false,
+}: {
+  result?: AnalysisResult | null;
+  isQuoteStreamStale?: boolean;
+  hasPosition?: boolean;
+} = {}) {
   const stores = makeStores(result);
-  vi.mocked(localStorage.getItem).mockReturnValue(expanded ? '1' : '0');
+  if (hasPosition) {
+    (stores.tradeStore as unknown as { state: unknown }).state = {
+      ...stores.tradeStore.getState(),
+      positions: [
+        {
+          symbol: contract.symbol,
+          assetClass: 'option',
+          quantity: 1,
+          avgPrice: 1.8,
+          markPrice: 1.9,
+          unrealizedPnl: 10,
+          multiplier: 100,
+        },
+      ],
+    };
+  }
   return renderToStaticMarkup(
     createElement(TradeDeskPanel, {
       analysisStore: stores.analysisStore,
@@ -148,42 +167,47 @@ function markup({
   );
 }
 
-beforeAll(() => {
-  vi.stubGlobal('localStorage', {
-    getItem: vi.fn(),
-    setItem: vi.fn(),
-  });
-});
-
-afterAll(() => {
-  vi.unstubAllGlobals();
-});
-
 describe('TradeDeskPanel', () => {
-  it('renders collapsed current guidance with action and entry', () => {
+  it('renders the flat 8-cell grid with action, setup, and entry', () => {
     const html = markup();
     expect(html).toContain('AI TRADE DESK');
     expect(html).toContain('WAIT');
-    expect(html).toContain('Entry $1.85');
+    expect(html).toContain('FLAT');
+    expect(html).toContain('SETUP');
     expect(html).toContain('Bullish pullback');
-  });
-
-  it('renders expanded levels, targets, management, and apply command', () => {
-    const html = markup({ expanded: true });
     expect(html).toContain('ENTRY');
     expect(html).toContain('SPY 746.55–746.65');
-    expect(html).toContain('$1.82–$1.88');
     expect(html).toContain('TARGETS');
-    expect(html).toContain('Contract First');
-    expect(html).toContain('Hold above VWAP');
+    expect(html).toContain('T1 $2.15');
+    expect(html).toContain('CONTRACT');
+    expect(html).toContain('SPY 746C');
+    expect(html).toContain('PREMIUM LIMIT');
+    expect(html).toContain('EXECUTION');
+    expect(html).toContain('RUNNER');
     expect(html).toContain('USE $1.85 ENTRY');
+    expect(html).not.toContain('IN TRADE');
+  });
+
+  it('renders the in-trade 8-cell grid when an open position exists, not the flat plan', () => {
+    const html = markup({ hasPosition: true });
+    expect(html).toContain('IN TRADE');
+    expect(html).not.toContain('>FLAT<');
+    expect(html).toContain('POSITION');
+    expect(html).toContain('SPY 746C');
+    expect(html).toContain('CURRENT ACTION');
+    expect(html).toContain('SCALE');
+    expect(html).toContain('OPTION STOP');
+    expect(html).toContain('UNDERLYING');
+    expect(html).toContain('RUNNER');
+    // Flat-only fields must not dominate the in-trade board.
+    expect(html).not.toContain('PREMIUM LIMIT');
   });
 
   it('marks stale guidance and disables apply when selected contract changed', () => {
     const stale = makeResult({
       context: { ...makeResult().context, selectedContractSymbol: 'OTHER' },
     });
-    const html = markup({ expanded: true, result: stale });
+    const html = markup({ result: stale });
     expect(html).toContain('STALE');
     expect(html).toContain('disabled=""');
   });
@@ -211,5 +235,45 @@ describe('TradeDeskPanel', () => {
     const html = markup({ isQuoteStreamStale: true });
     vi.useRealTimers();
     expect(html).toContain('UNAVAILABLE');
+  });
+
+  it('preserves the last valid grid while a new analysis is generating', () => {
+    const stores = makeStores(makeResult());
+    (stores.analysisStore as unknown as { state: unknown }).state = {
+      ...stores.analysisStore.getState(),
+      isAnalyzing: true,
+    };
+    const html = renderToStaticMarkup(
+      createElement(TradeDeskPanel, {
+        analysisStore: stores.analysisStore,
+        chainStore: stores.chainStore,
+        tradeStore: stores.tradeStore,
+        selectedContract: contract,
+        buildSnapshot: () => stores.snapshot,
+      }),
+    );
+    expect(html).toContain('Bullish pullback');
+    expect(html).toContain('trade-desk__analyzing-dot');
+  });
+
+  it('shows a bounded placeholder, not a raw error, when analysis fails with no prior result', () => {
+    const stores = makeStores(null);
+    (stores.analysisStore as unknown as { state: unknown }).state = {
+      ...stores.analysisStore.getState(),
+      latestResult: null,
+      errorMessage: 'Options snapshot is missing required delta values at line 42 in module x.y.z',
+    };
+    const html = renderToStaticMarkup(
+      createElement(TradeDeskPanel, {
+        analysisStore: stores.analysisStore,
+        chainStore: stores.chainStore,
+        tradeStore: stores.tradeStore,
+        selectedContract: contract,
+        buildSnapshot: () => stores.snapshot,
+      }),
+    );
+    expect(html).toContain('FAILED');
+    expect(html).toContain('Retry');
+    expect(html).not.toContain('line 42');
   });
 });

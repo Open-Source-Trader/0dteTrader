@@ -3,8 +3,8 @@ const fs = require('node:fs');
 const DEFAULT_STATE = {
   width: 1440,
   height: 960,
-  minWidth: 960,
-  minHeight: 720,
+  minWidth: 1280,
+  minHeight: 800,
   maximized: false,
 };
 

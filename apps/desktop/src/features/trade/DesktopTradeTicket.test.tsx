@@ -246,6 +246,30 @@ describe('DesktopTradeTicket CALL/PUT selection', () => {
     });
   });
 
+  it('shows ADD TO POSITION as secondary and SELL TO CLOSE as primary when a long is open', () => {
+    const { chainStore, tradeStore } = makeStores({ optionType: 'call' });
+    (tradeStore as unknown as { state: Record<string, unknown> }).state.positions = [
+      {
+        symbol: call.symbol,
+        assetClass: 'option',
+        quantity: 1,
+        avgPrice: 1.5,
+        markPrice: 1.55,
+        unrealizedPnl: 5,
+        multiplier: 100,
+      },
+    ];
+    const markup = ticketMarkup({ chainStore, tradeStore });
+
+    expect(markup).toContain('>ADD TO POSITION<');
+    expect(markup).not.toContain('>BUY TO OPEN<');
+    expect(markup).toContain('>SELL TO CLOSE<');
+    const addButtonHtml = markup.slice(
+      markup.lastIndexOf('<button', markup.indexOf('ADD TO POSITION')),
+    );
+    expect(addButtonHtml).toContain('hud-btn--secondary');
+  });
+
   it('missing opposite-side contracts clear selected contract and disable submissions safely', () => {
     const { chainStore, tradeStore } = makeStores();
     (chainStore as unknown as { state: Record<string, unknown> }).state.chain = {

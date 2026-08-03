@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { OptionContract, OrderSide, OrderType } from '@0dtetrader/shared-types';
-import { Store, useStore } from '../../core/observable';
+import { useStore } from '../../core/observable';
 import { dayString } from '../../core/models/dates';
 import { midPrice, quotesPending } from '../../core/models/domain';
 import { isPriceInputShape, parsePriceInput } from '../../core/models/priceInput';
@@ -16,26 +16,13 @@ import { DesktopContractSummary } from './DesktopContractSummary';
 import { buildDesktopContractSummary } from './DesktopContractSummaryModel';
 import { selectedContractPremium } from './expiryBreakEven';
 import { OptionChainTable } from './OptionChainTable';
-import type { AnalysisSnapshot } from '../appleIntelligence/types';
-import type { AnalysisStore } from '../appleIntelligence/AnalysisStore';
-import type { ChartStore } from '../chart/ChartStore';
-import { TradeDeskPanel } from './TradeDeskPanel';
 
 interface DesktopTradeTicketProps {
   tradeStore: TradeStore;
   chainStore: ChainStore;
   onArm: (side: OrderSide) => void;
   locked?: boolean;
-  analysisStore?: AnalysisStore;
-  buildAnalysisSnapshot?: () => AnalysisSnapshot;
-  chartStore?: ChartStore;
 }
-
-/** Stand-in for callers that don't supply a ChartStore (e.g. tests) — a
- * store that never reports stale, so useStore always has a valid,
- * non-optional Store<S> to subscribe to regardless of whether the caller
- * passed a real one. */
-const ALWAYS_LIVE_CHART_STORE = new Store({ isStale: false });
 
 const PRICE_MODES: Array<{ value: OrderType; label: string }> = [
   { value: 'bid', label: 'Bid' },
@@ -81,6 +68,17 @@ function dteLabel(expiration: string | null): string {
   return expiration === dayString() ? '0DTE / Expiry' : expiration;
 }
 
+function buyButtonTitle({
+  isSubmitting,
+  hasOpenLong,
+}: {
+  isSubmitting: boolean;
+  hasOpenLong: boolean;
+}): string {
+  if (isSubmitting) return 'Working…';
+  return hasOpenLong ? 'ADD TO POSITION' : 'BUY TO OPEN';
+}
+
 /** Desktop-grid execution rail: chain first, then configuration, selected
  *  contract, sizing/pricing, and finally the safety-critical BUY/SELL row. */
 export function DesktopTradeTicket({
@@ -88,17 +86,9 @@ export function DesktopTradeTicket({
   chainStore,
   onArm,
   locked = false,
-  analysisStore,
-  buildAnalysisSnapshot,
-  chartStore,
 }: DesktopTradeTicketProps) {
   const trade = useStore(tradeStore);
   const chain = useStore(chainStore);
-  const isQuoteStreamStale = useStore(
-    chartStore ?? ALWAYS_LIVE_CHART_STORE,
-    (state) => state.isStale,
-    (a, b) => a === b,
-  );
   const [customDraft, setCustomDraft] = useState<string | null>(null);
   const customRef = useRef<HTMLInputElement>(null);
 
@@ -146,6 +136,14 @@ export function DesktopTradeTicket({
   const hasSellableLeg =
     tradeStore.sellableHeldLegs(chain.underlying, chain.selectedExpiration, chain.optionType)
       .length > 0;
+  // Narrower than hasSellableLeg (exact contract, not underlying+expiration+
+  // right): the buy button's label distinguishes adding to an existing
+  // position in THIS contract from opening a new one.
+  const hasOpenLong = selectedContract
+    ? trade.positions.some(
+        (position) => position.symbol === selectedContract.symbol && position.quantity > 0,
+      )
+    : false;
   // `premium !== null` alone does not cover the Custom mode: a typed price
   // supplies a premium even when the leg itself has no quotes yet, so the
   // zero-quote CURR gate needs its own term here.
@@ -268,18 +266,6 @@ export function DesktopTradeTicket({
             </button>
           ) : null}
         </div>
-
-        {analysisStore && buildAnalysisSnapshot ? (
-          <TradeDeskPanel
-            analysisStore={analysisStore}
-            tradeStore={tradeStore}
-            chainStore={chainStore}
-            selectedContract={selectedContract}
-            buildSnapshot={buildAnalysisSnapshot}
-            locked={locked}
-            isQuoteStreamStale={isQuoteStreamStale}
-          />
-        ) : null}
 
         <DesktopContractSummary
           selectedContract={selectedContract}
@@ -417,9 +403,10 @@ export function DesktopTradeTicket({
             onClick={() => onArm('sell')}
           />
           <TradeActionButton
-            title={trade.isSubmitting ? 'Working…' : 'BUY TO OPEN'}
+            title={buyButtonTitle({ isSubmitting: trade.isSubmitting, hasOpenLong })}
             color="var(--buy-green)"
             isEnabled={canBuy}
+            secondary={hasOpenLong}
             onClick={() => onArm('buy')}
           />
         </div>

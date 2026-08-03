@@ -1,4 +1,5 @@
-import type { OptionContract } from '@0dtetrader/shared-types';
+import type { OptionContract, Position } from '@0dtetrader/shared-types';
+import { optionTypeShortName } from '../../core/models/domain';
 import { PRICE_MAX, PRICE_MIN, PRICE_STEP, roundToTick } from '../../core/models/priceInput';
 import { Format } from '../../design/format';
 import { isResultCurrent } from './stalenessGate';
@@ -79,6 +80,12 @@ export interface TradeDeskPresentation {
   applicablePriceSuggestion?: ApplicablePriceSuggestion;
 }
 
+/** Whether the trader is flat or holding the selected contract — derived
+ * from actual broker/account position data (never from the AI's chosen
+ * action), so a stale or racing recommendation can never flip the grid
+ * layout on its own. See buildTradeDeskViewState's `hasOpenPosition` input. */
+export type TradeDeskPositionState = 'flat' | 'in-trade';
+
 export interface TradeDeskViewState {
   status: 'current' | 'generating' | 'stale' | 'unavailable' | 'failed' | 'disabled';
   presentation?: TradeDeskPresentation;
@@ -96,6 +103,9 @@ export interface TradeDeskViewState {
    * panel can show "confirming" feedback without flipping the badge on a
    * single contrary sample. */
   pendingActionChange?: { action: TradeDeskAction; label: string };
+  /** Authoritative flat/in-trade state for choosing which 8-cell grid to
+   * render. Always present so callers don't need a separate lookup. */
+  positionState: TradeDeskPositionState;
 }
 
 export interface TradeDeskPresentationLimits {
@@ -129,12 +139,17 @@ export interface BuildTradeDeskViewStateInput {
   limits?: Partial<TradeDeskPresentationLimits>;
   marketSessionState?: MarketAnalysisState;
   pendingActionChange?: { action: TradeDeskAction } | null;
+  /** Authoritative flat/in-trade signal — an actual open long in the
+   * selected contract, not inferred from the AI's recommended action.
+   * Defaults to false (flat) for callers that don't supply it. */
+  hasOpenPosition?: boolean;
 }
 
 export function buildTradeDeskViewState(input: BuildTradeDeskViewStateInput): TradeDeskViewState {
   const marketSessionState = input.marketSessionState ?? 'live';
+  const positionState: TradeDeskPositionState = input.hasOpenPosition ? 'in-trade' : 'flat';
   if (input.disabled) {
-    return { status: 'disabled', canApplySuggestedPrice: false, marketSessionState };
+    return { status: 'disabled', canApplySuggestedPrice: false, marketSessionState, positionState };
   }
 
   const limits = { ...DEFAULT_TRADE_DESK_LIMITS, ...input.limits };
@@ -156,6 +171,7 @@ export function buildTradeDeskViewState(input: BuildTradeDeskViewStateInput): Tr
       generatedAt: visiblePresentation?.resultId ? input.latestResult?.generatedAt : undefined,
       canApplySuggestedPrice: false,
       marketSessionState,
+      positionState,
     };
   }
 
@@ -165,6 +181,7 @@ export function buildTradeDeskViewState(input: BuildTradeDeskViewStateInput): Tr
       staleReason: input.errorMessage,
       canApplySuggestedPrice: false,
       marketSessionState,
+      positionState,
     };
   }
 
@@ -174,11 +191,17 @@ export function buildTradeDeskViewState(input: BuildTradeDeskViewStateInput): Tr
       staleReason: 'reason' in input.availability ? input.availability.reason : undefined,
       canApplySuggestedPrice: false,
       marketSessionState,
+      positionState,
     };
   }
 
   if (!visiblePresentation || !input.latestResult) {
-    return { status: 'unavailable', canApplySuggestedPrice: false, marketSessionState };
+    return {
+      status: 'unavailable',
+      canApplySuggestedPrice: false,
+      marketSessionState,
+      positionState,
+    };
   }
 
   const isCurrent = input.currentContext
@@ -193,6 +216,7 @@ export function buildTradeDeskViewState(input: BuildTradeDeskViewStateInput): Tr
       staleReason: staleReason(input.latestResult.context, input.currentContext),
       canApplySuggestedPrice: false,
       marketSessionState,
+      positionState,
     };
   }
 
@@ -204,6 +228,7 @@ export function buildTradeDeskViewState(input: BuildTradeDeskViewStateInput): Tr
       staleReason: input.errorMessage,
       canApplySuggestedPrice: false,
       marketSessionState,
+      positionState,
     };
   }
 
@@ -225,6 +250,7 @@ export function buildTradeDeskViewState(input: BuildTradeDeskViewStateInput): Tr
     canApplySuggestedPrice,
     marketSessionState,
     pendingActionChange,
+    positionState,
   };
 }
 
@@ -490,7 +516,7 @@ function clampList(values: string[], limits: TradeDeskPresentationLimits): strin
     .map((value) => clampText(value, 80));
 }
 
-function clampText(value: string, max: number): string {
+export function clampText(value: string, max: number): string {
   const compact = value.replace(/\s+/g, ' ').trim();
   if (compact.length <= max) return compact;
   const boundary = compact.lastIndexOf(' ', max - 1);
@@ -544,4 +570,168 @@ function underlying(symbol: string, value: number): string {
 
 function capitalize(value: string): string {
   return value.charAt(0).toUpperCase() + value.slice(1);
+}
+
+// ---------------------------------------------------------------------------
+// Fixed 8-cell grid models for the AI Trade Desk band. Both are pure
+// re-projections of TradeDeskPresentation's existing fields — no new
+// domain concepts, just picking the right subset for the flat vs. in-trade
+// board and giving each a short (label, value) shape a grid cell can render
+// without measuring content.
+// ---------------------------------------------------------------------------
+
+export interface TradeDeskGridCell {
+  label: string;
+  value: string;
+  secondary?: string;
+}
+
+export interface FlatTradeDeskAnalysis {
+  setup: TradeDeskGridCell;
+  entry: TradeDeskGridCell;
+  invalidation: TradeDeskGridCell;
+  targets: TradeDeskGridCell;
+  contract: TradeDeskGridCell;
+  premiumLimit: TradeDeskGridCell;
+  execution: TradeDeskGridCell;
+  runner: TradeDeskGridCell;
+}
+
+export interface PositionTradeDeskAnalysis {
+  position: TradeDeskGridCell;
+  currentAction: TradeDeskGridCell;
+  invalidation: TradeDeskGridCell;
+  targets: TradeDeskGridCell;
+  scale: TradeDeskGridCell;
+  optionStop: TradeDeskGridCell;
+  underlying: TradeDeskGridCell;
+  runner: TradeDeskGridCell;
+}
+
+const DASH = '—';
+
+function contractDisplayName(contract: OptionContract | null): string {
+  if (!contract) return DASH;
+  return `${contract.underlying} ${Format.strike(contract.strike)}${optionTypeShortName(contract.optionType)}`;
+}
+
+function firstTarget(presentation: TradeDeskPresentation): PresentedTarget | undefined {
+  return presentation.contractTargets[0] ?? presentation.underlyingTargets[0];
+}
+
+function runnerTarget(presentation: TradeDeskPresentation): PresentedTarget | undefined {
+  const all = [...presentation.contractTargets, ...presentation.underlyingTargets];
+  return all.find((target) => target.role === 'runner') ?? all[all.length - 1];
+}
+
+function executionLine(presentation: TradeDeskPresentation): string {
+  switch (presentation.action) {
+    case 'enter':
+      return presentation.entry?.preferredContractPrice
+        ? 'Confirm and enter'
+        : 'Wait for confirmation';
+    case 'wait':
+      return 'Wait for setup';
+    case 'avoid':
+      return 'Avoid — no edge';
+    default:
+      return DASH;
+  }
+}
+
+/** Builds the flat-state 8-cell board. `contract` is the currently selected
+ * chain contract (for the trader-friendly label), not the AI's own pick. */
+export function buildFlatTradeDeskAnalysis(
+  presentation: TradeDeskPresentation,
+  contract: OptionContract | null,
+): FlatTradeDeskAnalysis {
+  const target = firstTarget(presentation);
+  const runner = runnerTarget(presentation);
+  return {
+    setup: { label: 'SETUP', value: presentation.setupLabel || DASH },
+    entry: {
+      label: 'ENTRY',
+      value: presentation.entry?.underlying?.value ?? presentation.entry?.contract?.value ?? DASH,
+      secondary: presentation.entry?.preferredContractPrice
+        ? `Contract ${presentation.entry.preferredContractPrice.value}`
+        : undefined,
+    },
+    invalidation: {
+      label: 'INVALIDATION',
+      value: presentation.invalidation?.underlying?.value ?? DASH,
+    },
+    targets: {
+      label: 'TARGETS',
+      value: target ? `T1 ${target.value}` : DASH,
+      secondary: presentation.underlyingTargets[1]
+        ? `T2 ${presentation.underlyingTargets[1].value}`
+        : undefined,
+    },
+    contract: { label: 'CONTRACT', value: contractDisplayName(contract) },
+    premiumLimit: {
+      label: 'PREMIUM LIMIT',
+      value: presentation.entry?.preferredContractPrice
+        ? `≤ ${presentation.entry.preferredContractPrice.value}`
+        : (presentation.entry?.contract?.value ?? DASH),
+    },
+    execution: { label: 'EXECUTION', value: executionLine(presentation) },
+    runner: { label: 'RUNNER', value: runner?.value ?? DASH },
+  };
+}
+
+/** Builds the in-trade 8-cell board. `position` is the actual open position
+ * in the selected contract (never inferred from the AI action). */
+export function buildPositionTradeDeskAnalysis(
+  presentation: TradeDeskPresentation,
+  contract: OptionContract | null,
+  position: Position | null,
+  underlyingLast: number | null,
+): PositionTradeDeskAnalysis {
+  const runner = runnerTarget(presentation);
+  const target = presentation.contractTargets[0] ?? presentation.underlyingTargets[0];
+  return {
+    position: {
+      label: 'POSITION',
+      value: position
+        ? `${position.quantity}x ${contractDisplayName(contract)}`
+        : contractDisplayName(contract),
+      secondary: position
+        ? `Avg $${Format.price(position.avgPrice)} · Mark $${Format.price(position.markPrice)}`
+        : undefined,
+    },
+    currentAction: {
+      label: 'CURRENT ACTION',
+      value: presentation.management.holdConditions[0] ?? presentation.summary ?? DASH,
+    },
+    invalidation: {
+      label: 'INVALIDATION',
+      value:
+        presentation.invalidation?.contract?.value ??
+        presentation.invalidation?.underlying?.value ??
+        DASH,
+    },
+    targets: {
+      label: 'TARGETS',
+      value: target ? `T1 ${target.value}` : DASH,
+      secondary: presentation.contractTargets[1]
+        ? `T2 ${presentation.contractTargets[1].value}`
+        : undefined,
+    },
+    scale: {
+      label: 'SCALE',
+      value: presentation.management.scaleConditions[0] ?? DASH,
+    },
+    optionStop: {
+      label: 'OPTION STOP',
+      value: presentation.invalidation?.contract?.value ?? DASH,
+    },
+    underlying: {
+      label: 'UNDERLYING',
+      value:
+        underlyingLast !== null && contract
+          ? `${contract.underlying} ${Format.price(underlyingLast)}`
+          : DASH,
+    },
+    runner: { label: 'RUNNER', value: runner?.value ?? DASH },
+  };
 }

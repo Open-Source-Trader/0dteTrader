@@ -2716,7 +2716,13 @@
   flex: none;
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
+  /* One line, always: the workspace footer budgets this row at a fixed
+     EDITOR_ROW_HEIGHT (TradeManagementWorkspaceModel.ts), and a wrapped
+     second line would push the status bar below the viewport. The meta
+     span ellipsizes instead. */
+  flex-wrap: nowrap;
+  min-height: 44px;
+  box-sizing: border-box;
   gap: 8px;
   padding: 6px 10px;
   border-bottom: var(--border-hairline) solid var(--hud-stroke-dim);
@@ -2726,10 +2732,15 @@
 
 .trade-leg-editor__title {
   font-weight: 800;
+  white-space: nowrap;
 }
 
 .trade-leg-editor__meta {
   color: var(--label-secondary);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .trade-leg-editor__field {

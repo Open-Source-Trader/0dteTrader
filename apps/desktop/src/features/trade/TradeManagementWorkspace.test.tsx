@@ -8,6 +8,7 @@ import { TradeManagementWorkspace } from './TradeManagementWorkspace';
 import {
   dayPnl,
   desktopTradeWorkspaceHeight,
+  EDITOR_ROW_HEIGHT,
   moveStopToEntryRequest,
   pnlPercent,
   signedCurrency,
@@ -185,6 +186,21 @@ describe('TradeManagementWorkspace helpers', () => {
     expect(desktopTradeWorkspaceHeight({ expanded: false, hasActivity: false })).toBe(36);
     expect(desktopTradeWorkspaceHeight({ expanded: false, hasActivity: true })).toBe(124);
     expect(desktopTradeWorkspaceHeight({ expanded: true, hasActivity: false })).toBe(220);
+  });
+
+  it('budgets the docked editor row — the footer is fixed-pixel with nothing elastic', () => {
+    // 124 is exactly strip (88) + status bar (36); an unbudgeted editor row
+    // pushes the status bar below the viewport.
+    expect(
+      desktopTradeWorkspaceHeight({ expanded: false, hasActivity: true, editorOpen: true }),
+    ).toBe(124 + EDITOR_ROW_HEIGHT);
+    expect(
+      desktopTradeWorkspaceHeight({ expanded: true, hasActivity: true, editorOpen: true }),
+    ).toBe(220 + EDITOR_ROW_HEIGHT);
+    // The function does not encode the editor-requires-activity coupling.
+    expect(
+      desktopTradeWorkspaceHeight({ expanded: false, hasActivity: false, editorOpen: true }),
+    ).toBe(36 + EDITOR_ROW_HEIGHT);
   });
 
   it('keeps P&L signed using more than color alone', () => {

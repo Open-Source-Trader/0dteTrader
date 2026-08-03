@@ -58,15 +58,27 @@ export function dayPnl(positions: Position[]): number {
   return positions.reduce((sum, position) => sum + position.unrealizedPnl, 0);
 }
 
+/** The docked stop/target editor row's fixed height (see the matching
+ *  `.trade-leg-editor` min-height). The workspace footer is a fixed-pixel
+ *  flex row with nothing elastic in the collapsed case — 124 is exactly
+ *  strip (88) + status bar (36) — so an unbudgeted row pushes the status
+ *  bar below the viewport. */
+export const EDITOR_ROW_HEIGHT = 44;
+
 export function desktopTradeWorkspaceHeight({
   expanded,
   hasActivity,
+  editorOpen = false,
 }: {
   expanded: boolean;
   hasActivity: boolean;
+  /** The docked editor OR its stale notice is showing (they share the row
+   *  and are mutually exclusive). */
+  editorOpen?: boolean;
 }): number {
-  if (expanded) return 220;
-  return hasActivity ? 124 : 36;
+  const editorExtra = editorOpen ? EDITOR_ROW_HEIGHT : 0;
+  if (expanded) return 220 + editorExtra;
+  return (hasActivity ? 124 : 36) + editorExtra;
 }
 
 /** Snapshot taken when Edit was chosen — display and change detection only;

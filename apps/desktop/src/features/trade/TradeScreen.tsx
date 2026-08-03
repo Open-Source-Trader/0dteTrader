@@ -127,6 +127,14 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
   // Workspace-owned stop/target editing session; created here so it survives
   // the workspace collapsing and expanding.
   const [stopTargetEditor] = useState(() => new StopTargetEditorStore(chartOrdersStore));
+  // The workspace's fixed height must budget the docked editor row, so this
+  // screen re-renders when the row opens or closes — a derived-boolean slice
+  // keeps price-field keystrokes from re-rendering the whole screen.
+  const editorChrome = useStore(
+    stopTargetEditor,
+    (s) => ({ rowOpen: s.draft !== null || s.staleNotice !== null }),
+    shallowEqual,
+  );
   const nextMode: TradingMode = tradingMode === 'live' ? 'practice' : 'live';
 
   // Active trading provider (from /v1/me) and whether it has credentials
@@ -436,6 +444,7 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
   const desktopWorkspaceHeight = desktopTradeWorkspaceHeight({
     expanded: desktopWorkspaceExpanded,
     hasActivity: hasDesktopActivity,
+    editorOpen: editorChrome.rowOpen,
   });
 
   // Desktop grid: state-aware trade-management workspace instead of a fixed empty table.

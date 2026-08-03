@@ -65,6 +65,26 @@ private final class DeviceAPIFake: DeviceRegistrationAPI {
     }
 }
 
+/// Holds the system authorization prompt open, so a teardown can land while
+/// the user is still looking at it. The manager's `requestAuthorization`
+/// seam is a bare closure, so the gate lives here rather than in the API
+/// fake.
+@MainActor
+private final class AuthGate {
+    private(set) var continuation: CheckedContinuation<Bool, Never>?
+
+    var isPromptUp: Bool { continuation != nil }
+
+    func authorize() async -> Bool {
+        await withCheckedContinuation { continuation = $0 }
+    }
+
+    func resume(_ granted: Bool) {
+        continuation?.resume(returning: granted)
+        continuation = nil
+    }
+}
+
 // MARK: - Tests
 
 /// The push lifecycle against fake APNs and API clients: local delivery must
@@ -305,7 +325,7 @@ final class PushNotificationsTests: XCTestCase {
         settings.setPushDeviceToken(tokenHex, server: serverA)
         let manager = makeManager()
         _ = coordinator.activate(serverKey: serverA, manager: manager)
-        coordinator.handleSessionExpired()
+        coordinator.handleSessionExpired(serverKey: serverA)
         XCTAssertEqual(registry.unregisterCount, 1)
         XCTAssertTrue(api.unregisterCalls.isEmpty)
         XCTAssertEqual(settings.pushDeviceToken(server: serverA), tokenHex)
@@ -315,9 +335,79 @@ final class PushNotificationsTests: XCTestCase {
         settings.pushNotificationsEnabled = true
         let manager = makeManager()
         _ = coordinator.activate(serverKey: serverA, manager: manager)
-        NotificationCenter.default.post(name: .sessionDidBecomeUnauthenticated, object: nil)
+        NotificationCenter.default.post(
+            name: .sessionDidBecomeUnauthenticated,
+            object: nil,
+            userInfo: [SessionStore.serverKeyUserInfoKey: serverA]
+        )
         await waitUntil { self.registry.unregisterCount == 1 }
         XCTAssertEqual(registry.unregisterCount, 1)
+    }
+
+    /// A departed server's late 401 arrives after a switch. It must not
+    /// touch the current server's delivery, binding, or token slot — the
+    /// exact cross-container false positive `object: nil` observers had.
+    func testForeignServerExpiry_leavesTheCurrentServerAlone() async {
+        settings.pushNotificationsEnabled = true
+        settings.setPushDeviceToken(tokenHex, server: serverA)
+        let manager = makeManager()
+        let generation = coordinator.activate(serverKey: serverA, manager: manager)
+
+        coordinator.handleSessionExpired(serverKey: serverB)
+
+        XCTAssertEqual(registry.unregisterCount, 0)
+        XCTAssertTrue(coordinator.isCurrent(serverKey: serverA, generation: generation))
+        XCTAssertEqual(settings.pushDeviceToken(server: serverA), tokenHex)
+    }
+
+    func testForeignServerExpiryNotification_isIgnored() async {
+        settings.pushNotificationsEnabled = true
+        let manager = makeManager()
+        let generation = coordinator.activate(serverKey: serverA, manager: manager)
+
+        NotificationCenter.default.post(
+            name: .sessionDidBecomeUnauthenticated,
+            object: nil,
+            userInfo: [SessionStore.serverKeyUserInfoKey: serverB]
+        )
+        // Let the observer's main-actor hop land before asserting nothing moved.
+        for _ in 0..<20 { await Task.yield() }
+
+        XCTAssertEqual(registry.unregisterCount, 0)
+        XCTAssertTrue(coordinator.isCurrent(serverKey: serverA, generation: generation))
+    }
+
+    /// Fix-1/fix-2 interaction: a foreign server's expiry must not kill the
+    /// CURRENT server's pending activation (per-server generations — a
+    /// global counter fails this), while the server's own expiry must.
+    func testForeignServerExpiry_doesNotKillPendingActivation() async {
+        settings.pushNotificationsEnabled = true
+        settings.setPushDeviceToken("old0", server: serverA)
+        api.holdNextUnregister = true
+        let manager = makeManager()
+        manager.activateAfterAuthentication()
+        await waitUntil { self.api.unregisterCalls.count == 1 }
+
+        coordinator.handleSessionExpired(serverKey: serverB)
+
+        api.releaseHeld()
+        await awaitOrFail("drain") { await manager.drainOperationsForTesting() }
+        XCTAssertEqual(registry.registerCount, 1)
+    }
+
+    func testOwnServerExpiry_killsPendingActivation() async {
+        settings.pushNotificationsEnabled = true
+        settings.setPushDeviceToken("old0", server: serverA)
+        api.holdNextUnregister = true
+        let manager = makeManager()
+        manager.activateAfterAuthentication()
+        await waitUntil { self.api.unregisterCalls.count == 1 }
+
+        coordinator.handleSessionExpired(serverKey: serverA)
+
+        api.releaseHeld()
+        await awaitOrFail("drain") { await manager.drainOperationsForTesting() }
+        XCTAssertEqual(registry.registerCount, 0)
     }
 
     // MARK: Stale asynchronous operations
@@ -435,14 +525,16 @@ final class PushNotificationsTests: XCTestCase {
         await awaitOrFail("drain") { await manager.drainOperationsForTesting() }
 
         XCTAssertEqual(registry.registerCount, 0)
-        XCTAssertFalse(coordinator.isCurrent(serverKey: serverA, generation: coordinator.generation))
+        XCTAssertFalse(
+            coordinator.isCurrent(serverKey: serverA, generation: coordinator.generation(for: serverA))
+        )
     }
 
     func testTokenCallbackAfterDeactivation_isDroppedEntirely() async {
         settings.pushNotificationsEnabled = true
         let manager = makeManager()
         _ = coordinator.activate(serverKey: serverA, manager: manager)
-        coordinator.deactivate()
+        coordinator.deactivate(serverKey: serverA)
         coordinator.didRegisterForRemoteNotifications(deviceToken: tokenData)
         await awaitOrFail("drain") { await manager.drainOperationsForTesting() }
         XCTAssertTrue(api.registerCalls.isEmpty)
@@ -526,6 +618,78 @@ final class PushNotificationsTests: XCTestCase {
         await awaitOrFail("enable") { await manager.setEnabled(true) }
         XCTAssertFalse(settings.pushNotificationsEnabled)
         XCTAssertEqual(registry.registerCount, 0)
+    }
+
+    /// Control for the gate harness: with nothing intervening, a held prompt
+    /// that resolves granted activates normally.
+    func testEnable_promptResolvingNormally_activates() async {
+        settings.pushNotificationsEnabled = false
+        let gate = AuthGate()
+        let manager = makeManager(authorization: { await gate.authorize() })
+        let enable = Task { await manager.setEnabled(true) }
+        await waitUntil("prompt up") { gate.isPromptUp }
+
+        gate.resume(true)
+        await awaitOrFail("enable") { await enable.value }
+
+        XCTAssertEqual(registry.registerCount, 1)
+    }
+
+    /// The system prompt outlives the session: toggle flips on, the prompt
+    /// sits open, the user logs out, THEN grants. The toggle preference is
+    /// device-level and survives the logout, so only the era counter can
+    /// prove the flip's session ended — delivery must not come back on.
+    func testEnable_promptResolvingAfterLogout_doesNotReactivate() async {
+        settings.pushNotificationsEnabled = false
+        let gate = AuthGate()
+        let manager = makeManager(authorization: { await gate.authorize() })
+        let enable = Task { await manager.setEnabled(true) }
+        await waitUntil("prompt up") { gate.isPromptUp }
+
+        let logout = Task { await manager.handleLogout() }
+        await waitUntil("local unregister") { self.registry.unregisterCount == 1 }
+
+        gate.resume(true)
+        await awaitOrFail("enable") { await enable.value }
+        await awaitOrFail("logout") { await logout.value }
+
+        XCTAssertEqual(registry.registerCount, 0)
+        XCTAssertFalse(
+            coordinator.isCurrent(serverKey: serverA, generation: coordinator.generation(for: serverA))
+        )
+    }
+
+    /// Same with a session expiry landing mid-prompt.
+    func testEnable_promptResolvingAfterOwnServerExpiry_doesNotReactivate() async {
+        settings.pushNotificationsEnabled = false
+        let gate = AuthGate()
+        let manager = makeManager(authorization: { await gate.authorize() })
+        let enable = Task { await manager.setEnabled(true) }
+        await waitUntil("prompt up") { gate.isPromptUp }
+
+        coordinator.handleSessionExpired(serverKey: serverA)
+
+        gate.resume(true)
+        await awaitOrFail("enable") { await enable.value }
+
+        XCTAssertEqual(registry.registerCount, 0)
+    }
+
+    /// A FOREIGN server's expiry mid-prompt must not veto this server's
+    /// flip — the per-server counters keep the two apart.
+    func testEnable_promptResolvingAfterForeignExpiry_stillActivates() async {
+        settings.pushNotificationsEnabled = false
+        let gate = AuthGate()
+        let manager = makeManager(authorization: { await gate.authorize() })
+        let enable = Task { await manager.setEnabled(true) }
+        await waitUntil("prompt up") { gate.isPromptUp }
+
+        coordinator.handleSessionExpired(serverKey: serverB)
+
+        gate.resume(true)
+        await awaitOrFail("enable") { await enable.value }
+
+        XCTAssertEqual(registry.registerCount, 1)
     }
 
     // MARK: Server switch

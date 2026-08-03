@@ -49,9 +49,15 @@ final class PushRegistrationCoordinator {
 
     private let registry: RemoteNotificationRegistry
     private var active: ActiveBinding?
-    /// Monotonic era counter. Every activation AND deactivation moves it, so
-    /// an async result stamped with an old generation can prove itself stale.
-    private(set) var generation = 0
+    /// Monotonic era counters, PER SERVER for the same reason the chains and
+    /// token slots are: a foreign server's era transitions must never
+    /// invalidate this server's pending intents, and vice versa. (A departed
+    /// server's late session expiry, for example, must not kill the current
+    /// server's queued activation — and this server's expiry must kill its
+    /// own even when no binding exists yet, e.g. mid-authorization-prompt.)
+    /// Every activation, teardown, and expiry of a server moves its counter,
+    /// so an async result stamped with an old value can prove itself stale.
+    private var generations: [String: Int] = [:]
     private var sessionObserver: NSObjectProtocol?
     /// One serial chain per server, held HERE rather than on the manager:
     /// a container swap builds a new manager for the same server, and the
@@ -76,8 +82,13 @@ final class PushRegistrationCoordinator {
             forName: .sessionDidBecomeUnauthenticated,
             object: nil,
             queue: .main
-        ) { [weak self] _ in
-            Task { @MainActor in self?.handleSessionExpired() }
+        ) { [weak self] notification in
+            // The notification names the server whose refresh failed — a
+            // departed container's in-flight refresh can 401 AFTER a server
+            // switch, and that late failure must not touch the current
+            // server's delivery.
+            let serverKey = notification.userInfo?[SessionStore.serverKeyUserInfoKey] as? String
+            Task { @MainActor in self?.handleSessionExpired(serverKey: serverKey) }
         }
     }
 
@@ -87,24 +98,44 @@ final class PushRegistrationCoordinator {
         }
     }
 
+    /// This server's era counter — capture before queued work, re-check
+    /// before applying its result.
+    func generation(for serverKey: String) -> Int {
+        generations[serverKey] ?? 0
+    }
+
+    private func bumpGeneration(for serverKey: String) {
+        generations[serverKey] = generation(for: serverKey) + 1
+    }
+
     /// Begins a registration era for `manager`'s server: APNs callbacks route
     /// there until the next activation or deactivation. Returns the era's
     /// generation for the caller to stamp its async work with.
     func activate(serverKey: String, manager: PushNotificationsManager) -> Int {
-        generation += 1
-        active = ActiveBinding(serverKey: serverKey, generation: generation, manager: manager)
+        bumpGeneration(for: serverKey)
+        active = ActiveBinding(
+            serverKey: serverKey,
+            generation: generation(for: serverKey),
+            manager: manager
+        )
         registry.registerForRemoteNotifications()
-        return generation
+        return generation(for: serverKey)
     }
 
     /// Stops local delivery NOW: unbinds the active era and unregisters from
-    /// APNs before any network call is made or awaited. Idempotent — calling
-    /// it with nothing active still bumps the generation, so an in-flight
-    /// result from any earlier era is invalidated either way.
-    func deactivate() {
-        generation += 1
-        active = nil
-        registry.unregisterForRemoteNotifications()
+    /// APNs before any network call is made or awaited. Called by `serverKey`'s
+    /// OWN manager (logout, switch, toggle-off) — its generation bumps, so a
+    /// queued intent for that server is invalidated even when no binding
+    /// exists yet. Idempotent.
+    func deactivate(serverKey: String) {
+        bumpGeneration(for: serverKey)
+        // The binding can only ever belong to the live container's server,
+        // but be strict anyway: another server's delivery is never this
+        // teardown's to stop.
+        if active == nil || active?.serverKey == serverKey {
+            active = nil
+            registry.unregisterForRemoteNotifications()
+        }
     }
 
     /// Whether (serverKey, generation) still names the active era. Async work
@@ -126,12 +157,28 @@ final class PushRegistrationCoordinator {
         return active.serverKey == serverKey && active.manager === manager
     }
 
-    /// Session expiry: the credentials just failed, so there is nothing to
-    /// DELETE with — stop delivery immediately and leave every server's
-    /// retained token where it is; the next successful login on a server
-    /// sweeps its slot with credentials that work.
-    func handleSessionExpired() {
-        deactivate()
+    /// Session expiry for ONE server: the credentials just failed, so there
+    /// is nothing to DELETE with. That server's generation bumps — killing
+    /// its pending intents even when no binding exists yet (the toggle's
+    /// authorization prompt can outlive the session) — and delivery stops
+    /// only when the expired server IS the one delivering. A departed
+    /// server's late 401 must never log the current server out of pushes.
+    /// Retained tokens stay where they are; the next successful login on a
+    /// server sweeps its slot with credentials that work.
+    ///
+    /// A nil serverKey cannot come from our own post site (it always names
+    /// its server); treat it as unattributable and fail toward stopping the
+    /// active delivery — the privacy-safe direction.
+    func handleSessionExpired(serverKey: String?) {
+        guard let serverKey else {
+            if let active { deactivate(serverKey: active.serverKey) }
+            return
+        }
+        bumpGeneration(for: serverKey)
+        if active?.serverKey == serverKey {
+            active = nil
+            registry.unregisterForRemoteNotifications()
+        }
     }
 
     // MARK: - Per-server operation chain

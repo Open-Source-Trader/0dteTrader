@@ -101,9 +101,11 @@ final class PushNotificationsManager: NSObject {
     func activateAfterAuthentication() {
         // The era this intent belongs to. A logout, expiry, switch, or
         // toggle-off landing before the queued work reaches its activation
-        // moves the counter — and delivery must NOT come back on for a
-        // session that ended while this operation was suspended mid-sweep.
-        let intent = coordinator.generation
+        // moves THIS SERVER's counter — and delivery must NOT come back on
+        // for a session that ended while this operation was suspended
+        // mid-sweep. (Per-server, so a departed server's late expiry cannot
+        // kill this one's intent.)
+        let intent = coordinator.generation(for: serverKey)
         enqueue { [self] in
             // Swept only when this manager does NOT hold the active era: a
             // token in the slot then is a leftover (previous account, dead
@@ -116,7 +118,7 @@ final class PushNotificationsManager: NSObject {
                 // way, and the next activation retries the sweep.
                 await unregisterAndClear(retained)
             }
-            guard coordinator.generation == intent,
+            guard coordinator.generation(for: serverKey) == intent,
                   settingsStore.pushNotificationsEnabled else { return }
             _ = coordinator.activate(serverKey: serverKey, manager: self)
         }
@@ -131,20 +133,29 @@ final class PushNotificationsManager: NSObject {
     func setEnabled(_ enabled: Bool) async {
         settingsStore.pushNotificationsEnabled = enabled
         if !enabled {
-            coordinator.deactivate()
+            coordinator.deactivate(serverKey: serverKey)
         }
+        // The enable intent is stamped with this server's era NOW: the
+        // system authorization prompt can outlive the session, and the
+        // resumed continuation must not switch delivery back on for it.
+        let intent = coordinator.generation(for: serverKey)
         await enqueue { [weak self] in
-            await self?.apply(enabled: enabled)
+            await self?.apply(enabled: enabled, intent: intent)
         }.value
     }
 
-    private func apply(enabled: Bool) async {
+    private func apply(enabled: Bool, intent: Int) async {
         // Superseded by a newer flip: leave the network alone — the newer
         // operation, queued behind this one, expresses the current intent.
         guard settingsStore.pushNotificationsEnabled == enabled else { return }
         if enabled {
             let granted = await requestAuthorization()
-            guard settingsStore.pushNotificationsEnabled == enabled else { return }
+            // Re-checked after EVERY await: the toggle preference is
+            // device-level and survives a logout or expiry, so it alone
+            // cannot prove the session this flip belonged to still exists —
+            // the era counter can.
+            guard settingsStore.pushNotificationsEnabled == enabled,
+                  coordinator.generation(for: serverKey) == intent else { return }
             guard granted else {
                 settingsStore.pushNotificationsEnabled = false
                 return
@@ -155,7 +166,8 @@ final class PushNotificationsManager: NSObject {
             if let retained = storedToken {
                 await unregisterAndClear(retained)
             }
-            guard settingsStore.pushNotificationsEnabled == enabled else { return }
+            guard settingsStore.pushNotificationsEnabled == enabled,
+                  coordinator.generation(for: serverKey) == intent else { return }
             _ = coordinator.activate(serverKey: serverKey, manager: self)
         } else if let uploaded = storedToken {
             await unregisterAndClear(uploaded)
@@ -170,7 +182,7 @@ final class PushNotificationsManager: NSObject {
     /// responsibilities. The caller awaits this before clearing the auth
     /// session, so the DELETE rides credentials that still work.
     func handleLogout() async {
-        coordinator.deactivate()
+        coordinator.deactivate(serverKey: serverKey)
         await enqueue { [self] in
             // Cleared only on success, and only the exact token deleted:
             // with the DELETE failed (the case an expiring session forces),
@@ -189,7 +201,7 @@ final class PushNotificationsManager: NSObject {
     /// reachable while unauthenticated, so it usually fails and the retained
     /// slot is healed by the next sign-in on this server instead.
     func handleServerSwitch() {
-        coordinator.deactivate()
+        coordinator.deactivate(serverKey: serverKey)
         enqueue { [self] in
             if let token = storedToken {
                 await unregisterAndClear(token)

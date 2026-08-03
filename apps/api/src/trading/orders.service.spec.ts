@@ -505,8 +505,10 @@ describe('OrdersService', () => {
     it('falls back to placement time for legacy rows recorded before fill timestamps', async () => {
       const opening = fill();
       await orders.record(USER, opening);
-      // A row persisted before the filledAt column existed carries none.
+      // A row persisted before the filledAt column (and the executions
+      // table) existed carries neither.
       prisma.tradeOrders.find((o) => o.id === opening.orderId).filledAt = null;
+      prisma.tradeOrderExecutions.length = 0;
 
       const anchor = (await orders.positionAnchors(USER, [OCC])).get(OCC);
       expect(anchor?.openedAt).toEqual(new Date(opening.timestamp));
@@ -527,6 +529,245 @@ describe('OrdersService', () => {
       expect(
         await orders.positionAnchors(practiceUser.id as string, [OCC]).then((m) => m.size),
       ).toBe(0);
+    });
+
+    it('reports the replayed signed quantity, shorts included', async () => {
+      await orders.record(USER, fill({ side: 'sell', quantity: 2, filledPrice: 1.5 }));
+
+      const anchor = (await orders.positionAnchors(USER, [OCC])).get(OCC);
+      expect(anchor?.quantity).toBe(-2);
+    });
+  });
+
+  describe('execution replay (interleaved partial fills)', () => {
+    const t = (s: number) => new Date(1_753_000_000_000 + s * 1000);
+
+    it('replays fills in market order, not placement order', async () => {
+      // A resting limit placed FIRST but filled LAST must not replay first:
+      // the position opened with the market order's earlier execution.
+      await orders.record(
+        USER,
+        fill({
+          orderId: 'REST',
+          quantity: 2,
+          filledPrice: 1.0,
+          timestamp: t(0).toISOString(),
+          filledAt: t(100).toISOString(),
+        }),
+      );
+      await orders.record(
+        USER,
+        fill({
+          orderId: 'MKT',
+          quantity: 1,
+          filledPrice: 1.1,
+          timestamp: t(50).toISOString(),
+          filledAt: t(50).toISOString(),
+        }),
+      );
+
+      const anchor = (await orders.positionAnchors(USER, [OCC])).get(OCC);
+      expect(anchor?.openedAt).toEqual(t(50));
+      expect(anchor?.quantity).toBe(3);
+    });
+
+    it('anchors openedAt on the execution that reopened the lifecycle, across interleaved partials', async () => {
+      // Order X partially fills (opens), order Y's fill flattens the book,
+      // X's remaining fill reopens it. Replaying X's cumulative row at its
+      // placement slot — the old behavior — reports the FIRST partial as the
+      // opening; the true lifecycle reopened at X's second execution.
+      const x = fill({
+        orderId: 'X',
+        status: 'partially_filled',
+        quantity: 4,
+        filledQuantity: 1,
+        filledPrice: 1.0,
+        timestamp: t(0).toISOString(),
+        filledAt: t(10).toISOString(),
+      });
+      await orders.record(USER, x);
+      await orders.record(
+        USER,
+        fill({
+          orderId: 'Y',
+          side: 'sell',
+          quantity: 1,
+          filledPrice: 1.5,
+          timestamp: t(5).toISOString(),
+          filledAt: t(20).toISOString(),
+        }),
+      );
+      await orders.record(USER, {
+        ...x,
+        status: 'filled',
+        filledQuantity: 4,
+        filledPrice: 1.2,
+        filledAt: t(30).toISOString(),
+      });
+
+      const anchor = (await orders.positionAnchors(USER, [OCC])).get(OCC);
+      expect(anchor?.openedAt).toEqual(t(30));
+      expect(anchor?.quantity).toBe(3);
+    });
+
+    it('records one execution per fill increment and none for a redelivered event', async () => {
+      const order = fill({
+        orderId: 'DUP',
+        status: 'partially_filled',
+        quantity: 3,
+        filledQuantity: 1,
+        filledPrice: 1.0,
+        filledAt: t(10).toISOString(),
+      });
+      await orders.record(USER, order);
+      // A webhook redelivery carries the same cumulative state.
+      await orders.record(USER, order);
+      await orders.record(USER, {
+        ...order,
+        status: 'filled',
+        filledQuantity: 3,
+        filledPrice: 1.2,
+        filledAt: t(20).toISOString(),
+      });
+
+      expect(prisma.tradeOrderExecutions).toHaveLength(2);
+      const total = prisma.tradeOrderExecutions.reduce((sum, e) => sum + e.quantity, 0);
+      expect(total).toBe(3);
+    });
+
+    it('derives the increment price from the moving cumulative average', async () => {
+      await orders.record(
+        USER,
+        fill({
+          orderId: 'AVG',
+          status: 'partially_filled',
+          quantity: 3,
+          filledQuantity: 1,
+          filledPrice: 1.0,
+          filledAt: t(10).toISOString(),
+        }),
+      );
+      // Cumulative average moves 1.00 → 1.20 over a 2-lot increment: the
+      // increment itself executed at (3·1.20 − 1·1.00) / 2 = 1.30.
+      await orders.record(
+        USER,
+        fill({
+          orderId: 'AVG',
+          status: 'filled',
+          quantity: 3,
+          filledQuantity: 3,
+          filledPrice: 1.2,
+          filledAt: t(20).toISOString(),
+        }),
+      );
+
+      const prices = prisma.tradeOrderExecutions.map((e) => e.price);
+      expect(prices[0]).toBeCloseTo(1.0);
+      expect(prices[1]).toBeCloseTo(1.3);
+    });
+
+    it('never regresses the stored fill on a stale out-of-order event', async () => {
+      await orders.record(
+        USER,
+        fill({
+          orderId: 'STALE',
+          status: 'filled',
+          quantity: 3,
+          filledQuantity: 3,
+          filledPrice: 1.2,
+          filledAt: t(20).toISOString(),
+        }),
+      );
+      // A delayed partial-fill event from earlier in the order's life.
+      await orders.record(
+        USER,
+        fill({
+          orderId: 'STALE',
+          status: 'partially_filled',
+          quantity: 3,
+          filledQuantity: 1,
+          filledPrice: 1.0,
+          filledAt: t(10).toISOString(),
+        }),
+      );
+
+      const row = prisma.tradeOrders.find((o) => o.id === 'STALE');
+      expect(row.filledQuantity).toBe(3);
+      expect(row.filledPrice).toBe(1.2);
+      expect(prisma.tradeOrderExecutions).toHaveLength(1);
+    });
+
+    it('replays a row with no recorded executions from its cumulative state', async () => {
+      const legacy = fill({ quantity: 2, filledPrice: 1.1, filledAt: t(10).toISOString() });
+      await orders.record(USER, legacy);
+      // A row recorded before the executions table existed has no increments.
+      prisma.tradeOrderExecutions.length = 0;
+
+      const anchor = (await orders.positionAnchors(USER, [OCC])).get(OCC);
+      expect(anchor?.openedAt).toEqual(t(10));
+      expect(anchor?.quantity).toBe(2);
+    });
+
+    it('sums realized P/L across a closing order’s partial executions', async () => {
+      await orders.record(
+        USER,
+        fill({ orderId: 'OPEN', quantity: 2, filledPrice: 1.0, filledAt: t(10).toISOString() }),
+      );
+      await orders.record(
+        USER,
+        fill({
+          orderId: 'CLOSE',
+          side: 'sell',
+          status: 'partially_filled',
+          quantity: 2,
+          filledQuantity: 1,
+          filledPrice: 1.5,
+          filledAt: t(20).toISOString(),
+        }),
+      );
+      await orders.record(
+        USER,
+        fill({
+          orderId: 'CLOSE',
+          side: 'sell',
+          status: 'filled',
+          quantity: 2,
+          filledQuantity: 2,
+          filledPrice: 1.5,
+          filledAt: t(30).toISOString(),
+        }),
+      );
+
+      const history = await orders.history(USER);
+      const close = history.entries.find((entry) => entry.orderId === 'CLOSE');
+      // Two 1-lot closes at 1.50 against a 1.00 basis: 2 × $0.50 × 100.
+      expect(close?.realizedPnl).toBe(100);
+      expect(history.totalRealizedPnl).toBe(100);
+      expect(history.entries).toHaveLength(2);
+    });
+
+    it('serializes concurrent events for one order (no double-counted increments)', async () => {
+      const partial = fill({
+        orderId: 'RACE',
+        status: 'partially_filled',
+        quantity: 3,
+        filledQuantity: 1,
+        filledPrice: 1.0,
+        filledAt: t(10).toISOString(),
+      });
+      const full = {
+        ...partial,
+        status: 'filled' as const,
+        filledQuantity: 3,
+        filledPrice: 1.2,
+        filledAt: t(20).toISOString(),
+      };
+      // Fired together, the way a poll tick and a webhook land: unserialized,
+      // both would read cumulative 0 and insert 1 + 3 = 4 lots of increments.
+      await Promise.all([orders.record(USER, partial), orders.record(USER, full)]);
+
+      const total = prisma.tradeOrderExecutions.reduce((sum, e) => sum + e.quantity, 0);
+      expect(total).toBe(3);
     });
   });
 

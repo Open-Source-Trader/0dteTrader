@@ -1,5 +1,5 @@
 import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
-import { Prisma, type TradeOrder } from '@prisma/client';
+import { Prisma, type TradeOrder, type TradeOrderExecution } from '@prisma/client';
 import { Subscription } from 'rxjs';
 import { OrderResult, TradeHistory, TradeHistoryEntry } from '@0dtetrader/shared-types';
 import { OPTION_MULTIPLIER } from '../broker/contract-resolution';
@@ -26,8 +26,24 @@ interface BookEntry {
 
 /** What positionAnchors reports per open contract, for annotating Positions. */
 export interface PositionAnchor {
+  /** The replayed book's SIGNED quantity. The caller must reconcile it with
+   *  the broker's before trusting the anchor: app-side history can miss
+   *  fills (outside orders, missed polls), and an entry price averaged over
+   *  the wrong fills is worse than none — "Move stop to entry" consumes it. */
+  quantity: number;
   underlyingEntryPrice?: number;
   openedAt?: Date;
+}
+
+/** One execution — a real recorded increment, or one synthesized from a
+ *  row's cumulative state where increments were never recorded — in the
+ *  order the MARKET produced them. `quantity` is positive; the sign comes
+ *  from the row's side. */
+interface FillEvent {
+  time: Date;
+  quantity: number;
+  price: number;
+  row: TradeOrder;
 }
 
 /**
@@ -81,19 +97,112 @@ function fillTimeOf(order: OrderResult): Date {
   return reported !== null && !Number.isNaN(reported.getTime()) ? reported : new Date();
 }
 
+/** The event's cumulative executed quantity (0 when it is not a fill). */
+function cumulativeOf(order: OrderResult): number {
+  return isFillEvent(order) ? (order.filledQuantity ?? order.quantity) : 0;
+}
+
 /**
- * Applies one fill to the running average-cost book, returning the realized
- * P/L it produced (null for opening or adding fills).
+ * The price of the increment between two cumulative snapshots. Brokers
+ * report `filledPrice` as a cumulative AVERAGE (Alpaca's filled_avg_price
+ * explicitly; SnapTrade's execution_price is ambiguously named), so the
+ * increment is recovered from the moving average; when the arithmetic
+ * degenerates (junk or missing inputs — upstream mappers already guard
+ * finiteness), the reported price is the honest fallback.
+ */
+function incrementPrice(
+  oldAvg: number | null,
+  cumBefore: number,
+  newAvg: number | undefined,
+  cumAfter: number,
+  delta: number,
+): number {
+  if (typeof newAvg !== 'number' || !Number.isFinite(newAvg)) return oldAvg ?? 0;
+  if (cumBefore > 0 && typeof oldAvg === 'number' && Number.isFinite(oldAvg)) {
+    const derived = (cumAfter * newAvg - cumBefore * oldAvg) / delta;
+    if (Number.isFinite(derived) && derived > 0) return derived;
+  }
+  return newAvg;
+}
+
+/**
+ * Turns rows plus their recorded executions into fill events in MARKET
+ * order. Recorded increments are the ground truth; a fill row whose
+ * increments do not cover its cumulative quantity (recorded before the
+ * executions table, or whose earliest fills predate it) synthesizes one
+ * event for the uncovered remainder at the row's first-fill time, priced at
+ * the cumulative average — the closest persisted truth for fills whose
+ * individual moments were never kept.
+ */
+function fillEventsFor(rows: TradeOrder[], executions: TradeOrderExecution[]): FillEvent[] {
+  const byOrder = new Map<string, TradeOrderExecution[]>();
+  for (const execution of executions) {
+    const list = byOrder.get(execution.orderId);
+    if (list) list.push(execution);
+    else byOrder.set(execution.orderId, [execution]);
+  }
+  const events: FillEvent[] = [];
+  for (const row of rows) {
+    const recorded = (byOrder.get(row.id) ?? [])
+      .slice()
+      .sort(
+        (a, b) =>
+          a.executedAt.getTime() - b.executedAt.getTime() ||
+          a.createdAt.getTime() - b.createdAt.getTime(),
+      );
+    let covered = 0;
+    for (const execution of recorded) {
+      if (!(execution.quantity > 0) || !Number.isFinite(execution.price)) continue;
+      covered += execution.quantity;
+      events.push({
+        time: execution.executedAt,
+        quantity: execution.quantity,
+        price: execution.price,
+        row,
+      });
+    }
+    if (isFill(row)) {
+      const remainder = fillQuantity(row) - covered;
+      if (remainder > 0) {
+        events.push({
+          time: row.filledAt ?? row.placedAt,
+          quantity: remainder,
+          price: row.filledPrice as number,
+          row,
+        });
+      }
+    }
+  }
+  // Market order, not placement order: a resting limit fills long after
+  // later-placed orders do. Ties break deterministically so the replay is
+  // stable across runs.
+  events.sort(
+    (a, b) =>
+      a.time.getTime() - b.time.getTime() ||
+      a.row.placedAt.getTime() - b.row.placedAt.getTime() ||
+      a.row.id.localeCompare(b.row.id),
+  );
+  return events;
+}
+
+/**
+ * Applies one execution to the running average-cost book, returning the
+ * realized P/L it produced (null for opening or adding executions).
  *
  * Shared by the trade history and the chart's entry-line anchors so both read
- * the same position out of the same fills.
+ * the same position out of the same executions.
  *
  * `key` is the caller's choice of what counts as one position. It must never
  * merge environments: a practice buy and a live sell of the same contract are
  * two unrelated positions, and averaging them would realize the live sale
  * against a cost basis the account never paid.
  */
-function applyFill(book: Map<string, BookEntry>, key: string, row: TradeOrder): number | null {
+function applyExecution(
+  book: Map<string, BookEntry>,
+  key: string,
+  event: FillEvent,
+): number | null {
+  const { row } = event;
   const position = book.get(key) ?? {
     quantity: 0,
     avgPrice: 0,
@@ -101,9 +210,9 @@ function applyFill(book: Map<string, BookEntry>, key: string, row: TradeOrder): 
     underlyingQty: 0,
     openedAt: null,
   };
-  const signed = row.side === 'buy' ? fillQuantity(row) : -fillQuantity(row);
+  const signed = row.side === 'buy' ? event.quantity : -event.quantity;
   const size = Math.abs(signed);
-  const price = row.filledPrice as number;
+  const price = event.price;
   // Rows predating the column (and any source reporting a junk price) must be
   // skipped rather than averaged in as zero, which would drag the anchor to a
   // level the position was never opened at.
@@ -114,10 +223,10 @@ function applyFill(book: Map<string, BookEntry>, key: string, row: TradeOrder): 
   let realized: number | null = null;
 
   if (position.quantity === 0 || Math.sign(position.quantity) === Math.sign(signed)) {
-    // Opening or adding: blend the average cost.
-    // Legacy rows carry no fill timestamp; placement time is the closest
-    // persisted moment, not a verified execution time.
-    if (position.quantity === 0) position.openedAt = row.filledAt ?? row.placedAt;
+    // Opening or adding: blend the average cost. The opening time is this
+    // execution's — for a synthesized legacy event, the row's first-fill
+    // time (or placement, the closest persisted moment before that column).
+    if (position.quantity === 0) position.openedAt = event.time;
     const totalQty = Math.abs(position.quantity) + size;
     position.avgPrice = (position.avgPrice * Math.abs(position.quantity) + price * size) / totalQty;
     if (underlying !== null) {
@@ -139,11 +248,11 @@ function applyFill(book: Map<string, BookEntry>, key: string, row: TradeOrder): 
       position.underlyingQty = 0;
       position.openedAt = null;
     } else if (Math.sign(position.quantity) !== direction) {
-      // Flipped: the remainder is a new position anchored on this fill.
+      // Flipped: the remainder is a new position anchored on this execution.
       position.avgPrice = price;
       position.avgUnderlying = underlying ?? 0;
       position.underlyingQty = underlying === null ? 0 : Math.abs(position.quantity);
-      position.openedAt = row.filledAt ?? row.placedAt;
+      position.openedAt = event.time;
     } else {
       // Partially closed: the average is unchanged, but it now backs less size.
       position.underlyingQty = Math.min(position.underlyingQty, Math.abs(position.quantity));
@@ -207,27 +316,87 @@ export class OrdersService implements OnModuleDestroy {
     };
   }
 
+  /**
+   * One serial chain per order. Two events for the same order arrive
+   * concurrently in practice — a placement emit racing its webhook,
+   * duplicate webhook redeliveries, poller ticks — and recording is a
+   * read-modify-write (the execution delta is computed against the stored
+   * row). In-process serialization is sufficient by design: order events
+   * ride this instance's in-process buses (the polling instance owns them),
+   * and the repo deliberately uses no database transactions (see
+   * PrismaService's doc comment and the test fake's delegate surface).
+   */
+  private readonly recordChains = new Map<string, Promise<void>>();
+
+  private enqueueForOrder(orderId: string, work: () => Promise<void>): Promise<void> {
+    const previous = this.recordChains.get(orderId) ?? Promise.resolve();
+    const run = previous.catch(() => undefined).then(work);
+    const tail = run.catch(() => undefined);
+    this.recordChains.set(orderId, tail);
+    void tail.finally(() => {
+      if (this.recordChains.get(orderId) === tail) this.recordChains.delete(orderId);
+    });
+    return run;
+  }
+
   /** Upsert an order row; updates only fields a status change can move. */
   async record(userId: string, order: OrderResult): Promise<void> {
-    await this.prisma.tradeOrder.upsert({
-      where: { id: order.orderId },
-      create: await this.createData(userId, order),
-      update: {
-        status: order.status,
-        filledPrice: order.filledPrice ?? null,
-        filledQuantity: order.filledQuantity ?? null,
-      },
-    });
+    return this.enqueueForOrder(order.orderId, () => this.recordSerialized(userId, order));
+  }
+
+  private async recordSerialized(userId: string, order: OrderResult): Promise<void> {
+    const existing = await this.prisma.tradeOrder.findUnique({ where: { id: order.orderId } });
+    // Fill state only ever ADVANCES: cumulative filled quantity is monotone
+    // at the broker, so an event carrying less than the stored row is stale
+    // (out-of-order delivery, a redelivered webhook) and must not regress
+    // the row — the previous last-writer-wins update could. Status stays
+    // last-writer-wins; fill ordering is what the replay depends on.
+    // Everything the increment derivation needs is read BEFORE any write —
+    // the row object must be treated as invalid once updated.
+    const cumBefore = existing && isFill(existing) ? fillQuantity(existing) : 0;
+    const oldAvgPrice = existing?.filledPrice ?? null;
+    const cumAfter = Math.max(cumulativeOf(order), cumBefore);
+    const advances = cumAfter > cumBefore;
+
+    if (existing) {
+      await this.prisma.tradeOrder.updateMany({
+        where: { id: order.orderId },
+        data: {
+          status: order.status,
+          ...(advances && {
+            filledPrice: order.filledPrice ?? null,
+            filledQuantity: order.filledQuantity ?? null,
+          }),
+        },
+      });
+    } else {
+      await this.prisma.tradeOrder.upsert({
+        where: { id: order.orderId },
+        create: await this.createData(userId, order),
+        update: {},
+      });
+    }
+
     if (!isFillEvent(order)) return;
     // First fill wins: openedAt anchors on the execution that made the
     // position quantity nonzero, so a later fill event (or a re-poll of the
-    // same fill) must never move an existing timestamp. An upsert's update
-    // clause cannot see the existing row, so the stamp is this separate
-    // conditional write — the `filledAt: null` guard makes it atomic under
-    // concurrent events (the loser's WHERE matches no rows).
+    // same fill) must never move an existing timestamp.
     await this.prisma.tradeOrder.updateMany({
       where: { id: order.orderId, filledAt: null },
       data: { filledAt: fillTimeOf(order) },
+    });
+    if (!advances) return;
+    // The increment this event revealed, kept as its own row: the order row
+    // holds only cumulative state, and interleaved partial fills across
+    // orders can only be replayed in market order from the increments.
+    const delta = cumAfter - cumBefore;
+    await this.prisma.tradeOrderExecution.create({
+      data: {
+        orderId: order.orderId,
+        quantity: delta,
+        price: incrementPrice(oldAvgPrice, cumBefore, order.filledPrice, cumAfter, delta),
+        executedAt: fillTimeOf(order),
+      },
     });
   }
 
@@ -241,6 +410,18 @@ export class OrdersService implements OnModuleDestroy {
    * both the trade history and realized P/L.
    */
   async recordUnderlyingPrice(
+    userId: string,
+    order: OrderResult,
+    underlyingPrice: number,
+  ): Promise<void> {
+    // Same per-order chain as record(): the placement path and the events
+    // bus write the same row, and only ordering keeps the create race out.
+    return this.enqueueForOrder(order.orderId, () =>
+      this.recordUnderlyingPriceSerialized(userId, order, underlyingPrice),
+    );
+  }
+
+  private async recordUnderlyingPriceSerialized(
     userId: string,
     order: OrderResult,
     underlyingPrice: number,
@@ -270,6 +451,15 @@ export class OrdersService implements OnModuleDestroy {
     }
   }
 
+  /** The recorded executions behind a set of rows (one query; joined in JS —
+   *  the replay needs them grouped and sorted its own way regardless). */
+  private async executionsFor(rows: TradeOrder[]): Promise<TradeOrderExecution[]> {
+    if (rows.length === 0) return [];
+    return this.prisma.tradeOrderExecution.findMany({
+      where: { orderId: { in: rows.map((row) => row.id) } },
+    });
+  }
+
   /**
    * Quantity-weighted underlying price behind each of the given open contracts
    * — the level the chart draws a position's entry line at.
@@ -278,8 +468,10 @@ export class OrdersService implements OnModuleDestroy {
    * current environment), so this replays a handful of fills rather than the
    * user's whole order history. Contracts with no recorded underlying price
    * (opened before the column existed, or outside the app) carry no price —
-   * the clients fall back to stamping the live price locally — but still
-   * report openedAt when their fills are on record.
+   * the clients simply omit the entry line — but still report openedAt when
+   * their fills are on record. Every anchor carries the replayed signed
+   * quantity so the caller can refuse anchors whose replay does not account
+   * for the whole broker position.
    */
   async positionAnchors(
     userId: string,
@@ -294,15 +486,15 @@ export class OrdersService implements OnModuleDestroy {
     });
 
     const book = new Map<string, BookEntry>();
-    for (const row of rows) {
+    for (const event of fillEventsFor(rows, await this.executionsFor(rows))) {
       // Already narrowed to one environment, so the symbol alone is the position.
-      if (isFill(row)) applyFill(book, row.contractSymbol, row);
+      applyExecution(book, event.row.contractSymbol, event);
     }
 
     const anchors = new Map<string, PositionAnchor>();
     for (const [symbol, entry] of book) {
       if (entry.quantity === 0) continue;
-      const anchor: PositionAnchor = {};
+      const anchor: PositionAnchor = { quantity: entry.quantity };
       if (entry.underlyingQty > 0) anchor.underlyingEntryPrice = round2(entry.avgUnderlying);
       if (entry.openedAt) anchor.openedAt = entry.openedAt;
       if (anchor.underlyingEntryPrice !== undefined || anchor.openedAt) {
@@ -318,14 +510,28 @@ export class OrdersService implements OnModuleDestroy {
       orderBy: { placedAt: 'asc' },
     });
 
-    // Average-cost realized P/L, computed per contract in fill order. History
-    // spans both environments, so the book is keyed by environment as well as
-    // symbol — otherwise a practice buy would become the cost basis for a live
-    // sale of the same contract.
+    // Average-cost realized P/L, replayed in MARKET order across every
+    // execution (a resting limit fills long after later-placed orders).
+    // History spans both environments, so the book is keyed by environment
+    // as well as symbol — otherwise a practice buy would become the cost
+    // basis for a live sale of the same contract. The list itself stays one
+    // entry per ORDER; an order's realized P/L is the sum over its closing
+    // executions.
     const book = new Map<string, BookEntry>();
+    const realizedByOrder = new Map<string, number>();
     let total = 0;
+    for (const event of fillEventsFor(rows, await this.executionsFor(rows))) {
+      const { row } = event;
+      const realized = applyExecution(book, `${row.environment}|${row.contractSymbol}`, event);
+      if (realized !== null) {
+        realizedByOrder.set(row.id, (realizedByOrder.get(row.id) ?? 0) + realized);
+        total += realized;
+      }
+    }
+
     const entries: TradeHistoryEntry[] = rows.map((row) => {
-      const entry: TradeHistoryEntry = {
+      const realized = realizedByOrder.get(row.id);
+      return {
         orderId: row.id,
         status: row.status as TradeHistoryEntry['status'],
         contractSymbol: row.contractSymbol,
@@ -335,16 +541,8 @@ export class OrdersService implements OnModuleDestroy {
         limitPrice: row.limitPrice ?? undefined,
         filledPrice: row.filledPrice ?? undefined,
         timestamp: row.placedAt.toISOString(),
-        realizedPnl: null,
+        realizedPnl: realized !== undefined ? round2(realized) : null,
       };
-      if (!isFill(row)) return entry;
-
-      const realized = applyFill(book, `${row.environment}|${row.contractSymbol}`, row);
-      if (realized !== null) {
-        entry.realizedPnl = realized;
-        total += realized;
-      }
-      return entry;
     });
 
     return { entries: entries.reverse(), totalRealizedPnl: round2(total) };

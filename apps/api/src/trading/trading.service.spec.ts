@@ -475,6 +475,33 @@ describe('TradingService', () => {
 
       await expect(trading.getPositions(userId)).resolves.toHaveLength(1);
     });
+
+    it('withholds the anchor when the replay covers less than the broker position', async () => {
+      const placed = await trading.place(userId, autoOtmCall(), 'idem-anchor-mismatch');
+      // The broker reports 3 held; the app only ever saw the 1-lot fill. An
+      // entry price averaged over a third of the position is not the
+      // position's entry price — and "Move stop to entry" would consume it.
+      jest
+        .spyOn(gateway, 'getPositions')
+        .mockResolvedValue([positionFor(placed.contractSymbol, 3)]);
+
+      const [position] = await trading.getPositions(userId);
+      expect(position.underlyingEntryPrice).toBeUndefined();
+      expect(position.openedAt).toBeUndefined();
+    });
+
+    it('withholds the anchor when the broker direction disagrees with the replay', async () => {
+      const placed = await trading.place(userId, autoOtmCall(), 'idem-anchor-sign');
+      // The app replayed a long; the broker says short. Attaching the long's
+      // entry to the short would gate the stop on the wrong side.
+      jest
+        .spyOn(gateway, 'getPositions')
+        .mockResolvedValue([positionFor(placed.contractSymbol, -1)]);
+
+      const [position] = await trading.getPositions(userId);
+      expect(position.underlyingEntryPrice).toBeUndefined();
+      expect(position.openedAt).toBeUndefined();
+    });
   });
 
   describe('post-placement bookkeeping', () => {

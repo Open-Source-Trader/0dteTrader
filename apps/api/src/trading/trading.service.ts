@@ -213,7 +213,13 @@ export class TradingService {
       .catch(() => new Map<string, PositionAnchor>());
     return positions.map((position) => {
       const anchor = anchors.get(position.symbol);
-      if (!anchor) return position;
+      // Trusted only when the replay accounts for the WHOLE broker position
+      // — same signed quantity. App-side history can miss fills (orders
+      // placed outside the app, missed polls), and an entry price averaged
+      // over the wrong fills is worse than none: "Move stop to entry"
+      // consumes it. Without the anchor the clients degrade cleanly (no
+      // entry line, "Entry price unknown", time-in-trade dash).
+      if (!anchor || anchor.quantity !== position.quantity) return position;
       return {
         ...position,
         ...(anchor.underlyingEntryPrice !== undefined && {

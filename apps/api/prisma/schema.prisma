@@ -195,8 +195,29 @@ model TradeOrder {
   placedAt       DateTime
   updatedAt      DateTime @updatedAt
 
+  executions TradeOrderExecution[]
+
   @@index([userId, placedAt])
   @@map("trade_orders")
+}
+
+// One broker execution (fill increment) of a TradeOrder. The order row keeps
+// only cumulative fill state, which loses how partial fills interleave across
+// orders; the position replay orders by these instead. `quantity` is the
+// positive executed delta; `price` the increment price recovered from the
+// cumulative averages brokers report. Orders recorded before the table are
+// replayed from their cumulative state.
+model TradeOrderExecution {
+  id         String     @id @default(uuid()) @db.Uuid
+  orderId    String
+  order      TradeOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  quantity   Float
+  price      Float
+  executedAt DateTime
+  createdAt  DateTime   @default(now())
+
+  @@index([orderId])
+  @@map("trade_order_executions")
 }
 
 // A resting order line drawn on the chart. The broker never receives it: the

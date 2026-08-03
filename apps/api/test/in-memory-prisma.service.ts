@@ -79,6 +79,7 @@ export class InMemoryPrismaService {
   readonly refreshTokens: any[] = [];
   readonly orderAudits: any[] = [];
   readonly tradeOrders: any[] = [];
+  readonly tradeOrderExecutions: any[] = [];
   readonly chartOrders: any[] = [];
   readonly optionsAnalyticsSnapshots: any[] = [];
   readonly scheduledJobLeases: any[] = [];
@@ -276,6 +277,18 @@ export class InMemoryPrismaService {
       }
       return { count };
     },
+  };
+
+  readonly tradeOrderExecution = {
+    create: async ({ data }: any) => {
+      const row = { id: randomUUID(), createdAt: new Date(), ...data };
+      this.tradeOrderExecutions.push(row);
+      return row;
+    },
+    // No orderBy: the replay sorts executions itself, so callers must not
+    // depend on database ordering here (and the real schema promises none).
+    findMany: async ({ where }: any = {}) =>
+      this.tradeOrderExecutions.filter((e) => matches(e, where)),
   };
 
   readonly optionsAnalyticsSnapshotRecord = {
@@ -605,6 +618,7 @@ export class InMemoryPrismaService {
     this.refreshTokens.length = 0;
     this.orderAudits.length = 0;
     this.tradeOrders.length = 0;
+    this.tradeOrderExecutions.length = 0;
     this.chartOrders.length = 0;
     this.optionsAnalyticsSnapshots.length = 0;
     this.scheduledJobLeases.length = 0;

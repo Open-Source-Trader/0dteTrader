@@ -252,6 +252,29 @@ describe('synthesizeHeldResult', () => {
     expect(synthesized.tradeDeskPlan?.summary).toBe('new plan summary');
     expect(synthesized.tradeDeskPlan?.warnings).toEqual(['fresh warning']);
   });
+
+  it('drops a fresh "Downgraded from" warning rather than attaching it to the held action', () => {
+    const held = baseResult({
+      recommendation: 'enter',
+      tradeDeskPlan: basePlan({ action: 'enter', summary: 'old summary' }),
+    });
+    const fresh = baseResult({
+      recommendation: 'wait',
+      tradeDeskPlan: basePlan({
+        action: 'wait',
+        summary: 'new plan summary',
+        warnings: [
+          'Downgraded from "hold": required data for that action was missing.',
+          'unrelated warning',
+        ],
+      }),
+    });
+
+    const synthesized = synthesizeHeldResult(held, fresh);
+
+    expect(synthesized.tradeDeskPlan?.action).toBe('enter');
+    expect(synthesized.tradeDeskPlan?.warnings).toEqual(['unrelated warning']);
+  });
 });
 
 describe('hysteresisKey', () => {

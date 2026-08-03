@@ -152,9 +152,16 @@ export function synthesizeHeldResult(held: AnalysisResult, fresh: AnalysisResult
       ? {
           ...held.tradeDeskPlan,
           // Prose fields inside the plan still refresh from the fresh
-          // sample — only the decision-bearing fields are held.
+          // sample — only the decision-bearing fields are held. Warnings
+          // are filtered, not taken wholesale: a "Downgraded from X" warning
+          // describes the fresh sample's own (differing, not-yet-confirmed)
+          // action, and would misrepresent the held plan's action if
+          // attached to it verbatim.
           summary: fresh.tradeDeskPlan?.summary ?? held.tradeDeskPlan.summary,
-          warnings: fresh.tradeDeskPlan?.warnings ?? held.tradeDeskPlan.warnings,
+          warnings:
+            fresh.tradeDeskPlan?.warnings?.filter(
+              (warning) => !warning.startsWith('Downgraded from "'),
+            ) ?? held.tradeDeskPlan.warnings,
         }
       : fresh.tradeDeskPlan,
   };

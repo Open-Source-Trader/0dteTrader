@@ -1,7 +1,11 @@
-import { useEffect, useState } from 'react';
-import { useStore } from '../../core/observable';
+import { useMemo, useState } from 'react';
+import type { OptionContract } from '@0dtetrader/shared-types';
+import { useStore, shallowEqual } from '../../core/observable';
 import type { AnalysisStore } from './AnalysisStore';
+import { hashPositionVersion } from './AnalysisSnapshotBuilder';
+import { buildTradeDeskViewState } from './tradeDeskPresenter';
 import type { AnalysisSnapshot, TriggerKind } from './types';
+import type { TradeStore } from '../trade/TradeStore';
 
 const TRIGGER_LABELS: Record<Exclude<TriggerKind, 'manual'>, string> = {
   'candle-close': 'candle close',
@@ -11,6 +15,8 @@ const TRIGGER_LABELS: Record<Exclude<TriggerKind, 'manual'>, string> = {
 
 interface AIAnalysisButtonProps {
   analysisStore: AnalysisStore;
+  tradeStore: TradeStore;
+  selectedContract: OptionContract | null;
   /** Builds a fresh snapshot from current domain state at click time —
    * the button never holds its own copy of trading state. */
   buildSnapshot: () => AnalysisSnapshot;
@@ -22,18 +28,62 @@ interface AIAnalysisButtonProps {
  * small panel. Self-positioned so it can mount once regardless of which of
  * TradeScreen's three layout variants is active, instead of threading props
  * through ChartView across all of them.
+ *
+ * Does not own the AnalysisStore event subscription — TradeScreen calls
+ * start()/refreshAvailability() once for the screen's full lifetime,
+ * independent of which layout (and therefore which AI entry point,
+ * AIAnalysisButton or TradeDeskPanel) is currently rendered.
  */
-export function AIAnalysisButton({ analysisStore, buildSnapshot }: AIAnalysisButtonProps) {
+export function AIAnalysisButton({
+  analysisStore,
+  tradeStore,
+  selectedContract,
+  buildSnapshot,
+}: AIAnalysisButtonProps) {
   const state = useStore(analysisStore);
+  const trade = useStore(tradeStore, (s) => ({ positions: s.positions }), shallowEqual);
   const [isOpen, setIsOpen] = useState(false);
 
-  useEffect(() => {
-    analysisStore.start();
-    void analysisStore.refreshAvailability();
-    return () => analysisStore.stop();
-  }, [analysisStore]);
-
   const isUnavailable = state.availability.state !== 'ready';
+
+  const currentPositionVersion = useMemo(() => {
+    if (!selectedContract) return 0;
+    const position = trade.positions.find(
+      (candidate) => candidate.symbol === selectedContract.symbol,
+    );
+    return position ? hashPositionVersion(position) : 0;
+  }, [selectedContract, trade.positions]);
+
+  const currentContext = useMemo(() => {
+    const latest = state.latestResult?.context;
+    if (!latest) return null;
+    return {
+      ...latest,
+      selectedContractSymbol: selectedContract?.symbol,
+      positionVersion: currentPositionVersion,
+    };
+  }, [state.latestResult, selectedContract, currentPositionVersion]);
+
+  // Presentation is the same single source of truth TradeDeskPanel uses:
+  // it applies action-invariant downgrading (validation.ts) and the
+  // decision-bearing fields consistently, so this button can't show a
+  // stale action next to a "Downgraded from ..." warning the way reading
+  // state.latestResult.recommendation directly once did.
+  const viewState = useMemo(
+    () =>
+      buildTradeDeskViewState({
+        availability: state.availability,
+        isAnalyzing: state.isAnalyzing,
+        latestResult: state.latestResult,
+        errorMessage: state.errorMessage,
+        pendingActionChange: state.pendingActionChange,
+        currentContext,
+        selectedContract,
+        currentPositionVersion,
+      }),
+    [state, currentContext, selectedContract, currentPositionVersion],
+  );
+  const presentation = viewState.presentation;
 
   return (
     // Top-right, clear of the chart's own top-right controls (symbol
@@ -85,7 +135,7 @@ export function AIAnalysisButton({ analysisStore, buildSnapshot }: AIAnalysisBut
                   {state.errorMessage}
                 </p>
               ) : null}
-              {state.latestResult ? (
+              {presentation ? (
                 <div>
                   {state.latestTriggerKind && state.latestTriggerKind !== 'manual' ? (
                     // Advisory-only label for automatic results: the app
@@ -95,14 +145,13 @@ export function AIAnalysisButton({ analysisStore, buildSnapshot }: AIAnalysisBut
                     </p>
                   ) : null}
                   <p>
-                    <strong>{state.latestResult.recommendation.toUpperCase()}</strong> ·{' '}
-                    {state.latestResult.bias} · confidence{' '}
-                    {Math.round(state.latestResult.confidence * 100)}%
+                    <strong>{presentation.actionLabel}</strong>
+                    {presentation.confidence ? ` · confidence ${presentation.confidence}` : ''}
                   </p>
-                  <p>{state.latestResult.summary}</p>
-                  {state.latestResult.warnings.length > 0 ? (
+                  <p>{presentation.summary}</p>
+                  {presentation.warnings.length > 0 ? (
                     <ul>
-                      {state.latestResult.warnings.map((warning) => (
+                      {presentation.warnings.map((warning) => (
                         <li key={warning}>{warning}</li>
                       ))}
                     </ul>

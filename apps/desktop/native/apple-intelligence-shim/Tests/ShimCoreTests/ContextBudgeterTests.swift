@@ -108,6 +108,23 @@ final class ContextBudgeterTests: XCTestCase {
         XCTAssertFalse(budgeted.downgradedToObservationOnly)
     }
 
+    /// Position presence/absence must reach the model on every trigger
+    /// kind, not just position-change/material-change — a manual or
+    /// candle-close analysis while flat still needs "POSITION: none" so the
+    /// model knows to propose entries instead of guessing at hold/exit.
+    func testNoPositionStatesNoneRegardlessOfTriggerKind() {
+        let snapshot = makeSnapshot(includePosition: false, triggerKind: "manual")
+        let budgeted = ContextBudgeter.build(from: snapshot)
+        XCTAssertTrue(budgeted.text.contains("POSITION: none"))
+    }
+
+    func testHeldPositionStatesPositionDetailRegardlessOfTriggerKind() {
+        let snapshot = makeSnapshot(includePosition: true, triggerKind: "manual")
+        let budgeted = ContextBudgeter.build(from: snapshot)
+        XCTAssertTrue(budgeted.text.contains("POSITION: {"))
+        XCTAssertFalse(budgeted.text.contains("POSITION: none"))
+    }
+
     func testOversizedSnapshotIsTrimmedUnderBudgetAndDeclaresOmissions() {
         // A large candle blob forces the budgeter to trim options first,
         // then levels, before strategy policy.

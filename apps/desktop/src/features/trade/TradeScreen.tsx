@@ -722,6 +722,8 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
       {isDesktopGrid ? null : (
         <AIAnalysisButton
           analysisStore={analysisStore}
+          tradeStore={tradeStore}
+          selectedContract={chainStore.selectedContract}
           buildSnapshot={buildCurrentAnalysisSnapshot}
         />
       )}

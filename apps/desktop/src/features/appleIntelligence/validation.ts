@@ -3,7 +3,7 @@
 // (grounding rule) and architecture-enforcement.md (runtime validation is
 // required at every trust boundary — TypeScript types alone do not qualify).
 import { z } from 'zod';
-import type { AnalysisResult, CandidateLevel, TradeDeskPlan } from './types';
+import type { AnalysisResult, CandidateLevel, Recommendation, TradeDeskPlan } from './types';
 
 const groundedLevelRefSchema = z.object({
   levelId: z.string().min(1),
@@ -231,6 +231,12 @@ export function enforceTradeDeskInvariants(
 
   return {
     ...result,
+    // The legacy top-level `recommendation` field must track the plan's
+    // downgraded action — every renderer that still reads `recommendation`
+    // instead of `tradeDeskPlan.action` (e.g. AIAnalysisButton) would
+    // otherwise show the original, un-downgraded action next to a plan
+    // whose own warnings say it was downgraded away from that action.
+    recommendation: 'wait' satisfies Recommendation,
     tradeDeskPlan: {
       ...plan,
       action: 'wait',

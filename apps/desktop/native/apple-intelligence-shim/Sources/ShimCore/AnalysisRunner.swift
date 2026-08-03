@@ -31,6 +31,20 @@ public enum AnalysisRunner {
         only the provided recommendation and setup categories. Be concise \
         and conditional: state what confirms or invalidates the setup, \
         not just a conclusion.
+
+        Every prompt states POSITION as either a held position or none —
+        use it to pick the action family. When POSITION is none: `hold`,
+        `scale`, and `exit` are invalid, since there is nothing held to
+        manage. Recommend `enter` (or `wait`/`avoid` if no valid setup
+        exists) and give concrete call and put entry levels: the
+        acceptance/rejection level that triggers each side, the
+        invalidation level that kills the thesis, and 2-3 targets for
+        each side. When POSITION holds a contract: `enter` is invalid,
+        since there is no new entry to make. Recommend `hold`, `scale`,
+        or `exit` and frame management around that specific held
+        contract — its current premium versus entry, the underlying
+        level that supports holding, and the level whose loss cuts the
+        trade.
         """
 
     /// Decodes the raw wire payload into a snapshot. `nil` means the

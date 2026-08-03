@@ -265,4 +265,17 @@ describe('enforceTradeDeskInvariants', () => {
     expect(output.tradeDeskPlan?.action).toBe('wait');
     expect(output.tradeDeskPlan?.warnings?.some((w) => w.includes('enter'))).toBe(true);
   });
+
+  it('downgrades the legacy recommendation field alongside the plan action, so a renderer reading either field stays consistent', () => {
+    const plan = basePlan({
+      action: 'hold',
+      management: { holdConditions: [], scaleConditions: [], exitConditions: [] },
+    });
+    const result = parseAnalysisResult(
+      validResult({ recommendation: 'hold', tradeDeskPlan: plan }),
+    )!;
+    const output = enforceTradeDeskInvariants(result, false);
+    expect(output.tradeDeskPlan?.action).toBe('wait');
+    expect(output.recommendation).toBe('wait');
+  });
 });

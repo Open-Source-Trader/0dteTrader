@@ -256,10 +256,16 @@ public enum ContextBudgeter {
         }
 
         // Priority 1: position/risk (never silently omitted from the prompt
-        // when present; downgrade above handles the case where it's absent
-        // but required).
+        // when present; downgrade above handles the case where it's
+        // expected but the data is missing). Stated unconditionally, not
+        // just for management-task triggers, so the model always knows
+        // whether to reason about entry levels (no position) or management
+        // of a held contract (position) — see systemInstructions for the
+        // action-family rule this line feeds.
         if let position = snapshot.position {
             parts.append("POSITION: \(compactJSON(position))")
+        } else {
+            parts.append("POSITION: none — no open position in this contract.")
         }
         if includeStrategyPolicy, let policy = snapshot.strategyPolicy {
             parts.append("STRATEGY POLICY (constraints, not suggestions): \(compactJSON(policy))")

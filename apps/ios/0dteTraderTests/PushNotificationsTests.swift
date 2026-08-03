@@ -114,13 +114,50 @@ final class PushNotificationsTests: XCTestCase {
         )
     }
 
-    /// Spins the main actor until `condition` holds (bounded, so a failing
-    /// test fails rather than hangs).
-    private func waitUntil(_ condition: () -> Bool) async {
-        for _ in 0..<200 where !condition() {
+    /// Spins the main actor until `condition` holds, failing on a deadline
+    /// rather than spinning forever.
+    private func waitUntil(
+        _ description: String = "condition",
+        file: StaticString = #filePath,
+        line: UInt = #line,
+        _ condition: () -> Bool
+    ) async {
+        let deadline = Date().addingTimeInterval(Self.deadlineSeconds)
+        while !condition() {
+            if Date() > deadline {
+                XCTFail("timed out waiting for \(description)", file: file, line: line)
+                return
+            }
             await Task.yield()
         }
     }
+
+    /// Awaits async work under a deadline, RECORDING A FAILURE instead of
+    /// hanging when it never finishes.
+    ///
+    /// Every await in these tests eventually lands on the coordinator's
+    /// per-server operation chain, and a chain whose head is parked on a
+    /// continuation that is never resumed would otherwise wedge `xcodebuild`
+    /// until the CI job's own multi-hour limit — one deadlocked test taking
+    /// the whole suite's signal with it. A named failure in seconds is worth
+    /// more than a job that never reports.
+    private func awaitOrFail(
+        _ description: String = "async work",
+        file: StaticString = #filePath,
+        line: UInt = #line,
+        _ body: @escaping @MainActor () async -> Void
+    ) async {
+        let finished = expectation(description: description)
+        Task { @MainActor in
+            await body()
+            finished.fulfill()
+        }
+        await fulfillment(of: [finished], timeout: Self.deadlineSeconds)
+    }
+
+    /// Generous enough that a loaded CI runner never flakes, short enough
+    /// that a genuine deadlock reports in seconds.
+    private static let deadlineSeconds: TimeInterval = 5
 
     // MARK: Token hex encoding
 
@@ -149,7 +186,7 @@ final class PushNotificationsTests: XCTestCase {
         settings.pushNotificationsEnabled = true
         let manager = makeManager()
         manager.activateAfterAuthentication()
-        await manager.drainOperationsForTesting()
+        await awaitOrFail("drain") { await manager.drainOperationsForTesting() }
         XCTAssertEqual(registry.registerCount, 1)
     }
 
@@ -158,7 +195,7 @@ final class PushNotificationsTests: XCTestCase {
         settings.setPushDeviceToken(tokenHex, server: serverA)
         let manager = makeManager()
         manager.activateAfterAuthentication()
-        await manager.drainOperationsForTesting()
+        await awaitOrFail("drain") { await manager.drainOperationsForTesting() }
         XCTAssertEqual(api.unregistered, [tokenHex])
         XCTAssertNil(settings.pushDeviceToken(server: serverA))
         XCTAssertEqual(registry.registerCount, 0)
@@ -169,7 +206,7 @@ final class PushNotificationsTests: XCTestCase {
         settings.setPushDeviceToken(tokenHex, server: serverA)
         let manager = makeManager()
         manager.activateAfterAuthentication()
-        await manager.drainOperationsForTesting()
+        await awaitOrFail("drain") { await manager.drainOperationsForTesting() }
         // The retained registration was deleted, then a fresh era began.
         XCTAssertEqual(api.unregistered, [tokenHex])
         XCTAssertEqual(registry.registerCount, 1)
@@ -182,9 +219,9 @@ final class PushNotificationsTests: XCTestCase {
         settings.pushNotificationsEnabled = true
         let manager = makeManager()
         manager.activateAfterAuthentication()
-        await manager.drainOperationsForTesting()
+        await awaitOrFail("drain") { await manager.drainOperationsForTesting() }
         coordinator.didRegisterForRemoteNotifications(deviceToken: tokenData)
-        await manager.drainOperationsForTesting()
+        await awaitOrFail("drain") { await manager.drainOperationsForTesting() }
         XCTAssertEqual(api.registered, [tokenHex])
         XCTAssertEqual(settings.pushDeviceToken(server: serverA), tokenHex)
     }
@@ -194,9 +231,9 @@ final class PushNotificationsTests: XCTestCase {
         api.registerFails = true
         let manager = makeManager()
         manager.activateAfterAuthentication()
-        await manager.drainOperationsForTesting()
+        await awaitOrFail("drain") { await manager.drainOperationsForTesting() }
         coordinator.didRegisterForRemoteNotifications(deviceToken: tokenData)
-        await manager.drainOperationsForTesting()
+        await awaitOrFail("drain") { await manager.drainOperationsForTesting() }
         XCTAssertNil(settings.pushDeviceToken(server: serverA))
     }
 
@@ -206,7 +243,7 @@ final class PushNotificationsTests: XCTestCase {
         let manager = makeManager()
         _ = coordinator.activate(serverKey: serverA, manager: manager)
         coordinator.didRegisterForRemoteNotifications(deviceToken: tokenData)
-        await manager.drainOperationsForTesting()
+        await awaitOrFail("drain") { await manager.drainOperationsForTesting() }
         // The old token's server row is keyed by token — the new POST would
         // not replace it, so it is deleted before the new token is stored.
         XCTAssertEqual(api.unregistered, ["old0"])
@@ -220,7 +257,7 @@ final class PushNotificationsTests: XCTestCase {
         settings.pushNotificationsEnabled = true
         settings.setPushDeviceToken(tokenHex, server: serverA)
         let manager = makeManager()
-        await manager.handleLogout()
+        await awaitOrFail("logout") { await manager.handleLogout() }
         XCTAssertEqual(registry.unregisterCount, 1)
         XCTAssertEqual(api.unregistered, [tokenHex])
         XCTAssertNil(settings.pushDeviceToken(server: serverA))
@@ -231,7 +268,7 @@ final class PushNotificationsTests: XCTestCase {
         settings.setPushDeviceToken(tokenHex, server: serverA)
         api.unregisterFails = true
         let manager = makeManager()
-        await manager.handleLogout()
+        await awaitOrFail("logout") { await manager.handleLogout() }
         XCTAssertEqual(registry.unregisterCount, 1)
         XCTAssertEqual(settings.pushDeviceToken(server: serverA), tokenHex)
     }
@@ -247,7 +284,7 @@ final class PushNotificationsTests: XCTestCase {
         XCTAssertEqual(registry.unregisterCount, 1)
         XCTAssertTrue(api.unregistered.isEmpty)
         api.releaseHeld()
-        await logout.value
+        await awaitOrFail("logout") { await logout.value }
         XCTAssertEqual(api.unregistered, [tokenHex])
     }
 
@@ -286,10 +323,10 @@ final class PushNotificationsTests: XCTestCase {
         // work queues on the same chain, strictly after the DELETE.
         manager.activateAfterAuthentication()
         api.releaseHeld()
-        await logout.value
-        await manager.drainOperationsForTesting()
+        await awaitOrFail("logout") { await logout.value }
+        await awaitOrFail("drain") { await manager.drainOperationsForTesting() }
         coordinator.didRegisterForRemoteNotifications(deviceToken: tokenData)
-        await manager.drainOperationsForTesting()
+        await awaitOrFail("drain") { await manager.drainOperationsForTesting() }
         XCTAssertEqual(api.registered, [tokenHex])
         XCTAssertEqual(settings.pushDeviceToken(server: serverA), tokenHex)
         // The delayed DELETE cleared only its own token; the login's fresh
@@ -308,13 +345,13 @@ final class PushNotificationsTests: XCTestCase {
 
         let managerB = makeManager(serverKey: serverB)
         managerB.activateAfterAuthentication()
-        await managerB.drainOperationsForTesting()
+        await awaitOrFail("drain") { await managerB.drainOperationsForTesting() }
         coordinator.didRegisterForRemoteNotifications(deviceToken: tokenData)
-        await managerB.drainOperationsForTesting()
+        await awaitOrFail("drain") { await managerB.drainOperationsForTesting() }
         XCTAssertEqual(settings.pushDeviceToken(server: serverB), tokenHex)
 
         api.releaseHeld()
-        await logoutA.value
+        await awaitOrFail("logout") { await logoutA.value }
         // A's failed DELETE retained A's token and never touched B's slot.
         XCTAssertEqual(settings.pushDeviceToken(server: serverA), "tokA")
         XCTAssertEqual(settings.pushDeviceToken(server: serverB), tokenHex)
@@ -341,8 +378,8 @@ final class PushNotificationsTests: XCTestCase {
         coordinator.didRegisterForRemoteNotifications(deviceToken: tokenData)
 
         api.releaseHeld()
-        await logout.value
-        await current.drainOperationsForTesting()
+        await awaitOrFail("logout") { await logout.value }
+        await awaitOrFail("drain") { await current.drainOperationsForTesting() }
 
         // The DELETE completed BEFORE the POST began, so the row that
         // survives is the new era's — not a registration silently deleted by
@@ -365,7 +402,7 @@ final class PushNotificationsTests: XCTestCase {
         settings.setPushDeviceToken("tok2", server: serverA)
 
         api.releaseHeld()
-        await logout.value
+        await awaitOrFail("logout") { await logout.value }
         XCTAssertEqual(settings.pushDeviceToken(server: serverA), "tok2")
     }
 
@@ -384,8 +421,8 @@ final class PushNotificationsTests: XCTestCase {
         await waitUntil { self.registry.unregisterCount == 1 }
 
         api.releaseHeld()
-        await logout.value
-        await manager.drainOperationsForTesting()
+        await awaitOrFail("logout") { await logout.value }
+        await awaitOrFail("drain") { await manager.drainOperationsForTesting() }
 
         XCTAssertEqual(registry.registerCount, 0)
         XCTAssertFalse(coordinator.isCurrent(serverKey: serverA, generation: coordinator.generation))
@@ -397,7 +434,7 @@ final class PushNotificationsTests: XCTestCase {
         _ = coordinator.activate(serverKey: serverA, manager: manager)
         coordinator.deactivate()
         coordinator.didRegisterForRemoteNotifications(deviceToken: tokenData)
-        await manager.drainOperationsForTesting()
+        await awaitOrFail("drain") { await manager.drainOperationsForTesting() }
         XCTAssertTrue(api.registerCalls.isEmpty)
         XCTAssertNil(settings.pushDeviceToken(server: serverA))
     }
@@ -413,8 +450,8 @@ final class PushNotificationsTests: XCTestCase {
         let logout = Task { await manager.handleLogout() }
         await waitUntil { self.registry.unregisterCount == 1 }
         api.releaseHeld()
-        await logout.value
-        await manager.drainOperationsForTesting()
+        await awaitOrFail("logout") { await logout.value }
+        await awaitOrFail("drain") { await manager.drainOperationsForTesting() }
         // The POST completed for a dead era: delivery is not reactivated and
         // the registration is compensated away.
         XCTAssertEqual(api.unregistered.last, tokenHex)
@@ -432,8 +469,8 @@ final class PushNotificationsTests: XCTestCase {
         await waitUntil { self.registry.unregisterCount == 1 }
         api.unregisterFails = true
         api.releaseHeld()
-        await logout.value
-        await manager.drainOperationsForTesting()
+        await awaitOrFail("logout") { await logout.value }
+        await awaitOrFail("drain") { await manager.drainOperationsForTesting() }
         // Compensation failed: the token is retained as the sweep's handle.
         XCTAssertEqual(settings.pushDeviceToken(server: serverA), tokenHex)
     }
@@ -446,7 +483,7 @@ final class PushNotificationsTests: XCTestCase {
         api.unregisterFails = true
         let manager = makeManager()
         _ = coordinator.activate(serverKey: serverA, manager: manager)
-        await manager.setEnabled(false)
+        await awaitOrFail("disable") { await manager.setEnabled(false) }
         XCTAssertEqual(registry.unregisterCount, 1)
         XCTAssertEqual(settings.pushDeviceToken(server: serverA), tokenHex)
         XCTAssertFalse(settings.pushNotificationsEnabled)
@@ -462,8 +499,8 @@ final class PushNotificationsTests: XCTestCase {
         // scheduler — both interleavings must land in the same final state.
         await waitUntil { !self.settings.pushNotificationsEnabled }
         let on = Task { await manager.setEnabled(true) }
-        await off.value
-        await on.value
+        await awaitOrFail("disable") { await off.value }
+        await awaitOrFail("enable") { await on.value }
         // Delivery stopped exactly once, the stale registration was deleted
         // exactly once (by the OFF flip or the ON flip's sweep), and the
         // final state is registered.
@@ -476,7 +513,7 @@ final class PushNotificationsTests: XCTestCase {
     func testEnable_authorizationDeniedRevertsTheToggle() async {
         settings.pushNotificationsEnabled = false
         let manager = makeManager(authorization: { false })
-        await manager.setEnabled(true)
+        await awaitOrFail("enable") { await manager.setEnabled(true) }
         XCTAssertFalse(settings.pushNotificationsEnabled)
         XCTAssertEqual(registry.registerCount, 0)
     }
@@ -492,7 +529,7 @@ final class PushNotificationsTests: XCTestCase {
         manager.handleServerSwitch()
         // Local delivery stopped before the (failing) cleanup attempt.
         XCTAssertEqual(registry.unregisterCount, 1)
-        await manager.drainOperationsForTesting()
+        await awaitOrFail("drain") { await manager.drainOperationsForTesting() }
         XCTAssertEqual(api.unregisterCalls, [tokenHex])
         XCTAssertEqual(settings.pushDeviceToken(server: serverA), tokenHex)
     }

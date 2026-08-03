@@ -746,6 +746,90 @@ describe('OrdersService', () => {
       expect(history.entries).toHaveLength(2);
     });
 
+    it('does not double-record when a stale status regression precedes a redelivered fill', async () => {
+      // The round-5 reproduction: filled(1) → stale `submitted` (every
+      // mapper's unknown-status fallback) → the same filled(1) redelivered.
+      // A watermark derived from status read the regressed row as unfilled
+      // and minted a second 1-lot execution — two contracts recorded against
+      // a one-lot order.
+      const filled = fill({
+        orderId: 'REGRESS',
+        quantity: 1,
+        filledQuantity: 1,
+        filledPrice: 1.0,
+        filledAt: t(10).toISOString(),
+      });
+      await orders.record(USER, filled);
+      await orders.record(USER, {
+        ...filled,
+        status: 'submitted',
+        filledQuantity: undefined,
+        filledPrice: undefined,
+        filledAt: undefined,
+      });
+      await orders.record(USER, filled);
+
+      const row = prisma.tradeOrders.find((o) => o.id === 'REGRESS');
+      expect(row.status).toBe('filled');
+      expect(row.executedQuantity).toBe(1);
+      expect(prisma.tradeOrderExecutions.filter((e) => e.orderId === 'REGRESS')).toHaveLength(1);
+      const anchor = (await orders.positionAnchors(USER, [OCC])).get(OCC);
+      expect(anchor?.quantity).toBe(1);
+    });
+
+    it('lets a real fill land over a synthesized cancel (cancel request racing the fill)', async () => {
+      // Gateways emit `cancelled` the moment a cancel REQUEST is accepted —
+      // before broker truth. When the broker reports the fill actually won,
+      // the fill must land: no broker un-fills an order.
+      const filled = fill({
+        orderId: 'CXL',
+        quantity: 1,
+        filledQuantity: 1,
+        filledPrice: 1.0,
+        filledAt: t(10).toISOString(),
+      });
+      await orders.record(USER, {
+        ...filled,
+        status: 'cancelled',
+        filledQuantity: undefined,
+        filledPrice: undefined,
+        filledAt: undefined,
+      });
+      await orders.record(USER, filled);
+
+      const row = prisma.tradeOrders.find((o) => o.id === 'CXL');
+      expect(row.status).toBe('filled');
+      expect(prisma.tradeOrderExecutions.filter((e) => e.orderId === 'CXL')).toHaveLength(1);
+    });
+
+    it('clamps replay to the watermark, so a historical duplicate execution cannot double the book', async () => {
+      // Rows written before the watermark existed can carry duplicate
+      // increments (the status-regression bug). The replay must trust the
+      // row's authority, not the sum of whatever was recorded.
+      const filled = fill({
+        orderId: 'DUPHIST',
+        quantity: 1,
+        filledQuantity: 1,
+        filledPrice: 1.0,
+        filledAt: t(10).toISOString(),
+      });
+      await orders.record(USER, filled);
+      prisma.tradeOrderExecutions.push({
+        id: 'dup-exec',
+        orderId: 'DUPHIST',
+        quantity: 1,
+        price: 1.0,
+        cumulative: null,
+        executedAt: t(11),
+        createdAt: new Date(),
+      });
+
+      const anchor = (await orders.positionAnchors(USER, [OCC])).get(OCC);
+      expect(anchor?.quantity).toBe(1);
+      const history = await orders.history(USER);
+      expect(history.totalRealizedPnl).toBe(0);
+    });
+
     it('serializes concurrent events for one order (no double-counted increments)', async () => {
       const partial = fill({
         orderId: 'RACE',
@@ -768,6 +852,139 @@ describe('OrdersService', () => {
 
       const total = prisma.tradeOrderExecutions.reduce((sum, e) => sum + e.quantity, 0);
       expect(total).toBe(3);
+    });
+  });
+
+  describe('multi-instance recording (two services over one database)', () => {
+    const t = (s: number) => new Date(1_753_000_000_000 + s * 1000);
+    let events2: OrderEventsService;
+    let orders2: OrdersService;
+
+    beforeEach(() => {
+      // A second API instance: its own in-process event bus and record
+      // chains, the same database. The per-order promise chain cannot see
+      // across this boundary — only the database CAS serializes them.
+      events2 = new OrderEventsService();
+      orders2 = new OrdersService(
+        prisma as unknown as ConstructorParameters<typeof OrdersService>[0],
+        events2,
+      );
+    });
+
+    afterEach(() => {
+      orders2.onModuleDestroy();
+    });
+
+    it('never double-records an order raced by two instances', async () => {
+      const partial = fill({
+        orderId: 'MULTI',
+        status: 'partially_filled',
+        quantity: 3,
+        filledQuantity: 1,
+        filledPrice: 1.0,
+        filledAt: t(10).toISOString(),
+      });
+      const full = {
+        ...partial,
+        status: 'filled' as const,
+        filledQuantity: 3,
+        filledPrice: 1.2,
+        filledAt: t(20).toISOString(),
+      };
+      // The webhook lands on instance B while the poller runs on instance A.
+      // Whatever the interleaving, the executions must sum to the broker's
+      // cumulative — never 1 + 3 = 4.
+      await Promise.all([orders.record(USER, partial), orders2.record(USER, full)]);
+
+      const row = prisma.tradeOrders.find((o) => o.id === 'MULTI');
+      expect(row.status).toBe('filled');
+      expect(row.executedQuantity).toBe(3);
+      const recorded = prisma.tradeOrderExecutions.filter((e) => e.orderId === 'MULTI');
+      expect(recorded.reduce((sum, e) => sum + e.quantity, 0)).toBe(3);
+      expect(new Set(recorded.map((e) => e.cumulative)).size).toBe(recorded.length);
+    });
+
+    it('retries the advance when the other instance claims the watermark mid-flight', async () => {
+      const partial = fill({
+        orderId: 'CAS',
+        status: 'partially_filled',
+        quantity: 3,
+        filledQuantity: 1,
+        filledPrice: 1.0,
+        filledAt: t(10).toISOString(),
+      });
+      const full = {
+        ...partial,
+        status: 'filled' as const,
+        filledQuantity: 3,
+        filledPrice: 1.2,
+        filledAt: t(20).toISOString(),
+      };
+      // Seed the row so both recorders go straight to the fill path.
+      await orders.record(USER, {
+        ...partial,
+        status: 'submitted',
+        filledQuantity: undefined,
+        filledPrice: undefined,
+        filledAt: undefined,
+      });
+
+      // Hold instance B on its FIRST watermark read — a pre-advance snapshot
+      // — until instance A's advance has fully committed. B's compare-and-set
+      // is then guaranteed the count-0 → re-read → retry branch; without the
+      // gate the interleaving (and which branch runs) is scheduler luck.
+      const original = prisma.tradeOrder.findUnique;
+      let releaseGate!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        releaseGate = resolve;
+      });
+      let reachedHold!: () => void;
+      const holding = new Promise<void>((resolve) => {
+        reachedHold = resolve;
+      });
+      prisma.tradeOrder.findUnique = async (args: any) => {
+        prisma.tradeOrder.findUnique = original; // one-shot: later reads pass
+        const row = await original(args);
+        reachedHold();
+        await gate;
+        return row;
+      };
+
+      const recordedByB = orders2.record(USER, full);
+      await holding; // B holds executedQuantity = 0
+      await orders.record(USER, partial); // A advances 0 → 1
+      releaseGate();
+      await recordedByB; // B: CAS(0) misses, re-reads 1, advances 1 → 3
+
+      const row = prisma.tradeOrders.find((o) => o.id === 'CAS');
+      expect(row.executedQuantity).toBe(3);
+      const recorded = prisma.tradeOrderExecutions
+        .filter((e) => e.orderId === 'CAS')
+        .sort((a, b) => a.cumulative - b.cumulative);
+      expect(recorded.map((e) => e.quantity)).toEqual([1, 2]);
+      expect(recorded.map((e) => e.cumulative)).toEqual([1, 3]);
+    });
+
+    it('refuses the same increment twice even when the watermark read is ambiguous (unique belt)', async () => {
+      // Belt over suspender: even if a recorder somehow re-claimed an
+      // already-recorded snapshot, the (orderId, cumulative) constraint
+      // refuses the duplicate row — and the recorder treats that as success.
+      const filled = fill({
+        orderId: 'BELT',
+        quantity: 2,
+        filledQuantity: 2,
+        filledPrice: 1.1,
+        filledAt: t(10).toISOString(),
+      });
+      await orders.record(USER, filled);
+      prisma.tradeOrders.find((o) => o.id === 'BELT').executedQuantity = 0;
+
+      await orders2.record(USER, filled);
+
+      const recorded = prisma.tradeOrderExecutions.filter((e) => e.orderId === 'BELT');
+      expect(recorded).toHaveLength(1);
+      const anchor = (await orders.positionAnchors(USER, [OCC])).get(OCC);
+      expect(anchor?.quantity).toBe(2);
     });
   });
 

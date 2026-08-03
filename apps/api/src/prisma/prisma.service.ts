@@ -7,12 +7,18 @@ import { PrismaClient } from '@prisma/client';
  * with the in-memory fake (test/in-memory-prisma.service.ts), so the app code
  * only ever uses the small delegate surface below (never $queryRaw,
  * transactions, or selects the fake cannot mirror):
- *   user:             findUnique, create, update
+ *   user:             findUnique, findMany, create, update
  *   webullCredential: upsert, findUnique, delete
  *   refreshToken:     create, findUnique, update, updateMany
- *   orderAudit:       findUnique, create, findMany
+ *   orderAudit:       findUnique, create, update, delete, findMany
+ *   tradeOrder:       findUnique, upsert, findMany, updateMany
+ *   tradeOrderExecution: create, findMany
+ *   chartOrder:       create, findUnique, findFirst, findMany, count, update, updateMany
  *   optionsAnalyticsSnapshotRecord: create, findMany, deleteMany
  *   scheduledJobLease: create, updateMany
+ *   brokerCredential: findUnique, findMany, upsert, delete
+ *   brokerApiToken:   findUnique, upsert, deleteMany
+ *   brokerConnection: findUnique, findMany, updateMany, upsert, delete, deleteMany
  *   deviceToken:      findMany, upsert, deleteMany
  */
 @Injectable()

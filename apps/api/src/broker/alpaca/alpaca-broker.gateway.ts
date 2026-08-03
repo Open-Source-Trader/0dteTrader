@@ -444,6 +444,9 @@ export class AlpacaBrokerGateway implements BrokerGateway, MarketDataProvider {
             ...result,
             status: detail.status,
             filledPrice: detail.filledPrice ?? result.filledPrice,
+            // The placement-time result reports filledQuantity 0; without the
+            // poll's value a poll-detected fill would never be accounted.
+            filledQuantity: detail.filledQuantity ?? result.filledQuantity,
             filledAt: detail.filledAt,
           });
           return;

@@ -187,6 +187,11 @@ model TradeOrder {
   // Position.openedAt. Null for rows recorded before this column existed —
   // readers fall back to placedAt.
   filledAt       DateTime?
+  // Cumulative executed quantity RECORDED so far — the watermark concurrent
+  // recorders (webhook + poller, across API instances) claim fill increments
+  // against, advanced only by compare-and-set in OrdersService. Deliberately
+  // independent of `status`: a stale status regression must never reset it.
+  executedQuantity Float  @default(0)
   // Price of the UNDERLYING when the order was placed. Feeds the chart's entry
   // line, which is drawn on the underlying's scale, not the contract's. Null
   // for orders placed before this was recorded.
@@ -213,9 +218,15 @@ model TradeOrderExecution {
   order      TradeOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
   quantity   Float
   price      Float
+  // The order's cumulative executed quantity AFTER this increment — the
+  // watermark snapshot the recording claimed. Null on rows predating the
+  // column; Postgres treats unique-index NULLs as distinct, so only real
+  // snapshots are constrained.
+  cumulative Float?
   executedAt DateTime
   createdAt  DateTime   @default(now())
 
+  @@unique([orderId, cumulative])
   @@index([orderId])
   @@map("trade_order_executions")
 }

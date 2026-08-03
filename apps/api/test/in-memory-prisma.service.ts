@@ -7,10 +7,12 @@ import { randomUUID } from 'node:crypto';
  *   - @default(uuid()) / @default(now()) / @updatedAt
  *   - unique constraints on user.email, refreshToken.tokenHash,
  *     webullCredential.(userId, environment),
- *     brokerCredential.(userId, provider, environment) and
- *     orderAudit.(userId, idempotencyKey)
+ *     brokerCredential.(userId, provider, environment),
+ *     orderAudit.(userId, idempotencyKey) and
+ *     tradeOrderExecution.(orderId, cumulative)
  *     (violations throw a P2002-coded error like the real client)
- *   - nullable unique column semantics for orderAudit.idempotencyKey
+ *   - nullable unique column semantics for orderAudit.idempotencyKey and
+ *     tradeOrderExecution.cumulative
  *     (multiple NULL keys never conflict, as in Postgres)
  *
  * It is injected via `overrideProvider(PrismaService).useValue(fake)`, so it
@@ -281,7 +283,15 @@ export class InMemoryPrismaService {
 
   readonly tradeOrderExecution = {
     create: async ({ data }: any) => {
-      const row = { id: randomUUID(), createdAt: new Date(), ...data };
+      if (
+        data.cumulative != null &&
+        this.tradeOrderExecutions.some(
+          (e) => e.orderId === data.orderId && e.cumulative === data.cumulative,
+        )
+      ) {
+        throw p2002('orderId, cumulative');
+      }
+      const row = { id: randomUUID(), createdAt: new Date(), cumulative: null, ...data };
       this.tradeOrderExecutions.push(row);
       return row;
     },

@@ -388,7 +388,9 @@ export function TradeManagementWorkspace({
       ) : null}
       {editorState.staleNotice ? (
         <div className="trade-leg-editor trade-leg-editor--stale" role="status">
-          <span>{editorState.staleNotice}</span>
+          <span className="trade-leg-editor__notice" title={editorState.staleNotice}>
+            {editorState.staleNotice}
+          </span>
           <button className="desktop-positions-action" onClick={() => editor.dismissStaleNotice()}>
             Dismiss
           </button>
@@ -633,7 +635,7 @@ function StopTargetEditorPanel({
         Cancel
       </button>
       {saveError ? (
-        <span className="trade-leg-editor__error" role="alert">
+        <span className="trade-leg-editor__error" role="alert" title={saveError}>
           {saveError}
         </span>
       ) : null}

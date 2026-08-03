@@ -511,6 +511,10 @@ describe('workspace stop/target editor', () => {
     const markup = renderWorkspace({ editor });
     expect(markup).toContain('role="status"');
     expect(markup).toContain('This stop fired while you were editing');
+    // The row is height-capped, so the notice must truncate rather than wrap
+    // — with the full text surviving in the title.
+    expect(markup).toContain('trade-leg-editor__notice');
+    expect(markup).toContain('title="This stop fired while you were editing');
   });
 
   it('closes with a stale notice when the leg is cancelled mid-edit', async () => {
@@ -548,6 +552,9 @@ describe('workspace stop/target editor', () => {
     expect(editor.getState().saveError).toBe('level already crossed');
     const markup = renderWorkspace({ chartOrders: [stop], editor });
     expect(markup).toContain('level already crossed');
+    // Truncates inside the height-capped row; hover recovers the full text.
+    expect(markup).toContain('trade-leg-editor__error');
+    expect(markup).toContain('title="level already crossed"');
   });
 
   it('refuses to begin for a missing or non-working id', async () => {

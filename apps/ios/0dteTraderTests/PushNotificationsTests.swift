@@ -279,9 +279,19 @@ final class PushNotificationsTests: XCTestCase {
         api.holdNextUnregister = true
         let manager = makeManager()
         let logout = Task { await manager.handleLogout() }
-        // The DELETE is suspended, yet local delivery has already stopped.
-        await waitUntil { self.registry.unregisterCount == 1 }
+        // Local delivery stops before the DELETE has even been sent — the
+        // whole point: teardown cannot depend on a reachable server.
+        await waitUntil("local unregister") { self.registry.unregisterCount == 1 }
         XCTAssertEqual(registry.unregisterCount, 1)
+        XCTAssertTrue(api.unregistered.isEmpty)
+
+        // Only now is the DELETE in flight and parked on its continuation.
+        // Releasing before it reaches the fake would resume nothing, and the
+        // call would then suspend forever with no one left to wake it — the
+        // deadlock that wedged this suite until every await gained a
+        // deadline. Waiting on the CALL (recorded before the fake suspends)
+        // is what makes the release land.
+        await waitUntil("delete in flight") { self.api.unregisterCalls.count == 1 }
         XCTAssertTrue(api.unregistered.isEmpty)
         api.releaseHeld()
         await awaitOrFail("logout") { await logout.value }

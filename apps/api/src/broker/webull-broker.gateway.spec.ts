@@ -617,6 +617,31 @@ describe('WebullBrokerGateway', () => {
         jest.useRealTimers();
       }
     });
+
+    it('keeps a partial cancellation’s filled quantity in the terminal update', async () => {
+      jest.useFakeTimers();
+      try {
+        const emitted: unknown[] = [];
+        events.events$.subscribe((event) => emitted.push(event));
+        const result = await gateway.placeOrder('u1', order, 'idem-key-partial-cancel');
+        handlers['GET /openapi/trade/order/detail'] = () => ({
+          status: 200,
+          body: {
+            client_order_id: result.orderId,
+            status: 'CANCELLED',
+            filled_price: '1.04',
+            filled_quantity: '1',
+            quantity: '3',
+          },
+        });
+        await jest.advanceTimersByTimeAsync(1_100);
+        expect(emitted[1]).toMatchObject({
+          order: { status: 'cancelled', filledQuantity: 1, orderId: result.orderId },
+        });
+      } finally {
+        jest.useRealTimers();
+      }
+    });
   });
 
   describe('cancelOrder', () => {

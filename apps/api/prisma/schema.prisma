@@ -39,6 +39,7 @@ model User {
   tradeOrders     TradeOrder[]
   chartOrders     ChartOrder[]
   deviceTokens    DeviceToken[]
+  orderNotifications OrderNotification[]
 
   @@map("users")
 }
@@ -331,6 +332,21 @@ model DeviceToken {
 
   @@index([userId])
   @@map("device_tokens")
+}
+
+// A terminal order outcome is claimed before it is sent to APNs. The unique
+// key makes poller and webhook deliveries from separate API instances converge
+// on one push.
+model OrderNotification {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @db.Uuid
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  orderId   String
+  status    String
+  createdAt DateTime @default(now())
+
+  @@unique([userId, orderId, status])
+  @@map("order_notifications")
 }
 
 model ScheduledJobLease {

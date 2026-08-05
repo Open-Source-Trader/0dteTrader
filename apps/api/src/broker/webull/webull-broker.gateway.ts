@@ -815,6 +815,7 @@ export class WebullBrokerGateway implements BrokerGateway, OnModuleDestroy {
           this.events.emit(userId, {
             ...result,
             status: detail.status,
+            filledQuantity: detail.filledQuantity ?? result.filledQuantity,
             filledPrice: detail.filledPrice ?? result.filledPrice,
           });
           return;

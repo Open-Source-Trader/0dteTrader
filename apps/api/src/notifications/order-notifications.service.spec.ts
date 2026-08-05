@@ -101,6 +101,14 @@ describe('OrderNotificationsService', () => {
     });
   });
 
+  it('deduplicates the same terminal order outcome across instances', async () => {
+    await service.handleOrderUpdate(userId, orderResult());
+    await service.handleOrderUpdate(userId, orderResult());
+
+    expect(apns.sent).toHaveLength(1);
+    expect(prisma.orderNotifications).toHaveLength(1);
+  });
+
   it('prefixes practice-mode pushes (current mode as the fallback when no row exists yet)', async () => {
     prisma.users.find((u) => u.id === userId).tradingMode = 'practice';
     await service.handleOrderUpdate(userId, orderResult({ status: 'rejected' }));

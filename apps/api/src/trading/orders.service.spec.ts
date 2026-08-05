@@ -694,7 +694,7 @@ describe('OrdersService', () => {
       const row = prisma.tradeOrders.find((o) => o.id === 'STALE');
       expect(row.filledQuantity).toBe(3);
       expect(row.filledPrice).toBe(1.2);
-      expect(prisma.tradeOrderExecutions).toHaveLength(1);
+      expect(prisma.tradeOrderExecutions).toHaveLength(2);
     });
 
     it('replays a row with no recorded executions from its cumulative state', async () => {
@@ -744,6 +744,68 @@ describe('OrdersService', () => {
       expect(close?.realizedPnl).toBe(100);
       expect(history.totalRealizedPnl).toBe(100);
       expect(history.entries).toHaveLength(2);
+    });
+
+    it('replays a late lower cumulative fill before an interleaved close', async () => {
+      // Webhook delivery is unordered: cumulative 3 arrives first, but its
+      // broker timestamp is after both the first fill and this one-lot close.
+      await orders.record(
+        USER,
+        fill({
+          orderId: 'OPEN-OOO',
+          quantity: 3,
+          filledQuantity: 3,
+          filledPrice: 1,
+          filledAt: t(30).toISOString(),
+        }),
+      );
+      await orders.record(
+        USER,
+        fill({
+          orderId: 'CLOSE-OOO',
+          side: 'sell',
+          quantity: 1,
+          filledPrice: 1.3,
+          filledAt: t(20).toISOString(),
+        }),
+      );
+      await orders.record(
+        USER,
+        fill({
+          orderId: 'OPEN-OOO',
+          status: 'partially_filled',
+          quantity: 3,
+          filledQuantity: 1,
+          filledPrice: 0.8,
+          filledAt: t(10).toISOString(),
+        }),
+      );
+
+      const history = await orders.history(USER);
+      const close = history.entries.find((entry) => entry.orderId === 'CLOSE-OOO');
+      expect(close?.realizedPnl).toBe(50);
+    });
+
+    it('rolls back the watermark when execution insertion fails', async () => {
+      const event = fill({
+        orderId: 'ATOMIC',
+        status: 'partially_filled',
+        quantity: 2,
+        filledQuantity: 1,
+      });
+      const original = prisma.tradeOrderExecution.create;
+      prisma.tradeOrderExecution.create = async () => {
+        throw new Error('insert failed');
+      };
+
+      await expect(orders.record(USER, event)).rejects.toThrow('insert failed');
+      expect(prisma.tradeOrders.find((row) => row.id === 'ATOMIC').executedQuantity).toBe(0);
+      expect(prisma.tradeOrderExecutions).toHaveLength(0);
+
+      prisma.tradeOrderExecution.create = original;
+      await orders.record(USER, event);
+      expect(prisma.tradeOrders.find((row) => row.id === 'ATOMIC').executedQuantity).toBe(1);
+      expect(prisma.tradeOrderExecutions).toHaveLength(1);
     });
 
     it('does not double-record when a stale status regression precedes a redelivered fill', async () => {

@@ -13,10 +13,8 @@ const TERMINAL_ORDER_STATUSES = new Set<OrderStatus>(['filled', 'rejected', 'can
  * Pushes order outcomes to the user's registered devices, subscribing to the
  * same in-process buses the WebSocket gateway and OrdersService already ride.
  *
- * Multi-instance note: these buses do not cross processes — but the instance
- * that runs the broker status poll (or holds the chart-order watcher lease) is
- * the one that emits the event, so each event pushes exactly once today. If
- * events ever move to a shared bus, this subscriber needs a dedupe story.
+ * A database-backed claim makes poller and webhook terminal events from
+ * separate API instances converge on one push.
  */
 @Injectable()
 export class OrderNotificationsService implements OnModuleDestroy {
@@ -52,6 +50,14 @@ export class OrderNotificationsService implements OnModuleDestroy {
   async handleOrderUpdate(userId: string, order: OrderResult): Promise<void> {
     if (!this.apns.enabled) return;
     if (!TERMINAL_ORDER_STATUSES.has(order.status)) return;
+    try {
+      await this.prisma.orderNotification.create({
+        data: { userId, orderId: order.orderId, status: order.status },
+      });
+    } catch (err) {
+      if ((err as { code?: string }).code === 'P2002') return;
+      throw err;
+    }
     const titles: Partial<Record<OrderStatus, string>> = {
       filled: 'Order filled',
       rejected: 'Order rejected',

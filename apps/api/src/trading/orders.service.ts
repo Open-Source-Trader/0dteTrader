@@ -43,6 +43,7 @@ interface FillEvent {
   time: Date;
   quantity: number;
   price: number;
+  cumulative: number;
   row: TradeOrder;
 }
 
@@ -165,6 +166,7 @@ function fillEventsFor(rows: TradeOrder[], executions: TradeOrderExecution[]): F
         time: execution.executedAt,
         quantity: take,
         price: execution.price,
+        cumulative: execution.cumulative ?? covered + take,
         row,
       });
       covered += take;
@@ -177,6 +179,7 @@ function fillEventsFor(rows: TradeOrder[], executions: TradeOrderExecution[]): F
         time: row.filledAt ?? row.placedAt,
         quantity: remainder,
         price: row.filledPrice,
+        cumulative: authority,
         row,
       });
     }
@@ -188,7 +191,8 @@ function fillEventsFor(rows: TradeOrder[], executions: TradeOrderExecution[]): F
     (a, b) =>
       a.time.getTime() - b.time.getTime() ||
       a.row.placedAt.getTime() - b.row.placedAt.getTime() ||
-      a.row.id.localeCompare(b.row.id),
+      a.row.id.localeCompare(b.row.id) ||
+      a.cumulative - b.cumulative,
   );
   return events;
 }
@@ -335,9 +339,8 @@ export class OrdersService implements OnModuleDestroy {
    * a webhook lands on whichever instance receives it while the poller runs
    * on the placing one. Correctness therefore lives in the database — the
    * ensure-exists upsert, the guarded status writes, and the
-   * compare-and-set watermark advance in recordFillProgress — none of which
-   * needs a transaction (the repo deliberately uses none; see
-   * PrismaService's doc comment). The chain merely keeps one instance from
+   * compare-and-set watermark advance and transactional execution write in
+   * recordFillProgress. The chain merely keeps one instance from
    * burning CAS retries against itself.
    */
   private readonly recordChains = new Map<string, Promise<void>>();
@@ -433,45 +436,81 @@ export class OrdersService implements OnModuleDestroy {
   private async recordFillProgress(order: OrderResult): Promise<void> {
     const cumulative = cumulativeOf(order);
     for (let attempt = 0; attempt < OrdersService.CAS_ATTEMPTS; attempt += 1) {
-      const row = await this.prisma.tradeOrder.findUnique({ where: { id: order.orderId } });
-      if (!row) return;
-      // Everything the increment derivation needs is read BEFORE the write —
-      // the fake returns live references, and the CAS fences these reads.
-      const cumBefore = row.executedQuantity ?? 0;
-      const oldAvgPrice = row.filledPrice ?? null;
-      if (cumulative <= cumBefore) return; // stale event, or already recorded
-      const delta = cumulative - cumBefore;
-      const { count } = await this.prisma.tradeOrder.updateMany({
-        // Exact float equality is sound here: the compared value is the
-        // double read from this very column, not a recomputed one.
-        where: { id: order.orderId, executedQuantity: cumBefore },
-        data: {
-          executedQuantity: cumulative,
-          filledQuantity: order.filledQuantity ?? null,
-          filledPrice: order.filledPrice ?? null,
-        },
-      });
-      if (count === 0) continue; // another recorder advanced first; re-read
-      // The increment this event revealed, kept as its own row: the order
-      // row holds only cumulative state, and interleaved partial fills
-      // across orders can only be replayed in market order from increments.
-      try {
-        await this.prisma.tradeOrderExecution.create({
+      const result = await this.prisma.$transaction(async (tx) => {
+        const row = await tx.tradeOrder.findUnique({ where: { id: order.orderId } });
+        if (!row) return 'done' as const;
+        const cumBefore = row.executedQuantity ?? 0;
+        const oldAvgPrice = row.filledPrice ?? null;
+        if (cumulative > cumBefore) {
+          const { count } = await tx.tradeOrder.updateMany({
+            where: { id: order.orderId, executedQuantity: cumBefore },
+            data: {
+              executedQuantity: cumulative,
+              filledQuantity: order.filledQuantity ?? null,
+              filledPrice: order.filledPrice ?? null,
+            },
+          });
+          if (count === 0) return 'retry' as const;
+          const delta = cumulative - cumBefore;
+          try {
+            await tx.tradeOrderExecution.create({
+              data: {
+                orderId: order.orderId,
+                quantity: delta,
+                price: incrementPrice(oldAvgPrice, cumBefore, order.filledPrice, cumulative, delta),
+                cumulative,
+                executedAt: fillTimeOf(order),
+              },
+            });
+          } catch (err) {
+            if ((err as { code?: string }).code !== 'P2002') throw err;
+          }
+          return 'done' as const;
+        }
+
+        // A lower cumulative snapshot can be delayed behind a later one. Keep
+        // it rather than discarding it: split the next recorded increment so
+        // the market-time replay can place it before an interleaved close.
+        const executions = await tx.tradeOrderExecution.findMany({
+          where: { orderId: order.orderId },
+        });
+        if (executions.some((execution) => execution.cumulative === cumulative)) {
+          return 'done' as const;
+        }
+        const successor = executions
+          .filter((execution) => execution.cumulative !== null && execution.cumulative > cumulative)
+          .sort((a, b) => (a.cumulative as number) - (b.cumulative as number))[0];
+        if (!successor || typeof order.filledPrice !== 'number') return 'done' as const;
+        const preceding = executions
+          .filter((execution) => execution.cumulative !== null && execution.cumulative < cumulative)
+          .sort((a, b) => (b.cumulative as number) - (a.cumulative as number))[0];
+        const priorCumulative = preceding?.cumulative ?? 0;
+        const priorValue = executions
+          .filter((execution) => (execution.cumulative ?? 0) <= priorCumulative)
+          .reduce((total, execution) => total + execution.quantity * execution.price, 0);
+        const lateQuantity = cumulative - priorCumulative;
+        const successorQuantity = (successor.cumulative as number) - cumulative;
+        if (!(lateQuantity > 0) || !(successorQuantity > 0)) return 'done' as const;
+        const successorValue = priorValue + successor.quantity * successor.price;
+        await tx.tradeOrderExecution.create({
           data: {
             orderId: order.orderId,
-            quantity: delta,
-            price: incrementPrice(oldAvgPrice, cumBefore, order.filledPrice, cumulative, delta),
+            quantity: lateQuantity,
+            price: (cumulative * order.filledPrice - priorValue) / lateQuantity,
             cumulative,
             executedAt: fillTimeOf(order),
           },
         });
-      } catch (err) {
-        // P2002 on (orderId, cumulative): this snapshot is already recorded —
-        // exactly the outcome wanted. Anything else lost the increment until
-        // redelivery; the replay synthesizes the remainder meanwhile.
-        if ((err as { code?: string }).code !== 'P2002') throw err;
-      }
-      return;
+        await tx.tradeOrderExecution.update({
+          where: { id: successor.id },
+          data: {
+            quantity: successorQuantity,
+            price: (successorValue - cumulative * order.filledPrice) / successorQuantity,
+          },
+        });
+        return 'done' as const;
+      });
+      if (result === 'done') return;
     }
     this.logger.warn(
       `execution watermark for ${order.orderId} still contended after ` +

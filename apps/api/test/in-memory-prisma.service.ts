@@ -10,6 +10,7 @@ import { randomUUID } from 'node:crypto';
  *     brokerCredential.(userId, provider, environment),
  *     orderAudit.(userId, idempotencyKey) and
  *     tradeOrderExecution.(orderId, cumulative)
+ *     orderNotification.(userId, orderId, status)
  *     (violations throw a P2002-coded error like the real client)
  *   - nullable unique column semantics for orderAudit.idempotencyKey and
  *     tradeOrderExecution.cumulative
@@ -82,6 +83,7 @@ export class InMemoryPrismaService {
   readonly orderAudits: any[] = [];
   readonly tradeOrders: any[] = [];
   readonly tradeOrderExecutions: any[] = [];
+  readonly orderNotifications: any[] = [];
   readonly chartOrders: any[] = [];
   readonly optionsAnalyticsSnapshots: any[] = [];
   readonly scheduledJobLeases: any[] = [];
@@ -295,10 +297,34 @@ export class InMemoryPrismaService {
       this.tradeOrderExecutions.push(row);
       return row;
     },
+    update: async ({ where, data }: any) => {
+      const row = this.tradeOrderExecutions.find((e) => e.id === where.id);
+      if (!row) throw Object.assign(new Error('Record not found'), { code: 'P2025' });
+      Object.assign(row, definedOnly(data));
+      return row;
+    },
     // No orderBy: the replay sorts executions itself, so callers must not
     // depend on database ordering here (and the real schema promises none).
     findMany: async ({ where }: any = {}) =>
       this.tradeOrderExecutions.filter((e) => matches(e, where)),
+  };
+
+  readonly orderNotification = {
+    create: async ({ data }: any) => {
+      if (
+        this.orderNotifications.some(
+          (row) =>
+            row.userId === data.userId &&
+            row.orderId === data.orderId &&
+            row.status === data.status,
+        )
+      ) {
+        throw p2002('userId, orderId, status');
+      }
+      const row = { id: randomUUID(), createdAt: new Date(), ...data };
+      this.orderNotifications.push(row);
+      return row;
+    },
   };
 
   readonly optionsAnalyticsSnapshotRecord = {
@@ -616,6 +642,20 @@ export class InMemoryPrismaService {
   };
 
   // Prisma lifecycle no-ops.
+  async $transaction<T>(work: (prisma: this) => Promise<T>): Promise<T> {
+    const orders = structuredClone(this.tradeOrders);
+    const executions = structuredClone(this.tradeOrderExecutions);
+    try {
+      return await work(this);
+    } catch (err) {
+      this.tradeOrders.length = 0;
+      this.tradeOrders.push(...orders);
+      this.tradeOrderExecutions.length = 0;
+      this.tradeOrderExecutions.push(...executions);
+      throw err;
+    }
+  }
+
   async $connect(): Promise<void> {}
   async $disconnect(): Promise<void> {}
   async onModuleInit(): Promise<void> {}
@@ -629,6 +669,7 @@ export class InMemoryPrismaService {
     this.orderAudits.length = 0;
     this.tradeOrders.length = 0;
     this.tradeOrderExecutions.length = 0;
+    this.orderNotifications.length = 0;
     this.chartOrders.length = 0;
     this.optionsAnalyticsSnapshots.length = 0;
     this.scheduledJobLeases.length = 0;

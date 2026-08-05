@@ -8,6 +8,8 @@ import { PrismaService } from '../prisma/prisma.service';
  */
 @Injectable()
 export class DevicesService {
+  private static readonly MAX_DEVICES_PER_USER = 10;
+
   constructor(private readonly prisma: PrismaService) {}
 
   async register(userId: string, token: string, platform: string): Promise<void> {
@@ -16,6 +18,16 @@ export class DevicesService {
       create: { userId, token, platform },
       update: { userId, platform },
     });
+    const devices = await this.prisma.deviceToken.findMany({
+      where: { userId },
+      orderBy: { updatedAt: 'desc' },
+    });
+    const overflow = devices.slice(DevicesService.MAX_DEVICES_PER_USER);
+    if (overflow.length > 0) {
+      await this.prisma.deviceToken.deleteMany({
+        where: { token: { in: overflow.map((device) => device.token) } },
+      });
+    }
   }
 
   /**

@@ -103,6 +103,23 @@ describe('OrderNotificationsService', () => {
     });
   });
 
+  it('does not collapse the same external order id across broker accounts', async () => {
+    const order = orderResult();
+    await service.handleOrderUpdate(userId, order, 'live', {
+      provider: 'snaptrade',
+      accountId: 'account-a',
+      brokerOrderId: order.orderId,
+    });
+    await service.handleOrderUpdate(userId, order, 'live', {
+      provider: 'snaptrade',
+      accountId: 'account-b',
+      brokerOrderId: order.orderId,
+    });
+
+    expect(apns.sent).toHaveLength(2);
+    expect(prisma.pushDeliveries).toHaveLength(2);
+  });
+
   it('prefixes practice-mode pushes (current mode as the fallback when no row exists yet)', async () => {
     prisma.users.find((u) => u.id === userId).tradingMode = 'practice';
     await service.handleOrderUpdate(userId, orderResult({ status: 'rejected' }));
@@ -260,19 +277,18 @@ describe('OrderNotificationsService', () => {
       expect(apns.sent.map((s) => s.title)).toEqual(['Chart order fired', 'Chart order failed']);
     });
 
-    it('releases the claim when nothing reached a device, so a retry can deliver', async () => {
-      // Without this the dedupe turns the very race it exists to fix into a
-      // missed alert: the instance whose send failed would hold the claim and
-      // the other instance's report would be swallowed.
+    it('keeps a failed device due for retry without re-enqueuing siblings', async () => {
       apns.nextResult = { status: 500, reason: 'InternalServerError' };
       await service.handleOrderUpdate(userId, orderResult());
       expect(apns.sent).toHaveLength(1);
-      expect(prisma.pushDeliveries).toHaveLength(0);
+      expect(prisma.pushDeliveries).toHaveLength(1);
+      expect(prisma.pushDeliveries[0].status).toBe('retry');
 
       apns.nextResult = { status: 200 };
-      await service.handleOrderUpdate(userId, orderResult());
+      await service.processDue(new Date(prisma.pushDeliveries[0].nextAttemptAt.getTime() + 1));
       expect(apns.sent).toHaveLength(2);
       expect(prisma.pushDeliveries).toHaveLength(1);
+      expect(prisma.pushDeliveries[0].status).toBe('delivered');
     });
 
     it('keeps the claim when a device already took the alert', async () => {
@@ -287,17 +303,18 @@ describe('OrderNotificationsService', () => {
       expect(apns.sent).toHaveLength(2);
     });
 
-    it('claims nothing for an event with no order id to key on', async () => {
+    it('gives each event with no order id its own durable identity', async () => {
       // SnapTrade can report a trade update with no brokerage order id. One
       // such event must not claim a key that suppresses every later one.
       await service.handleOrderUpdate(userId, orderResult({ orderId: '' }));
       await service.handleOrderUpdate(userId, orderResult({ orderId: '' }));
 
       expect(apns.sent).toHaveLength(2);
-      expect(prisma.pushDeliveries).toHaveLength(0);
+      expect(prisma.pushDeliveries).toHaveLength(2);
+      expect(new Set(prisma.pushDeliveries.map((row) => row.key)).size).toBe(2);
     });
 
-    it('releases the claim when nothing was delivered, even with prune failures', async () => {
+    it('records dead per-device outcomes even with prune failures', async () => {
       // Every device is dead and the prunes fail on top: cleanup trouble
       // must neither keep the claim (nothing was delivered) nor escape as a
       // throw.
@@ -312,7 +329,8 @@ describe('OrderNotificationsService', () => {
       };
 
       await service.handleOrderUpdate(userId, orderResult());
-      expect(prisma.pushDeliveries).toHaveLength(0);
+      expect(prisma.pushDeliveries).toHaveLength(2);
+      expect(prisma.pushDeliveries.every((row) => row.status === 'dead')).toBe(true);
       prisma.deviceToken.deleteMany = deleteMany;
     });
 
@@ -329,7 +347,8 @@ describe('OrderNotificationsService', () => {
       };
 
       await service.handleOrderUpdate(userId, orderResult());
-      expect(prisma.pushDeliveries).toHaveLength(1);
+      expect(prisma.pushDeliveries).toHaveLength(2);
+      expect(prisma.pushDeliveries.map((row) => row.status).sort()).toEqual(['dead', 'delivered']);
 
       prisma.deviceToken.deleteMany = deleteMany;
       const sends = apns.sent.length;
@@ -357,6 +376,59 @@ describe('OrderNotificationsService', () => {
       await new DevicesService(prisma as never).register(userId, TOKEN, 'ios');
       await service.handleOrderUpdate(userId, orderResult());
       expect(apns.sent).toHaveLength(1);
+    });
+
+    it('recovers a per-device lease after the claiming process dies', async () => {
+      const row = await prisma.pushDelivery.create({
+        data: {
+          userId,
+          key: 'order:crash:filled',
+          deviceToken: TOKEN,
+          environment: 'live',
+          title: 'Order filled',
+          body: 'Recovered delivery',
+        },
+      });
+      Object.assign(row, {
+        status: 'leased',
+        leaseOwnerId: 'dead-instance',
+        leaseExpiresAt: new Date('2026-08-05T12:00:00Z'),
+      });
+
+      await service.processDue(new Date('2026-08-05T12:01:00Z'));
+
+      expect(apns.sent[apns.sent.length - 1]?.body).toBe('Recovered delivery');
+      expect(row.status).toBe('delivered');
+    });
+
+    it('sweeps terminal delivery rows older than seven days under a daily lease', async () => {
+      const row = await prisma.pushDelivery.create({
+        data: {
+          userId,
+          key: 'order:old:filled',
+          deviceToken: TOKEN,
+          environment: 'live',
+          title: 'Old',
+          body: 'Old',
+        },
+      });
+      Object.assign(row, {
+        status: 'delivered',
+        createdAt: new Date('2026-07-01T00:00:00Z'),
+      });
+
+      await service.processDue(new Date('2026-08-05T12:00:00Z'));
+
+      expect(prisma.pushDeliveries).toHaveLength(0);
+      expect(prisma.scheduledJobLeases[0].name).toBe('push-delivery-retention:2026-08-05');
+    });
+
+    it('bounds each account to its ten most recently registered devices', async () => {
+      const devices = new DevicesService(prisma as never);
+      for (let index = 0; index < 12; index += 1) {
+        await devices.register(userId, index.toString(16).padStart(64, '0'), 'ios');
+      }
+      expect(await devices.listForUser(userId)).toHaveLength(10);
     });
   });
 });

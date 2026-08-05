@@ -1,8 +1,8 @@
 import { WebSocket } from 'ws';
+import { Subject } from 'rxjs';
 import { ChartOrder, Quote } from '@0dtetrader/shared-types';
 import { BrokerGateway } from '../broker/broker-gateway.interface';
-import { OrderEventsService } from '../broker/order-events.service';
-import { ChartOrderEventsService } from '../chart-orders/chart-order-events.service';
+import { DurableUserEvent, EventTransportService } from '../events/event-transport.service';
 import { CryptoDataService } from './crypto-data.service';
 import { IndexDataService } from './index-data.service';
 import { StreamGateway } from './stream.gateway';
@@ -29,7 +29,8 @@ describe('StreamGateway.tickSymbol', () => {
   let crypto: { isCryptoSymbol: jest.Mock; getQuote: jest.Mock };
   let index: { isIndexSymbol: jest.Mock; getQuote: jest.Mock };
   let gateway: StreamGateway;
-  let chartOrderEvents: ChartOrderEventsService;
+  let durableEvents: Subject<DurableUserEvent>;
+  let replay: jest.Mock;
 
   beforeEach(() => {
     broker = {
@@ -47,7 +48,8 @@ describe('StreamGateway.tickSymbol', () => {
       isIndexSymbol: jest.fn(() => false),
       getQuote: jest.fn(async (symbol: string) => quoteFor(symbol, 400)),
     };
-    chartOrderEvents = new ChartOrderEventsService();
+    durableEvents = new Subject<DurableUserEvent>();
+    replay = jest.fn(async () => []);
     gateway = new StreamGateway(
       broker as unknown as BrokerGateway,
       crypto as unknown as CryptoDataService,
@@ -55,8 +57,10 @@ describe('StreamGateway.tickSymbol', () => {
       // jwt/config are only used during connection auth, not by ticks.
       {} as never,
       {} as never,
-      new OrderEventsService(),
-      chartOrderEvents,
+      {
+        events$: durableEvents.asObservable(),
+        replay,
+      } as unknown as EventTransportService,
     );
   });
 
@@ -66,12 +70,27 @@ describe('StreamGateway.tickSymbol', () => {
 
   function subscribe(symbol: string, sockets: Array<[unknown, string]>): void {
     const internals = gateway as unknown as {
-      clients: Map<unknown, { userId: string; symbols: Set<string> }>;
+      clients: Map<
+        unknown,
+        {
+          userId: string;
+          symbols: Set<string>;
+          lastSequence: number;
+          replaying: boolean;
+          pending: DurableUserEvent[];
+        }
+      >;
       subscribers: Map<string, Set<unknown>>;
     };
     internals.subscribers.set(symbol, new Set(sockets.map(([socket]) => socket)));
     for (const [socket, userId] of sockets) {
-      internals.clients.set(socket, { userId, symbols: new Set([symbol]) });
+      internals.clients.set(socket, {
+        userId,
+        symbols: new Set([symbol]),
+        lastSequence: 0,
+        replaying: false,
+        pending: [],
+      });
     }
   }
 
@@ -83,13 +102,65 @@ describe('StreamGateway.tickSymbol', () => {
       [other, 'u2'],
     ]);
 
-    chartOrderEvents.emit('u1', { id: 'co-1', status: 'triggered' } as ChartOrder);
+    durableEvents.next({
+      id: '11111111-1111-1111-1111-111111111111',
+      userId: 'u1',
+      sequence: 1,
+      type: 'chartOrder',
+      payload: { id: 'co-1', status: 'triggered' } as ChartOrder,
+    });
 
     expect(other.send).not.toHaveBeenCalled();
     expect(owner.send).toHaveBeenCalledTimes(1);
     const message = JSON.parse(owner.send.mock.calls[0][0]);
     expect(message.type).toBe('chartOrder');
     expect(message.data.id).toBe('co-1');
+  });
+
+  it('paginates reconnect replay until the cursor is fully caught up', async () => {
+    const socket = fakeSocket();
+    const page = Array.from({ length: 1_000 }, (_, index): DurableUserEvent => ({
+      id: `event-${index + 1}`,
+      userId: 'u1',
+      sequence: index + 1,
+      type: 'orderUpdate',
+      payload: { orderId: `order-${index + 1}` },
+    }));
+    replay.mockResolvedValueOnce(page).mockResolvedValueOnce([
+      {
+        id: 'event-1001',
+        userId: 'u1',
+        sequence: 1_001,
+        type: 'orderUpdate',
+        payload: { orderId: 'order-1001' },
+      },
+    ]);
+    const internals = gateway as unknown as {
+      clients: Map<
+        unknown,
+        {
+          userId: string;
+          symbols: Set<string>;
+          lastSequence: number;
+          replaying: boolean;
+          pending: DurableUserEvent[];
+        }
+      >;
+      replayClient(client: unknown, userId: string, cursor: number): Promise<void>;
+    };
+    internals.clients.set(socket, {
+      userId: 'u1',
+      symbols: new Set(),
+      lastSequence: 0,
+      replaying: true,
+      pending: [],
+    });
+
+    await internals.replayClient(socket, 'u1', 0);
+
+    expect(replay).toHaveBeenNthCalledWith(1, 'u1', 0, 1_000);
+    expect(replay).toHaveBeenNthCalledWith(2, 'u1', 1_000, 1_000);
+    expect(socket.send).toHaveBeenCalledTimes(1_001);
   });
 
   it('fetches broker quotes per user so credentials are never shared', async () => {

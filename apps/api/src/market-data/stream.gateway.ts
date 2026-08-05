@@ -4,13 +4,9 @@ import { JwtService } from '@nestjs/jwt';
 import { OnGatewayConnection, OnGatewayDisconnect, WebSocketGateway } from '@nestjs/websockets';
 import { IncomingMessage } from 'node:http';
 import { WebSocket } from 'ws';
-import { Quote, StreamServerMessage } from '@0dtetrader/shared-types';
+import { ChartOrder, OrderResult, Quote, StreamServerMessage } from '@0dtetrader/shared-types';
 import { BROKER_GATEWAY, BrokerGateway } from '../broker/broker-gateway.interface';
-import { OrderEventsService, OrderUpdateEvent } from '../broker/order-events.service';
-import {
-  ChartOrderEventsService,
-  ChartOrderUpdateEvent,
-} from '../chart-orders/chart-order-events.service';
+import { DurableUserEvent, EventTransportService } from '../events/event-transport.service';
 import { Subscription } from 'rxjs';
 import { CryptoDataService } from './crypto-data.service';
 import { IndexDataService } from './index-data.service';
@@ -27,6 +23,9 @@ const SYMBOL_PATTERN = /^[A-Za-z0-9.-]{1,32}$/;
 interface ClientState {
   userId: string;
   symbols: Set<string>;
+  lastSequence: number;
+  replaying: boolean;
+  pending: DurableUserEvent[];
 }
 
 /**
@@ -49,8 +48,7 @@ export class StreamGateway implements OnGatewayConnection, OnGatewayDisconnect, 
   private readonly inFlightTicks = new Set<string>();
   /** Last logged quote-tick warning per key — identical failures log once. */
   private readonly tickWarnings = new Map<string, string>();
-  private readonly orderEventsSub: Subscription;
-  private readonly chartOrderEventsSub: Subscription;
+  private readonly durableEventsSub: Subscription;
 
   constructor(
     @Inject(BROKER_GATEWAY) private readonly broker: BrokerGateway,
@@ -58,18 +56,15 @@ export class StreamGateway implements OnGatewayConnection, OnGatewayDisconnect, 
     private readonly index: IndexDataService,
     private readonly jwt: JwtService,
     private readonly config: ConfigService,
-    orderEvents: OrderEventsService,
-    chartOrderEvents: ChartOrderEventsService,
+    private readonly eventTransport: EventTransportService,
   ) {
-    this.orderEventsSub = orderEvents.events$.subscribe((event) => this.pushOrderUpdate(event));
-    this.chartOrderEventsSub = chartOrderEvents.events$.subscribe((event) =>
-      this.pushChartOrderUpdate(event),
+    this.durableEventsSub = eventTransport.events$.subscribe((event) =>
+      this.pushDurableEvent(event),
     );
   }
 
   onModuleDestroy(): void {
-    this.orderEventsSub.unsubscribe();
-    this.chartOrderEventsSub.unsubscribe();
+    this.durableEventsSub.unsubscribe();
     for (const timer of this.timers.values()) clearInterval(timer);
     this.timers.clear();
   }
@@ -90,10 +85,18 @@ export class StreamGateway implements OnGatewayConnection, OnGatewayDisconnect, 
       return;
     }
 
-    this.clients.set(client, { userId, symbols: new Set() });
+    const cursor = this.extractCursor(req);
+    this.clients.set(client, {
+      userId,
+      symbols: new Set(),
+      lastSequence: cursor,
+      replaying: true,
+      pending: [],
+    });
     client.on('message', (raw) => this.handleMessage(client, raw));
     client.on('close', () => this.handleDisconnect(client));
     client.on('error', () => this.handleDisconnect(client));
+    void this.replayClient(client, userId, cursor);
   }
 
   handleDisconnect(client: WebSocket): void {
@@ -279,21 +282,53 @@ export class StreamGateway implements OnGatewayConnection, OnGatewayDisconnect, 
     this.logger.warn(message);
   }
 
-  private pushOrderUpdate(event: OrderUpdateEvent): void {
+  private pushDurableEvent(event: DurableUserEvent): void {
     for (const [client, state] of this.clients) {
-      if (state.userId === event.userId) {
-        this.send(client, { type: 'orderUpdate', data: event.order });
-      }
+      if (state.userId !== event.userId) continue;
+      if (state.replaying) state.pending.push(event);
+      else this.sendDurable(client, state, event);
     }
   }
 
-  /** The server-side watcher fired, failed, or retired one of the user's chart
-   *  order lines — the chart must reflect it without waiting for a poll. */
-  private pushChartOrderUpdate(event: ChartOrderUpdateEvent): void {
-    for (const [client, state] of this.clients) {
-      if (state.userId === event.userId) {
-        this.send(client, { type: 'chartOrder', data: event.order });
+  private async replayClient(client: WebSocket, userId: string, cursor: number): Promise<void> {
+    try {
+      const state = this.clients.get(client);
+      if (!state) return;
+      let after = cursor;
+      for (;;) {
+        const missed = await this.eventTransport.replay(userId, after, 1_000);
+        if (this.clients.get(client) !== state) return;
+        for (const event of missed) this.sendDurable(client, state, event);
+        if (missed.length < 1_000) break;
+        after = missed[missed.length - 1].sequence;
       }
+      state.replaying = false;
+      const pending = state.pending.splice(0).sort((a, b) => a.sequence - b.sequence);
+      for (const event of pending) this.sendDurable(client, state, event);
+    } catch (error) {
+      const state = this.clients.get(client);
+      if (state) state.replaying = false;
+      this.logger.warn(`event replay failed for user ${userId}: ${(error as Error).message}`);
+    }
+  }
+
+  private sendDurable(client: WebSocket, state: ClientState, event: DurableUserEvent): void {
+    if (event.sequence <= state.lastSequence) return;
+    state.lastSequence = event.sequence;
+    if (event.type === 'orderUpdate') {
+      this.send(client, {
+        type: 'orderUpdate',
+        eventId: event.id,
+        sequence: event.sequence,
+        data: event.payload as OrderResult,
+      });
+    } else {
+      this.send(client, {
+        type: 'chartOrder',
+        eventId: event.id,
+        sequence: event.sequence,
+        data: event.payload as ChartOrder,
+      });
     }
   }
 
@@ -307,6 +342,16 @@ export class StreamGateway implements OnGatewayConnection, OnGatewayDisconnect, 
       return url.searchParams.get('token');
     } catch {
       return null;
+    }
+  }
+
+  private extractCursor(req: IncomingMessage): number {
+    try {
+      const url = new URL(req.url ?? '', 'http://localhost');
+      const parsed = Number.parseInt(url.searchParams.get('cursor') ?? '0', 10);
+      return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : 0;
+    } catch {
+      return 0;
     }
   }
 

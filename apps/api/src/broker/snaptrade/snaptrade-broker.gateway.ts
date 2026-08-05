@@ -174,7 +174,12 @@ export class SnapTradeBrokerGateway implements BrokerGateway {
       );
       const orderId = result.brokerage_order_id ?? idempotencyKey;
       const mapped = this.mapOrderResult(order, orderId, limitPrice);
-      this.events.emit(userId, mapped);
+      this.events.emit(userId, mapped, mode, {
+        provider: 'snaptrade',
+        accountId,
+        brokerOrderId: result.brokerage_order_id ?? undefined,
+        clientOrderId: idempotencyKey,
+      });
       return mapped;
     }
 
@@ -182,7 +187,12 @@ export class SnapTradeBrokerGateway implements BrokerGateway {
     const result = await this.client.placeEquityOrder(mode, clientId, consumerKey, payload as any);
     const orderId = result.brokerage_order_id ?? idempotencyKey;
     const mapped = this.mapOrderResult(order, orderId, limitPrice);
-    this.events.emit(userId, mapped);
+    this.events.emit(userId, mapped, mode, {
+      provider: 'snaptrade',
+      accountId,
+      brokerOrderId: result.brokerage_order_id ?? undefined,
+      clientOrderId: idempotencyKey,
+    });
     return mapped;
   }
 
@@ -193,7 +203,11 @@ export class SnapTradeBrokerGateway implements BrokerGateway {
     if (!target) throw brokerErrors.orderNotFound(orderId);
 
     await this.client.cancelOrder(mode, clientId, consumerKey, accountId, orderId);
-    this.events.emit(userId, { ...target, status: 'cancelled' });
+    this.events.emit(userId, { ...target, status: 'cancelled' }, mode, {
+      provider: 'snaptrade',
+      accountId,
+      brokerOrderId: orderId,
+    });
   }
 
   async getPositions(userId: string): Promise<Position[]> {

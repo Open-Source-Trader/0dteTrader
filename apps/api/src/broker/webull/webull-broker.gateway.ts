@@ -573,9 +573,10 @@ export class WebullBrokerGateway implements BrokerGateway, OnModuleDestroy {
       limitPrice,
       heldQuantity,
     );
+    const accountId = await this.accountIdFor(userId, client);
     const raw = await client.request('orderPlace', {
       body: {
-        account_id: await this.accountIdFor(userId, client),
+        account_id: accountId,
         new_orders: [newOrder],
       },
     });
@@ -592,13 +593,20 @@ export class WebullBrokerGateway implements BrokerGateway, OnModuleDestroy {
       limitPrice,
       timestamp: new Date().toISOString(),
     };
-    this.events.emit(userId, result);
-    this.startStatusPoll(userId, client, result);
+    this.events.emit(userId, result, mode, {
+      provider: 'webull',
+      accountId,
+      clientOrderId: result.orderId,
+      brokerOrderId: placed.orderId,
+    });
+    this.startStatusPoll(userId, client, result, mode, accountId, placed.orderId);
     return result;
   }
 
   async cancelOrder(userId: string, orderId: string): Promise<void> {
-    const client = await this.clientFor(userId);
+    const mode = await this.tradingModeFor(userId);
+    const client = await this.clientFor(userId, mode);
+    const accountId = await this.accountIdFor(userId, client);
     // Look the order up first: unknown orders fail locally with
     // ORDER_NOT_FOUND, and the cancelled orderUpdate carries the full order.
     const open = await this.getOpenOrders(userId);
@@ -606,12 +614,16 @@ export class WebullBrokerGateway implements BrokerGateway, OnModuleDestroy {
     if (!target) throw brokerErrors.orderNotFound(orderId);
     await client.request('orderCancel', {
       body: {
-        account_id: await this.accountIdFor(userId, client),
+        account_id: accountId,
         client_order_id: orderId,
       },
     });
     this.stopStatusPoll(userId, orderId);
-    this.events.emit(userId, { ...target, status: 'cancelled' });
+    this.events.emit(userId, { ...target, status: 'cancelled' }, mode, {
+      provider: 'webull',
+      accountId,
+      clientOrderId: orderId,
+    });
   }
 
   async getPositions(userId: string): Promise<Position[]> {
@@ -793,7 +805,14 @@ export class WebullBrokerGateway implements BrokerGateway, OnModuleDestroy {
    * Polls order/detail after placement until a terminal status (fills
    * otherwise arrive only via Webull's gRPC events, out of scope for P4).
    */
-  private startStatusPoll(userId: string, client: WebullClient, result: OrderResult): void {
+  private startStatusPoll(
+    userId: string,
+    client: WebullClient,
+    result: OrderResult,
+    environment: TradingMode,
+    accountId: string,
+    brokerOrderId?: string,
+  ): void {
     const key = `${userId}:${result.orderId}`;
     let attempts = 0;
     const tick = async (): Promise<void> => {
@@ -812,20 +831,30 @@ export class WebullBrokerGateway implements BrokerGateway, OnModuleDestroy {
           detail.status === 'cancelled' ||
           detail.status === 'rejected'
         ) {
-          this.events.emit(userId, {
-            ...result,
-            status: detail.status,
-            filledPrice: detail.filledPrice ?? result.filledPrice,
-            // The placement-time result predates every fill, so the poll's
-            // own parse is the only source of how much executed. Without it
-            // a cancel that followed a partial fill reports no executed
-            // quantity, fill accounting rightly ignores the whole event, and
-            // the row keeps neither the quantity nor the price — the lot the
-            // user actually holds becomes invisible to the position book.
-            // (No filledAt: Webull reports no execution timestamp at all —
-            // see webull-mappers.ts — so fills are stamped when observed.)
-            filledQuantity: detail.filledQuantity ?? result.filledQuantity,
-          });
+          this.events.emit(
+            userId,
+            {
+              ...result,
+              status: detail.status,
+              filledPrice: detail.filledPrice ?? result.filledPrice,
+              // The placement-time result predates every fill, so the poll's
+              // own parse is the only source of how much executed. Without it
+              // a cancel that followed a partial fill reports no executed
+              // quantity, fill accounting rightly ignores the whole event, and
+              // the row keeps neither the quantity nor the price — the lot the
+              // user actually holds becomes invisible to the position book.
+              // (No filledAt: Webull reports no execution timestamp at all —
+              // see webull-mappers.ts — so fills are stamped when observed.)
+              filledQuantity: detail.filledQuantity ?? result.filledQuantity,
+            },
+            environment,
+            {
+              provider: 'webull',
+              accountId,
+              clientOrderId: result.orderId,
+              brokerOrderId,
+            },
+          );
           return;
         }
       } catch (err) {

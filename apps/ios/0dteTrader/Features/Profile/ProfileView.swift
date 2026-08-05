@@ -13,6 +13,11 @@ struct ProfileView: View {
     @State var showSnapTradeDeleteConfirmation: (mode: TradingMode, connectionId: String)? = nil
     @State private var showLogoutConfirmation = false
     @State private var showSnapTradeSafari = false
+    @State var discordWebhookURL = ""
+    @State var discordEnabled = false
+    @State var discordIncludePnl = false
+    @State var deleteAccountEmail = ""
+    @State var showAccountDeleteConfirmation = false
 
     var body: some View {
         NavigationStack {
@@ -34,6 +39,9 @@ struct ProfileView: View {
                     securityCard
                     tradingCard
                     preferencesCard
+                    discordCard
+                    legalCard
+                    deleteAccountCard
                     logoutCard
                 }
                 .padding(.horizontal, AppSpacing.lg)
@@ -72,6 +80,9 @@ struct ProfileView: View {
                 if viewModel.tradingProvider == .snaptrade {
                     await viewModel.loadSnapTradeConnections()
                 }
+                await viewModel.loadCompliance()
+                discordEnabled = viewModel.discordSettings?.enabled ?? false
+                discordIncludePnl = viewModel.discordSettings?.includePnl ?? false
             }
             .confirmationDialog(
                 "Remove Webull credentials?",

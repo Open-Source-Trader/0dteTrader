@@ -17,6 +17,13 @@ export interface OrderUpdateEvent {
    * environment is stamped once and never moves.
    */
   environment?: TradingMode;
+  /** Stable external identity scope. Older emitters may omit it; recorders use
+   * conservative per-user defaults until that gateway supplies the scope. */
+  provider?: 'webull' | 'alpaca' | 'snaptrade';
+  accountId?: string;
+  brokerOrderId?: string;
+  clientOrderId?: string;
+  sourceEventId?: string;
 }
 
 /** Persists an order update. Registered by OrdersService; throws when the
@@ -46,28 +53,47 @@ export type OrderUpdateIngestor = (event: OrderUpdateEvent) => Promise<void>;
 export class OrderEventsService {
   private readonly subject = new Subject<OrderUpdateEvent>();
   readonly events$ = this.subject.asObservable();
-  private readonly ingestors = new Set<OrderUpdateIngestor>();
+  private readonly ingestors: Array<{ ingestor: OrderUpdateIngestor; priority: number }> = [];
 
-  registerIngestor(ingestor: OrderUpdateIngestor): () => void {
-    this.ingestors.add(ingestor);
-    return () => this.ingestors.delete(ingestor);
+  registerIngestor(ingestor: OrderUpdateIngestor, priority = 0): () => void {
+    const entry = { ingestor, priority };
+    this.ingestors.push(entry);
+    this.ingestors.sort((left, right) => right.priority - left.priority);
+    return () => {
+      const index = this.ingestors.indexOf(entry);
+      if (index >= 0) this.ingestors.splice(index, 1);
+    };
   }
 
-  emit(userId: string, order: OrderResult, environment?: TradingMode): void {
-    const event: OrderUpdateEvent = { userId, order, environment };
-    for (const ingestor of this.ingestors) {
-      // Exhaustion is already logged where it happens; a fire-and-forget
-      // caller has nothing further to do with it.
-      void ingestor(event).catch(() => undefined);
-    }
+  emit(
+    userId: string,
+    order: OrderResult,
+    environment?: TradingMode,
+    identity: Omit<OrderUpdateEvent, 'userId' | 'order' | 'environment'> = {},
+  ): void {
+    const event: OrderUpdateEvent = { userId, order, environment, ...identity };
+    // Preserve ingestor order. Persistence registers before durable fan-out in
+    // the normal module graph, and serial execution guarantees subscribers do
+    // not observe an event whose required database work is still racing.
+    void this.runIngestors(event)
+      .then(() => this.subject.next(event))
+      .catch(() => undefined);
+  }
+
+  async ingest(
+    userId: string,
+    order: OrderResult,
+    environment?: TradingMode,
+    identity: Omit<OrderUpdateEvent, 'userId' | 'order' | 'environment'> = {},
+  ): Promise<void> {
+    const event: OrderUpdateEvent = { userId, order, environment, ...identity };
+    await this.runIngestors(event);
     this.subject.next(event);
   }
 
-  async ingest(userId: string, order: OrderResult, environment?: TradingMode): Promise<void> {
-    const event: OrderUpdateEvent = { userId, order, environment };
-    for (const ingestor of this.ingestors) {
+  private async runIngestors(event: OrderUpdateEvent): Promise<void> {
+    for (const { ingestor } of this.ingestors) {
       await ingestor(event);
     }
-    this.subject.next(event);
   }
 }

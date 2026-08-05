@@ -23,6 +23,7 @@ RUN npm run build --workspace packages/shared-types
 
 # Build API
 COPY apps/api/src/ apps/api/src/
+COPY docs/legal/ docs/legal/
 COPY apps/api/tsconfig.json apps/api/tsconfig.build.json apps/api/
 RUN npm run build --workspace apps/api
 
@@ -43,6 +44,7 @@ COPY --from=builder /app/apps/api/dist ./apps/api/dist
 COPY --from=builder /app/apps/api/prisma ./apps/api/prisma
 COPY --from=builder /app/apps/api/prisma.config.ts ./apps/api/
 COPY --from=builder /app/apps/api/package.json ./apps/api/
+COPY --from=builder /app/docs/legal ./docs/legal
 COPY --from=builder /app/package.json ./
 
 RUN addgroup -S appgroup && adduser -S appuser -G appgroup

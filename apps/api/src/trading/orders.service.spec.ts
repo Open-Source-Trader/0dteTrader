@@ -1579,7 +1579,7 @@ describe('OrdersService', () => {
     const t = (s: number) => new Date(1_753_000_000_000 + s * 1000);
     const USER_B = 'user-2';
 
-    it("refuses another user's event on a colliding id — status, fill state and executions", async () => {
+    it("stores each user's event independently when broker order ids collide", async () => {
       // Broker order ids are unique only within a brokerage account. User A
       // owns the row; user B's broker happens to reuse the same id.
       await orders.record(
@@ -1619,9 +1619,20 @@ describe('OrdersService', () => {
       const anchorA = (await orders.positionAnchors(USER, [OCC])).get(OCC);
       expect(anchorA?.quantity).toBe(1);
       expect((await orders.history(USER)).totalRealizedPnl).toBe(0);
+      const rowB = prisma.tradeOrders.find((order) => order.userId === USER_B);
+      expect(rowB).toMatchObject({
+        brokerOrderId: null,
+        clientOrderId: 'SHARED',
+        status: 'filled',
+        filledPrice: 9.9,
+        executedQuantity: 2,
+      });
+      expect(
+        prisma.tradeOrderExecutions.filter((execution) => execution.orderId === rowB.id),
+      ).toHaveLength(1);
     });
 
-    it("refuses another user's underlying price on a colliding id", async () => {
+    it("keeps each user's underlying price on its own internal order row", async () => {
       await orders.recordUnderlyingPrice(
         USER,
         fill({ orderId: 'SHARED2', quantity: 1, filledPrice: 1.0 }),
@@ -1638,6 +1649,9 @@ describe('OrdersService', () => {
       expect(row.underlyingPrice).toBe(600);
       const anchor = (await orders.positionAnchors(USER, [OCC])).get(OCC);
       expect(anchor?.underlyingEntryEstimate).toBe(600);
+      expect(prisma.tradeOrders.find((order) => order.userId === USER_B)?.underlyingPrice).toBe(
+        999,
+      );
     });
   });
 

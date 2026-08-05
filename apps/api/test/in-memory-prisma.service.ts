@@ -10,7 +10,10 @@ import { randomUUID } from 'node:crypto';
  *     brokerCredential.(userId, provider, environment),
  *     orderAudit.(userId, idempotencyKey),
  *     tradeOrderExecution.(orderId, cumulative) and
- *     pushDelivery.(userId, key) — the one whose columns are both NOT NULL,
+ *     pushDelivery.(userId, key, deviceToken), userEvent.(userId, sequence),
+ *     webhookInbox.(provider, webhookId), chartOrder.(ocoGroupId, kind),
+ *     discordDelivery.(userId, key), legalAcceptance.(userId, document, version) —
+ *     the ones whose columns are all NOT NULL,
  *     so it has no nullable-unique semantics to emulate
  *     (violations throw a P2002-coded error like the real client)
  *   - nullable unique column semantics for orderAudit.idempotencyKey and
@@ -88,6 +91,7 @@ export class InMemoryPrismaService {
   readonly tradeOrders: any[] = [];
   readonly tradeOrderExecutions: any[] = [];
   readonly chartOrders: any[] = [];
+  readonly bracketGroups: any[] = [];
   readonly optionsAnalyticsSnapshots: any[] = [];
   readonly scheduledJobLeases: any[] = [];
   readonly brokerCredentials: any[] = [];
@@ -95,6 +99,23 @@ export class InMemoryPrismaService {
   readonly brokerConnections: any[] = [];
   readonly deviceTokens: any[] = [];
   readonly pushDeliveries: any[] = [];
+  readonly webhookInboxRows: any[] = [];
+  readonly userEvents: any[] = [];
+  readonly discordSettingsRows: any[] = [];
+  readonly discordDeliveries: any[] = [];
+  readonly legalAcceptances: any[] = [];
+
+  private tradeOrderConflict(data: any, except?: any): boolean {
+    return this.tradeOrders.some((row) => {
+      if (row === except || row.userId !== data.userId || row.provider !== data.provider)
+        return false;
+      if (row.environment !== data.environment || row.accountId !== data.accountId) return false;
+      return (
+        (data.brokerOrderId != null && row.brokerOrderId === data.brokerOrderId) ||
+        (data.clientOrderId != null && row.clientOrderId === data.clientOrderId)
+      );
+    });
+  }
 
   readonly user = {
     findUnique: async ({ where }: any) => {
@@ -123,6 +144,38 @@ export class InMemoryPrismaService {
       const row = this.users.find((u) => u.id === where.id);
       if (!row) throw Object.assign(new Error('Record not found'), { code: 'P2025' });
       Object.assign(row, data, { updatedAt: new Date() });
+      return row;
+    },
+    delete: async ({ where }: any) => {
+      const index = this.users.findIndex((u) => u.id === where.id);
+      if (index === -1) throw Object.assign(new Error('Record not found'), { code: 'P2025' });
+      const [row] = this.users.splice(index, 1);
+      const owned = (value: any) => value.userId === row.id;
+      const orderIds = new Set(this.tradeOrders.filter(owned).map((order) => order.id));
+      for (const table of [
+        this.credentials,
+        this.refreshTokens,
+        this.orderAudits,
+        this.tradeOrders,
+        this.chartOrders,
+        this.bracketGroups,
+        this.brokerCredentials,
+        this.brokerApiTokens,
+        this.brokerConnections,
+        this.deviceTokens,
+        this.pushDeliveries,
+        this.webhookInboxRows,
+        this.userEvents,
+        this.discordSettingsRows,
+        this.discordDeliveries,
+        this.legalAcceptances,
+      ]) {
+        for (let i = table.length - 1; i >= 0; i -= 1) if (owned(table[i])) table.splice(i, 1);
+      }
+      for (let i = this.tradeOrderExecutions.length - 1; i >= 0; i -= 1) {
+        if (orderIds.has(this.tradeOrderExecutions[i].orderId))
+          this.tradeOrderExecutions.splice(i, 1);
+      }
       return row;
     },
   };
@@ -255,17 +308,70 @@ export class InMemoryPrismaService {
   };
 
   readonly tradeOrder = {
-    findUnique: async ({ where }: any) => this.tradeOrders.find((o) => o.id === where.id) ?? null,
+    findUnique: async ({ where }: any) => {
+      if (where.id !== undefined) return this.tradeOrders.find((o) => o.id === where.id) ?? null;
+      const broker = where.userId_provider_environment_accountId_brokerOrderId;
+      if (broker) {
+        return (
+          this.tradeOrders.find(
+            (o) =>
+              o.userId === broker.userId &&
+              o.provider === broker.provider &&
+              o.environment === broker.environment &&
+              o.accountId === broker.accountId &&
+              o.brokerOrderId === broker.brokerOrderId,
+          ) ?? null
+        );
+      }
+      const client = where.userId_provider_environment_accountId_clientOrderId;
+      if (client) {
+        return (
+          this.tradeOrders.find(
+            (o) =>
+              o.userId === client.userId &&
+              o.provider === client.provider &&
+              o.environment === client.environment &&
+              o.accountId === client.accountId &&
+              o.clientOrderId === client.clientOrderId,
+          ) ?? null
+        );
+      }
+      return null;
+    },
     findFirst: async ({ where }: any) => this.tradeOrders.find((o) => matches(o, where)) ?? null,
+    create: async ({ data }: any) => {
+      const normalized = {
+        provider: 'webull',
+        accountId: 'default',
+        brokerOrderId: null,
+        clientOrderId: null,
+        ...data,
+      };
+      if (this.tradeOrderConflict(normalized)) throw p2002('scoped external order id');
+      const external = normalized.clientOrderId ?? normalized.brokerOrderId;
+      const row = {
+        id:
+          normalized.id ??
+          (external && !this.tradeOrders.some((order) => order.id === external)
+            ? external
+            : randomUUID()),
+        updatedAt: new Date(),
+        ...normalized,
+      };
+      this.tradeOrders.push(row);
+      return row;
+    },
     upsert: async ({ where, create, update }: any) => {
-      const existing = this.tradeOrders.find((o) => o.id === where.id);
+      const existing =
+        (where.id !== undefined ? this.tradeOrders.find((o) => o.id === where.id) : undefined) ??
+        (await this.tradeOrder.findUnique({ where }));
       if (existing) {
+        const next = { ...existing, ...definedOnly(update) };
+        if (this.tradeOrderConflict(next, existing)) throw p2002('scoped external order id');
         Object.assign(existing, definedOnly(update), { updatedAt: new Date() });
         return existing;
       }
-      const row = { updatedAt: new Date(), ...create };
-      this.tradeOrders.push(row);
-      return row;
+      return this.tradeOrder.create({ data: create });
     },
     findMany: async ({ where, orderBy }: any = {}) => {
       const rows = this.tradeOrders.filter((o) => matches(o, where));
@@ -280,6 +386,8 @@ export class InMemoryPrismaService {
       let count = 0;
       for (const row of this.tradeOrders) {
         if (matches(row, where)) {
+          const next = { ...row, ...definedOnly(data) };
+          if (this.tradeOrderConflict(next, row)) throw p2002('scoped external order id');
           Object.assign(row, definedOnly(data), { updatedAt: new Date() });
           count += 1;
         }
@@ -364,6 +472,14 @@ export class InMemoryPrismaService {
 
   readonly chartOrder = {
     create: async ({ data }: any) => {
+      if (
+        data.ocoGroupId != null &&
+        this.chartOrders.some(
+          (order) => order.ocoGroupId === data.ocoGroupId && order.kind === data.kind,
+        )
+      ) {
+        throw p2002('ocoGroupId, kind');
+      }
       const now = new Date();
       const row = {
         id: `co-${this.chartOrders.length + 1}`,
@@ -404,6 +520,51 @@ export class InMemoryPrismaService {
           Object.assign(row, definedOnly(data), { updatedAt: new Date() });
           count += 1;
         }
+      }
+      return { count };
+    },
+  };
+
+  readonly bracketGroup = {
+    create: async ({ data }: any) => {
+      if (this.bracketGroups.some((group) => group.id === data.id)) throw p2002('id');
+      const now = new Date();
+      const row = {
+        status: 'working',
+        fireLegId: null,
+        leaseOwnerId: null,
+        leaseExpiresAt: null,
+        lastError: null,
+        createdAt: now,
+        updatedAt: now,
+        ...data,
+      };
+      this.bracketGroups.push(row);
+      return row;
+    },
+    findUnique: async ({ where }: any) =>
+      this.bracketGroups.find((group) => group.id === where.id) ?? null,
+    findFirst: async ({ where }: any) =>
+      this.bracketGroups.find((group) => matches(group, where)) ?? null,
+    findMany: async ({ where, orderBy, take }: any = {}) => {
+      const rows = this.bracketGroups.filter((group) => matches(group, where));
+      if (orderBy?.createdAt === 'asc') {
+        rows.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+      }
+      return take === undefined ? rows : rows.slice(0, take);
+    },
+    update: async ({ where, data }: any) => {
+      const row = this.bracketGroups.find((group) => group.id === where.id);
+      if (!row) throw Object.assign(new Error('Record not found'), { code: 'P2025' });
+      Object.assign(row, definedOnly(data), { updatedAt: new Date() });
+      return row;
+    },
+    updateMany: async ({ where, data }: any) => {
+      let count = 0;
+      for (const row of this.bracketGroups) {
+        if (!matches(row, where)) continue;
+        Object.assign(row, definedOnly(data), { updatedAt: new Date() });
+        count += 1;
       }
       return { count };
     },
@@ -612,7 +773,13 @@ export class InMemoryPrismaService {
   };
 
   readonly deviceToken = {
-    findMany: async ({ where }: any = {}) => this.deviceTokens.filter((t) => matches(t, where)),
+    findMany: async ({ where, orderBy }: any = {}) => {
+      const rows = this.deviceTokens.filter((token) => matches(token, where));
+      if (orderBy?.updatedAt === 'desc') {
+        rows.sort((left, right) => right.updatedAt.getTime() - left.updatedAt.getTime());
+      }
+      return rows;
+    },
     upsert: async ({ where, create, update }: any) => {
       const existing = this.deviceTokens.find((t) => t.token === where.token);
       if (existing) {
@@ -635,14 +802,61 @@ export class InMemoryPrismaService {
 
   readonly pushDelivery = {
     create: async ({ data }: any) => {
-      // `key` is NOT NULL in the schema, so — unlike orderAudit.idempotencyKey
-      // and tradeOrderExecution.cumulative — there is no null-skip here.
-      if (this.pushDeliveries.some((d) => d.userId === data.userId && d.key === data.key)) {
-        throw p2002('userId, key');
+      if (
+        this.pushDeliveries.some(
+          (d) =>
+            d.userId === data.userId && d.key === data.key && d.deviceToken === data.deviceToken,
+        )
+      ) {
+        throw p2002('userId, key, deviceToken');
       }
-      const row = { id: randomUUID(), createdAt: new Date(), ...data };
+      const now = new Date();
+      const row = {
+        id: randomUUID(),
+        status: 'pending',
+        attempts: 0,
+        nextAttemptAt: now,
+        leaseOwnerId: null,
+        leaseExpiresAt: null,
+        lastError: null,
+        deliveredAt: null,
+        createdAt: now,
+        updatedAt: now,
+        ...data,
+      };
       this.pushDeliveries.push(row);
       return row;
+    },
+    findUnique: async ({ where }: any) =>
+      this.pushDeliveries.find((delivery) => delivery.id === where.id) ?? null,
+    findFirst: async ({ where, orderBy }: any = {}) => {
+      const rows = this.pushDeliveries.filter((delivery) => matches(delivery, where));
+      if (orderBy?.createdAt === 'asc') {
+        rows.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+      }
+      return rows[0] ?? null;
+    },
+    findMany: async ({ where, orderBy, take }: any = {}) => {
+      const rows = this.pushDeliveries.filter((delivery) => matches(delivery, where));
+      if (orderBy?.createdAt === 'asc') {
+        rows.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+      }
+      return take === undefined ? rows : rows.slice(0, take);
+    },
+    update: async ({ where, data }: any) => {
+      const row = this.pushDeliveries.find((delivery) => delivery.id === where.id);
+      if (!row) throw Object.assign(new Error('Record not found'), { code: 'P2025' });
+      Object.assign(row, definedOnly(data), { updatedAt: new Date() });
+      return row;
+    },
+    updateMany: async ({ where, data }: any) => {
+      let count = 0;
+      for (const row of this.pushDeliveries) {
+        if (!matches(row, where)) continue;
+        Object.assign(row, definedOnly(data), { updatedAt: new Date() });
+        count += 1;
+      }
+      return { count };
     },
     deleteMany: async ({ where }: any = {}) => {
       const keep = this.pushDeliveries.filter((d) => !matches(d, where));
@@ -651,6 +865,199 @@ export class InMemoryPrismaService {
       this.pushDeliveries.push(...keep);
       return { count };
     },
+  };
+
+  readonly webhookInbox = {
+    create: async ({ data }: any) => {
+      if (
+        this.webhookInboxRows.some(
+          (row) => row.provider === data.provider && row.webhookId === data.webhookId,
+        )
+      ) {
+        throw p2002('provider, webhookId');
+      }
+      const now = new Date();
+      const row = {
+        id: randomUUID(),
+        accountId: null,
+        status: 'pending',
+        attempts: 0,
+        nextAttemptAt: now,
+        leaseOwnerId: null,
+        leaseExpiresAt: null,
+        lastError: null,
+        failureStage: null,
+        processedAt: null,
+        createdAt: now,
+        updatedAt: now,
+        ...data,
+      };
+      this.webhookInboxRows.push(row);
+      return row;
+    },
+    findUnique: async ({ where }: any) => {
+      if (where.id !== undefined)
+        return this.webhookInboxRows.find((row) => row.id === where.id) ?? null;
+      const key = where.provider_webhookId;
+      return (
+        this.webhookInboxRows.find(
+          (row) => row.provider === key.provider && row.webhookId === key.webhookId,
+        ) ?? null
+      );
+    },
+    findFirst: async ({ where, orderBy }: any = {}) => {
+      const rows = this.webhookInboxRows.filter((row) => matches(row, where));
+      if (orderBy?.createdAt === 'asc') {
+        rows.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+      }
+      return rows[0] ?? null;
+    },
+    findMany: async ({ where, orderBy, take }: any = {}) => {
+      const rows = this.webhookInboxRows.filter((row) => matches(row, where));
+      if (orderBy?.createdAt === 'asc') {
+        rows.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+      }
+      return take === undefined ? rows : rows.slice(0, take);
+    },
+    update: async ({ where, data }: any) => {
+      const row = this.webhookInboxRows.find((entry) => entry.id === where.id);
+      if (!row) throw Object.assign(new Error('Record not found'), { code: 'P2025' });
+      Object.assign(row, definedOnly(data), { updatedAt: new Date() });
+      return row;
+    },
+    updateMany: async ({ where, data }: any) => {
+      let count = 0;
+      for (const row of this.webhookInboxRows) {
+        if (!matches(row, where)) continue;
+        Object.assign(row, definedOnly(data), { updatedAt: new Date() });
+        count += 1;
+      }
+      return { count };
+    },
+  };
+
+  readonly userEvent = {
+    create: async ({ data }: any) => {
+      if (
+        this.userEvents.some(
+          (event) => event.userId === data.userId && event.sequence === data.sequence,
+        )
+      ) {
+        throw p2002('userId, sequence');
+      }
+      if (
+        data.dedupeKey != null &&
+        this.userEvents.some(
+          (event) => event.userId === data.userId && event.dedupeKey === data.dedupeKey,
+        )
+      ) {
+        throw p2002('userId, dedupeKey');
+      }
+      let ordinal = 1n;
+      for (const event of this.userEvents)
+        if (event.ordinal >= ordinal) ordinal = event.ordinal + 1n;
+      const row = { ordinal, id: randomUUID(), createdAt: new Date(), ...data };
+      this.userEvents.push(row);
+      return row;
+    },
+    findUnique: async ({ where }: any) => {
+      const key = where.userId_dedupeKey;
+      return (
+        this.userEvents.find(
+          (event) => event.userId === key.userId && event.dedupeKey === key.dedupeKey,
+        ) ?? null
+      );
+    },
+    findFirst: async ({ where, orderBy }: any = {}) => {
+      const rows = this.userEvents.filter((event) => matches(event, where));
+      if (orderBy?.ordinal === 'desc') rows.sort((a, b) => (a.ordinal < b.ordinal ? 1 : -1));
+      if (orderBy?.sequence === 'desc') rows.sort((a, b) => b.sequence - a.sequence);
+      return rows[0] ?? null;
+    },
+    findMany: async ({ where, orderBy, take }: any = {}) => {
+      const rows = this.userEvents.filter((event) => matches(event, where));
+      if (orderBy?.ordinal === 'asc') rows.sort((a, b) => (a.ordinal > b.ordinal ? 1 : -1));
+      if (orderBy?.sequence === 'asc') rows.sort((a, b) => a.sequence - b.sequence);
+      return take === undefined ? rows : rows.slice(0, take);
+    },
+  };
+
+  readonly discordNotificationSettings = {
+    findUnique: async ({ where }: any) =>
+      this.discordSettingsRows.find((row) => row.userId === where.userId) ?? null,
+    upsert: async ({ where, create, update }: any) => {
+      const existing = this.discordSettingsRows.find((row) => row.userId === where.userId);
+      if (existing) {
+        Object.assign(existing, definedOnly(update), { updatedAt: new Date() });
+        return existing;
+      }
+      const now = new Date();
+      const row = {
+        encWebhookUrl: null,
+        enabled: false,
+        includePnl: false,
+        createdAt: now,
+        updatedAt: now,
+        ...create,
+      };
+      this.discordSettingsRows.push(row);
+      return row;
+    },
+  };
+
+  readonly discordDelivery = {
+    create: async ({ data }: any) => {
+      if (
+        this.discordDeliveries.some((row) => row.userId === data.userId && row.key === data.key)
+      ) {
+        throw p2002('userId, key');
+      }
+      const now = new Date();
+      const row = {
+        id: randomUUID(),
+        attempts: 0,
+        lastError: null,
+        deliveredAt: null,
+        createdAt: now,
+        updatedAt: now,
+        ...data,
+      };
+      this.discordDeliveries.push(row);
+      return row;
+    },
+    update: async ({ where, data }: any) => {
+      const row = this.discordDeliveries.find((delivery) => delivery.id === where.id);
+      if (!row) throw Object.assign(new Error('Record not found'), { code: 'P2025' });
+      Object.assign(row, definedOnly(data), { updatedAt: new Date() });
+      return row;
+    },
+    deleteMany: async ({ where }: any = {}) => {
+      const keep = this.discordDeliveries.filter((row) => !matches(row, where));
+      const count = this.discordDeliveries.length - keep.length;
+      this.discordDeliveries.length = 0;
+      this.discordDeliveries.push(...keep);
+      return { count };
+    },
+  };
+
+  readonly legalAcceptance = {
+    create: async ({ data }: any) => {
+      if (
+        this.legalAcceptances.some(
+          (row) =>
+            row.userId === data.userId &&
+            row.document === data.document &&
+            row.version === data.version,
+        )
+      ) {
+        throw p2002('userId, document, version');
+      }
+      const row = { id: randomUUID(), acceptedAt: new Date(), ...data };
+      this.legalAcceptances.push(row);
+      return row;
+    },
+    findMany: async ({ where }: any = {}) =>
+      this.legalAcceptances.filter((row) => matches(row, where)),
   };
 
   // Prisma lifecycle no-ops.
@@ -668,6 +1075,7 @@ export class InMemoryPrismaService {
     this.tradeOrders.length = 0;
     this.tradeOrderExecutions.length = 0;
     this.chartOrders.length = 0;
+    this.bracketGroups.length = 0;
     this.optionsAnalyticsSnapshots.length = 0;
     this.scheduledJobLeases.length = 0;
     this.brokerCredentials.length = 0;
@@ -675,6 +1083,11 @@ export class InMemoryPrismaService {
     this.brokerConnections.length = 0;
     this.deviceTokens.length = 0;
     this.pushDeliveries.length = 0;
+    this.webhookInboxRows.length = 0;
+    this.userEvents.length = 0;
+    this.discordSettingsRows.length = 0;
+    this.discordDeliveries.length = 0;
+    this.legalAcceptances.length = 0;
   }
 
   /** Test helper: flip the kill switch for a user. */

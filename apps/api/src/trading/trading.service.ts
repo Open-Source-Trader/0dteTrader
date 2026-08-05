@@ -69,6 +69,7 @@ export class TradingService {
     dto: OrderRequestDto,
     idempotencyKey: string,
     expectedMode?: TradingMode,
+    closeOnly = false,
   ): Promise<OrderResult> {
     const user = await this.assertTradingEnabled(userId, 'place', { order: dto });
     // Resolved once, here, and carried to the send: everything downstream
@@ -93,6 +94,7 @@ export class TradingService {
         userId,
         normalized,
         contractSymbol,
+        closeOnly,
       );
       const result = await timed(this.logger, 'trading.place.gateway', () =>
         this.gateway.placeOrder(userId, capped, idempotencyKey, mode, heldQuantity, contract),
@@ -378,6 +380,7 @@ export class TradingService {
     userId: string,
     order: OrderRequest,
     contractSymbol: string,
+    closeOnly: boolean,
   ): Promise<{ order: OrderRequest; heldQuantity: number | undefined }> {
     let held: Position | undefined;
     try {
@@ -385,6 +388,12 @@ export class TradingService {
         (position) => position.symbol === contractSymbol,
       );
     } catch (err) {
+      if (closeOnly) {
+        throw errors.unavailable(
+          'POSITIONS_UNAVAILABLE',
+          `Could not verify the ${contractSymbol} position — the close-only order was not sent`,
+        );
+      }
       this.logger.error(
         `could not read positions to size-check ${contractSymbol}; ` +
           `placing ${order.quantity} uncapped: ${(err as Error).message}`,
@@ -392,11 +401,27 @@ export class TradingService {
       return { order, heldQuantity: undefined };
     }
     const heldQuantity = held?.quantity ?? 0;
-    if (!held || held.quantity === 0) return { order, heldQuantity };
+    if (!held || held.quantity === 0) {
+      if (closeOnly) {
+        throw errors.conflict(
+          'CLOSE_ONLY_NO_POSITION',
+          `There is no ${contractSymbol} position left to close`,
+        );
+      }
+      return { order, heldQuantity };
+    }
 
     // Closing means trading against the sign of what is held.
     const closing = order.side === 'sell' ? held.quantity > 0 : held.quantity < 0;
-    if (!closing) return { order, heldQuantity };
+    if (!closing) {
+      if (closeOnly) {
+        throw errors.conflict(
+          'CLOSE_ONLY_WRONG_SIDE',
+          `${order.side.toUpperCase()} would increase or reverse the ${contractSymbol} position`,
+        );
+      }
+      return { order, heldQuantity };
+    }
 
     const closable = Math.abs(held.quantity);
     if (order.quantity <= closable) return { order, heldQuantity };

@@ -644,6 +644,34 @@ describe('TradingService', () => {
       // hand the gateway — it falls back to its own lookup.
       expect(place.mock.calls[0][4]).toBeUndefined();
     });
+
+    it('fails closed when an unattended close-only order cannot read positions', async () => {
+      jest.spyOn(gateway, 'getPositions').mockRejectedValue(new Error('broker down'));
+      const place = jest.spyOn(gateway, 'placeOrder');
+
+      await expect(
+        trading.place(
+          userId,
+          autoOtmCall({ side: 'sell', quantity: 3 }),
+          'idem-close-only-1',
+          'live',
+          true,
+        ),
+      ).rejects.toMatchObject({ code: 'POSITIONS_UNAVAILABLE' });
+
+      expect(place).not.toHaveBeenCalled();
+    });
+
+    it('fails closed when an unattended close-only order would open a position', async () => {
+      jest.spyOn(gateway, 'getPositions').mockResolvedValue([]);
+      const place = jest.spyOn(gateway, 'placeOrder');
+
+      await expect(
+        trading.place(userId, autoOtmCall({ side: 'sell' }), 'idem-close-only-2', 'live', true),
+      ).rejects.toMatchObject({ code: 'CLOSE_ONLY_NO_POSITION' });
+
+      expect(place).not.toHaveBeenCalled();
+    });
   });
 
   /**

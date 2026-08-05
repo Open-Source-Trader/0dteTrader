@@ -31,6 +31,9 @@ export class QuoteSocket extends Store<QuoteSocketState> {
   private quoteListeners = new Set<(quote: Quote) => void>();
   private chartOrderListeners = new Set<(order: ChartOrder) => void>();
   private reconnectListeners = new Set<() => void>();
+  private lastSequence = 0;
+  private readonly seenEventIds = new Set<string>();
+  private readonly seenEventOrder: string[] = [];
   /** Whether a connection has already been established once, so the next
    *  `connected` transition is a RE-connection with a gap to make up. */
   private hasConnected = false;
@@ -86,6 +89,9 @@ export class QuoteSocket extends Store<QuoteSocketState> {
     this.clearReconnectTimer();
     this.teardownConnection();
     this.set({ connectionState: 'disconnected' });
+    this.lastSequence = 0;
+    this.seenEventIds.clear();
+    this.seenEventOrder.length = 0;
   }
 
   /** Called when the page becomes visible again: reconnect if dropped. */
@@ -168,6 +174,7 @@ export class QuoteSocket extends Store<QuoteSocketState> {
         return;
       }
       url.searchParams.set('token', token);
+      if (this.lastSequence > 0) url.searchParams.set('cursor', String(this.lastSequence));
       const ws = new WebSocket(url.toString());
       this.ws = ws;
 
@@ -280,9 +287,11 @@ export class QuoteSocket extends Store<QuoteSocketState> {
         break;
       }
       case 'orderUpdate':
+        if (!this.acceptDurable(message.eventId, message.sequence)) break;
         this.orderUpdateListeners.forEach((listener) => listener(message.data));
         break;
       case 'chartOrder':
+        if (!this.acceptDurable(message.eventId, message.sequence)) break;
         this.chartOrderListeners.forEach((listener) => listener(message.data));
         break;
       case 'error':
@@ -291,5 +300,17 @@ export class QuoteSocket extends Store<QuoteSocketState> {
       default:
         break;
     }
+  }
+
+  private acceptDurable(eventId: string, sequence: number): boolean {
+    if (this.seenEventIds.has(eventId)) return false;
+    this.seenEventIds.add(eventId);
+    this.seenEventOrder.push(eventId);
+    if (this.seenEventOrder.length > 512) {
+      const removed = this.seenEventOrder.shift();
+      if (removed) this.seenEventIds.delete(removed);
+    }
+    this.lastSequence = Math.max(this.lastSequence, sequence);
+    return true;
   }
 }

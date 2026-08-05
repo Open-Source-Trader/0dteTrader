@@ -8,7 +8,11 @@ import { optionExpirations, optionSettlementAt } from '../broker/expiration-cale
 import { OrdersService } from '../trading/orders.service';
 import { TradingService } from '../trading/trading.service';
 import { ChartOrderEventsService } from './chart-order-events.service';
-import { ChartOrdersService, MAX_WORKING_CHART_ORDERS } from './chart-orders.service';
+import {
+  ChartOrdersService,
+  MAX_WORKING_CHART_ORDERS,
+  idempotencyKeyFor,
+} from './chart-orders.service';
 import { CreateChartOrderDto } from './dto/chart-order.dto';
 
 /**
@@ -78,6 +82,13 @@ describe('ChartOrdersService', () => {
    * restored afterwards because the stub builds its option chain around it.
    */
   async function triggerCrossed(user: string, order: ChartOrder, now?: Date) {
+    if (order.kind === 'target' || order.kind === 'stop') {
+      gateway.setPosition(
+        user,
+        order.contractSymbol,
+        order.side === 'sell' ? order.quantity : -order.quantity,
+      );
+    }
     const before = gateway.price;
     gateway.price =
       order.armPrice >= order.triggerPrice
@@ -444,6 +455,7 @@ describe('ChartOrdersService', () => {
       const rows = prisma.chartOrders.filter(
         (row: { ocoGroupId?: string }) => row.ocoGroupId === groupId,
       );
+      gateway.setPosition(userId, stop.contractSymbol, -stop.quantity);
       expect(rows.map((row: { id: string }) => row.id).sort()).toEqual([target.id, stop.id].sort());
 
       const now = new Date();
@@ -646,6 +658,68 @@ describe('ChartOrdersService', () => {
       expect(place).not.toHaveBeenCalled();
       expect(result.status).toBe('cancelled');
       expect((await service.byId(target.id))?.status).toBe('working');
+    });
+
+    it('recovers an expired fire lease from the accepted order audit without resubmitting', async () => {
+      const groupId = 'aaaaaaaa-2222-3333-4444-555555555555';
+      const target = await service.create(
+        userId,
+        draft({ kind: 'target', triggerPrice: 105, orderType: 'market', ocoGroupId: groupId }),
+      );
+      const stop = await service.create(
+        userId,
+        draft({ kind: 'stop', triggerPrice: 95, orderType: 'market', ocoGroupId: groupId }),
+      );
+      const now = new Date();
+      const placed = {
+        orderId: 'accepted-before-crash',
+        status: 'submitted',
+        contractSymbol: stop.contractSymbol,
+        side: stop.side,
+        quantity: stop.quantity,
+        orderType: stop.orderType,
+        timestamp: now.toISOString(),
+      };
+      Object.assign(
+        prisma.bracketGroups.find((group) => group.id === groupId),
+        {
+          status: 'pending_fire',
+          fireLegId: stop.id,
+          leaseOwnerId: 'dead-instance',
+          leaseExpiresAt: new Date(now.getTime() - 1),
+        },
+      );
+      Object.assign(
+        prisma.chartOrders.find((row) => row.id === stop.id),
+        {
+          status: 'pending_fire',
+          triggeredAt: new Date(now.getTime() - 31_000),
+        },
+      );
+      Object.assign(
+        prisma.chartOrders.find((row) => row.id === target.id),
+        {
+          status: 'cancelled',
+        },
+      );
+      await prisma.orderAudit.create({
+        data: {
+          userId,
+          idempotencyKey: idempotencyKeyFor(stop.id),
+          request: {},
+          response: placed,
+          status: 'submitted',
+        },
+      });
+      const brokerPlace = jest.spyOn(gateway, 'placeOrder');
+
+      expect(await service.recoverPendingBrackets(now)).toBe(1);
+
+      expect(brokerPlace).not.toHaveBeenCalled();
+      expect((await service.byId(stop.id))?.status).toBe('triggered');
+      expect((await service.byId(stop.id))?.brokerOrderId).toBe(placed.orderId);
+      expect((await service.byId(target.id))?.status).toBe('cancelled');
+      expect(prisma.bracketGroups.find((group) => group.id === groupId)?.status).toBe('fired');
     });
   });
 

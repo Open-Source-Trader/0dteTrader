@@ -297,12 +297,18 @@ export class AlpacaBrokerGateway implements BrokerGateway, MarketDataProvider {
       ...toOrderResult(placed),
       orderId: placed.client_order_id ?? clientOrderId,
     };
-    this.events.emit(userId, result);
-    this.startStatusPoll(userId, client, result);
+    this.events.emit(userId, result, mode, {
+      provider: 'alpaca',
+      accountId: 'default',
+      clientOrderId: result.orderId,
+      brokerOrderId: placed.id,
+    });
+    this.startStatusPoll(userId, client, result, mode, placed.id);
     return result;
   }
 
   async cancelOrder(userId: string, orderId: string): Promise<void> {
+    const mode = await this.tradingModeFor(userId);
     const client = await this.clientFor(userId);
     let ord;
     try {
@@ -315,7 +321,12 @@ export class AlpacaBrokerGateway implements BrokerGateway, MarketDataProvider {
     const target = toOrderResult(ord);
     await this.guard(() => client.trading.orders.deleteOrderByOrderID({ orderId: ord.id! }));
     this.stopStatusPoll(userId, orderId);
-    this.events.emit(userId, { ...target, status: 'cancelled' });
+    this.events.emit(userId, { ...target, status: 'cancelled' }, mode, {
+      provider: 'alpaca',
+      accountId: 'default',
+      clientOrderId: orderId,
+      brokerOrderId: ord.id,
+    });
   }
 
   async getPositions(userId: string): Promise<Position[]> {
@@ -424,7 +435,13 @@ export class AlpacaBrokerGateway implements BrokerGateway, MarketDataProvider {
     };
   }
 
-  private startStatusPoll(userId: string, client: AlpacaClientLike, result: OrderResult): void {
+  private startStatusPoll(
+    userId: string,
+    client: AlpacaClientLike,
+    result: OrderResult,
+    environment: TradingMode,
+    brokerOrderId?: string,
+  ): void {
     const key = `${userId}:${result.orderId}`;
     let attempts = 0;
     const tick = async (): Promise<void> => {
@@ -440,15 +457,25 @@ export class AlpacaBrokerGateway implements BrokerGateway, MarketDataProvider {
           detail.status === 'cancelled' ||
           detail.status === 'rejected'
         ) {
-          this.events.emit(userId, {
-            ...result,
-            status: detail.status,
-            filledPrice: detail.filledPrice ?? result.filledPrice,
-            // The placement-time result reports filledQuantity 0; without the
-            // poll's value a poll-detected fill would never be accounted.
-            filledQuantity: detail.filledQuantity ?? result.filledQuantity,
-            filledAt: detail.filledAt,
-          });
+          this.events.emit(
+            userId,
+            {
+              ...result,
+              status: detail.status,
+              filledPrice: detail.filledPrice ?? result.filledPrice,
+              // The placement-time result reports filledQuantity 0; without the
+              // poll's value a poll-detected fill would never be accounted.
+              filledQuantity: detail.filledQuantity ?? result.filledQuantity,
+              filledAt: detail.filledAt,
+            },
+            environment,
+            {
+              provider: 'alpaca',
+              accountId: 'default',
+              clientOrderId: result.orderId,
+              brokerOrderId: detail.orderId === result.orderId ? brokerOrderId : detail.orderId,
+            },
+          );
           return;
         }
       } catch (err) {

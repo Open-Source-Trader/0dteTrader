@@ -1,5 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { BrokerProvider, CredentialProvider, TradingMode } from '@0dtetrader/shared-types';
+import type {
+  BrokerProvider,
+  CredentialProvider,
+  DiscordNotificationSettings,
+  LegalAcceptanceStatus,
+  LegalDocument,
+  LegalDocumentSlug,
+  TradingMode,
+} from '@0dtetrader/shared-types';
 import { useContainer } from '../../app/container';
 import { useStore } from '../../core/observable';
 import { AlertDialog } from '../../design/components/AlertDialog';
@@ -102,6 +110,201 @@ function AccountSection() {
       <button className="grouped-row button-row" onClick={() => void store.load()}>
         Retry
       </button>
+    </>
+  );
+}
+
+function DiscordAndLegalSection({ onAccountDeleted }: { onAccountDeleted: () => void }) {
+  const container = useContainer();
+  const store = useProfileStore();
+  const profile = useStore(store);
+  const [discord, setDiscord] = useState<DiscordNotificationSettings | null>(null);
+  const [webhookUrl, setWebhookUrl] = useState('');
+  const [legal, setLegal] = useState<LegalAcceptanceStatus | null>(null);
+  const [document, setDocument] = useState<LegalDocument | null>(null);
+  const [deleteEmail, setDeleteEmail] = useState('');
+  const [message, setMessage] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    void Promise.all([container.apiClient.discordSettings(), container.apiClient.legalStatus()])
+      .then(([discordSettings, legalStatus]) => {
+        setDiscord(discordSettings);
+        setLegal(legalStatus);
+      })
+      .catch((error) => setMessage(error instanceof Error ? error.message : String(error)));
+  }, [container]);
+
+  const openDocument = async (slug: LegalDocumentSlug) => {
+    setBusy(true);
+    try {
+      setDocument(await container.apiClient.legalDocument(slug));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <>
+      <div className="grouped-section">
+        <div className="section-header">Discord</div>
+        <div className="section-card">
+          <label className="grouped-row">
+            <span>Webhook URL</span>
+            <input
+              type="password"
+              value={webhookUrl}
+              placeholder={discord?.maskedWebhookUrl ?? 'https://discord.com/api/webhooks/...'}
+              onChange={(event) => setWebhookUrl(event.target.value)}
+            />
+          </label>
+          <div className="grouped-row">
+            <span>Post filled orders</span>
+            <span style={{ marginLeft: 'auto' }}>
+              <Toggle
+                on={discord?.enabled ?? false}
+                onChange={(enabled) => setDiscord((current) => current && { ...current, enabled })}
+              />
+            </span>
+          </div>
+          <div className="grouped-row">
+            <span>Include realized P/L</span>
+            <span style={{ marginLeft: 'auto' }}>
+              <Toggle
+                on={discord?.includePnl ?? false}
+                onChange={(includePnl) =>
+                  setDiscord((current) => current && { ...current, includePnl })
+                }
+              />
+            </span>
+          </div>
+          <button
+            className="grouped-row button-row"
+            disabled={!discord || busy}
+            onClick={() => {
+              if (!discord) return;
+              setBusy(true);
+              void container.apiClient
+                .updateDiscordSettings({
+                  ...(webhookUrl.trim() ? { webhookUrl: webhookUrl.trim() } : {}),
+                  enabled: discord.enabled,
+                  includePnl: discord.includePnl,
+                })
+                .then((value) => {
+                  setDiscord(value);
+                  setWebhookUrl('');
+                  setMessage('Discord settings saved.');
+                })
+                .catch((error) =>
+                  setMessage(error instanceof Error ? error.message : String(error)),
+                )
+                .finally(() => setBusy(false));
+            }}
+          >
+            Save Discord Settings
+          </button>
+          <button
+            className="grouped-row button-row"
+            disabled={!discord?.configured || busy}
+            onClick={() => {
+              setBusy(true);
+              void container.apiClient
+                .testDiscord()
+                .then(() => setMessage('Test notification sent.'))
+                .catch((error) =>
+                  setMessage(error instanceof Error ? error.message : String(error)),
+                )
+                .finally(() => setBusy(false));
+            }}
+          >
+            Send Test Notification
+          </button>
+        </div>
+      </div>
+
+      <div className="grouped-section">
+        <div className="section-header">About & Legal</div>
+        <div className="section-card">
+          {legal?.documents.map((item) => (
+            <div className="grouped-row" key={item.slug}>
+              <button className="inline-button" onClick={() => void openDocument(item.slug)}>
+                {item.title}
+              </button>
+              {item.requiresAcceptance &&
+                (item.accepted ? (
+                  <span className="row-value positive">Accepted</span>
+                ) : (
+                  <button
+                    className="inline-button row-value"
+                    onClick={() => void openDocument(item.slug)}
+                  >
+                    Review & accept
+                  </button>
+                ))}
+            </div>
+          ))}
+          {document ? (
+            <div className="grouped-row legal-document" role="region">
+              <div>
+                <strong>{document.title}</strong>
+                <div style={{ whiteSpace: 'pre-wrap', marginTop: 8 }}>{document.markdown}</div>
+                {document.requiresAcceptance &&
+                !legal?.documents.find((item) => item.slug === document.slug)?.accepted ? (
+                  <button
+                    className="inline-button"
+                    onClick={() =>
+                      void container.apiClient
+                        .acceptLegal(document.slug as 'terms' | 'risk', document.version)
+                        .then((value) => {
+                          setLegal(value);
+                          setMessage(`${document.title} accepted.`);
+                        })
+                    }
+                  >
+                    Accept {document.title}
+                  </button>
+                ) : null}
+                <button className="inline-button" onClick={() => setDocument(null)}>
+                  Close
+                </button>
+              </div>
+            </div>
+          ) : null}
+        </div>
+      </div>
+
+      <div className="grouped-section">
+        <div className="section-header">Delete Account</div>
+        <div className="section-card">
+          <label className="grouped-row">
+            <span>Confirm email</span>
+            <input
+              type="email"
+              value={deleteEmail}
+              placeholder={profile.me?.email ?? 'you@example.com'}
+              onChange={(event) => setDeleteEmail(event.target.value)}
+            />
+          </label>
+          <button
+            className="grouped-row destructive"
+            disabled={busy || deleteEmail.trim() === ''}
+            onClick={() => {
+              if (!window.confirm('Permanently delete this account and all stored data?')) return;
+              setBusy(true);
+              void container.apiClient
+                .deleteAccount(deleteEmail)
+                .then(onAccountDeleted)
+                .catch((error) =>
+                  setMessage(error instanceof Error ? error.message : String(error)),
+                )
+                .finally(() => setBusy(false));
+            }}
+          >
+            Permanently Delete Account
+          </button>
+        </div>
+        {message ? <div className="section-footer">{message}</div> : null}
+      </div>
     </>
   );
 }
@@ -853,6 +1056,11 @@ function ProfileViewContent({
 
         {/* Security section intentionally omitted: Face ID / AppLockManager is
               iOS-only (ProfileView.swift securitySection). */}
+        <DiscordAndLegalSection
+          onAccountDeleted={() => {
+            void onLogout().then(onDismiss);
+          }}
+        />
         {/* Session */}
         <div className="grouped-section">
           <div className="section-card">

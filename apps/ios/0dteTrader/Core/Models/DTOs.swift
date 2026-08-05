@@ -312,6 +312,65 @@ struct DeviceRegistrationDTO: Encodable, Equatable, Sendable {
     let platform: String
 }
 
+// MARK: - Discord and legal/compliance
+
+struct DiscordNotificationSettingsDTO: Codable, Equatable, Sendable {
+    let configured: Bool
+    let maskedWebhookUrl: String?
+    var enabled: Bool
+    var includePnl: Bool
+}
+
+struct DiscordNotificationSettingsUpdateDTO: Encodable, Equatable, Sendable {
+    let webhookUrl: String?
+    let enabled: Bool
+    let includePnl: Bool
+}
+
+enum LegalDocumentSlug: String, Codable, Equatable, Sendable, Identifiable {
+    case about
+    case terms
+    case privacy
+    case risk
+    case openSourceLicenses = "open-source-licenses"
+
+    var id: String { rawValue }
+}
+
+struct LegalDocumentSummaryDTO: Decodable, Equatable, Sendable, Identifiable {
+    let slug: LegalDocumentSlug
+    let title: String
+    let version: String
+    let publicUrl: String
+    let requiresAcceptance: Bool
+    let acceptedAt: String?
+    let accepted: Bool?
+
+    var id: String { slug.rawValue }
+}
+
+struct LegalDocumentDTO: Decodable, Equatable, Sendable {
+    let slug: LegalDocumentSlug
+    let title: String
+    let version: String
+    let publicUrl: String
+    let requiresAcceptance: Bool
+    let markdown: String
+}
+
+struct LegalAcceptanceStatusDTO: Decodable, Equatable, Sendable {
+    let documents: [LegalDocumentSummaryDTO]
+}
+
+struct LegalAcceptanceRequestDTO: Encodable, Equatable, Sendable {
+    let document: String
+    let version: String
+}
+
+struct DeleteAccountRequestDTO: Encodable, Equatable, Sendable {
+    let confirmEmail: String
+}
+
 // MARK: - Chart trading
 
 struct ChartOrderDTO: Decodable, Equatable, Sendable {
@@ -395,10 +454,14 @@ struct SocketQuoteMessage: Decodable, Sendable {
 
 struct SocketChartOrderMessage: Decodable, Sendable {
     let data: ChartOrderDTO
+    let eventId: String?
+    let sequence: Int?
 }
 
 struct SocketOrderUpdateMessage: Decodable, Sendable {
     let data: OrderResultDTO
+    let eventId: String?
+    let sequence: Int?
 }
 
 struct SocketErrorMessage: Decodable, Sendable {

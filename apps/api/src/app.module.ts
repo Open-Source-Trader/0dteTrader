@@ -17,6 +17,7 @@ import { OptionsAnalyticsModule } from './options-analytics/options-analytics.mo
 import { PrismaModule } from './prisma/prisma.module';
 import { TradingModule } from './trading/trading.module';
 import { UsersModule } from './users/users.module';
+import { LegalModule } from './legal/legal.module';
 
 @Module({
   imports: [
@@ -46,6 +47,7 @@ import { UsersModule } from './users/users.module';
     ChartOrdersModule,
     NotificationsModule,
     OptionsAnalyticsModule,
+    LegalModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: AppThrottlerGuard },

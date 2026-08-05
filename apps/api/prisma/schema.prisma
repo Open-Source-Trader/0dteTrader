@@ -20,26 +20,32 @@ datasource db {
 }
 
 model User {
-  id              String             @id @default(uuid()) @db.Uuid
-  email           String             @unique
-  passwordHash    String
-  tradingDisabled Boolean            @default(false)
-  tradingMode     String             @default("live")
+  id                String                       @id @default(uuid()) @db.Uuid
+  email             String                       @unique
+  passwordHash      String
+  tradingDisabled   Boolean                      @default(false)
+  tradingMode       String                       @default("live")
   /// Broker the user trades through ('webull' | 'alpaca'); default webull.
-  tradingProvider String             @default("webull")
-  createdAt       DateTime           @default(now())
-  updatedAt       DateTime           @updatedAt
-  credentials     WebullCredential[]
-  refreshTokens   RefreshToken[]
-  orderAudits     OrderAudit[]
-  webullApiTokens WebullApiToken[]
+  tradingProvider   String                       @default("webull")
+  createdAt         DateTime                     @default(now())
+  updatedAt         DateTime                     @updatedAt
+  credentials       WebullCredential[]
+  refreshTokens     RefreshToken[]
+  orderAudits       OrderAudit[]
+  webullApiTokens   WebullApiToken[]
   brokerCredentials BrokerCredential[]
   brokerApiTokens   BrokerApiToken[]
   brokerConnections BrokerConnection[]
-  tradeOrders     TradeOrder[]
-  chartOrders     ChartOrder[]
-  deviceTokens    DeviceToken[]
-  pushDeliveries  PushDelivery[]
+  tradeOrders       TradeOrder[]
+  chartOrders       ChartOrder[]
+  bracketGroups     BracketGroup[]
+  deviceTokens      DeviceToken[]
+  pushDeliveries    PushDelivery[]
+  webhookInbox      WebhookInbox[]
+  userEvents        UserEvent[]
+  discordSettings   DiscordNotificationSettings?
+  discordDeliveries DiscordDelivery[]
+  legalAcceptances  LegalAcceptance[]
 
   @@map("users")
 }
@@ -87,14 +93,14 @@ model WebullApiToken {
 // the provider-specific secret JSON ({appKey,appSecret,accountId} for Webull;
 // {apiKey,apiSecret} for Alpaca). One row per (user, provider, environment).
 model BrokerCredential {
-  id          String   @id @default(uuid()) @db.Uuid
-  userId      String   @db.Uuid
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  provider    String   @default("webull")
-  environment String   @default("live")
-  encSecrets  Bytes
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id                String   @id @default(uuid()) @db.Uuid
+  userId            String   @db.Uuid
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider          String   @default("webull")
+  environment       String   @default("live")
+  encSecrets        Bytes
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
   /// SnapTrade Personal client ID, stored in plaintext (not a secret on its
   /// own — the consumerKey is) so the webhook receiver can resolve which app
   /// user a `clientId` in an inbound webhook payload belongs to without
@@ -136,17 +142,17 @@ model BrokerApiToken {
 // picker. The `userId` FK has `onDelete: Cascade` so removing a user removes
 // all their connections.
 model BrokerConnection {
-  id                String    @id @default(uuid()) @db.Uuid
-  userId            String    @db.Uuid
-  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  provider          String    @default("snaptrade")
-  environment       String    @default("live")
+  id                String   @id @default(uuid()) @db.Uuid
+  userId            String   @db.Uuid
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider          String   @default("snaptrade")
+  environment       String   @default("live")
   connectionId      String
   accountIds        String[]
   selectedAccountId String?
-  status            String    @default("active")
-  createdAt         DateTime  @default(now())
-  updatedAt         DateTime  @updatedAt
+  status            String   @default("active")
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 
   @@unique([userId, provider, environment])
   @@map("broker_connections")
@@ -168,41 +174,49 @@ model RefreshToken {
 // One row per broker order, kept current as order-update events arrive
 // (fills land asynchronously). Feeds the trade-history endpoint.
 model TradeOrder {
-  id             String   @id // broker orderId
-  userId         String   @db.Uuid
-  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  contractSymbol String
-  assetClass     String
+  // Internal identity. Broker and client order ids are only unique inside a
+  // user/provider/environment/account scope and therefore cannot be the PK.
+  id               String    @id @default(uuid()) @db.Uuid
+  userId           String    @db.Uuid
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider         String    @default("webull")
+  accountId        String    @default("default")
+  brokerOrderId    String?
+  clientOrderId    String?
+  contractSymbol   String
+  assetClass       String
   // "live" | "practice" — tradingMode in effect when the order was recorded.
-  environment    String   @default("live")
-  side           String
-  quantity       Float
+  environment      String    @default("live")
+  side             String
+  quantity         Float
   // Broker-reported executed quantity (partial fills); null when the broker
   // gives only the order quantity.
-  filledQuantity Float?
-  orderType      String
-  limitPrice     Float?
-  filledPrice    Float?
+  filledQuantity   Float?
+  orderType        String
+  limitPrice       Float?
+  filledPrice      Float?
   // When the order's FIRST execution happened: the broker's execution
   // timestamp when reported, else when the fill was observed. Anchors
   // Position.openedAt. Null for rows recorded before this column existed —
   // readers fall back to placedAt.
-  filledAt       DateTime?
+  filledAt         DateTime?
   // Cumulative executed quantity RECORDED so far — the watermark concurrent
   // recorders (webhook + poller, across API instances) claim fill increments
   // against, advanced only by compare-and-set in OrdersService. Deliberately
   // independent of `status`: a stale status regression must never reset it.
-  executedQuantity Float  @default(0)
+  executedQuantity Float     @default(0)
   // Price of the UNDERLYING when the order was placed. Feeds the chart's entry
   // line, which is drawn on the underlying's scale, not the contract's. Null
   // for orders placed before this was recorded.
-  underlyingPrice Float?
-  status         String
-  placedAt       DateTime
-  updatedAt      DateTime @updatedAt
+  underlyingPrice  Float?
+  status           String
+  placedAt         DateTime
+  updatedAt        DateTime  @updatedAt
 
   executions TradeOrderExecution[]
 
+  @@unique([userId, provider, environment, accountId, brokerOrderId])
+  @@unique([userId, provider, environment, accountId, clientOrderId])
   @@index([userId, placedAt])
   @@map("trade_orders")
 }
@@ -223,7 +237,7 @@ model TradeOrder {
 // either shape.
 model TradeOrderExecution {
   id         String     @id @default(uuid()) @db.Uuid
-  orderId    String
+  orderId    String     @db.Uuid
   order      TradeOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
   // The order's cumulative executed quantity as of this observation.
   // Null only on rows predating the column; Postgres treats unique-index
@@ -250,11 +264,11 @@ model TradeOrderExecution {
 // the server-side watcher are armed; they converge because the fire uses a
 // deterministic idempotency key derived from `id`.
 model ChartOrder {
-  id             String    @id @default(uuid()) @db.Uuid
-  userId         String    @db.Uuid
-  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id             String        @id @default(uuid()) @db.Uuid
+  userId         String        @db.Uuid
+  user           User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   // "live" | "practice" — a line armed in practice must never fire against live.
-  environment    String    @default("live")
+  environment    String        @default("live")
   // Chart symbol whose price arms the trigger (SPY), not the contract.
   underlying     String
   triggerPrice   Float
@@ -274,22 +288,51 @@ model ChartOrder {
   strike         Float
   contractSymbol String
   // Shared by the target and stop of one position; firing either cancels the other.
-  ocoGroupId     String?   @db.Uuid
+  ocoGroupId     String?       @db.Uuid
+  bracketGroup   BracketGroup? @relation(fields: [ocoGroupId], references: [id], onDelete: Cascade)
   // "working" | "triggered" | "filled" | "cancelled" | "failed" | "expired"
-  status         String    @default("working")
+  status         String        @default("working")
   // The contract's expiration close; past this the line expires unfilled.
   expiresAt      DateTime
   triggeredAt    DateTime?
   brokerOrderId  String?
   lastError      String?
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
 
+  @@unique([ocoGroupId, kind])
   @@index([userId, status])
   // The watcher's sweep: every working line, grouped by what it must quote.
   @@index([status, environment, underlying])
   @@index([ocoGroupId])
   @@map("chart_orders")
+}
+
+// Durable identity and state machine for an OCO bracket. The group is claimed
+// before either leg reaches the broker; a lease lets another instance recover
+// a process death around placement by consulting the idempotent order audit.
+model BracketGroup {
+  id                String       @id @db.Uuid
+  userId            String       @db.Uuid
+  user              User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider          String
+  environment       String
+  accountId         String
+  contractSymbol    String
+  closeSide         String
+  protectedQuantity Int
+  status            String       @default("working")
+  fireLegId         String?      @db.Uuid
+  leaseOwnerId      String?
+  leaseExpiresAt    DateTime?
+  lastError         String?
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+  orders            ChartOrder[]
+
+  @@index([status, leaseExpiresAt])
+  @@index([userId, environment, status])
+  @@map("bracket_groups")
 }
 
 model OrderAudit {
@@ -346,22 +389,122 @@ model DeviceToken {
   @@map("device_tokens")
 }
 
-// One row per push already claimed for a (user, event). Written BEFORE the
-// APNs send: the insert IS the claim, and a unique violation means another
-// API instance — or an earlier delivery of the same broker event — already
-// pushed it. `key` is built only from fields every emitter reports
-// identically (the order's id and its terminal status), never from the
-// price, quantity or timestamps, which differ between a poller's
-// placement-derived view and a webhook's and would defeat the dedupe.
+// One row per device and notifiable event. Delivery is leased so a process
+// death between claim and APNs send is recoverable, and one failing device can
+// retry without re-alerting siblings that already received the event.
 model PushDelivery {
-  id        String   @id @default(uuid()) @db.Uuid
+  id             String    @id @default(uuid()) @db.Uuid
+  userId         String    @db.Uuid
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  key            String
+  deviceToken    String
+  environment    String
+  title          String
+  body           String
+  status         String    @default("pending")
+  attempts       Int       @default(0)
+  nextAttemptAt  DateTime  @default(now())
+  leaseOwnerId   String?
+  leaseExpiresAt DateTime?
+  lastError      String?
+  deliveredAt    DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@unique([userId, key, deviceToken])
+  @@index([status, nextAttemptAt, leaseExpiresAt])
+  @@index([createdAt])
+  @@map("push_deliveries")
+}
+
+// Provider webhook inbox. HTTP acknowledgement happens only after this row
+// commits; workers then claim rows with compare-and-set leases.
+model WebhookInbox {
+  id             String    @id @default(uuid()) @db.Uuid
+  userId         String    @db.Uuid
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider       String
+  webhookId      String
+  environment    String
+  accountId      String?
+  eventType      String
+  payload        Json
+  status         String    @default("pending")
+  attempts       Int       @default(0)
+  nextAttemptAt  DateTime  @default(now())
+  leaseOwnerId   String?
+  leaseExpiresAt DateTime?
+  lastError      String?
+  failureStage   String?
+  processedAt    DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@unique([provider, webhookId])
+  @@index([status, nextAttemptAt, leaseExpiresAt])
+  @@map("webhook_inbox")
+}
+
+// Durable, resumable application events. `ordinal` is the shared polling
+// cursor; `sequence` is monotone inside one user's stream and is what clients
+// persist across reconnects.
+model UserEvent {
+  ordinal   BigInt   @id @default(autoincrement())
+  id        String   @unique @default(uuid()) @db.Uuid
   userId    String   @db.Uuid
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  key       String
+  sequence  Int
+  dedupeKey String?
+  type      String
+  payload   Json
   createdAt DateTime @default(now())
 
+  @@unique([userId, sequence])
+  @@unique([userId, dedupeKey])
+  @@index([userId, sequence])
+  @@map("user_events")
+}
+
+model DiscordNotificationSettings {
+  userId        String   @id @db.Uuid
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  encWebhookUrl Bytes?
+  enabled       Boolean  @default(false)
+  includePnl    Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@map("discord_notification_settings")
+}
+
+model DiscordDelivery {
+  id          String    @id @default(uuid()) @db.Uuid
+  userId      String    @db.Uuid
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  key         String
+  status      String
+  attempts    Int       @default(0)
+  lastError   String?
+  deliveredAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
   @@unique([userId, key])
-  @@map("push_deliveries")
+  @@index([createdAt])
+  @@map("discord_deliveries")
+}
+
+model LegalAcceptance {
+  id         String   @id @default(uuid()) @db.Uuid
+  userId     String   @db.Uuid
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  document   String
+  version    String
+  acceptedAt DateTime @default(now())
+
+  @@unique([userId, document, version])
+  @@index([userId, document])
+  @@map("legal_acceptances")
 }
 
 model ScheduledJobLease {

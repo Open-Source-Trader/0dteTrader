@@ -85,6 +85,11 @@ final class ProfileViewModel: ObservableObject {
     /// runs the authorization flow and a denial has to revert the switch.
     @Published var pushNotificationsEnabled: Bool
 
+    @Published private(set) var discordSettings: DiscordNotificationSettingsDTO?
+    @Published private(set) var legalStatus: LegalAcceptanceStatusDTO?
+    @Published private(set) var selectedLegalDocument: LegalDocumentDTO?
+    @Published private(set) var isComplianceBusy = false
+
     private let apiClient: APIClient
     private let settingsStore: SettingsStore
     private let quoteSocket: QuoteSocketClient
@@ -276,6 +281,92 @@ final class ProfileViewModel: ObservableObject {
         // Push teardown lives in RootView's signOut(), which every sign-out
         // route — this one included — funnels through.
         await onLogout()
+    }
+
+    func loadCompliance() async {
+        guard !isComplianceBusy else { return }
+        isComplianceBusy = true
+        defer { isComplianceBusy = false }
+        do {
+            async let discord = apiClient.discordSettings()
+            async let legal = apiClient.legalStatus()
+            discordSettings = try await discord
+            legalStatus = try await legal
+        } catch {
+            setError(error)
+        }
+    }
+
+    func saveDiscord(webhookUrl: String, enabled: Bool, includePnl: Bool) async {
+        guard !isComplianceBusy else { return }
+        isComplianceBusy = true
+        defer { isComplianceBusy = false }
+        do {
+            discordSettings = try await apiClient.updateDiscordSettings(
+                DiscordNotificationSettingsUpdateDTO(
+                    webhookUrl: webhookUrl.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        ? nil
+                        : webhookUrl.trimmingCharacters(in: .whitespacesAndNewlines),
+                    enabled: enabled,
+                    includePnl: includePnl
+                )
+            )
+            successMessage = "Discord settings saved."
+        } catch {
+            setError(error)
+        }
+    }
+
+    func testDiscord() async {
+        guard !isComplianceBusy else { return }
+        isComplianceBusy = true
+        defer { isComplianceBusy = false }
+        do {
+            try await apiClient.testDiscord()
+            successMessage = "Test notification sent."
+        } catch {
+            setError(error)
+        }
+    }
+
+    func showLegalDocument(_ slug: LegalDocumentSlug) async {
+        guard !isComplianceBusy else { return }
+        isComplianceBusy = true
+        defer { isComplianceBusy = false }
+        do {
+            selectedLegalDocument = try await apiClient.legalDocument(slug)
+        } catch {
+            setError(error)
+        }
+    }
+
+    func closeLegalDocument() {
+        selectedLegalDocument = nil
+    }
+
+    func acceptLegal(_ document: LegalDocumentDTO) async {
+        guard document.slug == .terms || document.slug == .risk else { return }
+        do {
+            legalStatus = try await apiClient.acceptLegal(
+                document: document.slug,
+                version: document.version
+            )
+            successMessage = "\(document.title) accepted."
+        } catch {
+            setError(error)
+        }
+    }
+
+    func deleteAccount(confirmEmail: String) async {
+        guard !isComplianceBusy else { return }
+        isComplianceBusy = true
+        defer { isComplianceBusy = false }
+        do {
+            try await apiClient.deleteAccount(confirmEmail: confirmEmail)
+            await onLogout()
+        } catch {
+            setError(error)
+        }
     }
 
     // MARK: - Alpaca credentials (generic broker-credentials endpoint)

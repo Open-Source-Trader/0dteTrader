@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { Inject, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { ChartOrder as ChartOrderRow } from '@prisma/client';
@@ -15,7 +16,7 @@ import {
 import { BROKER_GATEWAY, BrokerGateway } from '../broker/broker-gateway.interface';
 import { findExplicitOption, pickExpiration } from '../broker/contract-resolution';
 import { optionSettlementAt } from '../broker/expiration-calendar';
-import { ApiException, errors } from '../common/api-exception';
+import { ApiException, errors, isUniqueViolation } from '../common/api-exception';
 import { BrokerError } from '../common/broker-error';
 import { PrismaService } from '../prisma/prisma.service';
 import { OrderRequestDto } from '../trading/dto/order-request.dto';
@@ -49,6 +50,8 @@ const TERMINAL_RETENTION_MS = 60 * 60_000;
  * sweep would cancel the bracket a beat before the position appears.
  */
 const ORPHAN_GRACE_MS = 60_000;
+const GROUP_FIRE_LEASE_MS = 30_000;
+const PENDING_AUDIT_TTL_MS = 2 * 60_000;
 
 export function toChartOrder(row: ChartOrderRow): ChartOrder {
   return {
@@ -83,6 +86,8 @@ export function toChartOrder(row: ChartOrderRow): ChartOrder {
  */
 @Injectable()
 export class ChartOrdersService {
+  private readonly fireOwnerId = randomUUID();
+
   constructor(
     private readonly prisma: PrismaService,
     @Inject(BROKER_GATEWAY) private readonly gateway: BrokerGateway,
@@ -140,28 +145,54 @@ export class ChartOrdersService {
     }
 
     const armPrice = await this.armPriceFor(userId, dto.underlying, dto.triggerPrice);
-    if (dto.ocoGroupId) await this.assertGroupJoinable(userId, dto.ocoGroupId, dto.kind);
+    if (dto.ocoGroupId) {
+      await this.ensureBracketGroup(userId, environment, dto, contract.symbol, dto.ocoGroupId);
+    }
 
-    const row = await this.prisma.chartOrder.create({
-      data: {
-        userId,
-        environment,
-        underlying: dto.underlying.toUpperCase(),
-        triggerPrice: dto.triggerPrice,
-        armPrice,
-        side: dto.side,
-        quantity: dto.quantity,
-        orderType: dto.orderType,
-        kind: dto.kind,
-        optionType: dto.optionType,
-        expiration: contract.expiration,
-        strike: contract.strike,
-        contractSymbol: contract.symbol,
-        ocoGroupId: dto.ocoGroupId ?? null,
-        status: 'working',
-        expiresAt,
-      },
-    });
+    let row: ChartOrderRow;
+    try {
+      row = await this.prisma.chartOrder.create({
+        data: {
+          userId,
+          environment,
+          underlying: dto.underlying.toUpperCase(),
+          triggerPrice: dto.triggerPrice,
+          armPrice,
+          side: dto.side,
+          quantity: dto.quantity,
+          orderType: dto.orderType,
+          kind: dto.kind,
+          optionType: dto.optionType,
+          expiration: contract.expiration,
+          strike: contract.strike,
+          contractSymbol: contract.symbol,
+          ocoGroupId: dto.ocoGroupId ?? null,
+          status: 'working',
+          expiresAt,
+        },
+      });
+    } catch (error) {
+      if (isUniqueViolation(error) && dto.ocoGroupId) {
+        throw errors.conflict(
+          'OCO_GROUP_DUPLICATE_KIND',
+          `That bracket already has a ${dto.kind} — move it instead of adding another`,
+        );
+      }
+      throw error;
+    }
+    // Close the phantom-insert window: a concurrent fire may have claimed the
+    // group after our pre-insert check. Such a late leg is retired immediately
+    // and never becomes another close order.
+    if (dto.ocoGroupId) {
+      const group = await this.prisma.bracketGroup.findUnique({ where: { id: dto.ocoGroupId } });
+      if (!group || group.status !== 'working') {
+        await this.prisma.chartOrder.updateMany({
+          where: { id: row.id, status: 'working' },
+          data: { status: 'cancelled' },
+        });
+        throw errors.conflict('OCO_GROUP_CLOSED', 'That bracket has already fired');
+      }
+    }
     return toChartOrder(row);
   }
 
@@ -190,7 +221,23 @@ export class ChartOrdersService {
       data.triggerPrice = dto.triggerPrice;
       data.armPrice = await this.armPriceFor(userId, existing.underlying, dto.triggerPrice);
     }
-    if (dto.quantity !== undefined) data.quantity = dto.quantity;
+    if (dto.quantity !== undefined) {
+      if (existing.ocoGroupId) {
+        const resized = await this.prisma.bracketGroup.updateMany({
+          where: { id: existing.ocoGroupId, userId, status: 'working' },
+          data: { protectedQuantity: dto.quantity },
+        });
+        if (resized.count === 0) {
+          throw errors.conflict('OCO_GROUP_CLOSED', 'That bracket is already firing');
+        }
+        await this.prisma.chartOrder.updateMany({
+          where: { ocoGroupId: existing.ocoGroupId, userId, status: 'working' },
+          data: { quantity: dto.quantity },
+        });
+      } else {
+        data.quantity = dto.quantity;
+      }
+    }
     if (dto.orderType !== undefined) data.orderType = dto.orderType;
 
     // A patch that changes nothing must not write. `updatedAt` is load-bearing:
@@ -364,6 +411,7 @@ export class ChartOrdersService {
       );
       // Nothing reached the broker, so the bracket must survive intact.
       await this.restoreRetired(row.userId, claim.retired);
+      if (row.ocoGroupId) await this.restoreGroupClaim(row.ocoGroupId);
       return unclaimed;
     }
 
@@ -380,6 +428,16 @@ export class ChartOrdersService {
       // `cancelled`, which reads as "the other leg filled". Each one retires on
       // its own `expiresAt` via the watcher's expiry sweep.
       await this.restoreRetired(row.userId, claim.retired);
+      if (row.ocoGroupId) {
+        await this.prisma.bracketGroup.updateMany({
+          where: { id: row.ocoGroupId, status: 'pending_fire', fireLegId: row.id },
+          data: {
+            status: 'expired',
+            leaseOwnerId: null,
+            leaseExpiresAt: null,
+          },
+        });
+      }
       this.events.emit(row.userId, expired);
       return expired;
     }
@@ -418,6 +476,7 @@ export class ChartOrdersService {
         request,
         idempotencyKeyFor(row.id),
         row.environment as TradingMode,
+        fresh.kind === 'target' || fresh.kind === 'stop',
       );
     } catch (err) {
       // The other caller's submission for this same line is still in flight.
@@ -437,6 +496,18 @@ export class ChartOrdersService {
       // re-arm the siblings this claim retired rather than leaving the position
       // with neither a target nor a stop.
       await this.restoreRetired(row.userId, claim.retired);
+      if (row.ocoGroupId) {
+        await this.prisma.bracketGroup.updateMany({
+          where: { id: row.ocoGroupId, leaseOwnerId: this.fireOwnerId, status: 'pending_fire' },
+          data: {
+            status: 'working',
+            fireLegId: null,
+            leaseOwnerId: null,
+            leaseExpiresAt: null,
+            lastError: message.slice(0, 500),
+          },
+        });
+      }
       this.events.emit(row.userId, failed);
       return failed;
     }
@@ -451,7 +522,7 @@ export class ChartOrdersService {
       updated = toChartOrder(
         await this.prisma.chartOrder.update({
           where: { id: row.id },
-          data: { brokerOrderId: placed.orderId },
+          data: { status: 'triggered', brokerOrderId: placed.orderId },
         }),
       );
     } catch {
@@ -463,6 +534,19 @@ export class ChartOrdersService {
         triggeredAt: now.toISOString(),
         brokerOrderId: placed.orderId,
       };
+    }
+    if (row.ocoGroupId) {
+      await this.prisma.bracketGroup
+        .updateMany({
+          where: { id: row.ocoGroupId, fireLegId: row.id, status: 'pending_fire' },
+          data: {
+            status: 'fired',
+            leaseOwnerId: null,
+            leaseExpiresAt: null,
+            lastError: null,
+          },
+        })
+        .catch(() => undefined);
     }
     this.events.emit(row.userId, updated);
     return updated;
@@ -489,6 +573,23 @@ export class ChartOrdersService {
     if (!row.ocoGroupId) {
       return { won: await this.claimForFire(row.id, now), retired: [] };
     }
+    const groupClaim = await this.prisma.bracketGroup.updateMany({
+      where: {
+        id: row.ocoGroupId,
+        userId: row.userId,
+        environment: row.environment,
+        status: 'working',
+      },
+      data: {
+        status: 'pending_fire',
+        fireLegId: row.id,
+        leaseOwnerId: this.fireOwnerId,
+        leaseExpiresAt: new Date(now.getTime() + GROUP_FIRE_LEASE_MS),
+        lastError: null,
+      },
+    });
+    if (groupClaim.count !== 1) return { won: false, retired: [] };
+
     // Scope every query in this claim to the owner and environment as well as
     // the group: a group id is client-supplied, and nothing should be able to
     // reach across accounts or across live/practice even if one leaks.
@@ -497,41 +598,22 @@ export class ChartOrdersService {
       userId: row.userId,
       environment: row.environment,
     };
-    // The stamp is minted here, not taken from `now`: the watcher passes one
-    // `now` to every fire in a tick, and the stamp has to identify THIS claim.
-    const claimedAt = new Date();
-
-    const claimed = await this.prisma.chartOrder.updateMany({
-      where: { ...group, status: 'working' },
-      data: { status: 'triggered', triggeredAt: claimedAt, lastError: null },
+    const selfClaim = await this.prisma.chartOrder.updateMany({
+      where: { id: row.id, ...group, status: 'working' },
+      data: { status: 'pending_fire', triggeredAt: now, lastError: null },
     });
-    if (claimed.count === 0) return { won: false, retired: [] };
-
-    // `status: triggered` + `triggeredAt: now` is this claim's token: together
-    // they name exactly the rows this call took, and no concurrent caller can
-    // share it (they matched nothing). Both halves are needed — a leg this
-    // group already *failed* keeps its old `triggeredAt`, so matching on the
-    // timestamp alone could reach across generations and retire it.
-    const token = { ...group, status: 'triggered', triggeredAt: claimedAt };
-    const self = await this.byId(row.id);
-    if (self?.status !== 'triggered' || self.triggeredAt?.getTime() !== claimedAt.getTime()) {
-      // Our own leg was not in the group's working set — it was cancelled or
-      // already fired. Put back what we took instead of retiring a sibling that
-      // is still legitimately armed.
-      await this.prisma.chartOrder.updateMany({
-        where: token,
-        data: { status: 'working', triggeredAt: null },
-      });
+    if (selfClaim.count !== 1) {
+      await this.restoreGroupClaim(row.ocoGroupId);
       return { won: false, retired: [] };
     }
 
     try {
       const siblings = await this.prisma.chartOrder.findMany({
-        where: { ...token, NOT: { id: row.id } },
+        where: { ...group, status: 'working', NOT: { id: row.id } },
       });
       if (siblings.length > 0) {
         await this.prisma.chartOrder.updateMany({
-          where: { ...token, NOT: { id: row.id } },
+          where: { ...group, status: 'working', NOT: { id: row.id } },
           data: { status: 'cancelled', triggeredAt: null },
         });
       }
@@ -542,9 +624,10 @@ export class ChartOrdersService {
       // leg out of `working` with nothing sent and no path back: `update`,
       // `cancel`, the expiry sweep and the orphan sweep all require `working`.
       await this.prisma.chartOrder.updateMany({
-        where: token,
+        where: { id: row.id, status: 'pending_fire' },
         data: { status: 'working', triggeredAt: null },
       });
+      await this.restoreGroupClaim(row.ocoGroupId);
       return { won: false, retired: [] };
     }
   }
@@ -567,11 +650,139 @@ export class ChartOrdersService {
     await this.emitByIds(userId, ids);
   }
 
+  private async restoreGroupClaim(groupId: string): Promise<void> {
+    await this.prisma.bracketGroup.updateMany({
+      where: { id: groupId, status: 'pending_fire', leaseOwnerId: this.fireOwnerId },
+      data: {
+        status: 'working',
+        fireLegId: null,
+        leaseOwnerId: null,
+        leaseExpiresAt: null,
+      },
+    });
+  }
+
   private async emitByIds(userId: string, ids: string[]): Promise<void> {
     for (const id of ids) {
       const row = await this.byId(id);
       if (row) this.events.emit(userId, toChartOrder(row));
     }
+  }
+
+  /** Recovers bracket claims whose worker died around broker placement. The
+   * order audit is the durable answer: completed audits finalize the group;
+   * stale/missing claims replay the broker-idempotent placement. */
+  async recoverPendingBrackets(now: Date): Promise<number> {
+    const groups = await this.prisma.bracketGroup.findMany({
+      where: { status: 'pending_fire', leaseExpiresAt: { lt: now } },
+      orderBy: { createdAt: 'asc' },
+      take: 100,
+    });
+    let recovered = 0;
+    for (const group of groups) {
+      const claimed = await this.prisma.bracketGroup.updateMany({
+        where: { id: group.id, status: 'pending_fire', leaseExpiresAt: { lt: now } },
+        data: {
+          leaseOwnerId: this.fireOwnerId,
+          leaseExpiresAt: new Date(now.getTime() + GROUP_FIRE_LEASE_MS),
+        },
+      });
+      if (claimed.count !== 1 || !group.fireLegId) continue;
+      const leg = await this.byId(group.fireLegId);
+      if (!leg) {
+        await this.prisma.bracketGroup.updateMany({
+          where: { id: group.id, leaseOwnerId: this.fireOwnerId },
+          data: { status: 'failed', lastError: 'Fire leg no longer exists' },
+        });
+        continue;
+      }
+      const key = idempotencyKeyFor(leg.id);
+      const audit = await this.prisma.orderAudit.findUnique({
+        where: { userId_idempotencyKey: { userId: leg.userId, idempotencyKey: key } },
+      });
+      if (audit && audit.status !== 'pending' && audit.response) {
+        await this.finishRecoveredGroup(group.id, leg, audit.response as unknown as OrderResult);
+        recovered += 1;
+        continue;
+      }
+      if (audit && now.getTime() - audit.createdAt.getTime() < PENDING_AUDIT_TTL_MS) continue;
+      try {
+        const placed = await this.trading.place(
+          leg.userId,
+          this.requestFor(leg),
+          key,
+          leg.environment as TradingMode,
+          true,
+        );
+        await this.finishRecoveredGroup(group.id, leg, placed);
+        recovered += 1;
+      } catch (error) {
+        if (error instanceof ApiException && error.code === 'ORDER_IN_FLIGHT') continue;
+        const message = error instanceof Error ? error.message : String(error);
+        await this.prisma.chartOrder.updateMany({
+          where: { id: leg.id, status: 'pending_fire' },
+          data: { status: 'failed', lastError: message.slice(0, 500) },
+        });
+        await this.prisma.chartOrder.updateMany({
+          where: { ocoGroupId: group.id, status: 'cancelled' },
+          data: { status: 'working' },
+        });
+        await this.prisma.bracketGroup.updateMany({
+          where: { id: group.id, leaseOwnerId: this.fireOwnerId },
+          data: {
+            status: 'working',
+            fireLegId: null,
+            leaseOwnerId: null,
+            leaseExpiresAt: null,
+            lastError: message.slice(0, 500),
+          },
+        });
+        this.events.emit(leg.userId, toChartOrder((await this.byId(leg.id)) ?? leg));
+      }
+    }
+    return recovered;
+  }
+
+  private requestFor(row: ChartOrderRow): OrderRequestDto {
+    return {
+      underlying: row.underlying,
+      assetClass: 'option',
+      side: row.side as OrderSide,
+      quantity: row.quantity,
+      orderType: row.orderType as ChartOrderType,
+      selection: {
+        mode: 'explicit',
+        optionType: row.optionType as OptionType,
+        expiration: row.expiration,
+        strike: row.strike,
+      },
+    };
+  }
+
+  private async finishRecoveredGroup(
+    groupId: string,
+    leg: ChartOrderRow,
+    placed: OrderResult,
+  ): Promise<void> {
+    await this.prisma.chartOrder.updateMany({
+      where: { id: leg.id, status: 'pending_fire' },
+      data: { status: 'triggered', brokerOrderId: placed.orderId },
+    });
+    await this.prisma.chartOrder.updateMany({
+      where: { ocoGroupId: groupId, NOT: { id: leg.id }, status: 'working' },
+      data: { status: 'cancelled' },
+    });
+    await this.prisma.bracketGroup.updateMany({
+      where: { id: groupId, status: 'pending_fire', fireLegId: leg.id },
+      data: {
+        status: 'fired',
+        leaseOwnerId: null,
+        leaseExpiresAt: null,
+        lastError: null,
+      },
+    });
+    const updated = await this.byId(leg.id);
+    if (updated) this.events.emit(leg.userId, toChartOrder(updated));
   }
 
   /** Retires working lines whose contract has settled. */
@@ -657,38 +868,64 @@ export class ChartOrdersService {
     return row;
   }
 
-  /**
-   * A new leg may only join a bracket whose every existing leg is still armed.
-   *
-   * The group claim in `claimForFireWithSiblings` locks the rows that exist when
-   * it runs; under READ COMMITTED it takes no gap lock, so a leg INSERTed
-   * afterwards is a phantom it never saw. Both clients build a bracket as two
-   * separate POSTs, and this one spends a chain fetch and a quote on the way in
-   * — long enough for the first leg to fire in between. Without this check the
-   * late leg lands `working` in a group that already fired, and firing it later
-   * would close the position and then reverse it.
-   *
-   * A leg may also not join a group that already has one of its own kind — OCO
-   * cancels siblings by group membership, not by kind, so two targets sharing a
-   * group would silently retire one of them on fire instead of rejecting the
-   * duplicate up front.
-   */
-  private async assertGroupJoinable(
+  private async ensureBracketGroup(
     userId: string,
-    ocoGroupId: string,
-    kind: ChartOrderKind,
+    environment: string,
+    dto: CreateChartOrderDto,
+    contractSymbol: string,
+    groupId: string,
   ): Promise<void> {
-    const existing = await this.prisma.chartOrder.findMany({ where: { ocoGroupId } });
-    if (existing.some((leg) => leg.userId !== userId)) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw errors.unauthorized('USER_NOT_FOUND', 'User no longer exists');
+    const provider = user.tradingProvider;
+    const connection =
+      provider === 'snaptrade'
+        ? await this.prisma.brokerConnection.findUnique({
+            where: {
+              userId_provider_environment: { userId, provider: 'snaptrade', environment },
+            },
+          })
+        : null;
+    const accountId = connection?.selectedAccountId ?? 'default';
+    try {
+      await this.prisma.bracketGroup.create({
+        data: {
+          id: groupId,
+          userId,
+          provider,
+          environment,
+          accountId,
+          contractSymbol,
+          closeSide: dto.side,
+          protectedQuantity: dto.quantity,
+        },
+      });
+    } catch (error) {
+      if (!isUniqueViolation(error)) throw error;
+    }
+    const group = await this.prisma.bracketGroup.findUnique({ where: { id: groupId } });
+    if (!group || group.userId !== userId) {
       throw errors.notFound('CHART_ORDER_NOT_FOUND', 'No such bracket group');
     }
-    if (existing.some((leg) => leg.status !== 'working')) {
+    if (group.status !== 'working') {
       throw errors.conflict('OCO_GROUP_CLOSED', 'That bracket has already fired — draw a new one');
     }
-    if (existing.some((leg) => leg.kind === kind)) {
+    if (
+      group.environment !== environment ||
+      group.provider !== provider ||
+      group.accountId !== accountId ||
+      group.contractSymbol !== contractSymbol ||
+      group.closeSide !== dto.side
+    ) {
       throw errors.conflict(
-        'OCO_GROUP_DUPLICATE_KIND',
-        `That bracket already has a ${kind} — move it instead of adding another`,
+        'OCO_GROUP_SCOPE_MISMATCH',
+        'A bracket can only contain matching account, contract, side and environment legs',
+      );
+    }
+    if (group.protectedQuantity !== dto.quantity) {
+      throw errors.conflict(
+        'OCO_GROUP_QUANTITY_MISMATCH',
+        'Target and stop quantities must match; resize the existing bracket first',
       );
     }
   }

@@ -258,6 +258,7 @@ export class ChartOrderWatcherService implements OnModuleInit, OnModuleDestroy {
    * empty position.
    */
   private async reconcile(now: Date): Promise<void> {
+    await this.chartOrders.recoverPendingBrackets(now);
     const expired = await this.chartOrders.expireSettled(now);
     if (expired > 0) this.metrics.expired += expired;
 

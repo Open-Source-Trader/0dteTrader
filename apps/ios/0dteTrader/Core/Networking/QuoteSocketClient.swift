@@ -50,6 +50,9 @@ final class QuoteSocketClient: ObservableObject {
     private var subscribedSymbols: Set<String> = []
     private var shouldBeConnected = false
     private var reconnectAttempt = 0
+    private var lastSequence = 0
+    private var seenEventIDs: Set<String> = []
+    private var seenEventOrder: [String] = []
 
     init(streamURL: URL, urlSession: URLSession = .shared, tokenProvider: @escaping () async throws -> String) {
         self.streamURL = streamURL
@@ -73,6 +76,9 @@ final class QuoteSocketClient: ObservableObject {
         reconnectTask = nil
         teardownConnection()
         connectionState = .disconnected
+        lastSequence = 0
+        seenEventIDs.removeAll()
+        seenEventOrder.removeAll()
     }
 
     /// Called on app foreground: re-establish the stream if it dropped while suspended.
@@ -130,7 +136,13 @@ final class QuoteSocketClient: ObservableObject {
                 guard var components = URLComponents(url: self.streamURL, resolvingAgainstBaseURL: false) else {
                     throw APIError.invalidRequest
                 }
-                components.queryItems = [URLQueryItem(name: "token", value: token)]
+                var queryItems = components.queryItems ?? []
+                queryItems.removeAll { $0.name == "token" || $0.name == "cursor" }
+                queryItems.append(URLQueryItem(name: "token", value: token))
+                if self.lastSequence > 0 {
+                    queryItems.append(URLQueryItem(name: "cursor", value: String(self.lastSequence)))
+                }
+                components.queryItems = queryItems
                 guard let url = components.url else {
                     throw APIError.invalidRequest
                 }
@@ -197,11 +209,11 @@ final class QuoteSocketClient: ObservableObject {
             return .quote(Quote(dto: payload.data))
         case "orderUpdate":
             guard let payload = try? decoder.decode(SocketOrderUpdateMessage.self, from: data) else { return nil }
-            return .orderUpdate(OrderResult(dto: payload.data))
+            return .orderUpdate(OrderResult(dto: payload.data), payload.eventId, payload.sequence)
         case "chartOrder":
             guard let payload = try? decoder.decode(SocketChartOrderMessage.self, from: data),
                   let order = ChartOrder(dto: payload.data) else { return nil }
-            return .chartOrder(order)
+            return .chartOrder(order, payload.eventId, payload.sequence)
         case "error":
             guard let payload = try? decoder.decode(SocketErrorMessage.self, from: data) else { return nil }
             return .error(payload.error.message)
@@ -215,13 +227,30 @@ final class QuoteSocketClient: ObservableObject {
         case .quote(let quote):
             quotes[quote.symbol] = quote
             lastQuote = quote
-        case .orderUpdate(let result):
+        case .orderUpdate(let result, let eventId, let sequence):
+            guard acceptDurable(eventId: eventId, sequence: sequence) else { return }
             lastOrderUpdate = result
-        case .chartOrder(let order):
+        case .chartOrder(let order, let eventId, let sequence):
+            guard acceptDurable(eventId: eventId, sequence: sequence) else { return }
             onChartOrder?(order)
         case .error(let message):
             lastErrorMessage = message
         }
+    }
+
+    private func acceptDurable(eventId: String?, sequence: Int?) -> Bool {
+        // Older servers/tests have no metadata. They remain readable during a
+        // rolling deploy, while new durable events use bounded id de-duplication.
+        guard let eventId, let sequence else { return true }
+        guard !seenEventIDs.contains(eventId) else { return false }
+        seenEventIDs.insert(eventId)
+        seenEventOrder.append(eventId)
+        if seenEventOrder.count > 512 {
+            let removed = seenEventOrder.removeFirst()
+            seenEventIDs.remove(removed)
+        }
+        lastSequence = max(lastSequence, sequence)
+        return true
     }
 
     private func startPingLoop() {
@@ -292,7 +321,7 @@ final class QuoteSocketClient: ObservableObject {
 
 private enum DecodedSocketMessage {
     case quote(Quote)
-    case orderUpdate(OrderResult)
-    case chartOrder(ChartOrder)
+    case orderUpdate(OrderResult, String?, Int?)
+    case chartOrder(ChartOrder, String?, Int?)
     case error(String)
 }

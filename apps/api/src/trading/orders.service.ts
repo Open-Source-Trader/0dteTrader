@@ -1,7 +1,12 @@
 import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import { Prisma, type TradeOrder, type TradeOrderExecution } from '@prisma/client';
 import { Subscription } from 'rxjs';
-import { OrderResult, TradeHistory, TradeHistoryEntry } from '@0dtetrader/shared-types';
+import {
+  OrderResult,
+  TradeHistory,
+  TradeHistoryEntry,
+  TradingMode,
+} from '@0dtetrader/shared-types';
 import { OPTION_MULTIPLIER } from '../broker/contract-resolution';
 import { OrderEventsService } from '../broker/order-events.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -421,7 +426,7 @@ export class OrdersService implements OnModuleDestroy {
     orderEvents: OrderEventsService,
   ) {
     this.eventsSub = orderEvents.events$.subscribe((event) => {
-      void this.recordWithRetry(event.userId, event.order);
+      void this.recordWithRetry(event.userId, event.order, event.environment);
     });
   }
 
@@ -444,10 +449,14 @@ export class OrdersService implements OnModuleDestroy {
    * poll event that fires exactly once and fails every attempt is lost, and
    * that gap closes only with durable webhook ingestion.
    */
-  private async recordWithRetry(userId: string, order: OrderResult): Promise<void> {
+  private async recordWithRetry(
+    userId: string,
+    order: OrderResult,
+    environment?: TradingMode,
+  ): Promise<void> {
     for (let attempt = 1; attempt <= OrdersService.RECORD_ATTEMPTS; attempt += 1) {
       try {
-        await this.record(userId, order);
+        await this.record(userId, order, environment);
         return;
       } catch (err) {
         if (attempt === OrdersService.RECORD_ATTEMPTS) {
@@ -471,17 +480,24 @@ export class OrdersService implements OnModuleDestroy {
     userId: string,
     order: OrderResult,
     underlyingPrice?: number,
+    /** The environment the emitter VERIFIED this order belongs to (a webhook
+     *  knows it from the credential the event was signed with). */
+    knownEnvironment?: TradingMode,
   ): Promise<Prisma.TradeOrderUncheckedCreateInput> {
     const placedAt = new Date(order.timestamp);
-    // Stamp the environment (live/practice) in effect when the order is first
-    // recorded; later status updates never move an order across environments.
-    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    // Stamp the environment (live/practice) the order was placed in; later
+    // status updates never move an order across environments. The user's
+    // current mode is only a fallback — it is mutable, so a fill arriving
+    // after a switch would otherwise be filed under the wrong account.
+    const user = knownEnvironment
+      ? null
+      : await this.prisma.user.findUnique({ where: { id: userId } });
     return {
       id: order.orderId,
       userId,
       contractSymbol: order.contractSymbol,
       assetClass: 'option',
-      environment: user?.tradingMode === 'practice' ? 'practice' : 'live',
+      environment: knownEnvironment ?? (user?.tradingMode === 'practice' ? 'practice' : 'live'),
       side: order.side,
       quantity: order.quantity,
       filledQuantity: order.filledQuantity ?? null,
@@ -525,18 +541,30 @@ export class OrdersService implements OnModuleDestroy {
   }
 
   /** Upsert an order row; updates only fields a status change can move. */
-  async record(userId: string, order: OrderResult): Promise<void> {
-    return this.enqueueForOrder(order.orderId, () => this.recordSerialized(userId, order));
+  async record(userId: string, order: OrderResult, environment?: TradingMode): Promise<void> {
+    // An order with no broker id has no identity to persist under. `id` is
+    // this table's primary key, so every id-less event — from any user —
+    // would land on one shared row, and a later fill would mutate whichever
+    // order got there first. Emitters are expected to drop these; this is
+    // the backstop for the ones that do not.
+    if (!order.orderId) return;
+    return this.enqueueForOrder(order.orderId, () =>
+      this.recordSerialized(userId, order, environment),
+    );
   }
 
-  private async recordSerialized(userId: string, order: OrderResult): Promise<void> {
+  private async recordSerialized(
+    userId: string,
+    order: OrderResult,
+    environment?: TradingMode,
+  ): Promise<void> {
     // Ensure the row exists (native ON CONFLICT under the hood: atomic across
     // instances). Fill fields are deliberately absent from THIS create: they
     // move only in the same statement as the executedQuantity watermark
     // below, so no reader can ever see fill state the watermark doesn't
     // cover. filledAt is dropped with them — the first-fill write below
     // stamps it with the same fillTimeOf in the same call.
-    const base = await this.createData(userId, order);
+    const base = await this.createData(userId, order, undefined, environment);
     await this.prisma.tradeOrder.upsert({
       where: { id: order.orderId },
       create: { ...base, filledQuantity: null, filledPrice: null, filledAt: null },
@@ -557,13 +585,14 @@ export class OrdersService implements OnModuleDestroy {
       order.status === 'rejected'
     ) {
       await this.prisma.tradeOrder.updateMany({
-        where: { id: order.orderId, status: { in: ['submitted', 'partially_filled'] } },
+        where: { id: order.orderId, userId, status: { in: ['submitted', 'partially_filled'] } },
         data: { status: order.status },
       });
     } else if (order.status === 'filled') {
       await this.prisma.tradeOrder.updateMany({
         where: {
           id: order.orderId,
+          userId,
           status: { in: ['submitted', 'partially_filled', 'cancelled', 'rejected'] },
         },
         data: { status: 'filled' },
@@ -577,10 +606,14 @@ export class OrdersService implements OnModuleDestroy {
     // a later fill event, must not move it, while a partial that arrives
     // after the fill it preceded must correct it.
     await this.prisma.tradeOrder.updateMany({
-      where: { id: order.orderId, OR: [{ filledAt: null }, { filledAt: { gt: executedAt } }] },
+      where: {
+        id: order.orderId,
+        userId,
+        OR: [{ filledAt: null }, { filledAt: { gt: executedAt } }],
+      },
       data: { filledAt: executedAt },
     });
-    await this.recordFillProgress(order, executedAt);
+    await this.recordFillProgress(userId, order, executedAt);
   }
 
   /**
@@ -607,11 +640,15 @@ export class OrdersService implements OnModuleDestroy {
    * observation whose insert failed. Gating this on the watermark is what
    * made both of those unrecoverable.
    */
-  private async recordFillProgress(order: OrderResult, executedAt: Date): Promise<void> {
+  private async recordFillProgress(
+    userId: string,
+    order: OrderResult,
+    executedAt: Date,
+  ): Promise<void> {
     const cumulative = cumulativeOf(order);
     if (!(cumulative > 0)) return;
     await this.prisma.tradeOrder.updateMany({
-      where: { id: order.orderId, executedQuantity: { lt: cumulative } },
+      where: { id: order.orderId, userId, executedQuantity: { lt: cumulative } },
       data: {
         executedQuantity: cumulative,
         filledQuantity: order.filledQuantity ?? null,
@@ -684,7 +721,7 @@ export class OrdersService implements OnModuleDestroy {
       // *would* have taken is still the right write — retry it rather than
       // losing the anchor and drawing the entry line at the wrong level.
       const { count } = await this.prisma.tradeOrder.updateMany({
-        where: { id: order.orderId },
+        where: { id: order.orderId, userId },
         data: { underlyingPrice },
       });
       if (count > 0) return;

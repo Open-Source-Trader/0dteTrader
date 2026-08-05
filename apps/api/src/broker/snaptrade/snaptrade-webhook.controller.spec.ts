@@ -97,7 +97,7 @@ describe('SnapTradeWebhookController', () => {
       expect(sendStatus).toHaveBeenCalledWith(400);
     });
 
-    it('returns 400 when eventtimestamp header is missing', async () => {
+    it('returns 400 when the payload carries no timestamp anywhere', async () => {
       const { response, sendStatus } = makeResponse();
       await controller.handle(
         { body: { clientId: CLIENT_ID }, headers: { signature: 'sig' } } as any,
@@ -138,8 +138,50 @@ describe('SnapTradeWebhookController', () => {
       expect(sendStatus).toHaveBeenCalledWith(401);
     });
 
+    it('accepts a delayed retry, which SnapTrade sends on 30-minute backoff', async () => {
+      const body = {
+        eventType: 'TRADE_UPDATE',
+        clientId: CLIENT_ID,
+        eventTimestamp: new Date(Date.now() - 1000 * 60 * 90).toISOString(),
+      };
+      const { response, sendStatus } = makeResponse();
+      await controller.handle({ body, headers: { signature: sign(body) } } as any, response);
+      expect(sendStatus).toHaveBeenCalledWith(200);
+    });
+
+    it('reads freshness from the SIGNED payload, so a fresh header cannot revive a stale body', async () => {
+      // The replay: a captured (body, signature) pair re-sent with a
+      // just-now header. The header is not covered by the HMAC, so it must
+      // not be able to vouch for the payload's age.
+      const body = {
+        eventType: 'TRADE_UPDATE',
+        clientId: CLIENT_ID,
+        eventTimestamp: new Date(Date.now() - 1000 * 60 * 60 * 25).toISOString(),
+      };
+      const { response, sendStatus } = makeResponse();
+      await controller.handle(
+        {
+          body,
+          headers: { signature: sign(body), eventtimestamp: new Date().toISOString() },
+        } as any,
+        response,
+      );
+      expect(sendStatus).toHaveBeenCalledWith(400);
+    });
+
+    it('accepts a payload carrying no timestamp header at all (SnapTrade sends none)', async () => {
+      const body = {
+        eventType: 'TRADE_UPDATE',
+        clientId: CLIENT_ID,
+        eventTimestamp: new Date().toISOString(),
+      };
+      const { response, sendStatus } = makeResponse();
+      await controller.handle({ body, headers: { signature: sign(body) } } as any, response);
+      expect(sendStatus).toHaveBeenCalledWith(200);
+    });
+
     it('returns 400 when eventTimestamp is too old (replay guard)', async () => {
-      const oldTimestamp = new Date(Date.now() - 1000 * 60 * 6).toISOString(); // 6 minutes ago
+      const oldTimestamp = new Date(Date.now() - 1000 * 60 * 60 * 25).toISOString();
       const body = { eventType: 'TRADE_UPDATE', clientId: CLIENT_ID };
       const { response, sendStatus } = makeResponse();
       await controller.handle(
@@ -153,7 +195,7 @@ describe('SnapTradeWebhookController', () => {
     });
 
     it('returns 400 when eventTimestamp is in the future', async () => {
-      const futureTimestamp = new Date(Date.now() + 1000 * 60 * 6).toISOString(); // 6 minutes future
+      const futureTimestamp = new Date(Date.now() + 1000 * 60 * 60 * 25).toISOString();
       const body = { eventType: 'TRADE_UPDATE', clientId: CLIENT_ID };
       const { response, sendStatus } = makeResponse();
       await controller.handle(
@@ -340,21 +382,32 @@ describe('SnapTradeWebhookController', () => {
       const { response, sendStatus } = makeResponse();
       await controller.handle({ body, headers: headersFor(body) } as any, response);
       expect(sendStatus).toHaveBeenCalledWith(200);
-      expect(events.emit).toHaveBeenCalledWith(OWNER_USER_ID, {
-        orderId: 'broker-1',
-        status: 'filled',
-        contractSymbol: 'SPY 250621C00503000',
-        side: 'buy',
-        quantity: 2,
-        orderType: 'mid',
-        limitPrice: 5.5,
-        filledPrice: 5.6,
-        filledQuantity: 2,
-        timestamp: '2026-07-20T12:00:00Z',
-      });
+      expect(events.emit).toHaveBeenCalledWith(
+        OWNER_USER_ID,
+        {
+          orderId: 'broker-1',
+          status: 'filled',
+          // SnapTrade sends the space-padded OCC; it is normalized to the
+          // app's compact canonical form at this boundary.
+          contractSymbol: 'SPY250621C00503000',
+          side: 'buy',
+          quantity: 2,
+          orderType: 'mid',
+          limitPrice: 5.5,
+          filledPrice: 5.6,
+          filledQuantity: 2,
+          timestamp: '2026-07-20T12:00:00Z',
+        },
+        // The environment resolved from the credential the event was signed
+        // with — not the user's current, mutable trading mode.
+        'live',
+      );
     });
 
-    it('defaults missing fields safely', async () => {
+    it('drops an order with no broker id rather than filing it under an empty key', async () => {
+      // trade_orders is keyed by the broker's order id, so an id-less event
+      // from ANY user would land on one shared row and a later fill would
+      // mutate whoever got there first.
       const body = {
         eventType: 'TRADE_UPDATE',
         clientId: CLIENT_ID,
@@ -363,15 +416,49 @@ describe('SnapTradeWebhookController', () => {
       const { response, sendStatus } = makeResponse();
       await controller.handle({ body, headers: headersFor(body) } as any, response);
       expect(sendStatus).toHaveBeenCalledWith(200);
-      expect(events.emit).toHaveBeenCalledWith(OWNER_USER_ID, {
-        orderId: '',
-        status: 'submitted',
-        contractSymbol: '',
-        side: 'buy',
-        quantity: 0,
-        orderType: 'mid',
-        timestamp: expect.any(String),
-      });
+      expect(events.emit).not.toHaveBeenCalled();
+    });
+
+    it('emits every order in the payload, not just the first', async () => {
+      // TRADE_DETECTION carries a list; a second fill in the same delivery
+      // used to be discarded silently.
+      const body = {
+        eventType: 'TRADE_DETECTION',
+        clientId: CLIENT_ID,
+        details: {
+          orders: [
+            { brokerage_order_id: 'broker-1', status: 'EXECUTED', total_quantity: '1' },
+            { brokerage_order_id: 'broker-2', status: 'EXECUTED', total_quantity: '1' },
+          ],
+        },
+      };
+      const { response, sendStatus } = makeResponse();
+      await controller.handle({ body, headers: headersFor(body) } as any, response);
+      expect(sendStatus).toHaveBeenCalledWith(200);
+      expect(events.emit).toHaveBeenCalledTimes(2);
+      expect((events.emit as jest.Mock).mock.calls.map((c) => c[1].orderId)).toEqual([
+        'broker-1',
+        'broker-2',
+      ]);
+    });
+
+    it.each([
+      ['PARTIAL_CANCELED', 'cancelled'],
+      ['CANCEL_PENDING', 'submitted'],
+    ])('maps %s to %s', async (brokerStatus, expected) => {
+      // PARTIAL_CANCELED is terminal — the remainder was cancelled and
+      // nothing more will execute. CANCEL_PENDING is a request, not an
+      // outcome: the order is still live and can still fill.
+      const body = {
+        eventType: 'TRADE_UPDATE',
+        clientId: CLIENT_ID,
+        details: {
+          orders: [{ brokerage_order_id: 'broker-9', status: brokerStatus, total_quantity: '3' }],
+        },
+      };
+      const { response } = makeResponse();
+      await controller.handle({ body, headers: headersFor(body) } as any, response);
+      expect((events.emit as jest.Mock).mock.calls[0][1].status).toBe(expected);
     });
 
     it('does nothing when details.orders is empty', async () => {

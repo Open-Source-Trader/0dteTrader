@@ -8,6 +8,15 @@ import {
 } from 'snaptrade-typescript-sdk';
 import { OrderResult, OrderStatus, Position } from '@0dtetrader/shared-types';
 
+/**
+ * SnapTrade reports option symbols in the 21-character space-PADDED OCC form
+ * (`AAPL  261218C00240000`), while this app's canonical form — and every
+ * parser in it, on all three clients — is compact. Normalizing here, at the
+ * one boundary the padded form enters through, keeps a padded symbol from
+ * failing to match the same contract held under its compact name.
+ */
+export const compactOcc = (symbol: string): string => symbol.replace(/\s+/g, '');
+
 // ---------------------------------------------------------------------------
 // SnapTrade status → app status
 // ---------------------------------------------------------------------------
@@ -62,7 +71,7 @@ export function toOrderResult(order: AccountOrderRecord): OrderResult {
 function optionSymbolOf(order: AccountOrderRecord): string | null {
   const opt = order.option_symbol as AccountOrderRecordOptionSymbol | undefined;
   if (!opt?.ticker) return null;
-  return opt.ticker;
+  return compactOcc(opt.ticker);
 }
 
 function equitySymbolOf(order: AccountOrderRecord): string | null {
@@ -101,7 +110,7 @@ export function toPosition(
   const price = Number(position.price ?? 0);
   const units = Number(position.units ?? 0);
   return {
-    symbol: option.symbol,
+    symbol: compactOcc(option.symbol),
     assetClass: 'option',
     quantity: units,
     avgPrice: multiplier > 0 ? costBasis / multiplier : costBasis,

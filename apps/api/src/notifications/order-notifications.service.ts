@@ -79,7 +79,13 @@ export class OrderNotificationsService implements OnModuleDestroy {
       titles[order.status] as string,
       `${order.side.toUpperCase()} ${order.quantity} ${order.contractSymbol}${price}`,
       async () => {
-        const row = await this.prisma.tradeOrder.findUnique({ where: { id: order.orderId } });
+        // findFirst scoped by owner, not findUnique by id alone: the row's
+        // primary key is the BROKER's order id, which is only unique within a
+        // brokerage account — another user's identically-numbered order must
+        // never decide this push's live/practice label.
+        const row = await this.prisma.tradeOrder.findFirst({
+          where: { id: order.orderId, userId },
+        });
         return row?.environment ?? null;
       },
     );
@@ -101,7 +107,7 @@ export class OrderNotificationsService implements OnModuleDestroy {
       `${order.side.toUpperCase()} ${order.quantity} ${order.contractSymbol} — ` +
         `${order.underlying} crossed ${order.triggerPrice}`,
       async () => {
-        const row = await this.prisma.chartOrder.findUnique({ where: { id: order.id } });
+        const row = await this.prisma.chartOrder.findFirst({ where: { id: order.id, userId } });
         return row?.environment ?? null;
       },
     );

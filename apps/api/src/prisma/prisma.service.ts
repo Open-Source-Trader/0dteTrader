@@ -11,7 +11,7 @@ import { PrismaClient } from '@prisma/client';
  *   webullCredential: upsert, findUnique, delete
  *   refreshToken:     create, findUnique, update, updateMany
  *   orderAudit:       findUnique, create, update, delete, findMany
- *   tradeOrder:       findUnique, upsert, findMany, updateMany
+ *   tradeOrder:       findUnique, findFirst, upsert, findMany, updateMany
  *   tradeOrderExecution: create, findMany
  *   chartOrder:       create, findUnique, findFirst, findMany, count, update, updateMany
  *   optionsAnalyticsSnapshotRecord: create, findMany, deleteMany

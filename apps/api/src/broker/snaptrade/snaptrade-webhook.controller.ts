@@ -5,8 +5,14 @@ import { TradingMode } from '@0dtetrader/shared-types';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CredentialsService } from '../../credentials/credentials.service';
 import { OrderEventsService } from '../order-events.service';
+import { compactOcc } from './snaptrade-mappers';
 
-const MAX_REPLAY_DRIFT_MS = 300_000;
+/** Freshness bound on a webhook's own `eventTimestamp`. Wide because
+ *  SnapTrade retries a failed delivery on 30-minute exponential backoff for
+ *  three tries: a window narrower than that ladder rejects the retries this
+ *  endpoint exists to accept. It bounds how long a captured payload stays
+ *  usable, nothing more. */
+const MAX_REPLAY_DRIFT_MS = 24 * 60 * 60 * 1_000;
 
 /** JSON.stringify with sorted keys and no extra whitespace — matches
  *  SnapTrade's own canonicalization (`json.dumps(payload, separators=(",", ":"), sort_keys=True)`
@@ -39,8 +45,15 @@ function canonicalJson(value: unknown): string {
  *   verify against — each user's events are signed with their own key, so
  *   the owning user must be resolved (via `clientId`) before the signature
  *   can be checked.
- * - Rejects replays where `eventTimestamp` is older than 5 minutes.
- * - Always returns 2xx (SnapTrade retries with 30-min exponential backoff, 3 tries).
+ * - Rejects payloads whose signed `eventTimestamp` is stale (see
+ *   MAX_REPLAY_DRIFT_MS — the bound has to clear SnapTrade's own retry
+ *   ladder, so it is coarse; exact-replay suppression comes from the
+ *   idempotency downstream, not from this check).
+ * - Always returns 2xx after dispatch (SnapTrade retries with 30-min
+ *   exponential backoff, 3 tries). The 2xx is sent once the in-process
+ *   handlers have run, which is NOT a durability boundary: an instance that
+ *   dies mid-dispatch loses the event, since nothing stores the raw payload.
+ *   Closing that needs a webhook inbox table — see the PR discussion.
  *
  * Each user registers this same URL in their own SnapTrade Dashboard.
  */
@@ -56,17 +69,24 @@ export class SnapTradeWebhookController {
   @HttpCode(HttpStatus.OK)
   async handle(@Req() req: Request, @Res() res: Response): Promise<void> {
     const signature = req.headers['signature'] as string | undefined;
-    const timestampHeader = req.headers['eventtimestamp'] as string | undefined;
     const body = (req.body ?? {}) as Record<string, unknown>;
     const clientId = typeof body['clientId'] === 'string' ? (body['clientId'] as string) : '';
 
-    if (!signature || !timestampHeader || !clientId) {
+    if (!signature || !clientId) {
       res.sendStatus(HttpStatus.BAD_REQUEST);
       return;
     }
 
-    // Replay guard.
-    const eventTimestamp = Date.parse(timestampHeader);
+    // Freshness is read from the SIGNED payload. SnapTrade documents
+    // `eventTimestamp` as a body field and signs the body; it sends no
+    // timestamp header, so requiring one rejected every genuine delivery,
+    // and trusting one would have let a captured payload be replayed under a
+    // fresh unsigned stamp. The header is still accepted as a fallback so a
+    // deployment sending one does not regress.
+    const timestampHeader = req.headers['eventtimestamp'] as string | undefined;
+    const signedTimestamp =
+      typeof body['eventTimestamp'] === 'string' ? (body['eventTimestamp'] as string) : undefined;
+    const eventTimestamp = Date.parse(signedTimestamp ?? timestampHeader ?? '');
     if (
       Number.isNaN(eventTimestamp) ||
       Math.abs(Date.now() - eventTimestamp) > MAX_REPLAY_DRIFT_MS
@@ -138,7 +158,7 @@ export class SnapTradeWebhookController {
         break;
       case 'TRADE_UPDATE':
       case 'TRADE_DETECTION':
-        await this.handleTradeUpdate(userId, event);
+        await this.handleTradeUpdate(userId, environment, event);
         break;
       default:
         break;
@@ -214,15 +234,29 @@ export class SnapTradeWebhookController {
     });
   }
 
-  private async handleTradeUpdate(userId: string, event: Record<string, unknown>): Promise<void> {
+  private async handleTradeUpdate(
+    userId: string,
+    environment: TradingMode,
+    event: Record<string, unknown>,
+  ): Promise<void> {
     const details = event['details'] as Record<string, unknown> | undefined;
     const orders = Array.isArray(details?.['orders'])
       ? (details['orders'] as Array<Record<string, unknown>>)
       : [];
-    const order = orders[0];
-    if (!order) return;
-    const mapped = this.mapOrderResult(order);
-    this.events.emit(userId, mapped);
+    // Every order, not just the first: SnapTrade documents TRADE_DETECTION as
+    // carrying a list, and a second fill in the same payload used to be
+    // dropped silently. Downstream is already safe for N events — recording
+    // serializes per order id and both the fill watermark and the push claim
+    // are idempotent.
+    for (const order of orders) {
+      const mapped = this.mapOrderResult(order);
+      // An order with no broker id has no identity: `id` is the primary key
+      // of trade_orders, so every id-less event across every user would
+      // collide on the same row, and a later fill would mutate someone
+      // else's order. There is nothing safe to do with it but drop it.
+      if (!mapped.orderId) continue;
+      this.events.emit(userId, mapped, environment);
+    }
   }
 
   private mapOrderResult(order: Record<string, unknown>): {
@@ -262,9 +296,17 @@ export class SnapTradeWebhookController {
   ): 'submitted' | 'filled' | 'partially_filled' | 'cancelled' | 'rejected' {
     const s = (status ?? '').toUpperCase();
     if (['EXECUTED', 'FILLED'].includes(s)) return 'filled';
-    if (['PARTIAL', 'PARTIALLY_FILLED', 'PARTIAL_CANCELED'].includes(s)) return 'partially_filled';
-    if (['CANCELED', 'CANCELLED', 'EXPIRED', 'CANCEL_PENDING'].includes(s)) return 'cancelled';
+    if (['PARTIAL', 'PARTIALLY_FILLED'].includes(s)) return 'partially_filled';
+    // PARTIAL_CANCELED is TERMINAL: the unfilled remainder was cancelled and
+    // nothing more will execute. Mapping it to partially_filled left the
+    // order sitting in the working list forever and suppressed its terminal
+    // push. The executed portion is still accounted — a cancelled row
+    // carrying a filled quantity is a real fill to the position book.
+    if (['CANCELED', 'CANCELLED', 'EXPIRED', 'PARTIAL_CANCELED'].includes(s)) return 'cancelled';
     if (['FAILED', 'REJECTED'].includes(s)) return 'rejected';
+    // CANCEL_PENDING is a REQUEST, not an outcome: the order is still live
+    // and can still fill. Reporting it as cancelled announced an outcome the
+    // broker had not reached.
     return 'submitted';
   }
 
@@ -285,7 +327,7 @@ export class SnapTradeWebhookController {
       : [];
     const instrument = legs[0]?.['instrument'] as Record<string, unknown> | undefined;
     if (instrument?.['symbol'] && typeof instrument['symbol'] === 'string') {
-      return instrument['symbol'] as string;
+      return compactOcc(instrument['symbol'] as string);
     }
     const optionSymbol = order['option_symbol'] as Record<string, unknown> | undefined;
     if (optionSymbol?.['ticker'] && typeof optionSymbol['ticker'] === 'string') {

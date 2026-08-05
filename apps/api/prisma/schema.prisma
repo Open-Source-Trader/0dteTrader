@@ -206,23 +206,35 @@ model TradeOrder {
   @@map("trade_orders")
 }
 
-// One broker execution (fill increment) of a TradeOrder. The order row keeps
-// only cumulative fill state, which loses how partial fills interleave across
-// orders; the position replay orders by these instead. `quantity` is the
-// positive executed delta; `price` the increment price recovered from the
-// cumulative averages brokers report. Orders recorded before the table are
-// replayed from their cumulative state.
+// One OBSERVATION of a TradeOrder's cumulative fill state. The order row keeps
+// only its latest cumulative state, which loses how partial fills interleave
+// across orders; the position replay works from these instead.
+//
+// Rows are snapshots, not increments, because at write time only the snapshot
+// is knowable-correct: a LOWER cumulative can still arrive afterwards (delayed
+// webhook, out-of-order poll), and an increment derived against the wrong
+// neighbour is wrong forever. Increments are the differences between
+// consecutive snapshots, derived when the replay reads them.
+//
+// Two older row shapes are still read: rows written as increments before this
+// table stored snapshots carry `quantity`/`price` and no `avgPrice`, and the
+// oldest carry no `cumulative` either. The replay reconstructs a snapshot from
+// either shape.
 model TradeOrderExecution {
   id         String     @id @default(uuid()) @db.Uuid
   orderId    String
   order      TradeOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  quantity   Float
-  price      Float
-  // The order's cumulative executed quantity AFTER this increment — the
-  // watermark snapshot the recording claimed. Null on rows predating the
-  // column; Postgres treats unique-index NULLs as distinct, so only real
-  // snapshots are constrained.
+  // The order's cumulative executed quantity as of this observation.
+  // Null only on rows predating the column; Postgres treats unique-index
+  // NULLs as distinct, so those rows are unconstrained by the index below.
   cumulative Float?
+  // The broker's cumulative AVERAGE price over `cumulative` — the other half
+  // of the observation, and what makes the increment derivable at read time.
+  avgPrice   Float?
+  // The pre-derived increment of the older shape: positive executed delta and
+  // its price. Never written for snapshot rows.
+  quantity   Float?
+  price      Float?
   executedAt DateTime
   createdAt  DateTime   @default(now())
 

@@ -125,18 +125,97 @@ function incrementPrice(
   return newAvg;
 }
 
+/** One point on an order's cumulative fill curve: how much had executed, at
+ *  what cumulative average price, and when the execution was observed. */
+interface FillPoint {
+  cumulative: number;
+  avgPrice: number;
+  time: Date;
+}
+
+const isFinitePositive = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
+
+/**
+ * Reconstructs one order's cumulative fill curve from its recorded rows,
+ * whatever shape they were written in.
+ *
+ * A snapshot row states the curve directly. The two older shapes state an
+ * INCREMENT, so their point is the running prefix: the cumulative they
+ * carry (or the running sum, for rows predating that column) at the average
+ * their notional implies. Points are ordered by CUMULATIVE — the only
+ * reliable sequence key, since an out-of-order observation can carry an
+ * earlier cumulative than one already recorded.
+ */
+function fillCurveFor(executions: TradeOrderExecution[]): FillPoint[] {
+  const byArrival = executions
+    .slice()
+    .sort(
+      (a, b) =>
+        a.executedAt.getTime() - b.executedAt.getTime() ||
+        a.createdAt.getTime() - b.createdAt.getTime() ||
+        a.id.localeCompare(b.id),
+    );
+  // Rows with no cumulative column are increments in arrival order; imply
+  // theirs from the running sum before anything is sequenced by cumulative.
+  const implied = new Map<string, number>();
+  let running = 0;
+  for (const row of byArrival) {
+    if (row.cumulative !== null) continue;
+    if (!isFinitePositive(row.quantity) || row.quantity <= 0) continue;
+    running += row.quantity;
+    implied.set(row.id, running);
+  }
+
+  const seen = new Set<number>();
+  const ordered = byArrival
+    .map((row) => ({ row, cumulative: row.cumulative ?? implied.get(row.id) ?? null }))
+    .filter((entry) => isFinitePositive(entry.cumulative) && entry.cumulative > 0)
+    .sort(
+      (a, b) =>
+        (a.cumulative as number) - (b.cumulative as number) ||
+        // A real snapshot outranks an increment row at the same cumulative:
+        // both describe the same point, and only the snapshot states it.
+        Number(a.row.avgPrice === null) - Number(b.row.avgPrice === null),
+    );
+
+  const points: FillPoint[] = [];
+  let prevNotional = 0;
+  for (const { row, cumulative } of ordered) {
+    const cum = cumulative as number;
+    if (seen.has(cum)) continue;
+    // A snapshot's notional is stated; an increment's is the prefix it
+    // extends — which is also how a row written with a cumulative but no
+    // average (an instance that predates the column) is recovered.
+    let notional: number | null = null;
+    if (isFinitePositive(row.avgPrice)) notional = cum * row.avgPrice;
+    else if (isFinitePositive(row.quantity) && isFinitePositive(row.price)) {
+      notional = prevNotional + row.quantity * row.price;
+    }
+    if (notional === null || !Number.isFinite(notional)) continue;
+    seen.add(cum);
+    points.push({ cumulative: cum, avgPrice: notional / cum, time: row.executedAt });
+    prevNotional = notional;
+  }
+  return points;
+}
+
 /**
  * Turns rows plus their recorded executions into fill events in MARKET
- * order, clamped to each row's AUTHORITY — the quantity the row itself
- * vouches for: the executedQuantity watermark, or the cumulative fill state
- * for rows advanced before the watermark existed. The clamp is what keeps
- * historical duplicate increments (recorded before the watermark, when a
- * stale status regression could double-record) from replaying forever; in
- * steady state it is a no-op. A row whose recorded increments do not cover
- * its authority (recorded before the executions table, or an increment lost
- * to an insert failure) synthesizes one event for the uncovered remainder at
- * the row's first-fill time, priced at the cumulative average — the closest
- * persisted truth for fills whose individual moments were never kept.
+ * order.
+ *
+ * Each order's increments are the differences between consecutive points on
+ * its cumulative fill curve, derived here rather than at write time — which
+ * is what lets a late partial slot into place instead of being discarded.
+ *
+ * Events are clamped to the row's AUTHORITY: the quantity the row itself
+ * vouches for (its executedQuantity watermark, or its cumulative fill state
+ * for rows advanced before that column). The watermark is advanced before
+ * any observation is recorded, so it never clamps a real one; what it does
+ * clamp is duplicate increment rows left by the status-regression bug. A row
+ * whose curve does not cover its authority (recorded before this table, or
+ * an observation lost to an insert failure) synthesizes one event for the
+ * uncovered remainder at the row's first-fill time, priced at the RESIDUAL
+ * that makes the replayed book's average equal the broker's reported one.
  */
 function fillEventsFor(rows: TradeOrder[], executions: TradeOrderExecution[]): FillEvent[] {
   const byOrder = new Map<string, TradeOrderExecution[]>();
@@ -147,36 +226,59 @@ function fillEventsFor(rows: TradeOrder[], executions: TradeOrderExecution[]): F
   }
   const events: FillEvent[] = [];
   for (const row of rows) {
-    const recorded = (byOrder.get(row.id) ?? [])
-      .slice()
-      .sort(
-        (a, b) =>
-          a.executedAt.getTime() - b.executedAt.getTime() ||
-          a.createdAt.getTime() - b.createdAt.getTime() ||
-          a.id.localeCompare(b.id),
-      );
     const authority = Math.max(row.executedQuantity ?? 0, isFill(row) ? fillQuantity(row) : 0);
-    let covered = 0;
-    for (const execution of recorded) {
-      if (!(execution.quantity > 0) || !Number.isFinite(execution.price)) continue;
-      const take = Math.min(execution.quantity, authority - covered);
-      if (take <= 0) continue;
-      events.push({
-        time: execution.executedAt,
-        quantity: take,
-        price: execution.price,
-        row,
+    const points = fillCurveFor(byOrder.get(row.id) ?? []);
+    const increments: { quantity: number; price: number; time: Date }[] = [];
+    let prevCumulative = 0;
+    let prevAvgPrice: number | null = null;
+    for (const point of points) {
+      const delta = point.cumulative - prevCumulative;
+      if (delta <= 0) continue;
+      increments.push({
+        quantity: delta,
+        price: incrementPrice(
+          prevAvgPrice,
+          prevCumulative,
+          point.avgPrice,
+          point.cumulative,
+          delta,
+        ),
+        time: point.time,
       });
-      covered += take;
+      prevCumulative = point.cumulative;
+      prevAvgPrice = point.avgPrice;
     }
+    // The k-th increment executed no later than the k-th earliest time we
+    // observed for this order. Assigning sorted times to cumulative-ordered
+    // increments is a no-op when the broker reports true execution times, and
+    // is what keeps an order's own fills in order when it does not: Webull
+    // reports none at all, so an observation is stamped when it ARRIVED, and
+    // a late partial arrives after the fill that superseded it.
+    const times = increments.map((increment) => increment.time).sort((a, b) => +a - +b);
+
+    let covered = 0;
+    let coveredNotional = 0;
+    increments.forEach((increment, index) => {
+      const take = Math.min(increment.quantity, authority - covered);
+      if (take <= 0) return;
+      events.push({ time: times[index], quantity: take, price: increment.price, row });
+      covered += take;
+      coveredNotional += take * increment.price;
+    });
+
     const remainder = authority - covered;
     // The finite-price guard, not isFill: replay is decoupled from status, so
     // a fill whose status was later regressed by a stale event still replays.
-    if (remainder > 0 && typeof row.filledPrice === 'number' && Number.isFinite(row.filledPrice)) {
+    if (remainder > 0 && isFinitePositive(row.filledPrice)) {
+      // What the uncovered quantity must have executed at for the book's
+      // average to come out at the broker's cumulative average. With nothing
+      // covered this is just that average, which is all a row recorded before
+      // this table can say.
+      const residual = (authority * row.filledPrice - coveredNotional) / remainder;
       events.push({
         time: row.filledAt ?? row.placedAt,
         quantity: remainder,
-        price: row.filledPrice,
+        price: Number.isFinite(residual) && residual > 0 ? residual : row.filledPrice,
         row,
       });
     }
@@ -400,83 +502,78 @@ export class OrdersService implements OnModuleDestroy {
     }
 
     if (!isFillEvent(order)) return;
-    // First fill wins: openedAt anchors on the execution that made the
-    // position quantity nonzero, so a later fill event (or a re-poll of the
-    // same fill) must never move an existing timestamp.
+    const executedAt = fillTimeOf(order);
+    // openedAt anchors on the order's EARLIEST execution, so this write moves
+    // the stamp backwards but never forwards: a re-poll of the same fill, or
+    // a later fill event, must not move it, while a partial that arrives
+    // after the fill it preceded must correct it.
     await this.prisma.tradeOrder.updateMany({
-      where: { id: order.orderId, filledAt: null },
-      data: { filledAt: fillTimeOf(order) },
+      where: { id: order.orderId, OR: [{ filledAt: null }, { filledAt: { gt: executedAt } }] },
+      data: { filledAt: executedAt },
     });
-    await this.recordFillProgress(order);
+    await this.recordFillProgress(order, executedAt);
   }
 
-  /** Bounded compare-and-set attempts per fill event. Exhaustion drops the
-   *  advance, which is safe: brokers redeliver fill state (webhook retries,
-   *  poller ticks), and until then the replay synthesizes the uncovered
-   *  remainder from whatever the watermark did record. */
-  private static readonly CAS_ATTEMPTS = 5;
-
   /**
-   * Advances the fill watermark and records the increment it claims.
+   * Advances the order's cumulative fill state and records the observation
+   * behind it.
    *
-   * `executedQuantity` is the only authority on how much of the order's
-   * cumulative fill has been recorded. It is independent of status (a stale
-   * status regression must not cause a double-record) and advances by
-   * compare-and-set, so recorders on different API instances each claim a
-   * disjoint increment or lose the race and re-read. Fill fields ride the
-   * same statement, which fences the reads below: filledPrice cannot change
-   * between the read and a successful CAS. After any advance,
-   * executedQuantity === filledQuantity ?? quantity for the claiming event.
-   * The (orderId, cumulative) unique index is the belt to this suspender: an
-   * ambiguous retry that re-claims a snapshot cannot insert it twice.
+   * Two independent writes, deliberately not a pair:
+   *
+   * `executedQuantity` is the monotone watermark — the quantity the row
+   * vouches for. It is independent of status (a stale status regression must
+   * not cause a double-record) and advances in ONE guarded statement, which
+   * is all the atomicity it needs: under READ COMMITTED, Postgres
+   * re-evaluates the predicate against the updated row after a concurrent
+   * writer commits, so a recorder on another instance carrying a lower
+   * cumulative simply matches nothing. (The in-memory test double cannot
+   * model that re-check — it is single-threaded — so the concurrency tests
+   * pin the outcome, not the mechanism.)
+   *
+   * The observation is then recorded UNCONDITIONALLY, even when its
+   * cumulative sits below the watermark. That is the whole point: a
+   * cumulative below the watermark is either a late partial the replay needs
+   * in order to place the earlier fill (its price and its moment are
+   * recoverable from nowhere else), or a redelivery repairing an
+   * observation whose insert failed. Gating this on the watermark is what
+   * made both of those unrecoverable.
    */
-  private async recordFillProgress(order: OrderResult): Promise<void> {
+  private async recordFillProgress(order: OrderResult, executedAt: Date): Promise<void> {
     const cumulative = cumulativeOf(order);
-    for (let attempt = 0; attempt < OrdersService.CAS_ATTEMPTS; attempt += 1) {
-      const row = await this.prisma.tradeOrder.findUnique({ where: { id: order.orderId } });
-      if (!row) return;
-      // Everything the increment derivation needs is read BEFORE the write —
-      // the fake returns live references, and the CAS fences these reads.
-      const cumBefore = row.executedQuantity ?? 0;
-      const oldAvgPrice = row.filledPrice ?? null;
-      if (cumulative <= cumBefore) return; // stale event, or already recorded
-      const delta = cumulative - cumBefore;
-      const { count } = await this.prisma.tradeOrder.updateMany({
-        // Exact float equality is sound here: the compared value is the
-        // double read from this very column, not a recomputed one.
-        where: { id: order.orderId, executedQuantity: cumBefore },
+    if (!(cumulative > 0)) return;
+    await this.prisma.tradeOrder.updateMany({
+      where: { id: order.orderId, executedQuantity: { lt: cumulative } },
+      data: {
+        executedQuantity: cumulative,
+        filledQuantity: order.filledQuantity ?? null,
+        filledPrice: order.filledPrice ?? null,
+      },
+    });
+    // A resting order re-reports the same cumulative on every poll tick, so
+    // check before writing rather than letting the unique index reject tick
+    // after tick. The index stays the authority — two instances can both miss
+    // here — this only keeps the common case off the write path.
+    const known = await this.prisma.tradeOrderExecution.findMany({
+      where: { orderId: order.orderId, cumulative },
+    });
+    if (known.length > 0) return;
+    try {
+      await this.prisma.tradeOrderExecution.create({
         data: {
-          executedQuantity: cumulative,
-          filledQuantity: order.filledQuantity ?? null,
-          filledPrice: order.filledPrice ?? null,
+          orderId: order.orderId,
+          cumulative,
+          avgPrice: order.filledPrice ?? null,
+          executedAt,
         },
       });
-      if (count === 0) continue; // another recorder advanced first; re-read
-      // The increment this event revealed, kept as its own row: the order
-      // row holds only cumulative state, and interleaved partial fills
-      // across orders can only be replayed in market order from increments.
-      try {
-        await this.prisma.tradeOrderExecution.create({
-          data: {
-            orderId: order.orderId,
-            quantity: delta,
-            price: incrementPrice(oldAvgPrice, cumBefore, order.filledPrice, cumulative, delta),
-            cumulative,
-            executedAt: fillTimeOf(order),
-          },
-        });
-      } catch (err) {
-        // P2002 on (orderId, cumulative): this snapshot is already recorded —
-        // exactly the outcome wanted. Anything else lost the increment until
-        // redelivery; the replay synthesizes the remainder meanwhile.
-        if ((err as { code?: string }).code !== 'P2002') throw err;
-      }
-      return;
+    } catch (err) {
+      // P2002 on (orderId, cumulative): another recorder got there first —
+      // exactly the outcome wanted. Anything else leaves the observation
+      // unrecorded until a redelivery repairs it; the watermark has already
+      // advanced, so the replay still books the quantity, priced at the
+      // residual that keeps the book's average honest.
+      if ((err as { code?: string }).code !== 'P2002') throw err;
     }
-    this.logger.warn(
-      `execution watermark for ${order.orderId} still contended after ` +
-        `${OrdersService.CAS_ATTEMPTS} attempts; dropping (broker redelivery heals)`,
-    );
   }
 
   /**

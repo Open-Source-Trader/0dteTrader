@@ -46,6 +46,13 @@ describe('OrdersService', () => {
     orders.onModuleDestroy();
   });
 
+  /** The cumulative fill curve recorded for one order, in curve order. */
+  const cumulativesFor = (orderId: string): number[] =>
+    prisma.tradeOrderExecutions
+      .filter((e) => e.orderId === orderId)
+      .map((e) => e.cumulative)
+      .sort((a: number, b: number) => a - b);
+
   it('persists orders arriving on the events bus, updating status on later events', async () => {
     const submitted = fill({
       status: 'submitted',
@@ -630,9 +637,7 @@ describe('OrdersService', () => {
         filledAt: t(20).toISOString(),
       });
 
-      expect(prisma.tradeOrderExecutions).toHaveLength(2);
-      const total = prisma.tradeOrderExecutions.reduce((sum, e) => sum + e.quantity, 0);
-      expect(total).toBe(3);
+      expect(cumulativesFor('DUP')).toEqual([1, 3]);
     });
 
     it('derives the increment price from the moving cumulative average', async () => {
@@ -647,6 +652,12 @@ describe('OrdersService', () => {
           filledAt: t(10).toISOString(),
         }),
       );
+      // A close between the two increments, so the replay has to price them
+      // separately — a single full close would net out the same either way.
+      await orders.record(
+        USER,
+        fill({ orderId: 'MID', side: 'sell', filledPrice: 1.5, filledAt: t(20).toISOString() }),
+      );
       // Cumulative average moves 1.00 → 1.20 over a 2-lot increment: the
       // increment itself executed at (3·1.20 − 1·1.00) / 2 = 1.30.
       await orders.record(
@@ -657,13 +668,31 @@ describe('OrdersService', () => {
           quantity: 3,
           filledQuantity: 3,
           filledPrice: 1.2,
-          filledAt: t(20).toISOString(),
+          filledAt: t(30).toISOString(),
+        }),
+      );
+      await orders.record(
+        USER,
+        fill({
+          orderId: 'REST',
+          side: 'sell',
+          quantity: 2,
+          filledPrice: 1.5,
+          filledAt: t(40).toISOString(),
         }),
       );
 
-      const prices = prisma.tradeOrderExecutions.map((e) => e.price);
-      expect(prices[0]).toBeCloseTo(1.0);
-      expect(prices[1]).toBeCloseTo(1.3);
+      // Recorded as the observations the broker actually reported…
+      expect(prisma.tradeOrderExecutions.map((e) => [e.cumulative, e.avgPrice])).toEqual([
+        [1, 1.0],
+        [1, 1.5],
+        [3, 1.2],
+        [2, 1.5],
+      ]);
+      // …and the 1.30 increment is what the REPLAY derives: (1.50−1.00)×1 +
+      // (1.50−1.30)×2, ×100. Pricing the second increment at the 1.20
+      // cumulative average instead would report 110.
+      expect((await orders.history(USER)).totalRealizedPnl).toBe(90);
     });
 
     it('never regresses the stored fill on a stale out-of-order event', async () => {
@@ -694,7 +723,174 @@ describe('OrdersService', () => {
       const row = prisma.tradeOrders.find((o) => o.id === 'STALE');
       expect(row.filledQuantity).toBe(3);
       expect(row.filledPrice).toBe(1.2);
-      expect(prisma.tradeOrderExecutions).toHaveLength(1);
+      expect(row.executedQuantity).toBe(3);
+      // The row's cumulative state does not regress — but the late partial is
+      // still put ON RECORD, because its price and its moment exist nowhere
+      // else and the replay needs them to place the earlier fill.
+      expect(cumulativesFor('STALE')).toEqual([1, 3]);
+      // Its execution time back-dates filledAt, which anchors openedAt.
+      expect(row.filledAt).toEqual(t(10));
+    });
+
+    /** A 3-lot buy that fills 1 @1.00 then 2 more (cumulative average 1.20),
+     *  with a 1-lot sell @1.50 executing in between. Whatever order the
+     *  broker's reports arrive in, the sell closed a lot that cost 1.00 and
+     *  the two lots left cost 1.30 — so the sell realizes $50 and a later
+     *  exit of the rest at 1.50 realizes $40. */
+    const recordInterleavedFill = async (arrival: 'in-order' | 'out-of-order') => {
+      const partial = fill({
+        orderId: 'OOO',
+        status: 'partially_filled' as const,
+        quantity: 3,
+        filledQuantity: 1,
+        filledPrice: 1.0,
+        filledAt: t(10).toISOString(),
+      });
+      const terminal = {
+        ...partial,
+        status: 'filled' as const,
+        filledQuantity: 3,
+        filledPrice: 1.2,
+        filledAt: t(30).toISOString(),
+      };
+      const sell = fill({
+        orderId: 'MID',
+        side: 'sell' as const,
+        filledPrice: 1.5,
+        filledAt: t(20).toISOString(),
+      });
+      if (arrival === 'in-order') {
+        await orders.record(USER, partial);
+        await orders.record(USER, sell);
+        await orders.record(USER, terminal);
+      } else {
+        await orders.record(USER, terminal);
+        await orders.record(USER, sell);
+        await orders.record(USER, partial);
+      }
+    };
+
+    it('books an interleaved close the same way whichever order the fills are reported in', async () => {
+      // The terminal snapshot arriving before the partial it supersedes used
+      // to discard the partial outright, which replayed all 3 lots at the
+      // terminal's moment: the sell then opened a phantom SHORT, realized $30
+      // instead of $50, and attributed it to the BUY.
+      await recordInterleavedFill('out-of-order');
+
+      const history = await orders.history(USER);
+      expect(history.totalRealizedPnl).toBe(50);
+      expect(history.entries.find((e) => e.orderId === 'MID')?.realizedPnl).toBe(50);
+      expect(history.entries.find((e) => e.orderId === 'OOO')?.realizedPnl).toBeNull();
+      // The 2 lots still open cost 1.30, not the 1.20 cumulative average.
+      await orders.record(
+        USER,
+        fill({
+          orderId: 'EXIT',
+          side: 'sell',
+          quantity: 2,
+          filledPrice: 1.5,
+          filledAt: t(40).toISOString(),
+        }),
+      );
+      expect((await orders.history(USER)).totalRealizedPnl).toBe(90);
+    });
+
+    it('reports the same book for in-order arrival (the baseline the above must match)', async () => {
+      await recordInterleavedFill('in-order');
+
+      const history = await orders.history(USER);
+      expect(history.totalRealizedPnl).toBe(50);
+      expect(history.entries.find((e) => e.orderId === 'MID')?.realizedPnl).toBe(50);
+      expect(cumulativesFor('OOO')).toEqual([1, 3]);
+    });
+
+    it('keeps an order’s own fills in sequence when the broker reports no execution times', async () => {
+      // Webull reports no execution timestamp, so an observation is stamped
+      // when it ARRIVED — and a late partial arrives AFTER the fill that
+      // superseded it. Ordering the replay by those stamps would put the
+      // 2-lot increment before the 1-lot one it followed.
+      const arrival = new Date('2026-08-04T14:00:00.000Z');
+      const partial = fill({
+        orderId: 'NOTIME',
+        status: 'partially_filled' as const,
+        quantity: 3,
+        filledQuantity: 1,
+        filledPrice: 1.0,
+        filledAt: undefined,
+      });
+      jest.useFakeTimers({ now: arrival });
+      try {
+        await orders.record(USER, {
+          ...partial,
+          status: 'filled',
+          filledQuantity: 3,
+          filledPrice: 1.2,
+        });
+        jest.setSystemTime(new Date(arrival.getTime() + 2000));
+        await orders.record(USER, partial);
+      } finally {
+        jest.useRealTimers();
+      }
+      await orders.record(
+        USER,
+        fill({
+          orderId: 'BETWEEN',
+          side: 'sell',
+          filledPrice: 1.5,
+          filledAt: new Date(arrival.getTime() + 1000).toISOString(),
+        }),
+      );
+
+      // The sell closed the 1.00 lot: $50. Replaying the increments in
+      // arrival order would close a 1.30 lot instead and report $20.
+      expect((await orders.history(USER)).totalRealizedPnl).toBe(50);
+    });
+
+    it('slots a partial that arrives between two already-recorded snapshots', async () => {
+      const base = {
+        orderId: 'PERM',
+        quantity: 3,
+        filledAt: t(10).toISOString(),
+      };
+      await orders.record(
+        USER,
+        fill({ ...base, status: 'partially_filled', filledQuantity: 1, filledPrice: 1.0 }),
+      );
+      await orders.record(
+        USER,
+        fill({
+          ...base,
+          status: 'filled',
+          filledQuantity: 3,
+          filledPrice: 1.2,
+          filledAt: t(30).toISOString(),
+        }),
+      );
+      // The middle partial shows up last.
+      await orders.record(
+        USER,
+        fill({
+          ...base,
+          status: 'partially_filled',
+          filledQuantity: 2,
+          filledPrice: 1.1,
+          filledAt: t(20).toISOString(),
+        }),
+      );
+
+      expect(cumulativesFor('PERM')).toEqual([1, 2, 3]);
+      // Increments 1.00, 1.20, 1.40 — notional 3.60 = 3 × the reported 1.20.
+      await orders.record(
+        USER,
+        fill({
+          orderId: 'PERM-EXIT',
+          side: 'sell',
+          quantity: 3,
+          filledPrice: 2.0,
+          filledAt: t(40).toISOString(),
+        }),
+      );
+      expect((await orders.history(USER)).totalRealizedPnl).toBe(240);
     });
 
     it('replays a row with no recorded executions from its cumulative state', async () => {
@@ -830,6 +1026,125 @@ describe('OrdersService', () => {
       expect(history.totalRealizedPnl).toBe(0);
     });
 
+    it('keeps the position whole when an observation cannot be stored, and repairs on redelivery', async () => {
+      const partial = fill({
+        orderId: 'LOST',
+        status: 'partially_filled' as const,
+        quantity: 2,
+        filledQuantity: 1,
+        filledPrice: 1.0,
+        filledAt: t(10).toISOString(),
+      });
+      const terminal = {
+        ...partial,
+        status: 'filled' as const,
+        filledQuantity: 2,
+        filledPrice: 1.5,
+        filledAt: t(20).toISOString(),
+      };
+      await orders.record(USER, partial);
+      const create = prisma.tradeOrderExecution.create;
+      let failing = true;
+      prisma.tradeOrderExecution.create = async (args: any) => {
+        if (failing && args.data.orderId === 'LOST' && args.data.cumulative === 2) {
+          throw new Error('connection reset');
+        }
+        return create(args);
+      };
+      await expect(orders.record(USER, terminal)).rejects.toThrow('connection reset');
+
+      // The watermark advanced, so the row still vouches for both lots — and
+      // the uncovered one is priced at the RESIDUAL (2·1.50 − 1·1.00 = 2.00),
+      // which is what makes the book's average equal the broker's 1.50.
+      // Pricing it at the cumulative average instead would report 1.25.
+      expect((await orders.positionAnchors(USER, [OCC])).get(OCC)?.quantity).toBe(2);
+      await orders.record(
+        USER,
+        fill({
+          orderId: 'LOST-EXIT',
+          side: 'sell',
+          quantity: 2,
+          filledPrice: 2.0,
+          filledAt: t(30).toISOString(),
+        }),
+      );
+      expect((await orders.history(USER)).totalRealizedPnl).toBe(100);
+
+      // A redelivery puts the missing observation on record, even though its
+      // cumulative is no higher than the watermark.
+      failing = false;
+      await orders.record(USER, terminal);
+      expect(cumulativesFor('LOST')).toEqual([1, 2]);
+      expect((await orders.history(USER)).totalRealizedPnl).toBe(100);
+    });
+
+    it('replays a row carrying the pre-snapshot increment shape', async () => {
+      // Rolling deploy: an instance that predates the snapshot columns writes
+      // {quantity, price} with no average, and the replay has to recover the
+      // curve point from the prefix it extends.
+      const base = { orderId: 'MIX', quantity: 3, filledAt: t(10).toISOString() };
+      await orders.record(
+        USER,
+        fill({ ...base, status: 'partially_filled', filledQuantity: 1, filledPrice: 1.0 }),
+      );
+      const old = prisma.tradeOrderExecutions.find((e) => e.orderId === 'MIX');
+      Object.assign(old, { avgPrice: null, quantity: 1, price: 1.0 });
+      await orders.record(
+        USER,
+        fill({
+          ...base,
+          status: 'filled',
+          filledQuantity: 3,
+          filledPrice: 1.2,
+          filledAt: t(30).toISOString(),
+        }),
+      );
+
+      // Notional 1×1.00 + 2×1.30 = 3.60; a point read as priceless would book
+      // the first lot at 0 and realize 360 below.
+      await orders.record(
+        USER,
+        fill({
+          orderId: 'MIX-EXIT',
+          side: 'sell',
+          quantity: 3,
+          filledPrice: 2.0,
+          filledAt: t(40).toISOString(),
+        }),
+      );
+      expect((await orders.history(USER)).totalRealizedPnl).toBe(240);
+    });
+
+    it('clamps a duplicate left by the status-regression bug even once it carries a cumulative', async () => {
+      // The watermark migration backfilled `cumulative` as a running sum, so
+      // a historical duplicate is now TWO rows at cumulative 1 and 2 on a
+      // one-lot order — self-consistent, and only the row's own watermark
+      // says which of them is real.
+      await orders.record(
+        USER,
+        fill({
+          orderId: 'DUPCUM',
+          quantity: 1,
+          filledQuantity: 1,
+          filledPrice: 1.0,
+          filledAt: t(10).toISOString(),
+        }),
+      );
+      prisma.tradeOrderExecutions.push({
+        id: 'dup-backfilled',
+        orderId: 'DUPCUM',
+        cumulative: 2,
+        avgPrice: null,
+        quantity: 1,
+        price: 1.0,
+        executedAt: t(11),
+        createdAt: new Date(),
+      });
+
+      expect(prisma.tradeOrders.find((o) => o.id === 'DUPCUM').executedQuantity).toBe(1);
+      expect((await orders.positionAnchors(USER, [OCC])).get(OCC)?.quantity).toBe(1);
+    });
+
     it('serializes concurrent events for one order (no double-counted increments)', async () => {
       const partial = fill({
         orderId: 'RACE',
@@ -846,12 +1161,11 @@ describe('OrdersService', () => {
         filledPrice: 1.2,
         filledAt: t(20).toISOString(),
       };
-      // Fired together, the way a poll tick and a webhook land: unserialized,
-      // both would read cumulative 0 and insert 1 + 3 = 4 lots of increments.
+      // Fired together, the way a poll tick and a webhook land.
       await Promise.all([orders.record(USER, partial), orders.record(USER, full)]);
 
-      const total = prisma.tradeOrderExecutions.reduce((sum, e) => sum + e.quantity, 0);
-      expect(total).toBe(3);
+      expect(cumulativesFor('RACE')).toEqual([1, 3]);
+      expect((await orders.positionAnchors(USER, [OCC])).get(OCC)?.quantity).toBe(3);
     });
   });
 
@@ -900,69 +1214,45 @@ describe('OrdersService', () => {
       expect(row.status).toBe('filled');
       expect(row.executedQuantity).toBe(3);
       const recorded = prisma.tradeOrderExecutions.filter((e) => e.orderId === 'MULTI');
-      expect(recorded.reduce((sum, e) => sum + e.quantity, 0)).toBe(3);
       expect(new Set(recorded.map((e) => e.cumulative)).size).toBe(recorded.length);
+      // What the observations mean is the same under every interleaving: the
+      // broker's cumulative, booked once.
+      expect((await orders.positionAnchors(USER, [OCC])).get(OCC)?.quantity).toBe(3);
     });
 
-    it('retries the advance when the other instance claims the watermark mid-flight', async () => {
+    it('records the lower observation without letting it walk the watermark back', async () => {
+      // Instance B's terminal snapshot lands first; instance A's earlier
+      // partial arrives afterwards. Both are real observations and both must
+      // be kept, but the row's cumulative state may only move forward.
+      //
+      // Monotonicity itself rests on the database: the advance is one
+      // statement guarded on `executedQuantity < :cumulative`, and under READ
+      // COMMITTED Postgres re-evaluates that predicate against the row the
+      // concurrent writer committed, so the lower advance matches nothing.
+      // The in-memory double is single-threaded and cannot model that
+      // re-check, so this pins the OUTCOME rather than the mechanism.
       const partial = fill({
-        orderId: 'CAS',
+        orderId: 'LATE',
         status: 'partially_filled',
         quantity: 3,
         filledQuantity: 1,
         filledPrice: 1.0,
         filledAt: t(10).toISOString(),
       });
-      const full = {
+      await orders2.record(USER, {
         ...partial,
-        status: 'filled' as const,
+        status: 'filled',
         filledQuantity: 3,
         filledPrice: 1.2,
-        filledAt: t(20).toISOString(),
-      };
-      // Seed the row so both recorders go straight to the fill path.
-      await orders.record(USER, {
-        ...partial,
-        status: 'submitted',
-        filledQuantity: undefined,
-        filledPrice: undefined,
-        filledAt: undefined,
+        filledAt: t(30).toISOString(),
       });
+      await orders.record(USER, partial);
 
-      // Hold instance B on its FIRST watermark read — a pre-advance snapshot
-      // — until instance A's advance has fully committed. B's compare-and-set
-      // is then guaranteed the count-0 → re-read → retry branch; without the
-      // gate the interleaving (and which branch runs) is scheduler luck.
-      const original = prisma.tradeOrder.findUnique;
-      let releaseGate!: () => void;
-      const gate = new Promise<void>((resolve) => {
-        releaseGate = resolve;
-      });
-      let reachedHold!: () => void;
-      const holding = new Promise<void>((resolve) => {
-        reachedHold = resolve;
-      });
-      prisma.tradeOrder.findUnique = async (args: any) => {
-        prisma.tradeOrder.findUnique = original; // one-shot: later reads pass
-        const row = await original(args);
-        reachedHold();
-        await gate;
-        return row;
-      };
-
-      const recordedByB = orders2.record(USER, full);
-      await holding; // B holds executedQuantity = 0
-      await orders.record(USER, partial); // A advances 0 → 1
-      releaseGate();
-      await recordedByB; // B: CAS(0) misses, re-reads 1, advances 1 → 3
-
-      const row = prisma.tradeOrders.find((o) => o.id === 'CAS');
+      const row = prisma.tradeOrders.find((o) => o.id === 'LATE');
       expect(row.executedQuantity).toBe(3);
-      const recorded = prisma.tradeOrderExecutions
-        .filter((e) => e.orderId === 'CAS')
-        .sort((a, b) => a.cumulative - b.cumulative);
-      expect(recorded.map((e) => e.quantity)).toEqual([1, 2]);
-      expect(recorded.map((e) => e.cumulative)).toEqual([1, 3]);
+      expect(row.filledQuantity).toBe(3);
+      expect(row.filledPrice).toBe(1.2);
+      expect(cumulativesFor('LATE')).toEqual([1, 3]);
     });
 
     it('refuses the same increment twice even when the watermark read is ambiguous (unique belt)', async () => {

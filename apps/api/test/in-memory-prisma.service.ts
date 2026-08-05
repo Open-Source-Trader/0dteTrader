@@ -291,7 +291,18 @@ export class InMemoryPrismaService {
       ) {
         throw p2002('orderId, cumulative');
       }
-      const row = { id: randomUUID(), createdAt: new Date(), cumulative: null, ...data };
+      // Every nullable column defaults to null, not undefined: Prisma returns
+      // null for an unwritten column, and a reader distinguishing the row
+      // shapes on `x === null` would otherwise pass here and misfire live.
+      const row = {
+        id: randomUUID(),
+        createdAt: new Date(),
+        cumulative: null,
+        avgPrice: null,
+        quantity: null,
+        price: null,
+        ...data,
+      };
       this.tradeOrderExecutions.push(row);
       return row;
     },

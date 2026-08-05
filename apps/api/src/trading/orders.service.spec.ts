@@ -253,7 +253,7 @@ describe('OrdersService', () => {
 
       // Quantity-weighted: (600×1 + 604×3) / 4
       const anchor = (await orders.positionAnchors(USER, [OCC])).get(OCC);
-      expect(anchor?.underlyingEntryPrice).toBe(603);
+      expect(anchor?.underlyingEntryEstimate).toBe(603);
     });
 
     it('carries openedAt but no price for fills without an underlying price', async () => {
@@ -263,7 +263,7 @@ describe('OrdersService', () => {
       await orders.record(USER, opening);
 
       const anchor = (await orders.positionAnchors(USER, [OCC])).get(OCC);
-      expect(anchor?.underlyingEntryPrice).toBeUndefined();
+      expect(anchor?.underlyingEntryEstimate).toBeUndefined();
       expect(anchor?.openedAt).toEqual(new Date(opening.filledAt!));
     });
 
@@ -276,7 +276,7 @@ describe('OrdersService', () => {
       );
 
       const anchor = (await orders.positionAnchors(USER, [OCC])).get(OCC);
-      expect(anchor?.underlyingEntryPrice).toBe(604);
+      expect(anchor?.underlyingEntryEstimate).toBe(604);
     });
 
     it('leaves the anchor untouched when the position is only partially closed', async () => {
@@ -297,7 +297,7 @@ describe('OrdersService', () => {
       );
 
       const anchor = (await orders.positionAnchors(USER, [OCC])).get(OCC);
-      expect(anchor?.underlyingEntryPrice).toBe(605);
+      expect(anchor?.underlyingEntryEstimate).toBe(605);
     });
 
     it('re-weights a later add against the remaining open quantity, not the closed one', async () => {
@@ -324,7 +324,7 @@ describe('OrdersService', () => {
 
       // 2 open at 605 + 2 new at 620 — the closed 2 must not still carry weight.
       const anchor = (await orders.positionAnchors(USER, [OCC])).get(OCC);
-      expect(anchor?.underlyingEntryPrice).toBe(612.5);
+      expect(anchor?.underlyingEntryEstimate).toBe(612.5);
     });
 
     it('drops the anchor once the position is flat', async () => {
@@ -356,7 +356,7 @@ describe('OrdersService', () => {
 
       // Now short 2, opened at the price the reversal happened at.
       const anchor = (await orders.positionAnchors(USER, [OCC])).get(OCC);
-      expect(anchor?.underlyingEntryPrice).toBe(610);
+      expect(anchor?.underlyingEntryEstimate).toBe(610);
     });
 
     it('only replays the contracts asked for, and none when asked for none', async () => {
@@ -374,7 +374,7 @@ describe('OrdersService', () => {
 
       const anchors = await orders.positionAnchors(USER, [other]);
       expect(anchors.size).toBe(1);
-      expect(anchors.get(other)?.underlyingEntryPrice).toBe(500);
+      expect(anchors.get(other)?.underlyingEntryEstimate).toBe(500);
       expect(await orders.positionAnchors(USER, [])).toEqual(new Map());
     });
 
@@ -559,9 +559,65 @@ describe('OrdersService', () => {
       );
 
       const anchor = (await orders.positionAnchors(USER, [OCC])).get(OCC);
-      expect(anchor?.underlyingEntryPrice).toBeUndefined();
+      expect(anchor?.underlyingEntryEstimate).toBeUndefined();
       // The opening TIME is still known — only the price is unanchored.
       expect(anchor?.openedAt).toEqual(late);
+    });
+
+    it('refuses the estimate when the reported execution PRECEDES placement', async () => {
+      // Negative lag: the broker's execution stamp sits before our placement
+      // stamp — the clocks disagree about which came first, and an estimate
+      // built on that ordering is not even an estimate.
+      const placed = new Date('2026-08-02T14:00:00.000Z');
+      const before = new Date('2026-08-02T13:59:30.000Z');
+      await orders.recordUnderlyingPrice(
+        USER,
+        fill({
+          side: 'buy',
+          quantity: 1,
+          filledPrice: 1.0,
+          timestamp: placed.toISOString(),
+          filledAt: before.toISOString(),
+        }),
+        600,
+      );
+
+      const anchor = (await orders.positionAnchors(USER, [OCC])).get(OCC);
+      expect(anchor?.underlyingEntryEstimate).toBeUndefined();
+    });
+
+    it('mixes provenance across partials: only the prompt fill weights the estimate', async () => {
+      const placedA = new Date('2026-08-02T14:00:00.000Z');
+      await orders.recordUnderlyingPrice(
+        USER,
+        fill({
+          side: 'buy',
+          quantity: 1,
+          filledPrice: 1.0,
+          timestamp: placedA.toISOString(),
+          filledAt: new Date(placedA.getTime() + 3_000).toISOString(),
+        }),
+        600,
+      );
+      // A resting add that fills five minutes after ITS placement: its
+      // placement quote (610) says nothing about the fill and must not drag
+      // the blended estimate.
+      const placedB = new Date('2026-08-02T14:01:00.000Z');
+      await orders.recordUnderlyingPrice(
+        USER,
+        fill({
+          side: 'buy',
+          quantity: 3,
+          filledPrice: 1.2,
+          timestamp: placedB.toISOString(),
+          filledAt: new Date(placedB.getTime() + 300_000).toISOString(),
+        }),
+        610,
+      );
+
+      const anchor = (await orders.positionAnchors(USER, [OCC])).get(OCC);
+      expect(anchor?.underlyingEntryEstimate).toBe(600);
+      expect(anchor?.quantity).toBe(4);
     });
 
     it('keeps the entry anchor for a fill that lands promptly after placement', async () => {
@@ -579,7 +635,9 @@ describe('OrdersService', () => {
         600,
       );
 
-      expect((await orders.positionAnchors(USER, [OCC])).get(OCC)?.underlyingEntryPrice).toBe(600);
+      expect((await orders.positionAnchors(USER, [OCC])).get(OCC)?.underlyingEntryEstimate).toBe(
+        600,
+      );
     });
 
     it('reports the replayed signed quantity, shorts included', async () => {
@@ -1535,7 +1593,7 @@ describe('OrdersService', () => {
       expect(row.userId).toBe(USER);
       expect(row.underlyingPrice).toBe(600);
       const anchor = (await orders.positionAnchors(USER, [OCC])).get(OCC);
-      expect(anchor?.underlyingEntryPrice).toBe(600);
+      expect(anchor?.underlyingEntryEstimate).toBe(600);
     });
   });
 

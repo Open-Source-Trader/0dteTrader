@@ -35,7 +35,8 @@ export interface PositionAnchor {
    *  fills (outside orders, missed polls), and an entry price averaged over
    *  the wrong fills is worse than none — "Move stop to entry" consumes it. */
   quantity: number;
-  underlyingEntryPrice?: number;
+  /** Placement-quote-derived ESTIMATE (prompt fills only) — display-only. */
+  underlyingEntryEstimate?: number;
   openedAt?: Date;
 }
 
@@ -392,7 +393,10 @@ function applyExecution(
   // Rows predating the column (and any source reporting a junk price) are
   // skipped for the same reason: averaged in as zero they would drag the
   // anchor to a level the position was never opened at.
-  const promptFill = event.time.getTime() - row.placedAt.getTime() <= FILL_ANCHOR_MAX_LAG_MS;
+  const lag = event.time.getTime() - row.placedAt.getTime();
+  // Negative lag means the clocks disagree about which came first — an
+  // estimate built on that is not even an estimate.
+  const promptFill = lag >= 0 && lag <= FILL_ANCHOR_MAX_LAG_MS;
   const underlying =
     promptFill && typeof row.underlyingPrice === 'number' && Number.isFinite(row.underlyingPrice)
       ? row.underlyingPrice
@@ -859,9 +863,9 @@ export class OrdersService implements OnModuleDestroy {
     for (const [symbol, entry] of book) {
       if (entry.quantity === 0) continue;
       const anchor: PositionAnchor = { quantity: entry.quantity };
-      if (entry.underlyingQty > 0) anchor.underlyingEntryPrice = round2(entry.avgUnderlying);
+      if (entry.underlyingQty > 0) anchor.underlyingEntryEstimate = round2(entry.avgUnderlying);
       if (entry.openedAt) anchor.openedAt = entry.openedAt;
-      if (anchor.underlyingEntryPrice !== undefined || anchor.openedAt) {
+      if (anchor.underlyingEntryEstimate !== undefined || anchor.openedAt) {
         anchors.set(symbol, anchor);
       }
     }

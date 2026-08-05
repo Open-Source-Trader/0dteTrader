@@ -457,16 +457,19 @@ describe('TradingService', () => {
         .mockResolvedValue([positionFor(placed.contractSymbol, 1)]);
 
       const [position] = await trading.getPositions(userId);
-      // The stub quotes the underlying at a fixed 100 — that is the level the
-      // chart's entry line must be drawn at.
-      expect(position.underlyingEntryPrice).toBe(StubBrokerGateway.PRICE);
+      // The stub quotes the underlying at a fixed 100. That level is a
+      // placement-time ESTIMATE, so it feeds the display-only estimate field;
+      // the authoritative fill-time field stays reserved and unset, keeping
+      // "Move stop to entry" disabled until a real fill observation exists.
+      expect(position.underlyingEntryEstimate).toBe(StubBrokerGateway.PRICE);
+      expect(position.underlyingEntryPrice).toBeUndefined();
     });
 
     it('leaves a position unannotated when no fill of it recorded an underlying price', async () => {
       jest.spyOn(gateway, 'getPositions').mockResolvedValue([positionFor('SPY260717C00505000', 1)]);
 
       const [position] = await trading.getPositions(userId);
-      expect(position.underlyingEntryPrice).toBeUndefined();
+      expect(position.underlyingEntryEstimate).toBeUndefined();
     });
 
     it('never fails a positions read because the anchor lookup failed', async () => {
@@ -486,7 +489,7 @@ describe('TradingService', () => {
         .mockResolvedValue([positionFor(placed.contractSymbol, 3)]);
 
       const [position] = await trading.getPositions(userId);
-      expect(position.underlyingEntryPrice).toBeUndefined();
+      expect(position.underlyingEntryEstimate).toBeUndefined();
       expect(position.openedAt).toBeUndefined();
     });
 
@@ -499,7 +502,7 @@ describe('TradingService', () => {
         .mockResolvedValue([positionFor(placed.contractSymbol, -1)]);
 
       const [position] = await trading.getPositions(userId);
-      expect(position.underlyingEntryPrice).toBeUndefined();
+      expect(position.underlyingEntryEstimate).toBeUndefined();
       expect(position.openedAt).toBeUndefined();
     });
   });

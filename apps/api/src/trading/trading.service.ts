@@ -222,8 +222,13 @@ export class TradingService {
       if (!anchor || anchor.quantity !== position.quantity) return position;
       return {
         ...position,
-        ...(anchor.underlyingEntryPrice !== undefined && {
-          underlyingEntryPrice: anchor.underlyingEntryPrice,
+        // The anchor is a placement-quote ESTIMATE: it feeds the display
+        // field only. underlyingEntryPrice stays reserved for a true
+        // fill-time observation, which the backend cannot produce yet — so
+        // "Move stop to entry" stays disabled rather than acting on a quote
+        // from before the fill.
+        ...(anchor.underlyingEntryEstimate !== undefined && {
+          underlyingEntryEstimate: anchor.underlyingEntryEstimate,
         }),
         ...(anchor.openedAt && { openedAt: anchor.openedAt.toISOString() }),
       };

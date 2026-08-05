@@ -745,7 +745,13 @@ components:
         underlyingEntryPrice:
           {
             type: number,
-            description: Quantity-weighted price of the UNDERLYING across the fills that opened this position — where the chart draws the entry line. Absent for positions opened before it was recorded or outside the app,
+            description: AUTHORITATIVE quantity-weighted underlying price observed at the opening fills' execution times. The only value automated actions (Move stop to entry) may consume. Reserved — not currently populated; the backend has no fill-time underlying observation yet,
+          }
+        underlyingEntryEstimate:
+          {
+            type: number,
+            description: ESTIMATED entry level — quantity-weighted over underlying quotes captured at order PLACEMENT,
+            counting only fills that executed promptly after placement. Display-only (draw the entry line as approximate); never an input to moving or arming an order. Absent when no prompt-fill estimate exists,
           }
         openedAt:
           {

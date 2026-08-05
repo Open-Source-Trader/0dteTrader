@@ -493,11 +493,22 @@ export interface Position {
   /** Contract multiplier (options: 100). Lets clients recompute P/L from live quotes. */
   multiplier: number;
   /**
-   * Quantity-weighted price of the UNDERLYING across the fills that opened this
-   * position — the level the chart's entry line is drawn at. Absent for
-   * positions opened before this was recorded, or outside the app.
+   * AUTHORITATIVE quantity-weighted price of the UNDERLYING at the fills that
+   * opened this position — an observation taken at execution time. The only
+   * value automated actions ("Move stop to entry") may consume. Currently
+   * never populated: the backend has no fill-time underlying observation yet,
+   * so the field is reserved and the actions it gates stay disabled.
    */
   underlyingEntryPrice?: number;
+  /**
+   * ESTIMATED entry level: quantity-weighted over the underlying quotes
+   * captured when the opening orders were PLACED, and only over fills that
+   * executed promptly after placement. Display-only — draw the entry line,
+   * label it as approximate — never an input to moving or arming an order:
+   * even a prompt 0DTE fill can sit meaningfully away from the placement
+   * quote. Absent when no prompt-fill estimate exists.
+   */
+  underlyingEntryEstimate?: number;
   /**
    * ISO-8601 UTC time of the first fill of the current position lifecycle (the
    * fill where quantity last left zero) — execution time, never order

@@ -4,11 +4,12 @@ import type { ApiClient } from '../../core/api/ApiClient';
 import type { ChainStore } from './ChainStore';
 import { TradeStore } from './TradeStore';
 
-function makeStore(): TradeStore {
+function makeStore(overrides: Partial<Record<string, unknown>> = {}): TradeStore {
   const apiClient = {
     previewOrder: async () => {
       throw new Error('preview unavailable in test');
     },
+    ...overrides,
   } as unknown as ApiClient;
   return new TradeStore(apiClient);
 }
@@ -410,6 +411,36 @@ describe('TradeStore.arm confirmation bypass', () => {
     expect(placeOrder).toHaveBeenCalledTimes(1);
     // Bypass never opens the confirm sheet.
     await vi.waitFor(() => expect(store.getState().armedTicket).toBeNull());
+  });
+
+  it('honours the bypass on a CURR close, not just the general path', () => {
+    // Every branch of arm() used to build its own ticket and return, so the
+    // CURR and held-close paths silently ignored "Skip order confirmation".
+    const placeOrder = vi.fn(async () => placedOrder);
+    const store = withResolver(
+      makeStore({ placeOrder, positions: async () => [], openOrders: async () => [] }),
+      [CONTRACT],
+    );
+    seedPositions(store, [position(2)]);
+
+    store.arm('sell', 'SPY', chainStub({ isCurrMode: true }), true);
+
+    expect(placeOrder).toHaveBeenCalledTimes(1);
+    expect(store.getState().armedTicket).toBeNull();
+  });
+
+  it('honours the bypass when closing a held leg by the matching heuristic', () => {
+    const placeOrder = vi.fn(async () => placedOrder);
+    const store = withResolver(
+      makeStore({ placeOrder, positions: async () => [], openOrders: async () => [] }),
+      [CONTRACT],
+    );
+    seedPositions(store, [position(2)]);
+
+    store.arm('sell', 'SPY', chainStub({ isCurrMode: false }), true);
+
+    expect(placeOrder).toHaveBeenCalledTimes(1);
+    expect(store.getState().armedTicket).toBeNull();
   });
 
   it('arms a ticket and does not submit when bypass is off', () => {

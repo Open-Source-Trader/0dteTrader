@@ -267,9 +267,11 @@ export class TradeStore extends Store<TradeStoreState> {
         return;
       }
       // A leg resolved from its OCC symbol has no quotes until its
-      // expiration's contracts load — never trade off a 0.00 display.
+      // expiration's contracts load — never trade off a 0.00 display. Same
+      // two-sided rule as quotesPending (and as iOS): a lone last print is
+      // not a quote to price an order from.
       const selected = chainStore.selectedContract;
-      if (selected && selected.bid <= 0 && selected.ask <= 0 && selected.last <= 0) {
+      if (selected && selected.bid <= 0 && selected.ask <= 0) {
         this.showToast('Quotes are still loading for that expiration.', 'error');
         return;
       }
@@ -302,26 +304,20 @@ export class TradeStore extends Store<TradeStoreState> {
         side === 'sell'
           ? `CLOSE ${sizeLabel} · ${underlying} ${Format.strike(strike)}${shortName}`
           : `${underlying} ${expiration} ${Format.strike(strike)}${shortName}`;
-      this.set({
-        armedTicket: {
-          id: nextId++,
-          request: {
-            underlying,
-            assetClass: 'option',
-            side,
-            quantity: orderQuantity,
-            orderType,
-            limitPrice,
-            selection: { mode: 'explicit', optionType, expiration, strike },
-          },
-          idempotencyKey: newIdempotencyKey(),
+      this.finish(
+        {
+          underlying,
+          assetClass: 'option',
           side,
-          summary: summaryLabel,
+          quantity: orderQuantity,
+          orderType,
+          limitPrice,
+          selection: { mode: 'explicit', optionType, expiration, strike },
         },
-        preview: null,
-        previewError: null,
-      });
-      void this.loadPreview();
+        side,
+        summaryLabel,
+        bypassConfirmation,
+      );
       return;
     }
 
@@ -351,31 +347,25 @@ export class TradeStore extends Store<TradeStoreState> {
       const shortName = firstClose.contract.optionType === 'call' ? 'C' : 'P';
       const sizeLabel =
         closeQuantity < totalHeld ? `${closeQuantity} of ${totalHeld}` : `${closeQuantity}`;
-      this.set({
-        armedTicket: {
-          id: nextId++,
-          request: {
-            underlying,
-            assetClass: 'option',
-            side,
-            quantity: closeQuantity,
-            orderType,
-            limitPrice,
-            selection: {
-              mode: 'explicit',
-              optionType: firstClose.contract.optionType,
-              expiration: firstClose.contract.expiration,
-              strike: firstClose.contract.strike,
-            },
-          },
-          idempotencyKey: newIdempotencyKey(),
+      this.finish(
+        {
+          underlying,
+          assetClass: 'option',
           side,
-          summary: `CLOSE ${sizeLabel} · ${underlying} ${Format.strike(firstClose.contract.strike)}${shortName}`,
+          quantity: closeQuantity,
+          orderType,
+          limitPrice,
+          selection: {
+            mode: 'explicit',
+            optionType: firstClose.contract.optionType,
+            expiration: firstClose.contract.expiration,
+            strike: firstClose.contract.strike,
+          },
         },
-        preview: null,
-        previewError: null,
-      });
-      void this.loadPreview();
+        side,
+        `CLOSE ${sizeLabel} · ${underlying} ${Format.strike(firstClose.contract.strike)}${shortName}`,
+        bypassConfirmation,
+      );
       return;
     }
 
@@ -414,25 +404,33 @@ export class TradeStore extends Store<TradeStoreState> {
       limitPrice,
       selection,
     };
+    this.finish(request, side, summary, bypassConfirmation);
+  }
+
+  /**
+   * The one place an armed order leaves `arm()`: either straight to the
+   * broker, or onto the confirm sheet with a preview loading.
+   *
+   * Every branch of arm() ends here. They used to each build their own
+   * ticket and return, so the CURR and held-close paths silently ignored
+   * "Skip order confirmation" — the setting was only consulted on the tail
+   * the general branch happened to reach.
+   */
+  private finish(
+    request: OrderRequest,
+    side: OrderSide,
+    summary: string,
+    bypassConfirmation: boolean,
+  ): void {
     const idempotencyKey = newIdempotencyKey();
     if (bypassConfirmation) {
       // Clear any stale ticket/preview state before bypassing
-      this.set({
-        armedTicket: null,
-        preview: null,
-        previewError: null,
-      });
+      this.set({ armedTicket: null, preview: null, previewError: null });
       void this.placeDirect(request, idempotencyKey, side);
       return;
     }
     this.set({
-      armedTicket: {
-        id: nextId++,
-        request,
-        idempotencyKey,
-        side,
-        summary,
-      },
+      armedTicket: { id: nextId++, request, idempotencyKey, side, summary },
       preview: null,
       previewError: null,
     });

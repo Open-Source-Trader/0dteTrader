@@ -18,14 +18,21 @@ export function midPrice(bid: number, ask: number, precision = 2): number | null
 }
 
 /**
- * No quote on any of bid/ask/last — a CURR leg synthesized from its OCC
- * symbol before its expiration's contracts load. Every trading gate (split
- * panel, desktop rail, fullscreen buttons/shortcuts) disables on it so a
- * 0.00 display is never tradeable; TradeStore.arm keeps a matching guard as
- * the backstop.
+ * No TWO-SIDED quote — a CURR leg synthesized from its OCC symbol before its
+ * expiration's contracts load, or a contract with nothing but a stale last
+ * trade. Every trading gate (split panel, desktop rail, fullscreen
+ * buttons/shortcuts) disables on it so a 0.00 display is never tradeable;
+ * TradeStore.arm keeps a matching guard as the backstop.
+ *
+ * `last` deliberately does not count. It is a print from whenever the
+ * contract last traded, which on an illiquid strike can be hours old, and
+ * every order type this app sends is priced from the live bid/ask — a mid
+ * order with no book has nothing to compute a limit from. iOS applies the
+ * same rule (`hasTradeableQuote`), and the two clients disagreeing about
+ * whether an order can be sent is worse than either rule alone.
  */
 export function quotesPending(contract: OptionContract | null): boolean {
-  return contract !== null && contract.bid <= 0 && contract.ask <= 0 && contract.last <= 0;
+  return contract !== null && contract.bid <= 0 && contract.ask <= 0;
 }
 
 export function oppositeSide(side: OrderSide): OrderSide {

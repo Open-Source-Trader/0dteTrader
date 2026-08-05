@@ -1,6 +1,6 @@
 import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import { Subscription } from 'rxjs';
-import { ChartOrder, OrderResult, OrderStatus } from '@0dtetrader/shared-types';
+import { ChartOrder, OrderResult, OrderStatus, TradingMode } from '@0dtetrader/shared-types';
 import { isUniqueViolation } from '../common/api-exception';
 import { OrderEventsService } from '../broker/order-events.service';
 import { ChartOrderEventsService } from '../chart-orders/chart-order-events.service';
@@ -42,7 +42,7 @@ export class OrderNotificationsService implements OnModuleDestroy {
   ) {
     this.subs = [
       orderEvents.events$.subscribe((event) => {
-        void this.handleOrderUpdate(event.userId, event.order).catch((err) =>
+        void this.handleOrderUpdate(event.userId, event.order, event.environment).catch((err) =>
           this.logger.warn(`order push failed: ${(err as Error).message}`),
         );
       }),
@@ -59,7 +59,11 @@ export class OrderNotificationsService implements OnModuleDestroy {
   }
 
   /** Terminal statuses only — nobody needs a push for `submitted`. */
-  async handleOrderUpdate(userId: string, order: OrderResult): Promise<void> {
+  async handleOrderUpdate(
+    userId: string,
+    order: OrderResult,
+    environment?: TradingMode,
+  ): Promise<void> {
     if (!this.apns.enabled) return;
     if (!TERMINAL_ORDER_STATUSES.has(order.status)) return;
     const titles: Partial<Record<OrderStatus, string>> = {
@@ -79,6 +83,12 @@ export class OrderNotificationsService implements OnModuleDestroy {
       titles[order.status] as string,
       `${order.side.toUpperCase()} ${order.quantity} ${order.contractSymbol}${price}`,
       async () => {
+        // The emitter's VERIFIED environment outranks every lookup: a
+        // webhook resolves it from the credential the event was signed with,
+        // while the row may not be written yet and the user's current mode
+        // is mutable — a live fill landing after a switch to practice must
+        // not wear the practice label.
+        if (environment) return environment;
         // findFirst scoped by owner, not findUnique by id alone: the row's
         // primary key is the BROKER's order id, which is only unique within a
         // brokerage account — another user's identically-numbered order must
@@ -159,15 +169,26 @@ export class OrderNotificationsService implements OnModuleDestroy {
           result: await this.apns.send(device.token, { title: fullTitle, body }),
         })),
       );
-      for (const { device, result } of results) {
-        if (result.status === 200) {
-          delivered = true;
-        } else if (isDeadToken(result)) {
-          await this.devices.prune(device.token);
-        } else {
+      // Aggregate success is decided from EVERY result before any cleanup
+      // runs: a prune that throws must not erase the knowledge that another
+      // device already received the alert — losing that would release the
+      // claim and alert that device twice on redelivery.
+      delivered = results.some(({ result }) => result.status === 200);
+      for (const { result } of results) {
+        if (result.status !== 200 && !isDeadToken(result)) {
           this.logger.warn(
             `APNs send failed (${result.status}${result.reason ? ` ${result.reason}` : ''})`,
           );
+        }
+      }
+      const pruned = await Promise.allSettled(
+        results
+          .filter(({ result }) => isDeadToken(result))
+          .map(({ device }) => this.devices.prune(device.token)),
+      );
+      for (const outcome of pruned) {
+        if (outcome.status === 'rejected') {
+          this.logger.warn(`dead-token prune failed: ${(outcome.reason as Error).message}`);
         }
       }
     } finally {

@@ -297,9 +297,10 @@ describe('OrderNotificationsService', () => {
       expect(prisma.pushDeliveries).toHaveLength(0);
     });
 
-    it('releases the claim when the send loop throws on its way out', async () => {
-      // A prune failing mid-loop used to leave a claim standing for a push
-      // no device received.
+    it('releases the claim when nothing was delivered, even with prune failures', async () => {
+      // Every device is dead and the prunes fail on top: cleanup trouble
+      // must neither keep the claim (nothing was delivered) nor escape as a
+      // throw.
       await new DevicesService(prisma as never).register(userId, 'd'.repeat(64), 'ios');
       apns.queued = [
         { status: 410, reason: 'Unregistered' },
@@ -310,11 +311,42 @@ describe('OrderNotificationsService', () => {
         throw new Error('connection reset');
       };
 
-      await expect(service.handleOrderUpdate(userId, orderResult())).rejects.toThrow(
-        'connection reset',
-      );
+      await service.handleOrderUpdate(userId, orderResult());
       expect(prisma.pushDeliveries).toHaveLength(0);
       prisma.deviceToken.deleteMany = deleteMany;
+    });
+
+    it('keeps the claim when one device delivered and a dead sibling’s prune failed', async () => {
+      // Aggregate success is decided from every result BEFORE cleanup: a
+      // throwing prune must not erase the fact that device two already
+      // showed the alert — releasing here would alert it twice on the other
+      // emitter's redelivery.
+      await new DevicesService(prisma as never).register(userId, 'e'.repeat(64), 'ios');
+      apns.queued = [{ status: 410, reason: 'Unregistered' }, { status: 200 }];
+      const deleteMany = prisma.deviceToken.deleteMany;
+      prisma.deviceToken.deleteMany = async () => {
+        throw new Error('connection reset');
+      };
+
+      await service.handleOrderUpdate(userId, orderResult());
+      expect(prisma.pushDeliveries).toHaveLength(1);
+
+      prisma.deviceToken.deleteMany = deleteMany;
+      const sends = apns.sent.length;
+      await service.handleOrderUpdate(userId, orderResult());
+      expect(apns.sent).toHaveLength(sends);
+    });
+
+    it('prefers the emitter’s verified environment over the row and the user’s mode', async () => {
+      // The race: a LIVE fill arrives while the user sits in practice mode
+      // and the order row is not yet visible. The event's own environment —
+      // resolved from the credential the webhook was signed with — must
+      // decide the label.
+      prisma.users.find((u) => u.id === userId).tradingMode = 'practice';
+
+      await service.handleOrderUpdate(userId, orderResult(), 'live');
+
+      expect(apns.sent[0].title).toBe('Order filled');
     });
 
     it('claims nothing when the user has no device, so registering later still delivers', async () => {

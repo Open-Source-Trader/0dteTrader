@@ -49,8 +49,8 @@ postgresDescribe('Event transport (two real Postgres clients)', () => {
     producer?.onModuleDestroy();
     if (userId) await databaseA.user.delete({ where: { id: userId } }).catch(() => undefined);
     await Promise.all([
-      databaseA?.onModuleDestroy() ?? Promise.resolve(),
-      databaseB?.onModuleDestroy() ?? Promise.resolve(),
+      databaseA ? databaseA.onModuleDestroy() : Promise.resolve(),
+      databaseB ? databaseB.onModuleDestroy() : Promise.resolve(),
     ]);
   });
 

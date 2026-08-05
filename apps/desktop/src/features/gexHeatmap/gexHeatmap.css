@@ -1,0 +1,105 @@
+.gex-heatmap-modal-panel {
+  width: min(900px, 92vw);
+  max-height: 82vh;
+  display: flex;
+  flex-direction: column;
+  background: #030303;
+  border: 8px solid transparent;
+  border-image: var(--hud-src-accent) 28 fill / 24px / 6px stretch;
+  box-shadow: var(--shadow-overlay);
+  overflow: auto;
+}
+
+/* GEX heatmap — dense strike x expiration matrix. Intentionally near-black
+   with a compact spreadsheet-like grid; this is a self-contained analytics
+   surface, not HUD chrome, so it doesn't follow the app's chamfered-corner
+   convention. */
+.gex-heatmap {
+  display: flex;
+  flex-direction: column;
+  background: #030303;
+  color: var(--label-primary);
+  font-family: var(--font-sans);
+  min-width: 0;
+}
+
+.gex-heatmap__grid-scroll {
+  overflow-x: auto;
+}
+
+.gex-heatmap__grid {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.gex-heatmap__col-heading {
+  position: sticky;
+  top: 0;
+  background: #0a0a0a;
+  padding: 6px 4px;
+  font-size: var(--fs-caption2-desktop);
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.6);
+  text-align: center;
+  white-space: nowrap;
+  border-bottom: var(--border-hairline) solid rgba(255, 255, 255, 0.12);
+  z-index: 1;
+}
+
+.gex-heatmap__row {
+  height: 30px;
+}
+
+.gex-heatmap__strike-cell {
+  position: sticky;
+  left: 0;
+  min-width: 56px;
+  padding: 0 6px;
+  text-align: center;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--fs-caption-desktop);
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.85);
+  background: #0a0a0a;
+  border-bottom: var(--border-hairline) solid rgba(255, 255, 255, 0.08);
+  z-index: 1;
+}
+
+.gex-heatmap__exposure-cell {
+  min-width: 68px;
+  max-width: 96px;
+  padding: 0 2px;
+  text-align: center;
+  border: var(--border-hairline) solid transparent;
+}
+
+.gex-heatmap__exposure-value {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--fs-caption-desktop);
+  font-weight: 700;
+  color: #ffffff;
+}
+
+/* Current-price row: blue highlight on the strike cell, same convention as
+   the reference terminal's spot-row marker. */
+.gex-heatmap__row--spot .gex-heatmap__strike-cell {
+  background: #3b5bdb;
+  color: #ffffff;
+}
+
+@media (max-width: 640px) {
+  .gex-heatmap__exposure-value {
+    font-size: var(--fs-caption2-desktop);
+  }
+
+  .gex-heatmap__exposure-cell {
+    min-width: 56px;
+  }
+}

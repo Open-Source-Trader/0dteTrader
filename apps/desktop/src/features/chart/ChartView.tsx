@@ -48,6 +48,7 @@ interface ChartViewProps {
   onToggleLock?: () => void;
   onShowHistory?: () => void;
   onShowProfile?: () => void;
+  onShowGexHeatmap?: () => void;
   /** Order-line overlay inputs; null when chart trading is off. */
   chartTrading: ChartTradingProps | null;
   /** Reports non-blocking analytics warnings so the screen can render them outside the canvas. */
@@ -88,6 +89,7 @@ export function ChartView({
   onToggleLock,
   onShowHistory,
   onShowProfile,
+  onShowGexHeatmap,
   chartTrading,
   onOptionsAnalyticsWarning,
 }: ChartViewProps) {
@@ -429,6 +431,7 @@ export function ChartView({
             onToggleLock={onToggleLock}
             onShowHistory={onShowHistory}
             onShowProfile={onShowProfile}
+            onShowGexHeatmap={onShowGexHeatmap}
           />
         ) : null}
         <div className="chart-plot-surface">

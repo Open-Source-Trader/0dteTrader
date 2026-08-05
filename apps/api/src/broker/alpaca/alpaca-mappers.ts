@@ -1,4 +1,5 @@
 import {
+  AccountSummary,
   Candle,
   OptionContract,
   OptionType,
@@ -11,12 +12,15 @@ import {
 } from '@0dtetrader/shared-types';
 import { OPTION_MULTIPLIER, parseOccSymbol } from '../contract-resolution';
 import {
+  SdkAccount,
   SdkBar,
   SdkOptionSnapshot,
   SdkOrder,
   SdkPosition,
   SdkStockSnapshot,
 } from './alpaca-sdk.types';
+
+const round2 = (v: number): number => Math.round(v * 100) / 100;
 
 export function num(value: unknown, fallback = 0): number {
   const n = typeof value === 'string' ? Number(value) : (value as number);
@@ -150,4 +154,10 @@ export function toPosition(pos: SdkPosition): Position | null {
     unrealizedPnl: num(pos.unrealized_pl),
     multiplier: OPTION_MULTIPLIER,
   };
+}
+
+export function toAccountSummary(account: SdkAccount): AccountSummary {
+  const equity = num(account.equity);
+  const lastEquity = num(account.lastEquity);
+  return { equity, lastEquity, dailyPnl: round2(equity - lastEquity) };
 }

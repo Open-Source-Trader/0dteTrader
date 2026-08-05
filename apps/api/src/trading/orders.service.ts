@@ -1,4 +1,4 @@
-import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
+import { Inject, Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import { Prisma, type TradeOrder, type TradeOrderExecution } from '@prisma/client';
 import {
   MAX_OPTION_PRICE,
@@ -8,11 +8,19 @@ import {
   TradeHistoryEntry,
   TradingMode,
 } from '@0dtetrader/shared-types';
+import { BROKER_GATEWAY, BrokerGateway } from '../broker/broker-gateway.interface';
 import { OPTION_MULTIPLIER } from '../broker/contract-resolution';
 import { OrderEventsService } from '../broker/order-events.service';
 import { PrismaService } from '../prisma/prisma.service';
 
 const round2 = (v: number): number => Math.round(v * 100) / 100;
+
+/**
+ * Reconciliation only pulls "recent" broker activity, not the full account
+ * history — 48h covers a weekend gap between sessions without slurping the
+ * account's entire order history back to a newest-known row from weeks ago.
+ */
+const RECONCILE_LOOKBACK_MS = 48 * 60 * 60 * 1000;
 
 /** Running average-cost state for one contract, rebuilt by replaying fills. */
 interface BookEntry {
@@ -468,6 +476,7 @@ export class OrdersService implements OnModuleDestroy {
   constructor(
     private readonly prisma: PrismaService,
     orderEvents: OrderEventsService,
+    @Inject(BROKER_GATEWAY) private readonly gateway: BrokerGateway,
   ) {
     // Registered as an INGESTOR, not a subscriber: the webhook path must be
     // able to await persistence before acknowledging the provider, and an
@@ -477,6 +486,47 @@ export class OrdersService implements OnModuleDestroy {
     this.unregisterIngestor = orderEvents.registerIngestor((event) =>
       this.recordWithRetry(event.userId, event.order, event.environment),
     );
+  }
+
+  /**
+   * Backfills recent orders the broker has on file that this app never saw
+   * placed — a trade made directly on the broker's own site/app never
+   * reaches {@link OrderEventsService}, so `record` never runs for it. Called
+   * before every `history()` read rather than on a timer: history is already
+   * polled every 60s from the desktop app, so a separate schedule would just
+   * be a second clock to keep in sync with the first.
+   *
+   * Bounded to the last {@link RECONCILE_LOOKBACK_MS} regardless of how old
+   * the newest known row is — this backfills *recent* broker activity, not
+   * the full account history, so a long-idle app doesn't suddenly pull weeks
+   * of orders on its next open.
+   *
+   * A no-op for gateways that don't implement `getRecentOrders` (Webull,
+   * SnapTrade today).
+   */
+  private async reconcileWithBroker(userId: string): Promise<void> {
+    if (!this.gateway.getRecentOrders) return;
+    const lookbackFloor = new Date(Date.now() - RECONCILE_LOOKBACK_MS);
+    const newest = await this.prisma.tradeOrder.findFirst({
+      where: { userId, placedAt: { gte: lookbackFloor } },
+      orderBy: { placedAt: 'desc' },
+      select: { placedAt: true },
+    });
+    const since = newest?.placedAt ?? lookbackFloor;
+    let brokerOrders: OrderResult[];
+    try {
+      brokerOrders = await this.gateway.getRecentOrders(userId, since);
+    } catch (err) {
+      // Reconciliation is best-effort: a broker hiccup here must not break
+      // the history read, which already has everything this app recorded.
+      this.logger.warn(`broker history reconciliation failed: ${(err as Error).message}`);
+      return;
+    }
+    for (const order of brokerOrders) {
+      await this.recordWithRetry(userId, order).catch((err) =>
+        this.logger.warn(`failed to reconcile broker order ${order.orderId}: ${err.message}`),
+      );
+    }
   }
 
   /**
@@ -885,6 +935,7 @@ export class OrdersService implements OnModuleDestroy {
   }
 
   async history(userId: string): Promise<TradeHistory> {
+    await this.reconcileWithBroker(userId);
     const rows = await this.prisma.tradeOrder.findMany({
       where: { userId },
       orderBy: { placedAt: 'asc' },

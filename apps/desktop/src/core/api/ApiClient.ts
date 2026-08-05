@@ -1,4 +1,5 @@
 import type {
+  AccountSummary,
   AuthTokens,
   BrokerCredentialsInput,
   BrokerCredentialsSaved,
@@ -275,6 +276,12 @@ export class ApiClient {
 
   orderHistory(): Promise<TradeHistory> {
     return this.request({ method: 'GET', path: 'v1/orders/history' });
+  }
+
+  /** Broker-reported equity/daily P&L; null when the broker exposes none
+   *  (Webull, SnapTrade today). */
+  accountSummary(): Promise<AccountSummary | null> {
+    return this.request({ method: 'GET', path: 'v1/account-summary' });
   }
 
   // MARK: - Chart trading

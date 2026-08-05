@@ -50,3 +50,4 @@ tasks/
 # test and breaks format:check. Name scratch work with these prefixes.
 **/zz-*.spec.ts
 **/__tmp*
+apps/desktop/native/apple-intelligence-shim/.build/

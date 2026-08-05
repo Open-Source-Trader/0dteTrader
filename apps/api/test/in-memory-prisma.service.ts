@@ -256,7 +256,15 @@ export class InMemoryPrismaService {
 
   readonly tradeOrder = {
     findUnique: async ({ where }: any) => this.tradeOrders.find((o) => o.id === where.id) ?? null,
-    findFirst: async ({ where }: any) => this.tradeOrders.find((o) => matches(o, where)) ?? null,
+    findFirst: async ({ where, orderBy }: any = {}) => {
+      const rows = this.tradeOrders.filter((o) => matches(o, where));
+      if (orderBy?.placedAt === 'asc') {
+        rows.sort((a, b) => a.placedAt.getTime() - b.placedAt.getTime());
+      } else if (orderBy?.placedAt === 'desc') {
+        rows.sort((a, b) => b.placedAt.getTime() - a.placedAt.getTime());
+      }
+      return rows[0] ?? null;
+    },
     upsert: async ({ where, create, update }: any) => {
       const existing = this.tradeOrders.find((o) => o.id === where.id);
       if (existing) {

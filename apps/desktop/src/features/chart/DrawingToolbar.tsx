@@ -4,6 +4,7 @@ import {
   BellIcon,
   ClockIcon,
   CursorIcon,
+  GexHeatmapIcon,
   HLineToolIcon,
   LockIcon,
   LockOpenIcon,
@@ -110,6 +111,7 @@ interface DrawToolsRailProps {
   onToggleLock?: () => void;
   onShowHistory?: () => void;
   onShowProfile?: () => void;
+  onShowGexHeatmap?: () => void;
 }
 
 /** Persistent vertical drawing-tool rail (desktop grid only) — TradingView's
@@ -123,10 +125,11 @@ export function DrawToolsRail({
   onToggleLock,
   onShowHistory,
   onShowProfile,
+  onShowGexHeatmap,
 }: DrawToolsRailProps) {
   const { tool, selectedId, drawings, alerts } = useStore(store);
   const hasAnnotations = drawings.length > 0 || alerts.length > 0;
-  const hasAppActions = onToggleLock || onShowHistory || onShowProfile;
+  const hasAppActions = onToggleLock || onShowHistory || onShowProfile || onShowGexHeatmap;
 
   return (
     <div className="draw-rail">
@@ -162,6 +165,19 @@ export function DrawToolsRail({
       ) : null}
       {hasAppActions ? (
         <div className="draw-rail-app-actions">
+          {onShowGexHeatmap ? (
+            <>
+              <button
+                className="chart-icon-button draw-rail-button"
+                onClick={onShowGexHeatmap}
+                aria-label="GEX heatmap"
+                title="GEX heatmap"
+              >
+                <GexHeatmapIcon size={19} />
+              </button>
+              <div className="draw-rail-separator" role="separator" aria-orientation="horizontal" />
+            </>
+          ) : null}
           {onToggleLock ? (
             <button
               className="chart-icon-button draw-rail-button"

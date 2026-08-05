@@ -197,6 +197,15 @@
   border-top: var(--border-hairline) solid var(--hud-stroke-dim);
 }
 
+/* Separates the GEX heatmap trigger from the lock/history/profile group
+   beneath it — same hairline convention as the app-actions group's own
+   top border. */
+.draw-rail-separator {
+  width: 24px;
+  height: var(--border-hairline);
+  background: var(--hud-stroke-dim);
+}
+
 /* On-chart position marker (desktop grid) — TradingView convention: risk
    lives at the price it affects, closeable in one click, no chart trip
    required. */

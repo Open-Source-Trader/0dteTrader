@@ -1,6 +1,8 @@
 import { OrderResult } from '@0dtetrader/shared-types';
+import { BrokerGateway } from '../broker/broker-gateway.interface';
 import { OrderEventsService } from '../broker/order-events.service';
 import { InMemoryPrismaService } from '../../test/in-memory-prisma.service';
+import { StubBrokerGateway } from '../../test/stub-broker.gateway';
 import { OrdersService } from './orders.service';
 
 const USER = 'user-1';
@@ -39,6 +41,7 @@ describe('OrdersService', () => {
     orders = new OrdersService(
       prisma as unknown as ConstructorParameters<typeof OrdersService>[0],
       events,
+      new StubBrokerGateway() as BrokerGateway,
     );
   });
 
@@ -1479,6 +1482,7 @@ describe('OrdersService', () => {
       orders2 = new OrdersService(
         prisma as unknown as ConstructorParameters<typeof OrdersService>[0],
         events2,
+        new StubBrokerGateway() as BrokerGateway,
       );
     });
 
@@ -1651,5 +1655,127 @@ describe('OrdersService', () => {
     const byUser = (userId: string) => prisma.tradeOrders.find((o) => o.userId === userId);
     expect(byUser(practiceUser.id as string).environment).toBe('practice');
     expect(byUser(USER).environment).toBe('live'); // unknown user → default
+  });
+});
+
+describe('OrdersService broker reconciliation', () => {
+  /** A gateway whose getRecentOrders is scripted per test — everything else
+   *  is unused by history() and left unimplemented. */
+  function fakeGateway(
+    recentOrders: (userId: string, since?: Date) => Promise<OrderResult[]>,
+  ): BrokerGateway {
+    return {
+      getRecentOrders: recentOrders,
+    } as unknown as BrokerGateway;
+  }
+
+  it('backfills an order placed directly on the broker, never seen on the events bus', async () => {
+    const prisma = new InMemoryPrismaService();
+    const brokerOnly = fill({ side: 'buy', quantity: 1, filledPrice: 2.0 });
+    const orders = new OrdersService(
+      prisma as unknown as ConstructorParameters<typeof OrdersService>[0],
+      new OrderEventsService(),
+      fakeGateway(async () => [brokerOnly]),
+    );
+
+    const history = await orders.history(USER);
+
+    expect(history.entries).toHaveLength(1);
+    expect(history.entries[0].orderId).toBe(brokerOnly.orderId);
+    expect(history.entries[0].filledPrice).toBe(2.0);
+  });
+
+  it('does not duplicate an order this app already recorded itself', async () => {
+    const prisma = new InMemoryPrismaService();
+    const events = new OrderEventsService();
+    const shared = fill({ side: 'buy', quantity: 1, filledPrice: 1.0 });
+    const orders = new OrdersService(
+      prisma as unknown as ConstructorParameters<typeof OrdersService>[0],
+      events,
+      // The broker reports the same order back — the upsert-by-id in
+      // `record` must update, not duplicate, the existing row.
+      fakeGateway(async () => [{ ...shared, status: 'filled' }]),
+    );
+    await orders.record(USER, shared);
+
+    const history = await orders.history(USER);
+
+    expect(history.entries).toHaveLength(1);
+  });
+
+  it('is a no-op when the gateway does not support getRecentOrders', async () => {
+    const prisma = new InMemoryPrismaService();
+    const orders = new OrdersService(
+      prisma as unknown as ConstructorParameters<typeof OrdersService>[0],
+      new OrderEventsService(),
+      {} as BrokerGateway, // no getRecentOrders — e.g. Webull, SnapTrade
+    );
+
+    await expect(orders.history(USER)).resolves.toEqual({ entries: [], totalRealizedPnl: 0 });
+  });
+
+  it('tolerates a broker error during reconciliation and still returns known history', async () => {
+    const prisma = new InMemoryPrismaService();
+    const events = new OrderEventsService();
+    const orders = new OrdersService(
+      prisma as unknown as ConstructorParameters<typeof OrdersService>[0],
+      events,
+      fakeGateway(async () => {
+        throw new Error('broker unavailable');
+      }),
+    );
+    await orders.record(USER, fill({ filledPrice: 1.0 }));
+
+    const history = await orders.history(USER);
+
+    expect(history.entries).toHaveLength(1);
+  });
+
+  it('reconciles from the newest known fill when it falls inside the 48h window', async () => {
+    const prisma = new InMemoryPrismaService();
+    const events = new OrderEventsService();
+    const sinceArgs: Array<Date | undefined> = [];
+    const orders = new OrdersService(
+      prisma as unknown as ConstructorParameters<typeof OrdersService>[0],
+      events,
+      fakeGateway(async (_userId, since) => {
+        sinceArgs.push(since);
+        return [];
+      }),
+    );
+    const recentFill = fill({ filledPrice: 1.0, timestamp: new Date().toISOString() });
+    await orders.record(USER, recentFill);
+
+    await orders.history(USER);
+
+    expect(sinceArgs).toHaveLength(1);
+    expect(sinceArgs[0]?.toISOString()).toBe(new Date(recentFill.timestamp).toISOString());
+  });
+
+  it('falls back to the 48h floor rather than the full account history when the newest known fill is older than that', async () => {
+    const prisma = new InMemoryPrismaService();
+    const events = new OrderEventsService();
+    const sinceArgs: Array<Date | undefined> = [];
+    const orders = new OrdersService(
+      prisma as unknown as ConstructorParameters<typeof OrdersService>[0],
+      events,
+      fakeGateway(async (_userId, since) => {
+        sinceArgs.push(since);
+        return [];
+      }),
+    );
+    // `fill()`'s default timestamp is a fixed date years in the past.
+    await orders.record(USER, fill({ filledPrice: 1.0 }));
+
+    const before = Date.now();
+    await orders.history(USER);
+    const after = Date.now();
+
+    expect(sinceArgs).toHaveLength(1);
+    const sinceMs = sinceArgs[0]?.getTime() ?? NaN;
+    // 48h ago, give or take the test's own execution time — never the
+    // old recorded fill's timestamp from years back.
+    expect(sinceMs).toBeGreaterThanOrEqual(before - 48 * 60 * 60 * 1000 - 1000);
+    expect(sinceMs).toBeLessThanOrEqual(after - 48 * 60 * 60 * 1000 + 1000);
   });
 });

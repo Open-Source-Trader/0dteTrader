@@ -69,6 +69,11 @@ export interface SdkPosition {
   asset_class?: string;
 }
 
+export interface SdkAccount {
+  equity?: string | number;
+  lastEquity?: string | number;
+}
+
 export interface SdkOrderInput {
   type: 'market' | 'limit' | 'stop' | 'stop_limit' | 'trailing_stop';
   symbol?: string;
@@ -110,11 +115,12 @@ export interface AlpacaMarketData {
 export interface AlpacaTrading {
   orders: {
     submit(input: SdkOrderInput): Promise<SdkOrder>;
-    getAllOrders(params: { status?: string; limit?: number }): Promise<SdkOrder[]>;
+    getAllOrders(params: { status?: string; limit?: number; after?: string }): Promise<SdkOrder[]>;
     getOrderByClientOrderId(params: { clientOrderId: string }): Promise<SdkOrder>;
     deleteOrderByOrderID(params: { orderId: string }): Promise<void>;
   };
   positions: { getAllOpenPositions(): Promise<SdkPosition[]> };
+  account: { getAccount(): Promise<SdkAccount> };
 }
 
 export interface AlpacaClientLike {

@@ -249,6 +249,45 @@ final class ChartTradingCoordinatorCancelTests: XCTestCase {
 
         XCTAssertEqual(coordinator.placementRequest?.price, 504.5)
     }
+
+    /// The entry line prefers the authoritative fill-time record and falls
+    /// back to the placement-time estimate; with neither there is no line.
+    /// Display only — the estimate never prices or arms an order.
+    func testEntryLines_fallBackToTheEstimateForDisplay() {
+        let (coordinator, _) = makeCoordinator()
+        let contract = OptionContract(
+            symbol: "SPY260727C00505000",
+            underlying: "SPY",
+            expiration: "2026-07-27",
+            strike: 505,
+            optionType: .call,
+            bid: 1.0,
+            ask: 1.02,
+            last: 1.01
+        )
+        coordinator.contractResolver = { symbol in
+            symbol == contract.symbol ? contract : nil
+        }
+        var position = Position(
+            symbol: contract.symbol,
+            assetClass: .option,
+            quantity: 1,
+            avgPrice: 1,
+            markPrice: 1.2,
+            unrealizedPnl: 20,
+            multiplier: 100,
+            underlyingEntryPrice: nil
+        )
+
+        XCTAssertTrue(coordinator.entryLines(positions: [position], symbol: "SPY").isEmpty)
+
+        position.underlyingEntryEstimate = 504.2
+        XCTAssertEqual(coordinator.entryLines(positions: [position], symbol: "SPY").first?.price, 504.2)
+
+        // The authoritative record wins whenever both are present.
+        position.underlyingEntryPrice = 505.1
+        XCTAssertEqual(coordinator.entryLines(positions: [position], symbol: "SPY").first?.price, 505.1)
+    }
 }
 
 final class ChartOrderLabelTests: XCTestCase {

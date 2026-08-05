@@ -291,9 +291,13 @@ struct PositionDTO: Decodable, Equatable, Sendable {
     /// Contract multiplier (options: 100) for client-side live P/L.
     let multiplier: Double
     /// Quantity-weighted price of the UNDERLYING across the opening fills —
-    /// where the chart draws this position's entry line. Absent for positions
-    /// opened before it was recorded, or outside the app.
+    /// the authoritative fill-time record. Absent for positions opened before
+    /// it was recorded, or outside the app — and absent from servers that
+    /// cannot yet observe the underlying at fill time.
     let underlyingEntryPrice: Double?
+    /// Placement-time-quote-derived estimate of the same level, sent while
+    /// `underlyingEntryPrice` is absent. Display fallback only.
+    let underlyingEntryEstimate: Double?
     /// ISO-8601 time of the fill that opened the current position run. Absent
     /// for positions opened before it was recorded, or outside the app.
     let openedAt: String?

@@ -40,10 +40,14 @@ final class ChartTradingCoordinator: ObservableObject, OrderLineOverlayDelegate 
 
     /// Entry lines for the chart's symbol: open positions with a recorded
     /// anchor whose contract the loaded chain can identify.
+    ///
+    /// The level prefers the authoritative fill-time record and falls back to
+    /// the placement-time estimate — display only: a bracket dragged off the
+    /// line triggers at the dragged level, never at this one.
     func entryLines(positions: [Position], symbol: String) -> [EntryLineModel] {
         positions.compactMap { position in
             guard position.quantity != 0,
-                  let price = position.underlyingEntryPrice,
+                  let price = position.underlyingEntryPrice ?? position.underlyingEntryEstimate,
                   let contract = contractResolver(position.symbol),
                   contract.underlying == symbol
             else { return nil }

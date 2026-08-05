@@ -25,16 +25,30 @@ final class TradeReadinessTests: XCTestCase {
         XCTAssertFalse(contract(bid: 0, ask: 0).hasTradeableQuote)
     }
 
-    func testBidOnly_isTradeable() {
-        XCTAssertTrue(contract(bid: 0.55, ask: 0).hasTradeableQuote)
+    /// Flipped from the old one-sided rule: every order type is priced from
+    /// the live book, and mid/bid/ask all need both sides — a lone bid is
+    /// not a market an order can be priced from.
+    func testBidOnly_isNotTradeable() {
+        XCTAssertFalse(contract(bid: 0.55, ask: 0).hasTradeableQuote)
     }
 
-    func testAskOnly_isTradeable() {
-        XCTAssertTrue(contract(bid: 0, ask: 0.6).hasTradeableQuote)
+    /// Flipped from the old one-sided rule, same reasoning as bid-only.
+    func testAskOnly_isNotTradeable() {
+        XCTAssertFalse(contract(bid: 0, ask: 0.6).hasTradeableQuote)
     }
 
     func testBothSidesLive_isTradeable() {
         XCTAssertTrue(contract(bid: 0.55, ask: 0.6).hasTradeableQuote)
+    }
+
+    /// A crossed book (bid above ask) is a broken feed, not a market.
+    func testCrossedBook_isNotTradeable() {
+        XCTAssertFalse(contract(bid: 0.65, ask: 0.6).hasTradeableQuote)
+    }
+
+    /// A locked book (bid == ask) is unusual but real and priceable.
+    func testLockedBook_isTradeable() {
+        XCTAssertTrue(contract(bid: 0.6, ask: 0.6).hasTradeableQuote)
     }
 
     func testNegativeAndInvalidSides_areNotTradeable() {
@@ -79,8 +93,11 @@ final class TradeReadinessTests: XCTestCase {
         )
     }
 
-    func testOneSidedQuote_isEnabled() {
-        XCTAssertTrue(
+    /// Flipped from the old one-sided rule: a lone ask can no longer arm —
+    /// two-sided, uncrossed quotes are required everywhere an order can be
+    /// sent.
+    func testOneSidedQuote_isDisabled() {
+        XCTAssertFalse(
             TradeReadiness.canTrade(contract: contract(bid: 0, ask: 0.6), locked: false, canArm: true)
         )
     }

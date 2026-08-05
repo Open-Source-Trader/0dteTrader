@@ -242,18 +242,13 @@ final class TradeViewModel: ObservableObject {
                     strike: firstClose.contract.strike
                 )
             )
-            armedTicket = ArmedOrderTicket(
-                id: UUID(),
+            finish(
                 request: request,
-                idempotencyKey: UUID().uuidString,
                 side: side,
                 summary: "CLOSE \(sizeLabel) · \(underlying) "
-                    + "\(Format.strike(firstClose.contract.strike))\(firstClose.contract.optionType.shortName)"
+                    + "\(Format.strike(firstClose.contract.strike))\(firstClose.contract.optionType.shortName)",
+                bypass: bypass
             )
-            preview = nil
-            previewError = nil
-            submitError = nil
-            Task { await loadPreview() }
             return
         }
 
@@ -341,6 +336,17 @@ final class TradeViewModel: ObservableObject {
             limitPrice: limitPrice,
             selection: selection
         )
+        finish(request: request, side: side, summary: summary, bypass: bypass)
+    }
+
+    /// The one place an order leaves `arm()`: either straight to the broker
+    /// (bypass), or onto the confirm sheet with a preview loading.
+    ///
+    /// Every branch of `arm()` ends here. The held-leg close path used to
+    /// build its own ticket and return, so it silently ignored "Skip order
+    /// confirmation" — the setting was only consulted on the tail the other
+    /// branches reached. Mirrors the desktop store's `finish`.
+    private func finish(request: OrderRequestDTO, side: OrderSide, summary: String, bypass: Bool) {
         let idempotencyKey = UUID().uuidString
         if bypass {
             // Clear any stale ticket/preview state before bypassing
@@ -364,10 +370,11 @@ final class TradeViewModel: ObservableObject {
         Task { await loadPreview() }
     }
 
-    /// True (and toasts) when `contract` exists but carries no live quote on
-    /// either side. Nil passes: the chain has not resolved a contract yet and
-    /// the server does the resolving (AUTO, or an explicit strike whose
-    /// contracts are still loading).
+    /// True (and toasts) when `contract` exists but carries no tradeable
+    /// quote — both sides live and not crossed (`hasTradeableQuote`). Nil
+    /// passes: the chain has not resolved a contract yet and the server does
+    /// the resolving (AUTO, or an explicit strike whose contracts are still
+    /// loading).
     private func refuseQuotelessContract(_ contract: OptionContract?) -> Bool {
         guard let contract, !contract.hasTradeableQuote else { return false }
         showToast("Quotes are unavailable for this contract.", style: .error)

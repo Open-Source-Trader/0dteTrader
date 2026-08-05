@@ -405,8 +405,10 @@ final class TradeViewModelArmTests: XCTestCase {
         XCTAssertEqual(tradeViewModel.toast?.message, "Quotes are unavailable for this contract.")
     }
 
-    /// One live side is a market: no bid but a valid ask must still arm.
-    func testArm_oneSidedQuote_stillArms() {
+    /// Flipped from the old one-sided rule: every order type is priced from
+    /// the live book (mid/bid/ask all need both sides), so a lone ask must
+    /// refuse to arm exactly like the all-zero placeholder.
+    func testArm_oneSidedQuote_isRefused() {
         let askOnly = OptionContract(
             symbol: Self.contract.symbol,
             underlying: "SPY",
@@ -423,7 +425,8 @@ final class TradeViewModelArmTests: XCTestCase {
 
         tradeViewModel.arm(side: .buy, underlying: "SPY", chainViewModel: chainViewModel)
 
-        XCTAssertNotNil(tradeViewModel.armedTicket)
+        XCTAssertNil(tradeViewModel.armedTicket)
+        XCTAssertEqual(tradeViewModel.toast?.message, "Quotes are unavailable for this contract.")
     }
 
     /// Leg-matching would close the highest-P/L leg; CURR must instead sell
@@ -478,6 +481,69 @@ final class TradeViewModelArmTests: XCTestCase {
         XCTAssertNotNil(tradeViewModel.armedTicket)
     }
 
+    /// The held-leg close path (a sell matching a held right + expiration
+    /// outside CURR mode) used to build its own ticket and return before the
+    /// bypass branch, so "Skip order confirmation" was silently ignored on
+    /// exactly the path where a fast exit matters most. It must submit
+    /// directly like every other branch: no ticket, no preview, one direct
+    /// placeOrder.
+    func testArm_heldLegCloseWithBypass_submitsDirectlyWithoutArmingTicket() async {
+        var placeOrderRequests: [URLRequest] = []
+        var previewCalls = 0
+        let placed = expectation(description: "placeOrder submitted")
+        BypassRecordingURLProtocol.handler = { request in
+            switch request.url?.path {
+            case "/v1/orders" where request.httpMethod == "POST":
+                placeOrderRequests.append(request)
+                placed.fulfill()
+                return Self.orderResultResponse
+            case "/v1/orders/preview":
+                previewCalls += 1
+                return Self.orderResultResponse
+            default:
+                // submitOrder's fallback refresh (no socket in tests) lands
+                // on GET /v1/positions and /v1/orders after the placement.
+                return "[]"
+            }
+        }
+        defer { BypassRecordingURLProtocol.handler = nil }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [BypassRecordingURLProtocol.self]
+        let session = URLSession(configuration: configuration)
+        let baseURL = URL(string: "https://example.test")!
+        let sessionStore = SessionStore(
+            keychainStore: KeychainStore(service: "test.arm.bypass.\(UUID().uuidString)"),
+            baseURL: baseURL,
+            urlSession: session
+        )
+        let apiClient = APIClient(baseURL: baseURL, sessionStore: sessionStore, urlSession: session)
+        let tradeViewModel = TradeViewModel(apiClient: apiClient)
+        let chainViewModel = OptionsChainViewModel(apiClient: apiClient)
+        // A held call matching the panel's selected right + expiration — the
+        // held-leg matching path (CURR mode stays off).
+        selectContract(tradeViewModel, chainViewModel)
+        tradeViewModel.setPositionsForTesting([position(2)])
+        tradeViewModel.setQuantity(2)
+
+        tradeViewModel.arm(side: .sell, underlying: "SPY", chainViewModel: chainViewModel, bypass: true)
+
+        // Bypass must not open the confirm flow…
+        XCTAssertNil(tradeViewModel.armedTicket)
+        XCTAssertNil(tradeViewModel.preview)
+
+        // …and the detached submission must reach the broker directly.
+        await fulfillment(of: [placed], timeout: 2)
+        XCTAssertEqual(placeOrderRequests.count, 1)
+        XCTAssertNotNil(placeOrderRequests.first?.value(forHTTPHeaderField: "Idempotency-Key"))
+        XCTAssertEqual(previewCalls, 0)
+        XCTAssertNil(tradeViewModel.preview)
+    }
+
+    private static let orderResultResponse = """
+    {"orderId":"o1","status":"submitted","contractSymbol":"SPY260727C00505000",
+     "side":"sell","quantity":2,"orderType":"mid","timestamp":"2026-07-27T00:00:00Z"}
+    """
+
     func testSetQuantity_clampsToValidRange() {
         let (tradeViewModel, _) = makeViewModels()
         tradeViewModel.setQuantity(0)
@@ -486,3 +552,35 @@ final class TradeViewModelArmTests: XCTestCase {
         XCTAssertEqual(tradeViewModel.quantity, 1000)
     }
 }
+
+/// Serves canned responses and records the order placement the bypass path
+/// fires from its detached task; the expectation its handler fulfills is what
+/// deadline-bounds the wait on that task. Mirrors the refresh tests' protocol.
+// swiftlint:disable static_over_final_class
+private final class BypassRecordingURLProtocol: URLProtocol, @unchecked Sendable {
+    typealias Handler = (URLRequest) -> String
+    nonisolated(unsafe) static var handler: Handler?
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        guard let client, let handler = Self.handler else {
+            client?.urlProtocol(self, didFailWithError: URLError(.badServerResponse))
+            return
+        }
+        let body = handler(request)
+        let response = HTTPURLResponse(
+            url: request.url!,
+            statusCode: 200,
+            httpVersion: "HTTP/1.1",
+            headerFields: ["Content-Type": "application/json"]
+        )!
+        client.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client.urlProtocol(self, didLoad: Data(body.utf8))
+        client.urlProtocolDidFinishLoading(self)
+    }
+
+    override func stopLoading() {}
+}
+// swiftlint:enable static_over_final_class

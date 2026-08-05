@@ -172,6 +172,19 @@ final class DTODecodingTests: XCTestCase {
         XCTAssertEqual(position.underlyingEntryPrice, 502.4)
         XCTAssertEqual(position.openedAt, DateParsing.dateTime("2026-07-17T14:30:00.000Z"))
         XCTAssertNotNil(position.openedAt)
+        XCTAssertNil(position.underlyingEntryEstimate)
+    }
+
+    /// While the backend cannot observe the underlying at fill time it sends
+    /// only the placement-time estimate; the authoritative field stays absent
+    /// and each decodes independently of the other.
+    func testPosition_decodesUnderlyingEntryEstimate() throws {
+        let dto = try decode(PositionDTO.self, """
+        {"symbol":"SPY260717C00503000","assetClass":"option","quantity":1,"avgPrice":1.5,"markPrice":1.6,"unrealizedPnl":10.0,"multiplier":100,"underlyingEntryEstimate":501.9}
+        """)
+        let position = try XCTUnwrap(Position(dto: dto))
+        XCTAssertNil(position.underlyingEntryPrice)
+        XCTAssertEqual(position.underlyingEntryEstimate, 501.9)
     }
 
     /// An unknown asset class must drop the position, not fall back to .option

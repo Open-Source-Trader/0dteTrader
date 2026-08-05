@@ -35,7 +35,8 @@ enum AppPlacementGuide {
     /// rather than armed. Paired with desktop's `LEVEL_MAX`, which bounds its
     /// `levelValid` as well as its stepper — the stepper alone never was the
     /// guard, since nothing stops the level being typed straight in.
-    static let levelMaximum: Double = 100_000
+    // The one Swift source for the price ceiling — see PriceMath.maxOptionPrice.
+    static let levelMaximum: Double = PriceMath.maxOptionPrice
 }
 
 /// Resolves the guide's price for this frame — or nil for no guide at all.

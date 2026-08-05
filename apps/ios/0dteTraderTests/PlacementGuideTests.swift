@@ -58,7 +58,7 @@ final class PlacementGuideTests: XCTestCase {
     func testRowsNeverReachIntoTheHandlesTouchTarget() {
         let overlay = OrderLineOverlayView(frame: .zero)
         overlay.settings = .default
-        overlay.hasSelectedContract = true
+        overlay.canPlaceChartOrder = true
         // Any level will do: the band is reserved at every y, not just the
         // guide's, so that the rows stay aligned as it is dragged past them.
         overlay.guidePrice = 500
@@ -84,7 +84,7 @@ final class PlacementGuideTests: XCTestCase {
     func testRowsReclaimTheHandlesBandWithNoGuideShowing() {
         let overlay = OrderLineOverlayView(frame: CGRect(x: 0, y: 0, width: 430, height: 400))
         overlay.settings = .default
-        overlay.hasSelectedContract = true
+        overlay.canPlaceChartOrder = true
         overlay.guidePrice = nil
         XCTAssertFalse(overlay.isGuideShowing)
         XCTAssertEqual(overlay.rowRightEdge, 430 - AppOrderLine.rowRightMargin)
@@ -192,7 +192,7 @@ final class PlacementGuideTests: XCTestCase {
     func testVoiceOverCanDismissAGuideItSummoned() {
         let overlay = OrderLineOverlayView(frame: CGRect(x: 0, y: 0, width: 430, height: 400))
         overlay.settings = .default
-        overlay.hasSelectedContract = true
+        overlay.canPlaceChartOrder = true
 
         // Dormant: an element to focus, but nothing to dismiss.
         overlay.guidePrice = nil

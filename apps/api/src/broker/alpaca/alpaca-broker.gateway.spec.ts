@@ -305,4 +305,38 @@ describe('AlpacaBrokerGateway (SDK-backed)', () => {
     expect(orders[0].status).toBe('submitted'); // 'new' -> 'submitted'
     expect(orders[0].contractSymbol).toBe(EXPECTED_OCC);
   });
+
+  it('emits a poll-detected fill carrying the filled quantity the poll reported', async () => {
+    env = buildGateway();
+    jest.useFakeTimers();
+    try {
+      const res = await env.gateway.placeOrder('user-1', ORDER, 'poll-fill-key');
+      // The placement-time result reports filled_qty '0'. The poll's detail
+      // is the only source of the executed amount — an emit spreading the
+      // placement result would report a fill of 0, which fill accounting
+      // rightly ignores, and the fill would never be recorded.
+      env.client.trading.orders.getOrderByClientOrderId = async () => ({
+        id: 'ord-server-1',
+        client_order_id: res.orderId,
+        status: 'filled',
+        symbol: EXPECTED_OCC,
+        side: 'buy',
+        type: 'limit',
+        qty: '1',
+        filled_qty: '1',
+        filled_avg_price: '4.10',
+        limit_price: null,
+        submitted_at: '2024-01-01T15:00:00Z',
+      });
+      await jest.advanceTimersByTimeAsync(2500);
+
+      const emit = env.events.emit as unknown as jest.Mock;
+      const fillEmit = emit.mock.calls.find(([, order]) => order.status === 'filled');
+      expect(fillEmit).toBeDefined();
+      expect(fillEmit![1].filledQuantity).toBe(1);
+      expect(fillEmit![1].filledPrice).toBe(4.1);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
 });

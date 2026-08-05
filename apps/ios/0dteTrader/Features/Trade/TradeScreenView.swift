@@ -216,10 +216,19 @@ struct TradeScreenView: View {
             }
         }
         .onAppear {
+            // The one place push registration begins: this screen only
+            // appears authenticated, so the manager can sweep any retained
+            // registration with credentials that work and then re-register
+            // under THIS account. A login after a logout reaches here without
+            // relaunching the app.
+            container.pushNotifications.activateAfterAuthentication()
             tradeViewModel.optionContractResolver = { symbol in
                 chainViewModel.chain?.contracts.first { $0.symbol == symbol }
             }
             tradeViewModel.isSocketConnected = { container.quoteSocket.connectionState == .connected }
+            // CURR mode filters the chain's menus to held contracts.
+            chainViewModel.positionsProvider = { tradeViewModel.positions }
+            tradeViewModel.toastPolicy = { settingsStore.toastsEnabled }
             // The overlay needs the same chain lookup the flatten path uses:
             // an entry line only draws for a contract the chain can identify.
             chartTrading.contractResolver = { symbol in
@@ -430,6 +439,12 @@ struct TradeScreenView: View {
                                 .onChange(of: proxy.size.height) { _, height in tradePanelHeight = height }
                         }
                     }
+                    // Swipe left (or tap the chevron) for the positions drawer.
+                    .modifier(PositionsPanelPresentation(
+                        tradeViewModel: tradeViewModel,
+                        chartOrders: chartOrdersModel,
+                        tradingLocked: tradingLocked || needsProviderConfig
+                    ))
                     .layoutPriority(1)
                     // Drawn offset, not layout: the panel slides up over the
                     // chart just far enough to bring the price field clear of
@@ -503,7 +518,10 @@ struct TradeScreenView: View {
                 positions: tradeViewModel.positions,
                 symbol: chartViewModel.symbol
             ),
-            hasSelectedContract: chainViewModel.selectedContract != nil,
+            canPlaceChartOrder: TradeReadiness.canPlaceChartOrder(
+                contract: chainViewModel.selectedContract,
+                locked: tradingLocked || needsProviderConfig
+            ),
             placement: chartTrading.placementRequest.map { request in
                 PlacementCardBinding(
                     request: request,
@@ -603,10 +621,17 @@ struct TradeScreenView: View {
         { Task { await chainViewModel.load(underlying: chartViewModel.symbol) } }
     }
 
-    /// Same gate as the split-layout TradePanelView's Buy/Sell buttons; the lock
-    /// disables every order-placing control while leaving the chart untouched.
+    /// Same gate as the split-layout TradePanelView's Buy/Sell buttons —
+    /// literally, via `TradeReadiness` — so the fullscreen floating buttons
+    /// can never accept a contract the panel would refuse (an unquoted CURR
+    /// placeholder, a custom price still untyped). The lock disables every
+    /// order-placing control while leaving the chart untouched.
     private var canTrade: Bool {
-        chainViewModel.selectedContract != nil && !tradingLocked && !needsProviderConfig
+        TradeReadiness.canTrade(
+            contract: chainViewModel.selectedContract,
+            locked: tradingLocked || needsProviderConfig,
+            canArm: tradeViewModel.canArm
+        )
     }
 
     // MARK: - Provider-aware copy + empty state

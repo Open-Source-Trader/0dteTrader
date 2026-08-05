@@ -40,14 +40,24 @@ final class ChartTradingCoordinator: ObservableObject, OrderLineOverlayDelegate 
 
     /// Entry lines for the chart's symbol: open positions with a recorded
     /// anchor whose contract the loaded chain can identify.
+    ///
+    /// The level prefers the authoritative fill-time record and falls back to
+    /// the placement-time estimate. An estimate line is display only — drawn
+    /// with a "~" marker, and it neither starts a bracket drag nor classifies
+    /// one; only its ✕ (close position) stays live.
     func entryLines(positions: [Position], symbol: String) -> [EntryLineModel] {
         positions.compactMap { position in
             guard position.quantity != 0,
-                  let price = position.underlyingEntryPrice,
+                  let price = position.underlyingEntryPrice ?? position.underlyingEntryEstimate,
                   let contract = contractResolver(position.symbol),
                   contract.underlying == symbol
             else { return nil }
-            return EntryLineModel(position: position, contract: contract, price: price)
+            return EntryLineModel(
+                position: position,
+                contract: contract,
+                price: price,
+                isEstimate: position.underlyingEntryPrice == nil
+            )
         }
     }
 
@@ -79,12 +89,10 @@ final class ChartTradingCoordinator: ObservableObject, OrderLineOverlayDelegate 
     }
 
     func orderLineOverlayDidDragBracket(entry: EntryLineModel, to price: Double) {
-        let kind = bracketKind(
-            optionType: entry.contract.optionType,
-            quantity: entry.position.quantity,
-            entryPrice: entry.price,
-            price: price
-        )
+        // Nil for an estimate line: classification must behave exactly as if
+        // there were no entry line, so nothing is created or moved. The
+        // overlay already refuses the drag; this is the backstop.
+        guard let kind = bracketKind(entry: entry, price: price) else { return }
         let siblings = chartOrders.orders.filter {
             $0.contractSymbol == entry.position.symbol && $0.ocoGroupId != nil && $0.isWorking
         }
@@ -118,7 +126,11 @@ final class ChartTradingCoordinator: ObservableObject, OrderLineOverlayDelegate 
     }
 
     func orderLineOverlayDidRequestPlacement(at price: Double) {
-        guard let contract = selectedContract() else { return }
+        // Backstop behind the overlay's `canPlaceChartOrder` gate: whatever
+        // the overlay believed when the tap landed, a placement card must
+        // never open for an unquoted contract — a CURR leg synthesized from
+        // its OCC symbol is selected long before its quotes exist.
+        guard let contract = selectedContract(), contract.hasTradeableQuote else { return }
         placementRequest = OrderPlacementRequest(price: rounded(price), contract: contract)
     }
 

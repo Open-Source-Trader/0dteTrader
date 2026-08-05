@@ -12,6 +12,7 @@ import { ChartOrdersModule } from './chart-orders/chart-orders.module';
 import { CredentialsModule } from './credentials/credentials.module';
 import { HealthModule } from './health/health.module';
 import { MarketDataModule } from './market-data/market-data.module';
+import { NotificationsModule } from './notifications/notifications.module';
 import { OptionsAnalyticsModule } from './options-analytics/options-analytics.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { TradingModule } from './trading/trading.module';
@@ -43,6 +44,7 @@ import { UsersModule } from './users/users.module';
     MarketDataModule,
     TradingModule,
     ChartOrdersModule,
+    NotificationsModule,
     OptionsAnalyticsModule,
   ],
   providers: [

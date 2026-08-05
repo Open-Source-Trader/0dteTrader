@@ -1,9 +1,11 @@
 import XCTest
 @testable import ZeroDTETrader
 
+/// Canonical AUTO expectation table (shared with the server's resolveAutoOtm):
+/// strikes [100, 101, 102, 103], ATM anchor = nearest strike with equidistant
+/// ties resolving toward the OTM side, then walk `otmOffset` strikes OTM.
 final class AutoContractSelectorTests: XCTestCase {
-    private let expiration0DTE = "2026-07-17"
-    private let expirationLater = "2026-07-20"
+    private let expiration = "2026-07-17"
 
     // Fixed "today" so nearest-expiration selection is deterministic.
     private var today: Date {
@@ -12,7 +14,7 @@ final class AutoContractSelectorTests: XCTestCase {
 
     // MARK: - Helpers
 
-    private func contract(_ symbol: String, expiration: String, strike: Double, type: OptionType) -> OptionContract {
+    private func contract(_ symbol: String, strike: Double, type: OptionType) -> OptionContract {
         OptionContract(
             symbol: symbol,
             underlying: "SPY",
@@ -25,114 +27,115 @@ final class AutoContractSelectorTests: XCTestCase {
         )
     }
 
-    /// 0DTE strikes 500...505 (both types), later expiration strikes 510...515 (both types).
-    /// Expirations intentionally unsorted.
-    private func makeChain(price: Double = 502.13) -> OptionsChain {
+    /// The canonical ladder: strikes 100...103, both rights.
+    private func makeChain() -> OptionsChain {
         var contracts: [OptionContract] = []
-        for strike in stride(from: 500.0, through: 505.0, by: 1.0) {
-            contracts.append(contract("C0-\(Int(strike))", expiration: expiration0DTE, strike: strike, type: .call))
-            contracts.append(contract("P0-\(Int(strike))", expiration: expiration0DTE, strike: strike, type: .put))
-        }
-        for strike in stride(from: 510.0, through: 515.0, by: 1.0) {
-            contracts.append(contract("C1-\(Int(strike))", expiration: expirationLater, strike: strike, type: .call))
-            contracts.append(contract("P1-\(Int(strike))", expiration: expirationLater, strike: strike, type: .put))
+        for strike in [100.0, 101.0, 102.0, 103.0] {
+            contracts.append(contract("C-\(Int(strike))", strike: strike, type: .call))
+            contracts.append(contract("P-\(Int(strike))", strike: strike, type: .put))
         }
         return OptionsChain(
             underlying: "SPY",
-            underlyingPrice: price,
-            expirations: [expirationLater, expiration0DTE],
+            underlyingPrice: 101.5,
+            expirations: [expiration],
             contracts: contracts
         )
     }
 
-    // MARK: - Acceptance criteria (PRD §5.3)
-
-    func testAutoCall_lastBetweenStrikes_picksLowestStrictlyAbove() {
-        let chain = makeChain(price: 502.13)
-        let selected = AutoContractSelector.selectAutoOTM(chain: chain, optionType: .call, today: today)
-        XCTAssertEqual(selected?.strike, 503)
-        XCTAssertEqual(selected?.optionType, .call)
-        XCTAssertEqual(selected?.expiration, expiration0DTE)
-    }
-
-    /// A live `last` overrides the chain-load snapshot price: as the underlying
-    /// crosses a strike, the AUTO pick moves with it.
-    func testAutoCall_liveLastOverridesSnapshotPrice() {
-        let chain = makeChain(price: 502.13)
-        let selected = AutoContractSelector.selectAutoOTM(
-            chain: chain,
-            optionType: .call,
-            last: 503.4,
+    private func select(_ type: OptionType, last: Double, offset: Int? = nil) -> OptionContract? {
+        if let offset {
+            return AutoContractSelector.selectAutoOTM(
+                chain: makeChain(),
+                optionType: type,
+                last: last,
+                otmOffset: offset,
+                today: today
+            )
+        }
+        return AutoContractSelector.selectAutoOTM(
+            chain: makeChain(),
+            optionType: type,
+            last: last,
             today: today
         )
-        XCTAssertEqual(selected?.strike, 504)
     }
 
-    func testAutoPut_lastBetweenStrikes_picksHighestStrictlyBelow() {
-        let chain = makeChain(price: 502.13)
-        let selected = AutoContractSelector.selectAutoOTM(chain: chain, optionType: .put, today: today)
-        XCTAssertEqual(selected?.strike, 502)
-        XCTAssertEqual(selected?.optionType, .put)
+    // MARK: - Default offset (+1 from the ATM anchor)
+
+    func testCall_lastBelowMidpoint_anchorsAtmBelow() {
+        XCTAssertEqual(select(.call, last: 100.4)?.strike, 101) // ATM 100
     }
 
-    // MARK: - Price exactly on a strike → strictly above/below
-
-    func testAutoCall_priceExactlyOnStrike_picksNextStrikeUp() {
-        let chain = makeChain(price: 503.00)
-        let selected = AutoContractSelector.selectAutoOTM(chain: chain, optionType: .call, today: today)
-        XCTAssertEqual(selected?.strike, 504)
+    func testCall_lastAboveMidpoint_anchorsAtmAbove() {
+        XCTAssertEqual(select(.call, last: 100.6)?.strike, 102) // ATM 101
     }
 
-    func testAutoPut_priceExactlyOnStrike_picksNextStrikeDown() {
-        let chain = makeChain(price: 503.00)
-        let selected = AutoContractSelector.selectAutoOTM(chain: chain, optionType: .put, today: today)
-        XCTAssertEqual(selected?.strike, 502)
+    func testPut_lastAboveMidpoint_anchorsAtmAbove() {
+        XCTAssertEqual(select(.put, last: 102.6)?.strike, 102) // ATM 103
     }
 
-    // MARK: - Expiration handling
-
-    func testAutoCall_explicitExpiration_filtersToThatExpiration() {
-        let chain = makeChain(price: 502.13)
-        let selected = AutoContractSelector.selectAutoOTM(
-            chain: chain,
-            optionType: .call,
-            expiration: expirationLater,
-            today: today
-        )
-        XCTAssertEqual(selected?.strike, 510)
-        XCTAssertEqual(selected?.expiration, expirationLater)
+    func testPut_lastBelowMidpoint_anchorsAtmBelow() {
+        XCTAssertEqual(select(.put, last: 102.4)?.strike, 101) // ATM 102
     }
 
-    // MARK: - Empty / degenerate chains
+    // MARK: - Exactly on a strike
 
-    func testAutoCall_emptyChain_returnsNil() {
+    func testCall_exactlyOnStrike_walksOneUp() {
+        XCTAssertEqual(select(.call, last: 101)?.strike, 102)
+    }
+
+    func testPut_exactlyOnStrike_walksOneDown() {
+        XCTAssertEqual(select(.put, last: 101)?.strike, 100)
+    }
+
+    // MARK: - Equidistant ties resolve toward the OTM side
+
+    func testCall_equidistantTie_anchorsHigher() {
+        XCTAssertEqual(select(.call, last: 101.5)?.strike, 103) // ATM 102
+    }
+
+    func testPut_equidistantTie_anchorsLower() {
+        XCTAssertEqual(select(.put, last: 101.5)?.strike, 100) // ATM 101
+    }
+
+    // MARK: - Offset 0 trades the ATM strike itself
+
+    func testCall_offsetZero_picksAtm() {
+        XCTAssertEqual(select(.call, last: 100.6, offset: 0)?.strike, 101)
+    }
+
+    func testPut_offsetZero_picksAtm() {
+        XCTAssertEqual(select(.put, last: 100.6, offset: 0)?.strike, 101)
+    }
+
+    // MARK: - Offset 2
+
+    func testCall_offsetTwo_walksTwoUp() {
+        XCTAssertEqual(select(.call, last: 100.4, offset: 2)?.strike, 102) // ATM 100
+    }
+
+    func testPut_offsetTwo_walksTwoDown() {
+        XCTAssertEqual(select(.put, last: 102.6, offset: 2)?.strike, 101) // ATM 103
+    }
+
+    // MARK: - Ladder exhaustion → nil
+
+    func testCall_atmAtTopOfLadder_returnsNil() {
+        XCTAssertNil(select(.call, last: 102.99)) // ATM 103, nothing above
+    }
+
+    func testPut_atmAtBottomOfLadder_returnsNil() {
+        XCTAssertNil(select(.put, last: 100.01)) // ATM 100, nothing below
+    }
+
+    func testCall_offsetBeyondLadder_returnsNil() {
+        XCTAssertNil(select(.call, last: 100.4, offset: 10))
+    }
+
+    func testEmptyChain_returnsNil() {
         let chain = OptionsChain(underlying: "SPY", underlyingPrice: 100, expirations: [], contracts: [])
         XCTAssertNil(AutoContractSelector.selectAutoOTM(chain: chain, optionType: .call, today: today))
         XCTAssertNil(AutoContractSelector.selectAutoOTM(chain: chain, optionType: .put, today: today))
-    }
-
-    func testAutoCall_noStrikeAboveLast_returnsNil() {
-        let chain = makeChain(price: 506.00)
-        XCTAssertNil(
-            AutoContractSelector.selectAutoOTM(
-                chain: chain,
-                optionType: .call,
-                expiration: expiration0DTE,
-                today: today
-            )
-        )
-    }
-
-    func testAutoPut_noStrikeBelowLast_returnsNil() {
-        let chain = makeChain(price: 499.50)
-        XCTAssertNil(
-            AutoContractSelector.selectAutoOTM(
-                chain: chain,
-                optionType: .put,
-                expiration: expiration0DTE,
-                today: today
-            )
-        )
     }
 
     // MARK: - Nearest expiration

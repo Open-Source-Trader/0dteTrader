@@ -1,6 +1,6 @@
 import { plainToInstance } from 'class-transformer';
 import { validateSync } from 'class-validator';
-import { OrderRequestDto } from './order-request.dto';
+import { OrderRequestDto, OrderSelectionDto } from './order-request.dto';
 
 /**
  * `POST /v1/orders` is public input, so the DTO — not the trade panel — is what
@@ -52,5 +52,30 @@ describe('OrderRequestDto', () => {
     expect(errorsFor({ orderType: 'custom', limitPrice: 1e9 }).join(' ')).toMatch(/between/);
     expect(errorsFor({ orderType: 'custom', limitPrice: 2.455 }).join(' ')).toMatch(/ticks/);
     expect(errorsFor({ orderType: 'custom', limitPrice: 'cheap' }).join(' ')).toMatch(/finite/);
+  });
+});
+
+describe('OrderSelectionDto.otmOffset', () => {
+  function selectionErrors(overrides: Record<string, unknown>): string[] {
+    const dto = plainToInstance(OrderSelectionDto, {
+      mode: 'auto_otm',
+      optionType: 'call',
+      ...overrides,
+    });
+    return validateSync(dto).flatMap((error) => Object.values(error.constraints ?? {}));
+  }
+
+  it('accepts 0 through 10, and absence', () => {
+    expect(selectionErrors({})).toEqual([]);
+    expect(selectionErrors({ otmOffset: 0 })).toEqual([]);
+    expect(selectionErrors({ otmOffset: 1 })).toEqual([]);
+    expect(selectionErrors({ otmOffset: 10 })).toEqual([]);
+  });
+
+  it('rejects negative, fractional, oversized, and non-numeric offsets', () => {
+    expect(selectionErrors({ otmOffset: -1 }).join(' ')).toMatch(/otmOffset/);
+    expect(selectionErrors({ otmOffset: 1.5 }).join(' ')).toMatch(/otmOffset/);
+    expect(selectionErrors({ otmOffset: 11 }).join(' ')).toMatch(/otmOffset/);
+    expect(selectionErrors({ otmOffset: 'two' }).join(' ')).toMatch(/otmOffset/);
   });
 });

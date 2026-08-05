@@ -8,10 +8,33 @@ import {
 } from 'snaptrade-typescript-sdk';
 import { OrderResult, OrderStatus, Position } from '@0dtetrader/shared-types';
 
+/**
+ * SnapTrade reports option symbols in the 21-character space-PADDED OCC form
+ * (`AAPL  261218C00240000`), while this app's canonical form — and every
+ * parser in it, on all three clients — is compact. Normalizing here, at the
+ * one boundary the padded form enters through, keeps a padded symbol from
+ * failing to match the same contract held under its compact name.
+ */
+export const compactOcc = (symbol: string): string => symbol.replace(/\s+/g, '');
+
 // ---------------------------------------------------------------------------
 // SnapTrade status → app status
 // ---------------------------------------------------------------------------
 
+/**
+ * The ONE SnapTrade status table — webhook ingestion and REST polling both
+ * map through it, so the two paths cannot disagree about an order's fate.
+ *
+ * Two entries are deliberate corrections of tempting mistakes:
+ * - CANCEL_PENDING is a REQUEST, not an outcome. The order is still live and
+ *   can still fill; announcing `cancelled` here is an outcome the broker has
+ *   not reached.
+ * - PARTIAL_CANCELED is TERMINAL: the unfilled remainder was cancelled and
+ *   nothing more will execute. Mapping it non-terminal left the order in the
+ *   working list forever with no terminal push. The executed portion still
+ *   accounts — a cancelled row carrying a filled quantity is a real fill to
+ *   the position book.
+ */
 const SNAPTRADE_STATUS_MAP: Record<string, OrderStatus> = {
   NONE: 'submitted',
   PENDING: 'submitted',
@@ -19,10 +42,13 @@ const SNAPTRADE_STATUS_MAP: Record<string, OrderStatus> = {
   FAILED: 'rejected',
   REJECTED: 'rejected',
   CANCELED: 'cancelled',
-  CANCEL_PENDING: 'cancelled',
-  PARTIAL_CANCELED: 'partially_filled',
+  CANCELLED: 'cancelled',
+  CANCEL_PENDING: 'submitted',
+  PARTIAL_CANCELED: 'cancelled',
   EXECUTED: 'filled',
+  FILLED: 'filled',
   PARTIAL: 'partially_filled',
+  PARTIALLY_FILLED: 'partially_filled',
   REPLACE_PENDING: 'submitted',
   REPLACED: 'submitted',
   EXPIRED: 'cancelled',
@@ -54,6 +80,7 @@ export function toOrderResult(order: AccountOrderRecord): OrderResult {
     ...(Number.isFinite(limitPrice ?? NaN) ? { limitPrice } : {}),
     ...(Number.isFinite(filledPrice ?? NaN) ? { filledPrice } : {}),
     ...(Number.isFinite(filledQuantity ?? NaN) ? { filledQuantity } : {}),
+    ...(order.time_executed ? { filledAt: order.time_executed } : {}),
     timestamp: order.time_placed ?? new Date().toISOString(),
   };
 }
@@ -61,7 +88,7 @@ export function toOrderResult(order: AccountOrderRecord): OrderResult {
 function optionSymbolOf(order: AccountOrderRecord): string | null {
   const opt = order.option_symbol as AccountOrderRecordOptionSymbol | undefined;
   if (!opt?.ticker) return null;
-  return opt.ticker;
+  return compactOcc(opt.ticker);
 }
 
 function equitySymbolOf(order: AccountOrderRecord): string | null {
@@ -100,7 +127,7 @@ export function toPosition(
   const price = Number(position.price ?? 0);
   const units = Number(position.units ?? 0);
   return {
-    symbol: option.symbol,
+    symbol: compactOcc(option.symbol),
     assetClass: 'option',
     quantity: units,
     avgPrice: multiplier > 0 ? costBasis / multiplier : costBasis,

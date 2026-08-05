@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { OrderSide } from '@0dtetrader/shared-types';
 import { useStore } from '../../core/observable';
-import { midPrice } from '../../core/models/domain';
+import { midPrice, quotesPending } from '../../core/models/domain';
 import { dayString } from '../../core/models/dates';
 import { isPriceInputShape, parsePriceInput } from '../../core/models/priceInput';
 import { Menu } from '../../design/components/Menu';
@@ -124,7 +124,18 @@ export function TradePanel({
 
   // Custom with nothing typed in it cannot be armed — there is no price to
   // send, and the server would reject the request anyway.
-  const canTrade = selectedContract !== null && !locked && tradeStore.canArm;
+  // A CURR leg resolved from its OCC symbol has no quotes until its
+  // expiration's contracts load: the ticket disables (and the pricing row
+  // dashes) rather than offering a trade off a 0.00 display.
+  const canTrade =
+    selectedContract !== null && !locked && tradeStore.canArm && !quotesPending(selectedContract);
+
+  // SELL only ever closes: it needs a held long that arm()'s underlying +
+  // expiration + right match would find (same predicate, so gate and action
+  // cannot disagree).
+  const hasSellableLeg =
+    tradeStore.sellableHeldLegs(chain.underlying, chain.selectedExpiration, chain.optionType)
+      .length > 0;
 
   const selectedQuote = selectedContract;
   const indicativeMid = selectedQuote ? midPrice(selectedQuote.bid, selectedQuote.ask) : null;
@@ -253,11 +264,26 @@ export function TradePanel({
             <button
               className={chain.isAutoMode ? 'hud-toggle-chip on' : 'hud-toggle-chip'}
               onClick={() => chainStore.setAutoMode(!chain.isAutoMode)}
-              aria-label="Auto +1 OTM selection"
+              aria-label="Auto OTM selection"
               aria-pressed={chain.isAutoMode}
             >
               {chain.isAutoMode ? <CheckmarkIcon size={11} /> : null}
               AUTO
+            </button>
+            <button
+              className={chain.isCurrMode ? 'hud-toggle-chip on' : 'hud-toggle-chip'}
+              onClick={() => chainStore.setCurrMode(!chain.isCurrMode)}
+              disabled={!chain.isCurrMode && !chainStore.hasCurrPositions}
+              title={
+                !chain.isCurrMode && !chainStore.hasCurrPositions
+                  ? 'No open long for this underlying'
+                  : undefined
+              }
+              aria-label="Current position selection"
+              aria-pressed={chain.isCurrMode}
+            >
+              {chain.isCurrMode ? <CheckmarkIcon size={11} /> : null}
+              CURR
             </button>
           </div>
         </div>
@@ -406,7 +432,9 @@ export function TradePanel({
             </div>
             <QuoteColumn
               label="Bid"
-              value={selectedQuote ? Format.price(selectedQuote.bid) : null}
+              value={
+                selectedQuote && selectedQuote.bid > 0 ? Format.price(selectedQuote.bid) : null
+              }
               selected={trade.orderType === 'bid'}
               onSelect={() => tradeStore.setOrderType('bid')}
             />
@@ -418,7 +446,9 @@ export function TradePanel({
             />
             <QuoteColumn
               label="Ask"
-              value={selectedQuote ? Format.price(selectedQuote.ask) : null}
+              value={
+                selectedQuote && selectedQuote.ask > 0 ? Format.price(selectedQuote.ask) : null
+              }
               selected={trade.orderType === 'ask'}
               onSelect={() => tradeStore.setOrderType('ask')}
             />
@@ -438,7 +468,7 @@ export function TradePanel({
           <TradeActionButton
             title="SELL"
             color="var(--sell-red)"
-            isEnabled={canTrade}
+            isEnabled={canTrade && hasSellableLeg}
             onClick={() => onArm('sell')}
           />
           <TradeActionButton

@@ -132,6 +132,12 @@ export interface ChartStoreState {
   indicatorSettings: IndicatorSettings;
   twcSettings: TwcHeatmapSettings;
   optionsAnalytics: OptionsAnalyticsSettings;
+  /** Price the chart is asked to keep in view ("Show on chart"); null = none.
+   *  CandleChart's autoscale merges it into the range while it is set. */
+  revealPrice: number | null;
+  /** Visible price domain as last painted, reported by CandleChart; null until
+   *  the first paint (or when the chart cannot read one). */
+  visiblePriceRange: { min: number; max: number } | null;
 }
 
 /**
@@ -139,6 +145,9 @@ export interface ChartStoreState {
  * settings, error banner) can subscribe to via `useStore(chartStore,
  * chartChromeSlice, shallowEqual)` — skips a re-render on every live-quote
  * tick, which only ever touches `candles`/`quote`/`tickProgress`/`isStale`.
+ * `visiblePriceRange` rides along for the workspace's "Show on chart"
+ * affordance; `setVisiblePriceRange` drops sub-epsilon jitter, so it does not
+ * reintroduce the per-tick re-render this slice exists to avoid.
  */
 export function chartChromeSlice(state: ChartStoreState) {
   return {
@@ -147,6 +156,7 @@ export function chartChromeSlice(state: ChartStoreState) {
     indicatorSettings: state.indicatorSettings,
     twcSettings: state.twcSettings,
     optionsAnalytics: state.optionsAnalytics,
+    visiblePriceRange: state.visiblePriceRange,
   };
 }
 
@@ -210,6 +220,8 @@ export class ChartStore extends Store<ChartStoreState> {
       indicatorSettings,
       twcSettings: settingsStore.twcSettings,
       optionsAnalytics: settingsStore.optionsAnalytics,
+      revealPrice: null,
+      visiblePriceRange: null,
     });
     socket.onQuote((quote) => this.handleLiveQuote(quote));
     // Mirror the socket's connection state so the header can flag frozen
@@ -285,7 +297,16 @@ export class ChartStore extends Store<ChartStoreState> {
     this.settingsStore.lastSymbol = normalized;
     this.tickAccumulator = null;
     this.cancelPendingCandlePatch();
-    this.set({ symbol: normalized, quote: null, candles: [], tickProgress: null });
+    // A reveal and a visible range are levels on the old symbol's scale;
+    // neither means anything on the new one.
+    this.set({
+      symbol: normalized,
+      quote: null,
+      candles: [],
+      tickProgress: null,
+      revealPrice: null,
+      visiblePriceRange: null,
+    });
     this.socket.subscribeSymbols([normalized]);
     void this.loadCandles();
   }
@@ -311,6 +332,36 @@ export class ChartStore extends Store<ChartStoreState> {
   setOptionsAnalytics(settings: OptionsAnalyticsSettings): void {
     this.settingsStore.optionsAnalytics = settings;
     this.set({ optionsAnalytics: settings });
+  }
+
+  /** "Show on chart": asks the chart to keep `price` in view; null clears the
+   *  reveal, which lets the previous viewport come back. */
+  setRevealPrice(price: number | null): void {
+    if (price === this.getState().revealPrice) return;
+    this.set({ revealPrice: price });
+  }
+
+  /**
+   * CandleChart reports the pane's price domain here after every repaint-worthy
+   * change. Moves under half a percent of the current span are dropped: live
+   * autoscale jitter re-reports on every tick, every `set` notifies every
+   * subscriber, and the only consumer (is a given line in view?) does not turn
+   * on a fraction of a percent.
+   */
+  setVisiblePriceRange(range: { min: number; max: number } | null): void {
+    const current = this.getState().visiblePriceRange;
+    if (range === null || current === null) {
+      if (range !== current) this.set({ visiblePriceRange: range });
+      return;
+    }
+    const epsilon = (current.max - current.min) * 0.005;
+    if (
+      Math.abs(range.min - current.min) <= epsilon &&
+      Math.abs(range.max - current.max) <= epsilon
+    ) {
+      return;
+    }
+    this.set({ visiblePriceRange: range });
   }
 
   // MARK: - Live updates

@@ -148,7 +148,7 @@ extension OrderLineOverlayView {
     /// it while the rows are being laid out — `draw(_:)` settles `guidePrice`
     /// before that point precisely so this answer is already this frame's.
     var isGuideShowing: Bool {
-        settings.enabled && hasSelectedContract && effectiveGuidePrice != nil
+        settings.enabled && canPlaceChartOrder && effectiveGuidePrice != nil
     }
 
     /// A tap on empty chart space: summons the guide at that level, or dismisses
@@ -159,7 +159,7 @@ extension OrderLineOverlayView {
     /// zoom. That routing is also what defines "empty": a tap that reached the
     /// chart at all is one no order line, pill, handle or drawing claimed.
     func toggleGuide(at point: CGPoint) {
-        guard settings.enabled, hasSelectedContract, !isPlacementOpen else { return }
+        guard settings.enabled, canPlaceChartOrder, !isPlacementOpen else { return }
         if guidePrice != nil {
             _ = dismissGuide()
             return
@@ -192,7 +192,7 @@ extension OrderLineOverlayView {
     /// is showing, and otherwise arms the card at the level it is on — the same
     /// two steps a tap on the chart and a tap on the `+` give everyone else.
     func activateGuideHandle() -> Bool {
-        guard settings.enabled, hasSelectedContract, !isPlacementOpen else { return false }
+        guard settings.enabled, canPlaceChartOrder, !isPlacementOpen else { return false }
         if let price = effectiveGuidePrice {
             Haptics.impact(.light)
             delegate?.orderLineOverlayDidRequestPlacement(at: price)
@@ -232,7 +232,7 @@ extension OrderLineOverlayView {
     /// in that state, and a control that takes the tap, spends a haptic and arms
     /// nothing is worse than no control.
     func resolveGuideForFrame() {
-        guard hasSelectedContract else {
+        guard canPlaceChartOrder else {
             guidePrice = nil
             return
         }
@@ -344,7 +344,7 @@ extension OrderLineOverlayView {
     /// VoiceOver can make, so without a dormant element to activate there would
     /// be no assistive route to chart order placement at all.
     func placementAccessibilityElement() -> UIAccessibilityElement? {
-        guard settings.enabled, hasSelectedContract else { return nil }
+        guard settings.enabled, canPlaceChartOrder else { return nil }
         // Reused rather than rebuilt so the element keeps its identity
         // across repaints: `draw(_:)` runs on every pan frame, and handing
         // VoiceOver a fresh element each time would drop focus out from

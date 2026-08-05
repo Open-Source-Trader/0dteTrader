@@ -407,6 +407,26 @@ paths:
             content: { application/json: { schema: { $ref: '#/components/schemas/ChartOrder' } } },
           }
         '404': { description: No such chart order }
+  /notifications/devices:
+    post:
+      tags: [notifications]
+      security: [{ bearerAuth: [] }]
+      description: Registers a device for push notifications. Idempotent upsert keyed on the token; re-registering an existing token moves it to the calling account.
+      requestBody:
+        required: true
+        content:
+          { application/json: { schema: { $ref: '#/components/schemas/DeviceRegistration' } } }
+      responses:
+        '204': { description: Registered }
+  /notifications/devices/{token}:
+    delete:
+      tags: [notifications]
+      security: [{ bearerAuth: [] }]
+      description: Unregisters a device. Possession-authorized — presenting the token removes its registration whichever account owns it, so a new login can clear a registration a session expiry stranded. Deleting an absent token is a no-op.
+      parameters:
+        - { name: token, in: path, required: true, schema: { type: string } }
+      responses:
+        '204': { description: Unregistered }
 components:
   securitySchemes:
     bearerAuth: { type: http, scheme: bearer, bearerFormat: JWT }
@@ -553,6 +573,13 @@ components:
             optionType: { type: string, enum: [call, put] }
             expiration: { type: string, format: date }
             strike: { type: number }
+            otmOffset:
+              {
+                type: integer,
+                minimum: 0,
+                maximum: 10,
+                description: 'auto_otm only: strikes out of the money from the ATM strike (closest to the live price); 0 = ATM; omitted means 1',
+              }
     OrderPreview:
       type: object
       properties:
@@ -579,7 +606,13 @@ components:
             type: number,
             description: Broker-reported executed quantity (partial fills); absent when the broker gives only the order quantity,
           }
-        timestamp: { type: string, format: date-time }
+        filledAt:
+          {
+            type: string,
+            format: date-time,
+            description: Broker-reported execution time; absent when the broker reports no execution timestamp,
+          }
+        timestamp: { type: string, format: date-time, description: Order placement time }
     TradeHistoryEntry:
       allOf:
         - $ref: '#/components/schemas/OrderResult'
@@ -712,8 +745,26 @@ components:
         underlyingEntryPrice:
           {
             type: number,
-            description: Quantity-weighted price of the UNDERLYING across the fills that opened this position — where the chart draws the entry line. Absent for positions opened before it was recorded or outside the app,
+            description: AUTHORITATIVE quantity-weighted underlying price observed at the opening fills' execution times. The only value automated actions (Move stop to entry) may consume. Reserved — not currently populated; the backend has no fill-time underlying observation yet,
           }
+        underlyingEntryEstimate:
+          {
+            type: number,
+            description: ESTIMATED entry level — quantity-weighted over underlying quotes captured at order PLACEMENT,
+            counting only fills that executed promptly after placement. Display-only (draw the entry line as approximate); never an input to moving or arming an order. Absent when no prompt-fill estimate exists,
+          }
+        openedAt:
+          {
+            type: string,
+            format: date-time,
+            description: ISO-8601 UTC time of the first fill of the current position lifecycle (where quantity last left zero) — execution time; never order placement/submission time. Legacy rows recorded before fill timestamps were stored fall back to the opening order's placement time. Absent for positions opened before it was recorded or outside the app,
+          }
+    DeviceRegistration:
+      type: object
+      required: [token, platform]
+      properties:
+        token: { type: string, description: Hex-encoded APNs device token }
+        platform: { type: string, enum: [ios] }
     OptionsAnalyticsCoverage:
       type: object
       required: [contractsTotal, contractsIncluded, ratio]

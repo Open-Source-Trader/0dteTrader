@@ -29,9 +29,12 @@ final class AuthViewModel: ObservableObject {
         self.sessionStore = sessionStore
         self.settingsStore = settingsStore
         self.socket = socket
+        // Filtered to THIS container's session store: a departed container's
+        // in-flight refresh can 401 after a server switch, and an unfiltered
+        // observer would force the new server's session out too.
         sessionObserver = NotificationCenter.default.addObserver(
             forName: .sessionDidBecomeUnauthenticated,
-            object: nil,
+            object: sessionStore,
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor in

@@ -1,17 +1,20 @@
 import Foundation
 
-/// AUTO contract selection (PRD FR-15/FR-16): pick the option +1 strike OTM
-/// from the underlying's last price —
-///   calls: lowest strike strictly above last;
-///   puts:  highest strike strictly below last.
+/// AUTO contract selection (PRD FR-15/FR-16): anchor on the ATM strike — the
+/// one nearest the underlying's last price, an exact tie resolving toward the
+/// OTM side — then walk `otmOffset` strikes OTM (up for calls, down for puts).
+/// Offset 0 trades the ATM strike itself; the default 1 keeps the classic
+/// one-strike-out behaviour. Walking off the end of the ladder yields nil.
 /// Expiration defaults to the nearest one (0DTE when available).
-/// The server re-validates this selection at submission time (FR-20).
+/// The server re-validates this selection at submission time (FR-20) with the
+/// same ATM-anchored walk (`resolveAutoOtm`).
 enum AutoContractSelector {
     static func selectAutoOTM(
         chain: OptionsChain,
         optionType: OptionType,
         expiration: String? = nil,
         last: Double? = nil,
+        otmOffset: Int = 1,
         today: Date = Date()
     ) -> OptionContract? {
         let referencePrice = last ?? chain.underlyingPrice
@@ -21,17 +24,35 @@ enum AutoContractSelector {
             contract.optionType == optionType
                 && (targetExpiration == nil || contract.expiration == targetExpiration)
         }
+        guard !candidates.isEmpty else { return nil }
 
-        switch optionType {
-        case .call:
-            return candidates
-                .filter { $0.strike > referencePrice }
-                .min(by: { $0.strike < $1.strike })
-        case .put:
-            return candidates
-                .filter { $0.strike < referencePrice }
-                .max(by: { $0.strike < $1.strike })
+        let ladder = Array(Set(candidates.map(\.strike))).sorted()
+        let anchor = atmIndex(in: ladder, reference: referencePrice, optionType: optionType)
+        let target = optionType == .call ? anchor + otmOffset : anchor - otmOffset
+        guard ladder.indices.contains(target) else { return nil }
+        let strike = ladder[target]
+        return candidates.first { $0.strike == strike }
+    }
+
+    /// Index of the ATM anchor in the ascending strike ladder: nearest strike
+    /// to `reference`, equidistant ties resolving toward the OTM side (higher
+    /// for calls, lower for puts).
+    private static func atmIndex(in ladder: [Double], reference: Double, optionType: OptionType) -> Int {
+        var best = 0
+        var bestDistance = Double.infinity
+        for (index, strike) in ladder.enumerated() {
+            let distance = abs(strike - reference)
+            if distance < bestDistance {
+                best = index
+                bestDistance = distance
+            } else if distance == bestDistance, optionType == .call {
+                // The ladder ascends, so on a tie the later index is the
+                // higher strike — the OTM side for a call. Puts keep the
+                // earlier (lower) one already stored.
+                best = index
+            }
         }
+        return best
     }
 
     /// Nearest expiration on or after `today`; falls back to the latest known

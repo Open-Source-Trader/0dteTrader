@@ -90,9 +90,19 @@ struct RootView: View {
             )
         case .authenticated:
             TradeScreenView(container: container) {
-                await authViewModel.logout()
+                await signOut()
             }
         }
+    }
+
+    /// Every sign-out route funnels here so push teardown can never be
+    /// skipped. `handleLogout` stops local APNs delivery synchronously and
+    /// then attempts the server-side DELETE while the departing account's
+    /// credentials still work; only after it returns does `logout()` clear
+    /// the local session, so the DELETE never races its own authentication.
+    private func signOut() async {
+        await container.pushNotifications.handleLogout()
+        await authViewModel.logout()
     }
 
     private var lockOverlay: some View {
@@ -119,7 +129,7 @@ struct RootView: View {
                 .controlSize(.large) // 50pt tall, above the 44pt HIG minimum
                 .tint(.appAccentFill) // white label passes WCAG AA on the fill token
                 Button("Sign in with password instead") {
-                    Task { await authViewModel.logout() }
+                    Task { await signOut() }
                     lockManager.forceUnlock()
                 }
                 .buttonStyle(.borderless)

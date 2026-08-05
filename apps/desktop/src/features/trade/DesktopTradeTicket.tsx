@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { OptionContract, OrderSide, OrderType } from '@0dtetrader/shared-types';
 import { useStore } from '../../core/observable';
 import { dayString } from '../../core/models/dates';
-import { midPrice } from '../../core/models/domain';
+import { midPrice, quotesPending } from '../../core/models/domain';
 import { isPriceInputShape, parsePriceInput } from '../../core/models/priceInput';
 import { AnchoredPopup } from '../../design/components/Menu';
 import { MinusIcon, PlusIcon } from '../../design/icons';
@@ -118,20 +118,26 @@ export function DesktopTradeTicket({
     trade.quantity,
     chain.underlyingLast,
   );
-  const hasOpenLong = selectedContract
-    ? trade.positions.some(
-        (position) => position.symbol === selectedContract.symbol && position.quantity > 0,
-      )
-    : false;
+  // SELL only ever closes: it needs a held long that arm()'s underlying +
+  // expiration + right match would find (same predicate, so gate and action
+  // cannot disagree — not the exact selected symbol, which AUTO's live pick
+  // can drift off of).
+  const hasSellableLeg =
+    tradeStore.sellableHeldLegs(chain.underlying, chain.selectedExpiration, chain.optionType)
+      .length > 0;
+  // `premium !== null` alone does not cover the Custom mode: a typed price
+  // supplies a premium even when the leg itself has no quotes yet, so the
+  // zero-quote CURR gate needs its own term here.
   const canSubmit =
     selectedContract !== null &&
     !locked &&
     !trade.isSubmitting &&
     !trade.armedTicket &&
     tradeStore.canArm &&
-    premium !== null;
+    premium !== null &&
+    !quotesPending(selectedContract);
   const canBuy = canSubmit;
-  const canSell = canSubmit && hasOpenLong;
+  const canSell = canSubmit && hasSellableLeg;
 
   return (
     <div className="trade-panel desktop desktop-ticket-rail">
@@ -192,10 +198,25 @@ export function DesktopTradeTicket({
             type="button"
             className={`desktop-mode-button desktop-mode-button--auto${chain.isAutoMode ? ' selected' : ''}`}
             onClick={() => chainStore.setAutoMode(!chain.isAutoMode)}
-            aria-label="Auto +1 OTM selection"
+            aria-label="Auto OTM selection"
             aria-pressed={chain.isAutoMode}
           >
             Auto
+          </button>
+          <button
+            type="button"
+            className={`desktop-mode-button desktop-mode-button--curr${chain.isCurrMode ? ' selected' : ''}`}
+            onClick={() => chainStore.setCurrMode(!chain.isCurrMode)}
+            disabled={!chain.isCurrMode && !chainStore.hasCurrPositions}
+            title={
+              !chain.isCurrMode && !chainStore.hasCurrPositions
+                ? 'No open long for this underlying'
+                : undefined
+            }
+            aria-label="Current position selection"
+            aria-pressed={chain.isCurrMode}
+          >
+            Curr
           </button>
           <button
             type="button"
@@ -359,7 +380,7 @@ export function DesktopTradeTicket({
             title={trade.isSubmitting ? 'Working…' : 'SELL TO CLOSE'}
             color="var(--sell-red)"
             isEnabled={canSell}
-            secondary={!hasOpenLong}
+            secondary={!hasSellableLeg}
             onClick={() => onArm('sell')}
           />
           <TradeActionButton

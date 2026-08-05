@@ -6,10 +6,12 @@ import {
   HistogramSeries,
   LineSeries,
   LineStyle,
+  type AutoscaleInfo,
   type CandlestickData,
   type HistogramData,
   type IChartApi,
   type IPriceLine,
+  type IRange,
   type ISeriesApi,
   type LineData,
   type LineWidth,
@@ -36,6 +38,7 @@ import { FloatingAxes } from './FloatingAxes';
 import type { DrawingsStore } from './drawings';
 import { OrderLineLayer } from './OrderLineLayer';
 import { sameColorsExceptLast } from './candleRepaint';
+import { extendPriceRange } from './priceReveal';
 import { OptionsAnalyticsOverlay } from './optionsAnalytics/OptionsAnalyticsOverlay';
 import { optionsAnalyticsRailWidth } from './optionsAnalytics/optionsAnalyticsGeometry';
 import type { OptionsAnalyticsSettings } from './optionsAnalytics/optionsAnalyticsSettings';
@@ -73,6 +76,11 @@ interface CandleChartProps {
   ask?: number | null;
   /** Chart trading: everything the order-line overlay needs, or null when off. */
   chartTrading?: ChartTradingProps | null;
+  /** Price the chart must keep in view ("Show on chart"); null = none. */
+  revealPrice?: number | null;
+  /** Reports the pane's visible price domain after every repaint-worthy
+   *  change; null when it cannot be read (no data yet, chart torn down). */
+  onVisiblePriceRange?: (range: { min: number; max: number } | null) => void;
 }
 
 /** Inputs for the order-line overlay, passed through from the trade screen. */
@@ -112,10 +120,17 @@ export function CandleChart({
   bid = null,
   ask = null,
   chartTrading = null,
+  revealPrice = null,
+  onVisiblePriceRange,
 }: CandleChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const candleSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
+  /** Read by the autoscale provider, which is bound once at series creation. */
+  const revealPriceRef = useRef<number | null>(null);
+  /** Manual price range to put back when a reveal clears — only set when the
+   *  reveal found the scale in manual mode (see the reveal effect below). */
+  const revealRestoreRef = useRef<IRange<number> | null>(null);
   const volumeSeriesRef = useRef<ISeriesApi<'Histogram'> | null>(null);
   const bidLineRef = useRef<IPriceLine | null>(null);
   const askLineRef = useRef<IPriceLine | null>(null);
@@ -201,6 +216,18 @@ export function CandleChart({
       priceLineStyle: 2,
       priceLineWidth: 1,
       lastValueVisible: false,
+      // "Show on chart": while a reveal is set, the auto range is widened to
+      // include it — lightweight-charts has no price-axis scroll API, so
+      // extending what autoscale computes is the sanctioned route to a level
+      // outside the data's own range. Null reveal returns the base range
+      // untouched, which is what restores the viewport on clear.
+      autoscaleInfoProvider: (original: () => AutoscaleInfo | null): AutoscaleInfo | null => {
+        const info = original();
+        const reveal = revealPriceRef.current;
+        if (reveal === null || info === null || info.priceRange === null) return info;
+        const range = extendPriceRange(info.priceRange.minValue, info.priceRange.maxValue, reveal);
+        return { ...info, priceRange: { minValue: range.min, maxValue: range.max } };
+      },
     });
     chartRef.current = chart;
     candleSeriesRef.current = candleSeries;
@@ -213,6 +240,7 @@ export function CandleChart({
       volumeSeriesRef.current = null;
       bidLineRef.current = null;
       askLineRef.current = null;
+      revealRestoreRef.current = null;
       overlaySeriesRef.current = new Map();
       prevOverlaysRef.current = null;
       lastLengthRef.current = 0;
@@ -287,6 +315,85 @@ export function CandleChart({
       askLineRef.current = null;
     }
   }, [bid, ask]);
+
+  // "Show on chart" reveal. Autoscaling scale (the default here): the provider
+  // above merges the level into the auto range, and re-applying
+  // `autoScale: true` — the same nudge resetView and the symbol swap use —
+  // makes the merge take effect now rather than on the next data tick;
+  // clearing recomputes without the level, which *is* the restoration. Manual
+  // scale (after a FloatingAxes axis drag): the provider never runs, so the
+  // visible range itself is extended and the pre-reveal range put back on
+  // clear. A drag *during* a reveal wins over both paths — the scale it
+  // leaves behind is the user's newest intent, and neither branch below
+  // touches a manual scale it did not itself extend.
+  useEffect(() => {
+    revealPriceRef.current = revealPrice;
+    const chart = chartRef.current;
+    if (!chart) return;
+    const scale = chart.priceScale('left');
+    if (revealPrice !== null) {
+      if (scale.options().autoScale) {
+        revealRestoreRef.current = null;
+        scale.applyOptions({ autoScale: true });
+      } else {
+        const current = scale.getVisibleRange();
+        if (current === null) return;
+        revealRestoreRef.current ??= current;
+        const extended = extendPriceRange(current.from, current.to, revealPrice);
+        scale.setVisibleRange({ from: extended.min, to: extended.max });
+      }
+    } else {
+      const restore = revealRestoreRef.current;
+      revealRestoreRef.current = null;
+      if (restore !== null && !scale.options().autoScale) scale.setVisibleRange(restore);
+      else if (scale.options().autoScale) scale.applyOptions({ autoScale: true });
+    }
+  }, [revealPrice]);
+
+  // Reports the pane's visible price domain (the workspace's "Show on chart"
+  // affordance needs to know when an order line sits outside it). Same
+  // repaint triggers FloatingAxes uses for the transform they both read, plus
+  // crosshair moves so an axis drag — which changes no logical range — still
+  // reports. ChartStore drops sub-epsilon updates, so live autoscale jitter
+  // does not fan out into re-renders.
+  const reportRangeRef = useRef<() => void>(() => {});
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!apis || !onVisiblePriceRange || !container) return;
+    let raf = 0;
+    const report = () => {
+      raf = 0;
+      const max = apis.series.coordinateToPrice(0);
+      const min = apis.series.coordinateToPrice(apis.chart.paneSize().height);
+      onVisiblePriceRange(min !== null && max !== null ? { min, max } : null);
+    };
+    const schedule = () => {
+      if (raf) return;
+      raf = requestAnimationFrame(report);
+    };
+    reportRangeRef.current = schedule;
+    apis.chart.timeScale().subscribeVisibleLogicalRangeChange(schedule);
+    apis.chart.subscribeCrosshairMove(schedule);
+    const resizeObserver = new ResizeObserver(schedule);
+    resizeObserver.observe(container);
+    schedule();
+    return () => {
+      reportRangeRef.current = () => {};
+      apis.chart.timeScale().unsubscribeVisibleLogicalRangeChange(schedule);
+      apis.chart.unsubscribeCrosshairMove(schedule);
+      resizeObserver.disconnect();
+      if (raf) cancelAnimationFrame(raf);
+      // The domain this reported no longer exists; a stale range would keep
+      // offering "Show on chart" against nothing.
+      onVisiblePriceRange(null);
+    };
+  }, [apis, onVisiblePriceRange]);
+
+  // Candle data and the reveal both move the price↔pixel transform under the
+  // reported range.
+  useEffect(() => {
+    reportRangeRef.current();
+  }, [candles, revealPrice]);
 
   // A drag-placed shape (trend/ray/rect) takes over the pointer mid-drag:
   // freeze pan/zoom so the chart doesn't scroll under the draft. Tools stay

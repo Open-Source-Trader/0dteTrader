@@ -1,5 +1,25 @@
 import SwiftUI
 
+/// Display-only status mapping for the history sheet. In a list of past
+/// orders, "Submitted" reads as done when it means the opposite — the order
+/// is still waiting to fill — so the pending states say so, in a warning
+/// amber. Local to history: `OrderStatus.displayName` (toasts, chips) keeps
+/// the wire wording.
+enum HistoryStatusStyle {
+    static func label(for status: OrderStatus) -> String {
+        switch status {
+        case .submitted: return "Waiting"
+        case .partiallyFilled: return "Waiting · partial fill"
+        default: return status.displayName
+        }
+    }
+
+    /// Still waiting on the broker — the states that wear the amber.
+    static func isPending(_ status: OrderStatus) -> Bool {
+        status == .submitted || status == .partiallyFilled
+    }
+}
+
 /// Trade history sheet: every order with its fill status and the realized P/L
 /// its closing fills produced, plus the running net total.
 struct HistoryView: View {
@@ -108,7 +128,7 @@ struct HistoryView: View {
                     .font(.system(.subheadline, design: .monospaced).weight(.semibold))
                     .lineLimit(1)
                 Spacer()
-                Text(OrderStatus(tolerant: entry.status).displayName)
+                Text(HistoryStatusStyle.label(for: OrderStatus(tolerant: entry.status)))
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(statusColor(entry.status))
             }
@@ -126,7 +146,10 @@ struct HistoryView: View {
         }
         .padding(.vertical, AppSpacing.xs)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(entry.side.uppercased()) \(entry.quantity) \(entry.contractSymbol), \(OrderStatus(tolerant: entry.status).displayName)")
+        .accessibilityLabel(
+            "\(entry.side.uppercased()) \(entry.quantity) \(entry.contractSymbol), "
+                + HistoryStatusStyle.label(for: OrderStatus(tolerant: entry.status))
+        )
         .accessibilityValue(entry.realizedPnl.map { "realized P/L \(Format.signedPrice($0)) dollars" } ?? "")
     }
 
@@ -144,7 +167,9 @@ struct HistoryView: View {
     }
 
     private func statusColor(_ status: String) -> Color {
-        switch OrderStatus(tolerant: status) {
+        let status = OrderStatus(tolerant: status)
+        if HistoryStatusStyle.isPending(status) { return .appWarning }
+        switch status {
         case .filled: return .buyGreen
         case .rejected: return .sellRed
         default: return .secondary

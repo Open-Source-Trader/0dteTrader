@@ -178,6 +178,11 @@
   border-image-source: var(--hud-src-accent);
   text-shadow: 0 0 6px var(--hud-glow);
 }
+/* CURR without an open long on the underlying: nothing to pick from. */
+.hud-toggle-chip:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
 /* Trading lock: the same chip in the refusal color, because locked is the
    state that turns orders away rather than a setting that is merely on. The
    padlock carries the label on its own, so the chip goes square instead of

@@ -1,4 +1,4 @@
-import { OrderType } from '@0dtetrader/shared-types';
+import { MAX_OPTION_PRICE, OrderType } from '@0dtetrader/shared-types';
 import { computeMid } from './contract-resolution';
 
 /**
@@ -23,7 +23,10 @@ export const OPTION_TICK = 0.01;
  * premium is finite, positive, tick-aligned, and would be sent.
  */
 export const MIN_LIMIT_PRICE = 0.01;
-export const MAX_LIMIT_PRICE = 100_000;
+// Alias, not a second opinion: the custom-limit ceiling IS the shared
+// option-price ceiling, so readiness, resolution and validation cannot
+// silently disagree if the value ever moves.
+export const MAX_LIMIT_PRICE = MAX_OPTION_PRICE;
 
 /**
  * How far outside the current spread a custom limit may sit before the preview

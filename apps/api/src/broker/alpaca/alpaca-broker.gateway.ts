@@ -373,7 +373,12 @@ export class AlpacaBrokerGateway implements BrokerGateway, MarketDataProvider {
       );
       const contract =
         order.selection.mode === 'auto_otm'
-          ? resolveAutoOtm(chain.contracts, optionType, chain.underlyingPrice)
+          ? resolveAutoOtm(
+              chain.contracts,
+              optionType,
+              chain.underlyingPrice,
+              order.selection.otmOffset,
+            )
           : chain.contracts.find(
               (c) => c.optionType === optionType && c.strike === order.selection.strike,
             );
@@ -439,6 +444,10 @@ export class AlpacaBrokerGateway implements BrokerGateway, MarketDataProvider {
             ...result,
             status: detail.status,
             filledPrice: detail.filledPrice ?? result.filledPrice,
+            // The placement-time result reports filledQuantity 0; without the
+            // poll's value a poll-detected fill would never be accounted.
+            filledQuantity: detail.filledQuantity ?? result.filledQuantity,
+            filledAt: detail.filledAt,
           });
           return;
         }

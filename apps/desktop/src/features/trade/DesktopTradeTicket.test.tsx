@@ -55,6 +55,7 @@ function makeStores({
     errorMessage: null,
     optionType,
     isAutoMode,
+    isCurrMode: false,
     selectedExpiration: EXPIRATION,
     selectedStrike: 729,
     underlyingLast: 728.8,
@@ -100,7 +101,7 @@ describe('DesktopTradeTicket right rail order', () => {
       markup.indexOf('desktop-ticket-action-row'),
     );
     expect((markup.match(/0DTE \/ Expiry|2026-07-29 · 0DTE/g) ?? []).length).toBe(1);
-    expect((markup.match(/aria-label="Auto \+1 OTM selection"/g) ?? []).length).toBe(1);
+    expect((markup.match(/aria-label="Auto OTM selection"/g) ?? []).length).toBe(1);
     expect((markup.match(/Select call contract/g) ?? []).length).toBe(1);
     expect((markup.match(/Select put contract/g) ?? []).length).toBe(1);
     expect(markup).not.toContain('≈');
@@ -277,15 +278,96 @@ describe('DesktopTradeTicket CALL/PUT selection', () => {
     expect(markup).not.toContain('>$728.02<');
   });
 
-  it('AUTO mode keeps previous behavior: optionType drives auto +1 OTM selection', () => {
+  it('AUTO mode: optionType drives the ATM-walk direction (calls up, puts down)', () => {
     const { chainStore } = makeStores({ isAutoMode: true });
-    chainStore.setUnderlyingLast(729.5);
+    const prevCall = { ...call, symbol: 'SPY260729C00728000', strike: 728 };
+    const prevPut = { ...put, symbol: 'SPY260729P00728000', strike: 728 };
+    chainStore.getState().chain!.contracts.push(prevCall, prevPut);
+    chainStore.setUnderlyingLast(729.2);
 
+    // ATM anchor 729 → calls step up to 730, puts step down to 728.
     expect(chainStore.autoContract?.symbol).toBe(nextCall.symbol);
     chainStore.setOptionType('put');
     expect(chainStore.getState().selectedStrike).toBe(729);
-    expect(chainStore.autoContract?.symbol).toBe(put.symbol);
-    expect(chainStore.selectedContract?.symbol).toBe(put.symbol);
+    expect(chainStore.autoContract?.symbol).toBe(prevPut.symbol);
+    expect(chainStore.selectedContract?.symbol).toBe(prevPut.symbol);
+  });
+});
+
+describe('DesktopTradeTicket CURR mode', () => {
+  it('renders the CURR chip beside AUTO, disabled with a tooltip when nothing is owned', () => {
+    const markup = ticketMarkup();
+
+    expect((markup.match(/aria-label="Current position selection"/g) ?? []).length).toBe(1);
+    expect(markup.indexOf('Auto OTM selection')).toBeLessThan(
+      markup.indexOf('Current position selection'),
+    );
+    // No open long on the underlying → the chip is disabled and says why.
+    expect(markup).toContain('title="No open long for this underlying"');
+  });
+
+  it('enables the chip when an open long resolves on the chart underlying', () => {
+    const stores = makeStores();
+    stores.chainStore.positionsProvider = () => [
+      {
+        symbol: put.symbol,
+        assetClass: 'option',
+        quantity: 1,
+        avgPrice: 0.98,
+        markPrice: 1.1,
+        unrealizedPnl: 12,
+        multiplier: 100,
+      },
+    ];
+    const markup = ticketMarkup(stores);
+
+    expect(markup).not.toContain('title="No open long for this underlying"');
+  });
+
+  it('marks the chip selected while CURR mode is on', () => {
+    const stores = makeStores();
+    (stores.chainStore as unknown as { state: Record<string, unknown> }).state.isCurrMode = true;
+    (stores.chainStore as unknown as { state: Record<string, unknown> }).state.isAutoMode = false;
+    const markup = ticketMarkup(stores);
+
+    expect(markup).toContain('desktop-mode-button--curr selected');
+  });
+});
+
+describe('DesktopTradeTicket SELL gating', () => {
+  function withHeldPut(stores = makeStores({ optionType: 'put' as OptionType })) {
+    (stores.tradeStore as unknown as { state: Record<string, unknown> }).state.positions = [
+      {
+        symbol: nextPut.symbol, // held 730P while the panel selects 729P
+        assetClass: 'option',
+        quantity: 1,
+        avgPrice: 0.98,
+        markPrice: 1.1,
+        unrealizedPnl: 12,
+        multiplier: 100,
+      },
+    ];
+    stores.tradeStore.optionContractResolver = (symbol: string) =>
+      [put, nextPut].find((contract) => contract.symbol === symbol);
+    return stores;
+  }
+
+  it('disables SELL (secondary outline) when no matching long is held', () => {
+    const markup = ticketMarkup();
+    const actionRow = markup.slice(markup.indexOf('desktop-ticket-action-row'));
+
+    expect(actionRow).toContain('hud-btn--secondary');
+    expect(actionRow).toContain('disabled=""');
+  });
+
+  it('enables SELL for a held leg on the same underlying+expiration+right, any strike', () => {
+    // Same widened match arm() uses: the held 730P is sellable while the
+    // panel's pick sits at 729P.
+    const markup = ticketMarkup(withHeldPut());
+    const actionRow = markup.slice(markup.indexOf('desktop-ticket-action-row'));
+
+    expect(actionRow).not.toContain('hud-btn--secondary');
+    expect(actionRow).not.toContain('disabled=""');
   });
 });
 

@@ -236,15 +236,49 @@ describe('TradingService', () => {
       const result = await trading.place(userId, autoOtmCall(), 'idem-auto-1');
       expect(result.status).toBe('filled');
 
-      // Server-side resolution: lowest call strike strictly above the last.
-      const strikes = [
-        ...new Set(chain.contracts.filter((c) => c.optionType === 'call').map((c) => c.strike)),
-      ].sort((a, b) => a - b);
-      const expected = strikes.find((s) => s > quote.last)!;
+      // Server-side resolution: the stub's last sits exactly on a strike, so
+      // that strike is the ATM anchor and the default offset steps one out.
       const sent = placeSpy.mock.calls[0][1] as OrderRequest;
       expect(sent.selection.mode).toBe('explicit');
-      expect(sent.selection.strike).toBe(expected);
+      expect(sent.selection.strike).toBe(quote.last + 1);
       expect(sent.selection.expiration).toBe(chain.expirations[0]);
+    });
+
+    it('honors selection.otmOffset when resolving auto_otm', async () => {
+      const placeSpy = jest.spyOn(gateway, 'placeOrder');
+      const quote = await gateway.getQuote(userId, 'SPY');
+
+      await trading.place(
+        userId,
+        autoOtmCall({
+          selection: { mode: 'auto_otm', optionType: 'call', otmOffset: 2 },
+        }),
+        'idem-auto-offset-1',
+      );
+      await trading.place(
+        userId,
+        autoOtmCall({
+          selection: { mode: 'auto_otm', optionType: 'put', otmOffset: 2 },
+        }),
+        'idem-auto-offset-2',
+      );
+      const sentCall = placeSpy.mock.calls[0][1] as OrderRequest;
+      const sentPut = placeSpy.mock.calls[1][1] as OrderRequest;
+      expect(sentCall.selection.strike).toBe(quote.last + 2);
+      expect(sentPut.selection.strike).toBe(quote.last - 2);
+    });
+
+    it('otmOffset 0 trades the ATM strike itself', async () => {
+      const quote = await gateway.getQuote(userId, 'SPY');
+      const preview = await trading.preview(
+        userId,
+        autoOtmCall({
+          selection: { mode: 'auto_otm', optionType: 'call', otmOffset: 0 },
+        }),
+      );
+      // The OCC symbol encodes the strike in thousandths.
+      const strike = Number(preview.resolved.contractSymbol.slice(-8)) / 1000;
+      expect(strike).toBe(quote.last);
     });
 
     it('defaults a missing expiration to the nearest one', async () => {
@@ -423,16 +457,19 @@ describe('TradingService', () => {
         .mockResolvedValue([positionFor(placed.contractSymbol, 1)]);
 
       const [position] = await trading.getPositions(userId);
-      // The stub quotes the underlying at a fixed 100 — that is the level the
-      // chart's entry line must be drawn at.
-      expect(position.underlyingEntryPrice).toBe(StubBrokerGateway.PRICE);
+      // The stub quotes the underlying at a fixed 100. That level is a
+      // placement-time ESTIMATE, so it feeds the display-only estimate field;
+      // the authoritative fill-time field stays reserved and unset, keeping
+      // "Move stop to entry" disabled until a real fill observation exists.
+      expect(position.underlyingEntryEstimate).toBe(StubBrokerGateway.PRICE);
+      expect(position.underlyingEntryPrice).toBeUndefined();
     });
 
     it('leaves a position unannotated when no fill of it recorded an underlying price', async () => {
       jest.spyOn(gateway, 'getPositions').mockResolvedValue([positionFor('SPY260717C00505000', 1)]);
 
       const [position] = await trading.getPositions(userId);
-      expect(position.underlyingEntryPrice).toBeUndefined();
+      expect(position.underlyingEntryEstimate).toBeUndefined();
     });
 
     it('never fails a positions read because the anchor lookup failed', async () => {
@@ -440,6 +477,33 @@ describe('TradingService', () => {
       jest.spyOn(orders, 'positionAnchors').mockRejectedValue(new Error('db down'));
 
       await expect(trading.getPositions(userId)).resolves.toHaveLength(1);
+    });
+
+    it('withholds the anchor when the replay covers less than the broker position', async () => {
+      const placed = await trading.place(userId, autoOtmCall(), 'idem-anchor-mismatch');
+      // The broker reports 3 held; the app only ever saw the 1-lot fill. An
+      // entry price averaged over a third of the position is not the
+      // position's entry price — and "Move stop to entry" would consume it.
+      jest
+        .spyOn(gateway, 'getPositions')
+        .mockResolvedValue([positionFor(placed.contractSymbol, 3)]);
+
+      const [position] = await trading.getPositions(userId);
+      expect(position.underlyingEntryEstimate).toBeUndefined();
+      expect(position.openedAt).toBeUndefined();
+    });
+
+    it('withholds the anchor when the broker direction disagrees with the replay', async () => {
+      const placed = await trading.place(userId, autoOtmCall(), 'idem-anchor-sign');
+      // The app replayed a long; the broker says short. Attaching the long's
+      // entry to the short would gate the stop on the wrong side.
+      jest
+        .spyOn(gateway, 'getPositions')
+        .mockResolvedValue([positionFor(placed.contractSymbol, -1)]);
+
+      const [position] = await trading.getPositions(userId);
+      expect(position.underlyingEntryEstimate).toBeUndefined();
+      expect(position.openedAt).toBeUndefined();
     });
   });
 

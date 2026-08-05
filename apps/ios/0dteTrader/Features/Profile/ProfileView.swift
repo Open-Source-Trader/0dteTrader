@@ -33,6 +33,7 @@ struct ProfileView: View {
                     }
                     securityCard
                     tradingCard
+                    preferencesCard
                     logoutCard
                 }
                 .padding(.horizontal, AppSpacing.lg)

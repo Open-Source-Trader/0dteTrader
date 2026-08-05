@@ -5,6 +5,7 @@ import { useStore } from './core/observable';
 import { getDesktopShell } from './core/desktop/desktopShell';
 import { Spinner } from './design/components/Spinner';
 import { LoginView } from './features/auth/LoginView';
+import { LegalGateView } from './features/auth/LegalGateView';
 import { RiskDisclaimerView } from './features/auth/RiskDisclaimerView';
 import { ServerSelectView } from './features/auth/ServerSelectView';
 import { hostLabel } from './features/auth/serverSelect';
@@ -254,6 +255,8 @@ export function RootView() {
     );
   } else if (state === 'unauthenticated') {
     content = <LoginView store={container.authStore} />;
+  } else if (state === 'legal') {
+    content = <LegalGateView store={container.authStore} />;
   } else {
     content = (
       <TradeScreen

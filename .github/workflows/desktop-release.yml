@@ -45,6 +45,11 @@ jobs:
 
       - name: Build desktop app
         run: npm run build --workspace apps/desktop
+        env:
+          # Vite embeds this value in the About screen at bundle time. Setting
+          # it only for electron-builder would leave every release labelled
+          # "development" even though the DMG filename carries the real SHA.
+          RELEASE_SHA: ${{ steps.meta.outputs.release_sha }}
 
       - name: Package macOS DMG
         run: npm run dist:mac --workspace apps/desktop

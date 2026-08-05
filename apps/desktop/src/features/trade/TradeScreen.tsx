@@ -196,7 +196,6 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
       chainStore
         .getState()
         .chain?.contracts.find((contract: OptionContract) => contract.symbol === symbol);
-    tradeStore.isSocketConnected = () => quoteSocket.getState().connectionState === 'connected';
     void chartOrdersStore.load();
     // OS notifications while the window is unfocused (the toast covers the
     // focused case); the preference is read at fire time.
@@ -218,8 +217,9 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
       // entry line appears without waiting for the next poll.
       void tradeStore.refreshTradingData();
     });
-    // Pushes that landed while the socket was down are gone; re-read on the
-    // way back rather than drawing a bracket that already fired.
+    // Re-read after replay catch-up as a cheap consistency check; refreshes
+    // coalesce with any durable order/chart callbacks delivered just before
+    // this reconnect signal.
     const offReconnect = quoteSocket.onReconnect(() => {
       void chartOrdersStore.load();
       void tradeStore.refreshTradingData();

@@ -16,13 +16,18 @@ import {
   WebullAccount,
 } from '@0dtetrader/shared-types';
 import { errors } from '../../common/api-exception';
-import { brokerErrors } from '../../common/broker-error';
+import { BrokerError, brokerErrors } from '../../common/broker-error';
 import { AGGREGATION_PLANS, aggregateCandles } from '../../market-data/candle-aggregation';
 import { CredentialsService } from '../../credentials/credentials.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { estimateBuyingPower, parseOccSymbol, resolveAutoOtm } from '../contract-resolution';
 import { customPriceWarning, resolveLimitPrice } from '../order-pricing';
-import { BrokerGateway, ResolvedContractHint } from '../broker-gateway.interface';
+import {
+  BrokerExecutionScope,
+  BrokerGateway,
+  RecoveredOrderResult,
+  ResolvedContractHint,
+} from '../broker-gateway.interface';
 import { optionExpirations } from '../expiration-calendar';
 import { OrderEventsService } from '../order-events.service';
 import {
@@ -62,6 +67,8 @@ const SNAPSHOT_BATCH = 20;
 /** Order-status polling after placement. */
 const STATUS_POLL_INTERVAL_MS = 1_000;
 const STATUS_POLL_MAX_ATTEMPTS = 60;
+const STATUS_EVENT_INGEST_ATTEMPTS = 3;
+const STATUS_EVENT_INGEST_RETRY_MS = 100;
 
 interface ResolvedContract {
   contractSymbol: string;
@@ -206,6 +213,13 @@ export class WebullBrokerGateway implements BrokerGateway, OnModuleDestroy {
     const cacheKey = `${userId}:${mode}`;
     const existing = this.clients.get(cacheKey);
     if (existing && existing.fingerprint === fingerprint) {
+      // Account selection is persisted inside the encrypted credential but is
+      // deliberately absent from the auth-token fingerprint. Refresh it on
+      // every resolution so a selection made on another API instance cannot
+      // leave this instance routing orders through its stale client account.
+      if (creds.accountId && existing.client.accountId !== creds.accountId) {
+        existing.client.setAccountId(creds.accountId);
+      }
       return existing.client;
     }
     const client = new WebullClient(creds, {
@@ -257,6 +271,21 @@ export class WebullBrokerGateway implements BrokerGateway, OnModuleDestroy {
     await this.credentials.saveDiscoveredAccountId(userId, 'webull', mode, accountId);
     this.logger.log(`Discovered Webull ${mode} account (…${accountId.slice(-4)}) via account/list`);
     return accountId;
+  }
+
+  async executionScope(userId: string, expectedMode?: TradingMode): Promise<BrokerExecutionScope> {
+    const environment = await this.tradingModeFor(userId);
+    if (expectedMode && environment !== expectedMode) {
+      throw brokerErrors.orderRejected(
+        `Account switched to ${environment} while this ${expectedMode} order was being placed — nothing was sent`,
+      );
+    }
+    const client = await this.clientFor(userId, environment);
+    return {
+      provider: 'webull',
+      environment,
+      accountId: await this.accountIdFor(userId, client),
+    };
   }
 
   private hosts(mode: TradingMode): WebullHosts {
@@ -544,6 +573,7 @@ export class WebullBrokerGateway implements BrokerGateway, OnModuleDestroy {
     expectedMode?: TradingMode,
     heldQuantity?: number,
     resolvedContract?: ResolvedContractHint,
+    expectedScope?: BrokerExecutionScope,
   ): Promise<OrderResult> {
     // The mode decided here picks the live vs paper hosts, and it is read
     // independently of whatever the caller checked. Assert they agree before
@@ -573,9 +603,20 @@ export class WebullBrokerGateway implements BrokerGateway, OnModuleDestroy {
       limitPrice,
       heldQuantity,
     );
+    const accountId = await this.accountIdFor(userId, client);
+    if (
+      expectedScope &&
+      (expectedScope.provider !== 'webull' ||
+        expectedScope.environment !== mode ||
+        expectedScope.accountId !== accountId)
+    ) {
+      throw brokerErrors.orderRejected(
+        'Webull account selection changed while this bracket was armed — nothing was sent',
+      );
+    }
     const raw = await client.request('orderPlace', {
       body: {
-        account_id: await this.accountIdFor(userId, client),
+        account_id: accountId,
         new_orders: [newOrder],
       },
     });
@@ -592,32 +633,59 @@ export class WebullBrokerGateway implements BrokerGateway, OnModuleDestroy {
       limitPrice,
       timestamp: new Date().toISOString(),
     };
-    this.events.emit(userId, result);
-    this.startStatusPoll(userId, client, result);
+    this.events.emit(userId, result, mode, {
+      provider: 'webull',
+      accountId,
+      clientOrderId: result.orderId,
+      brokerOrderId: placed.orderId,
+    });
+    this.startStatusPoll(userId, client, result, mode, accountId, placed.orderId);
     return result;
   }
 
   async cancelOrder(userId: string, orderId: string): Promise<void> {
-    const client = await this.clientFor(userId);
+    const mode = await this.tradingModeFor(userId);
+    const client = await this.clientFor(userId, mode);
+    const accountId = await this.accountIdFor(userId, client);
     // Look the order up first: unknown orders fail locally with
     // ORDER_NOT_FOUND, and the cancelled orderUpdate carries the full order.
-    const open = await this.getOpenOrders(userId);
+    // Keep the same client/account snapshot for lookup and cancellation. A
+    // second clientFor() can refresh this cached client's selected account
+    // from credentials changed on another API instance, pairing account A's
+    // cancel body with account B's same-id lookup.
+    const open = await this.openOrdersFor(client, accountId);
     const target = open.find((o) => o.orderId === orderId);
     if (!target) throw brokerErrors.orderNotFound(orderId);
     await client.request('orderCancel', {
       body: {
-        account_id: await this.accountIdFor(userId, client),
+        account_id: accountId,
         client_order_id: orderId,
       },
     });
     this.stopStatusPoll(userId, orderId);
-    this.events.emit(userId, { ...target, status: 'cancelled' });
+    this.events.emit(userId, { ...target, status: 'cancelled' }, mode, {
+      provider: 'webull',
+      accountId,
+      clientOrderId: orderId,
+    });
   }
 
-  async getPositions(userId: string): Promise<Position[]> {
-    const client = await this.clientFor(userId);
+  async getPositions(userId: string, expectedScope?: BrokerExecutionScope): Promise<Position[]> {
+    const mode = await this.tradingModeFor(userId);
+    const client = await this.clientFor(userId, mode);
+    const accountId = await this.accountIdFor(userId, client);
+    if (
+      expectedScope &&
+      (expectedScope.provider !== 'webull' ||
+        expectedScope.environment !== mode ||
+        expectedScope.accountId !== accountId)
+    ) {
+      throw brokerErrors.orderRejected(
+        'Webull account selection changed while this bracket was armed — positions were not read',
+      );
+    }
     const raw = await client.request('positions', {
-      query: { account_id: await this.accountIdFor(userId, client) },
+      query: { account_id: accountId },
     });
     return asArray(raw)
       .map((p) => toPosition(p as WebullPosition))
@@ -626,15 +694,70 @@ export class WebullBrokerGateway implements BrokerGateway, OnModuleDestroy {
 
   async getOpenOrders(userId: string): Promise<OrderResult[]> {
     const client = await this.clientFor(userId);
+    return this.openOrdersFor(client, await this.accountIdFor(userId, client));
+  }
+
+  private async openOrdersFor(client: WebullClient, accountId: string): Promise<OrderResult[]> {
     const raw = await client.request('orderOpen', {
       query: {
-        account_id: await this.accountIdFor(userId, client),
+        account_id: accountId,
         page_size: '100',
       },
     });
     return this.flattenOrders(raw)
       .map((o) => toOrderResult(o))
       .filter((o) => o.status === 'submitted' || o.status === 'partially_filled');
+  }
+
+  /** Webull accepts our deterministic client_order_id on placement and can
+   * query that exact id across terminal statuses. Unlike the open-orders list,
+   * a definitive not-found here proves a stale audit is safe to retry. */
+  async recoverOrder(
+    userId: string,
+    idempotencyKey: string,
+    expectedScope: BrokerExecutionScope,
+  ): Promise<RecoveredOrderResult | null> {
+    const mode = await this.tradingModeFor(userId);
+    const client = await this.clientFor(userId, mode);
+    const accountId = await this.accountIdFor(userId, client);
+    if (
+      expectedScope.provider !== 'webull' ||
+      expectedScope.environment !== mode ||
+      expectedScope.accountId !== accountId
+    ) {
+      throw brokerErrors.orderRejected(
+        'Webull account selection changed while the interrupted order was being reconciled',
+      );
+    }
+    const clientOrderId = toClientOrderId(userId, idempotencyKey);
+    try {
+      const raw = asObject(
+        await client.request('orderDetail', {
+          query: {
+            account_id: accountId,
+            client_order_id: clientOrderId,
+          },
+        }),
+      ) as WebullOrder;
+      if (
+        (!raw.client_order_id && !raw.order_id) ||
+        (!raw.status && !raw.order_status) ||
+        (raw.client_order_id && raw.client_order_id !== clientOrderId)
+      ) {
+        throw brokerErrors.unavailable(
+          'Webull returned an unverifiable order-detail response during recovery',
+        );
+      }
+      return {
+        ...toOrderResult(raw),
+        orderId: clientOrderId,
+        clientOrderId,
+        ...(raw.order_id ? { brokerOrderId: raw.order_id } : {}),
+      };
+    } catch (error) {
+      if (error instanceof BrokerError && error.code === 'ORDER_NOT_FOUND') return null;
+      throw error;
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -793,7 +916,14 @@ export class WebullBrokerGateway implements BrokerGateway, OnModuleDestroy {
    * Polls order/detail after placement until a terminal status (fills
    * otherwise arrive only via Webull's gRPC events, out of scope for P4).
    */
-  private startStatusPoll(userId: string, client: WebullClient, result: OrderResult): void {
+  private startStatusPoll(
+    userId: string,
+    client: WebullClient,
+    result: OrderResult,
+    environment: TradingMode,
+    accountId: string,
+    brokerOrderId?: string,
+  ): void {
     const key = `${userId}:${result.orderId}`;
     let attempts = 0;
     const tick = async (): Promise<void> => {
@@ -802,7 +932,12 @@ export class WebullBrokerGateway implements BrokerGateway, OnModuleDestroy {
       try {
         const raw = await client.request('orderDetail', {
           query: {
-            account_id: await this.accountIdFor(userId, client),
+            // Poll the immutable account that accepted this order. The cached
+            // client can be refreshed to a newly selected account by another
+            // request/API instance while this timer is alive; following that
+            // mutable selection could read a same-id order from the wrong
+            // account and then publish it under the old account's identity.
+            account_id: accountId,
             client_order_id: result.orderId,
           },
         });
@@ -812,20 +947,34 @@ export class WebullBrokerGateway implements BrokerGateway, OnModuleDestroy {
           detail.status === 'cancelled' ||
           detail.status === 'rejected'
         ) {
-          this.events.emit(userId, {
-            ...result,
-            status: detail.status,
-            filledPrice: detail.filledPrice ?? result.filledPrice,
-            // The placement-time result predates every fill, so the poll's
-            // own parse is the only source of how much executed. Without it
-            // a cancel that followed a partial fill reports no executed
-            // quantity, fill accounting rightly ignores the whole event, and
-            // the row keeps neither the quantity nor the price — the lot the
-            // user actually holds becomes invisible to the position book.
-            // (No filledAt: Webull reports no execution timestamp at all —
-            // see webull-mappers.ts — so fills are stamped when observed.)
-            filledQuantity: detail.filledQuantity ?? result.filledQuantity,
-          });
+          await this.ingestTerminalStatus(
+            () =>
+              this.events.ingest(
+                userId,
+                {
+                  ...result,
+                  status: detail.status,
+                  filledPrice: detail.filledPrice ?? result.filledPrice,
+                  // The placement-time result predates every fill, so the poll's
+                  // own parse is the only source of how much executed. Without it
+                  // a cancel that followed a partial fill reports no executed
+                  // quantity, fill accounting rightly ignores the whole event, and
+                  // the row keeps neither the quantity nor the price — the lot the
+                  // user actually holds becomes invisible to the position book.
+                  // (No filledAt: Webull reports no execution timestamp at all —
+                  // see webull-mappers.ts — so fills are stamped when observed.)
+                  filledQuantity: detail.filledQuantity ?? result.filledQuantity,
+                },
+                environment,
+                {
+                  provider: 'webull',
+                  accountId,
+                  clientOrderId: result.orderId,
+                  brokerOrderId,
+                },
+              ),
+            result.orderId,
+          );
           return;
         }
       } catch (err) {
@@ -836,6 +985,27 @@ export class WebullBrokerGateway implements BrokerGateway, OnModuleDestroy {
       }
     };
     this.schedulePoll(key, tick);
+  }
+
+  /** Retries the produced terminal event independently of broker poll count,
+   * so even the final allowed broker query does not stop before the durable
+   * append has had a small bounded retry window. */
+  private async ingestTerminalStatus(ingest: () => Promise<void>, orderId: string): Promise<void> {
+    let lastError: unknown;
+    for (let attempt = 1; attempt <= STATUS_EVENT_INGEST_ATTEMPTS; attempt += 1) {
+      try {
+        await ingest();
+        return;
+      } catch (error) {
+        lastError = error;
+        if (attempt < STATUS_EVENT_INGEST_ATTEMPTS) {
+          await new Promise((resolve) => setTimeout(resolve, STATUS_EVENT_INGEST_RETRY_MS));
+        }
+      }
+    }
+    throw lastError instanceof Error
+      ? lastError
+      : new Error(`terminal status ingestion failed for ${orderId}`);
   }
 
   private schedulePoll(key: string, tick: () => Promise<void>): void {

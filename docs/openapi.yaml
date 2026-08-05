@@ -617,7 +617,21 @@ components:
       allOf:
         - $ref: '#/components/schemas/OrderResult'
         - type: object
+          required: [internalOrderId, realizedPnl]
           properties:
+            internalOrderId:
+              {
+                type: string,
+                format: uuid,
+                description: Stable app-owned identity; use this rather than broker ids for list identity,
+              }
+            brokerOrderId:
+              { type: string, description: Provider order identity when the broker supplied one }
+            clientOrderId:
+              {
+                type: string,
+                description: Client/idempotency identity when the provider supplied one,
+              }
             realizedPnl:
               {
                 type: [number, 'null'],

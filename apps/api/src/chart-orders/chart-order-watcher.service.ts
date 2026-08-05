@@ -7,7 +7,7 @@ import { BROKER_GATEWAY, BrokerGateway } from '../broker/broker-gateway.interfac
 import { isRegularMarketSessionOpen } from '../broker/expiration-calendar';
 import { PrismaService } from '../prisma/prisma.service';
 import { ChartOrderEventsService } from './chart-order-events.service';
-import { ChartOrdersService, toChartOrder } from './chart-orders.service';
+import { ChartOrdersService } from './chart-orders.service';
 
 const LEASE_NAME = 'chart-order-watcher';
 /** Lease outlives several ticks so a slow broker call cannot drop it mid-flight. */
@@ -258,6 +258,7 @@ export class ChartOrderWatcherService implements OnModuleInit, OnModuleDestroy {
    * empty position.
    */
   private async reconcile(now: Date): Promise<void> {
+    await this.chartOrders.recoverPendingBrackets(now);
     const expired = await this.chartOrders.expireSettled(now);
     if (expired > 0) this.metrics.expired += expired;
 
@@ -271,19 +272,19 @@ export class ChartOrderWatcherService implements OnModuleInit, OnModuleDestroy {
 
     for (const [userId, environment] of byUser) {
       try {
-        const positions = await this.gateway.getPositions(userId);
-        const open = positions.filter((p) => p.quantity !== 0).map((p) => p.symbol);
+        const scope = await this.chartOrders.reconciliationScope(userId, environment);
+        const positions = await this.gateway.getPositions(userId, scope);
+        const open = positions
+          .filter((p) => p.quantity !== 0)
+          .map((p) => ({ symbol: p.symbol, quantity: p.quantity }));
         const orphans = await this.chartOrders.cancelOrphanedBrackets(
           userId,
           environment,
           open,
           now,
+          scope,
         );
-        for (const id of orphans) {
-          this.metrics.orphansCancelled += 1;
-          const row = await this.chartOrders.byId(id);
-          if (row) this.events.emit(userId, toChartOrder(row));
-        }
+        this.metrics.orphansCancelled += orphans.length;
       } catch (err) {
         // A positions read that fails must not retire live brackets.
         this.logger.warn(

@@ -295,6 +295,50 @@ struct APIClient: @unchecked Sendable {
         try await requestVoid(Endpoint(method: .delete, path: "v1/notifications/devices/\(token)"))
     }
 
+    func discordSettings() async throws -> DiscordNotificationSettingsDTO {
+        try await request(Endpoint(method: .get, path: "v1/notifications/discord"))
+    }
+
+    func updateDiscordSettings(
+        _ input: DiscordNotificationSettingsUpdateDTO
+    ) async throws -> DiscordNotificationSettingsDTO {
+        try await request(
+            Endpoint(method: .put, path: "v1/notifications/discord"),
+            body: encode(input)
+        )
+    }
+
+    func testDiscord() async throws {
+        try await requestVoid(Endpoint(method: .post, path: "v1/notifications/discord/test"))
+    }
+
+    func legalStatus() async throws -> LegalAcceptanceStatusDTO {
+        try await request(Endpoint(method: .get, path: "v1/me/legal"))
+    }
+
+    func legalDocument(_ slug: LegalDocumentSlug) async throws -> LegalDocumentDTO {
+        try await request(
+            Endpoint(method: .get, path: "v1/legal/\(slug.rawValue)", requiresAuth: false)
+        )
+    }
+
+    func acceptLegal(
+        document: LegalDocumentSlug,
+        version: String
+    ) async throws -> LegalAcceptanceStatusDTO {
+        try await request(
+            Endpoint(method: .post, path: "v1/me/legal/accept"),
+            body: encode(LegalAcceptanceRequestDTO(document: document.rawValue, version: version))
+        )
+    }
+
+    func deleteAccount(confirmEmail: String) async throws {
+        try await requestVoid(
+            Endpoint(method: .delete, path: "v1/me"),
+            body: encode(DeleteAccountRequestDTO(confirmEmail: confirmEmail))
+        )
+    }
+
     // MARK: - Chart trading
 
     func chartOrders() async throws -> [ChartOrderDTO] {

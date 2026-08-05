@@ -18,7 +18,7 @@ import {
   formatOccSymbol,
 } from '../broker/contract-resolution';
 import { optionExpirations } from '../broker/expiration-calendar';
-import { BrokerGateway } from '../broker/broker-gateway.interface';
+import { BrokerExecutionScope, BrokerGateway } from '../broker/broker-gateway.interface';
 import { brokerErrors } from '../common/broker-error';
 import { InMemoryPrismaService } from '../../test/in-memory-prisma.service';
 import { OrderEventsService } from '../broker/order-events.service';
@@ -128,6 +128,8 @@ class StubBrokerGateway implements BrokerGateway {
     _idempotencyKey: string,
     _expectedMode?: TradingMode,
     _heldQuantity?: number,
+    _resolvedContract?: OptionContract,
+    _expectedScope?: BrokerExecutionScope,
   ): Promise<OrderResult> {
     const resolved = await this.resolveContract(userId, order);
     const result: OrderResult = {
@@ -162,6 +164,18 @@ class StubBrokerGateway implements BrokerGateway {
     return [...this.orders.values()].filter(
       (o) => o.status === 'submitted' || o.status === 'partially_filled',
     );
+  }
+
+  async getRecentOrders(
+    _userId: string,
+    since?: Date,
+    _expectedScope?: BrokerExecutionScope,
+  ): Promise<OrderResult[]> {
+    return [...this.orders.values()].filter((order) => {
+      if (!since) return true;
+      const timestamp = Date.parse(order.timestamp);
+      return !Number.isFinite(timestamp) || timestamp >= since.getTime();
+    });
   }
 
   async getPositions(): Promise<Position[]> {
@@ -206,26 +220,30 @@ describe('TradingService', () => {
   let prisma: InMemoryPrismaService;
   let gateway: StubBrokerGateway;
   let orders: OrdersService;
+  let orderEvents: OrderEventsService;
   let trading: TradingService;
   let userId: string;
 
   beforeEach(async () => {
     prisma = new InMemoryPrismaService();
     gateway = new StubBrokerGateway();
+    orderEvents = new OrderEventsService();
     orders = new OrdersService(
       prisma as unknown as ConstructorParameters<typeof OrdersService>[0],
-      new OrderEventsService(),
+      orderEvents,
       gateway as BrokerGateway,
     );
     trading = new TradingService(
       prisma as unknown as ConstructorParameters<typeof TradingService>[0],
       gateway as BrokerGateway,
       orders,
+      orderEvents,
     );
     const user = await prisma.user.create({
       data: { email: 'trader@example.com', passwordHash: 'x' },
     });
     userId = user.id;
+    prisma.acceptCurrentTradingLegal(userId);
   });
 
   describe('auto_otm re-validation', () => {
@@ -267,6 +285,25 @@ describe('TradingService', () => {
       const sentPut = placeSpy.mock.calls[1][1] as OrderRequest;
       expect(sentCall.selection.strike).toBe(quote.last + 2);
       expect(sentPut.selection.strike).toBe(quote.last - 2);
+    });
+
+    it('records the placement quote under the immutable execution account scope', async () => {
+      (gateway as BrokerGateway).executionScope = jest.fn(async () => ({
+        provider: 'webull' as const,
+        environment: 'live' as const,
+        accountId: 'broker-account-42',
+      }));
+
+      const result = await trading.place(userId, autoOtmCall(), 'idem-scoped-anchor');
+
+      expect(prisma.tradeOrders).toHaveLength(1);
+      expect(prisma.tradeOrders[0]).toMatchObject({
+        provider: 'webull',
+        environment: 'live',
+        accountId: 'broker-account-42',
+        clientOrderId: result.orderId,
+        underlyingPrice: StubBrokerGateway.PRICE,
+      });
     });
 
     it('otmOffset 0 trades the ATM strike itself', async () => {
@@ -346,6 +383,11 @@ describe('TradingService', () => {
       const keyed = audits.filter((a) => a.idempotencyKey === 'idem-123');
       expect(keyed).toHaveLength(1);
       expect(keyed[0].status).toBe('filled');
+      expect(keyed[0].request).toMatchObject({
+        preparedOrder: {
+          selection: { mode: 'explicit' },
+        },
+      });
     });
 
     it('different keys execute independently', async () => {
@@ -382,7 +424,9 @@ describe('TradingService', () => {
     });
 
     it('frees the key when execution fails so the client can retry', async () => {
-      jest.spyOn(gateway, 'placeOrder').mockRejectedValueOnce(new Error('broker down'));
+      jest
+        .spyOn(gateway, 'placeOrder')
+        .mockRejectedValueOnce(brokerErrors.orderRejected('broker down'));
       await expect(trading.place(userId, autoOtmCall(), 'idem-retry')).rejects.toThrow(
         'broker down',
       );
@@ -393,6 +437,411 @@ describe('TradingService', () => {
       // The failure left only an unkeyed error audit behind.
       const audits = await prisma.orderAudit.findMany({ where: { userId } });
       expect(audits.filter((a) => a.idempotencyKey === 'idem-retry')).toHaveLength(1);
+    });
+
+    it('keeps the key pending when an unknown gateway error may follow broker acceptance', async () => {
+      const place = jest
+        .spyOn(gateway, 'placeOrder')
+        .mockRejectedValueOnce(new Error('fetch failed'));
+
+      await expect(trading.place(userId, autoOtmCall(), 'idem-uncertain')).rejects.toMatchObject({
+        status: 503,
+        code: 'ORDER_PLACEMENT_UNCERTAIN',
+      });
+      const keyed = prisma.orderAudits.filter((audit) => audit.idempotencyKey === 'idem-uncertain');
+      expect(keyed).toHaveLength(1);
+      expect(keyed[0].status).toBe('pending');
+
+      await expect(trading.place(userId, autoOtmCall(), 'idem-uncertain')).rejects.toMatchObject({
+        code: 'ORDER_IN_FLIGHT',
+      });
+      expect(place).toHaveBeenCalledTimes(1);
+    });
+
+    it('recovers an order accepted before a crash without submitting it again', async () => {
+      const chain = await gateway.getOptionsChain(userId, 'SPY');
+      const dto = autoOtmCall({
+        orderType: 'mid',
+        selection: {
+          mode: 'explicit',
+          optionType: 'call',
+          expiration: chain.expirations[0],
+          strike: 101,
+        },
+      });
+      const accepted = await gateway.placeOrder(userId, dto, 'crash-after-accept');
+      const pending = await prisma.orderAudit.create({
+        data: {
+          userId,
+          idempotencyKey: 'crash-after-accept',
+          request: { action: 'place', order: dto },
+          response: null,
+          status: 'pending',
+        },
+      });
+      pending.createdAt = new Date(Date.now() - 3 * 60_000);
+      const place = jest.spyOn(gateway, 'placeOrder');
+
+      await expect(trading.place(userId, dto, 'crash-after-accept')).resolves.toEqual(accepted);
+      expect(place).not.toHaveBeenCalled();
+    });
+
+    it('prefers an exact provider client-id recovery over history matching', async () => {
+      const dto = autoOtmCall({ orderType: 'mid' });
+      const scope: BrokerExecutionScope = {
+        provider: 'webull',
+        environment: 'live',
+        accountId: 'default',
+      };
+      const accepted: OrderResult = {
+        orderId: 'deterministic-client-order-id',
+        status: 'filled',
+        contractSymbol: 'SPY260101C00101000',
+        side: dto.side,
+        quantity: dto.quantity,
+        orderType: dto.orderType,
+        timestamp: new Date().toISOString(),
+      };
+      const pending = await prisma.orderAudit.create({
+        data: {
+          userId,
+          idempotencyKey: 'exact-crash-after-accept',
+          request: { action: 'place', order: dto, executionScope: scope },
+          response: null,
+          status: 'pending',
+        },
+      });
+      pending.createdAt = new Date(Date.now() - 3 * 60_000);
+      const recover = jest.fn(async () => ({
+        ...accepted,
+        clientOrderId: accepted.orderId,
+        brokerOrderId: 'webull-broker-order-id',
+      }));
+      (gateway as BrokerGateway).recoverOrder = recover;
+      const recent = jest.spyOn(gateway, 'getRecentOrders');
+      const place = jest.spyOn(gateway, 'placeOrder');
+      const updates: OrderResult[] = [];
+      orderEvents.events$.subscribe((event) => updates.push(event.order));
+
+      await expect(trading.place(userId, dto, 'exact-crash-after-accept')).resolves.toEqual(
+        accepted,
+      );
+
+      expect(recover).toHaveBeenCalledWith(userId, 'exact-crash-after-accept', scope);
+      expect(recent).not.toHaveBeenCalled();
+      expect(place).not.toHaveBeenCalled();
+      expect(prisma.tradeOrders).toContainEqual(
+        expect.objectContaining({
+          userId,
+          provider: 'webull',
+          environment: 'live',
+          accountId: 'default',
+          clientOrderId: accepted.orderId,
+          brokerOrderId: 'webull-broker-order-id',
+        }),
+      );
+      expect(updates).toContainEqual(expect.objectContaining({ orderId: accepted.orderId }));
+    });
+
+    it('retries durable event ingestion from a completed audit without touching the broker', async () => {
+      const dto = autoOtmCall({ orderType: 'mid' });
+      const scope: BrokerExecutionScope = {
+        provider: 'webull',
+        environment: 'live',
+        accountId: 'default',
+      };
+      const completed: OrderResult = {
+        orderId: 'completed-audit-client-id',
+        status: 'submitted',
+        contractSymbol: 'SPY260101C00101000',
+        side: dto.side,
+        quantity: dto.quantity,
+        orderType: dto.orderType,
+        timestamp: new Date().toISOString(),
+      };
+      await prisma.orderAudit.create({
+        data: {
+          userId,
+          idempotencyKey: 'completed-audit-replay',
+          request: { action: 'place', order: dto, executionScope: scope },
+          response: completed,
+          status: completed.status,
+        },
+      });
+      jest.spyOn(orderEvents, 'ingest').mockRejectedValueOnce(new Error('event store offline'));
+      const place = jest.spyOn(gateway, 'placeOrder');
+
+      await expect(trading.place(userId, dto, 'completed-audit-replay')).rejects.toMatchObject({
+        code: 'ORDER_RECOVERY_UNAVAILABLE',
+      });
+      expect(place).not.toHaveBeenCalled();
+      expect(prisma.tradeOrders).toHaveLength(0);
+
+      await expect(trading.place(userId, dto, 'completed-audit-replay')).resolves.toEqual(
+        completed,
+      );
+      expect(place).not.toHaveBeenCalled();
+      expect(prisma.tradeOrders).toContainEqual(
+        expect.objectContaining({ clientOrderId: completed.orderId, status: 'submitted' }),
+      );
+    });
+
+    it('retries only after exact recovery authoritatively reports no order', async () => {
+      const dto = autoOtmCall({ orderType: 'mid' });
+      const scope: BrokerExecutionScope = {
+        provider: 'webull',
+        environment: 'live',
+        accountId: 'default',
+      };
+      const pending = await prisma.orderAudit.create({
+        data: {
+          userId,
+          idempotencyKey: 'exact-crash-before-send',
+          request: { action: 'place', order: dto, executionScope: scope },
+          response: null,
+          status: 'pending',
+        },
+      });
+      pending.createdAt = new Date(Date.now() - 3 * 60_000);
+      const recover = jest.fn(async () => null);
+      (gateway as BrokerGateway).recoverOrder = recover;
+      const place = jest.spyOn(gateway, 'placeOrder');
+
+      await expect(trading.place(userId, dto, 'exact-crash-before-send')).resolves.toBeDefined();
+
+      expect(recover).toHaveBeenCalledWith(userId, 'exact-crash-before-send', scope);
+      expect(place).toHaveBeenCalledTimes(1);
+    });
+
+    it('keeps a stale claim pending when exact provider recovery is unavailable', async () => {
+      const dto = autoOtmCall({ orderType: 'mid' });
+      const scope: BrokerExecutionScope = {
+        provider: 'webull',
+        environment: 'live',
+        accountId: 'default',
+      };
+      const pending = await prisma.orderAudit.create({
+        data: {
+          userId,
+          idempotencyKey: 'exact-recovery-offline',
+          request: { action: 'place', order: dto, executionScope: scope },
+          response: null,
+          status: 'pending',
+        },
+      });
+      pending.createdAt = new Date(Date.now() - 3 * 60_000);
+      (gateway as BrokerGateway).recoverOrder = jest.fn(async () => {
+        throw brokerErrors.unavailable('order detail offline');
+      });
+      const place = jest.spyOn(gateway, 'placeOrder');
+
+      await expect(trading.place(userId, dto, 'exact-recovery-offline')).rejects.toMatchObject({
+        code: 'ORDER_RECOVERY_UNAVAILABLE',
+      });
+
+      expect(place).not.toHaveBeenCalled();
+      expect(
+        prisma.orderAudits.find((audit) => audit.idempotencyKey === 'exact-recovery-offline'),
+      ).toMatchObject({ status: 'pending' });
+    });
+
+    it('reclaims a stale pre-send crash only after broker history confirms no order', async () => {
+      const dto = autoOtmCall({ orderType: 'mid' });
+      const pending = await prisma.orderAudit.create({
+        data: {
+          userId,
+          idempotencyKey: 'crash-before-send',
+          request: { action: 'place', order: dto },
+          response: null,
+          status: 'pending',
+        },
+      });
+      pending.createdAt = new Date(Date.now() - 3 * 60_000);
+      const place = jest.spyOn(gateway, 'placeOrder');
+
+      await expect(trading.place(userId, dto, 'crash-before-send')).resolves.toBeDefined();
+      expect(place).toHaveBeenCalledTimes(1);
+    });
+
+    it('reconciles and replays a stale claim only in its persisted broker account scope', async () => {
+      const dto = autoOtmCall({ orderType: 'mid' });
+      const armedScope: BrokerExecutionScope = {
+        provider: 'webull',
+        environment: 'live',
+        accountId: 'account-a',
+      };
+      const currentScope: BrokerExecutionScope = {
+        provider: 'snaptrade',
+        environment: 'live',
+        accountId: 'account-b',
+      };
+      const pending = await prisma.orderAudit.create({
+        data: {
+          userId,
+          idempotencyKey: 'scope-pinned-crash',
+          request: { action: 'place', order: dto, executionScope: armedScope },
+          response: null,
+          status: 'pending',
+        },
+      });
+      pending.createdAt = new Date(Date.now() - 3 * 60_000);
+      (gateway as BrokerGateway).executionScope = jest.fn(async () => currentScope);
+      const recent = jest.spyOn(gateway, 'getRecentOrders').mockResolvedValue([]);
+      const place = jest.spyOn(gateway, 'placeOrder');
+
+      await trading.place(userId, dto, 'scope-pinned-crash');
+
+      expect(recent.mock.calls[0][2]).toEqual(armedScope);
+      expect(place.mock.calls[0][6]).toEqual(armedScope);
+      expect(
+        prisma.orderAudits.find((audit) => audit.idempotencyKey === 'scope-pinned-crash'),
+      ).toMatchObject({ request: expect.objectContaining({ executionScope: armedScope }) });
+    });
+  });
+
+  describe('legal gate', () => {
+    it('blocks placement until both current server-side acceptances exist', async () => {
+      prisma.legalAcceptances.length = 0;
+      const place = jest.spyOn(gateway, 'placeOrder');
+
+      await expect(trading.place(userId, autoOtmCall(), 'legal-blocked')).rejects.toMatchObject({
+        status: 403,
+        code: 'LEGAL_ACCEPTANCE_REQUIRED',
+      });
+      expect(place).not.toHaveBeenCalled();
+
+      prisma.acceptCurrentTradingLegal(userId);
+      await expect(trading.place(userId, autoOtmCall(), 'legal-accepted')).resolves.toBeDefined();
+    });
+
+    it('allows a verified close-only risk reduction after the legal version changes', async () => {
+      const chain = await gateway.getOptionsChain(userId, 'SPY');
+      const contract = findExplicitOption(chain.contracts, 'call', 101)!;
+      jest.spyOn(gateway, 'getPositions').mockResolvedValue([
+        {
+          symbol: contract.symbol,
+          assetClass: 'option',
+          quantity: 1,
+          avgPrice: 1,
+          markPrice: 1,
+          unrealizedPnl: 0,
+          multiplier: 100,
+        } as Position,
+      ]);
+      prisma.legalAcceptances.length = 0;
+
+      await expect(
+        trading.place(
+          userId,
+          autoOtmCall({
+            side: 'sell',
+            selection: {
+              mode: 'explicit',
+              optionType: 'call',
+              expiration: chain.expirations[0],
+              strike: 101,
+            },
+          }),
+          'legal-close-only',
+          'live',
+          true,
+        ),
+      ).resolves.toBeDefined();
+    });
+
+    it('allows a manual flatten after a version bump only when the broker proves the reduction', async () => {
+      const chain = await gateway.getOptionsChain(userId, 'SPY');
+      const contract = findExplicitOption(chain.contracts, 'call', 101)!;
+      jest.spyOn(gateway, 'getPositions').mockResolvedValue([
+        {
+          symbol: contract.symbol,
+          assetClass: 'option',
+          quantity: 2,
+          avgPrice: 1,
+          markPrice: 1,
+          unrealizedPnl: 0,
+          multiplier: 100,
+        } as Position,
+      ]);
+      prisma.legalAcceptances.length = 0;
+
+      await expect(
+        trading.place(
+          userId,
+          autoOtmCall({
+            side: 'sell',
+            quantity: 2,
+            selection: {
+              mode: 'explicit',
+              optionType: 'call',
+              expiration: chain.expirations[0],
+              strike: 101,
+            },
+          }),
+          'manual-flatten-after-legal-bump',
+        ),
+      ).resolves.toBeDefined();
+    });
+
+    it('does not treat an over-sized or same-side manual order as a legal-bypass close', async () => {
+      const chain = await gateway.getOptionsChain(userId, 'SPY');
+      const contract = findExplicitOption(chain.contracts, 'call', 101)!;
+      jest.spyOn(gateway, 'getPositions').mockResolvedValue([
+        {
+          symbol: contract.symbol,
+          assetClass: 'option',
+          quantity: 1,
+          avgPrice: 1,
+          markPrice: 1,
+          unrealizedPnl: 0,
+          multiplier: 100,
+        } as Position,
+      ]);
+      prisma.legalAcceptances.length = 0;
+      const explicit = {
+        mode: 'explicit' as const,
+        optionType: 'call' as const,
+        expiration: chain.expirations[0],
+        strike: 101,
+      };
+
+      await expect(
+        trading.place(
+          userId,
+          autoOtmCall({ side: 'sell', quantity: 2, selection: explicit }),
+          'unaccepted-over-close',
+        ),
+      ).rejects.toMatchObject({ code: 'LEGAL_ACCEPTANCE_REQUIRED' });
+      await expect(
+        trading.place(
+          userId,
+          autoOtmCall({ side: 'buy', quantity: 1, selection: explicit }),
+          'unaccepted-add',
+        ),
+      ).rejects.toMatchObject({ code: 'LEGAL_ACCEPTANCE_REQUIRED' });
+    });
+
+    it('fails closed when positions are unavailable during an unaccepted manual close', async () => {
+      const chain = await gateway.getOptionsChain(userId, 'SPY');
+      jest.spyOn(gateway, 'getPositions').mockRejectedValue(new Error('positions offline'));
+      prisma.legalAcceptances.length = 0;
+
+      await expect(
+        trading.place(
+          userId,
+          autoOtmCall({
+            side: 'sell',
+            selection: {
+              mode: 'explicit',
+              optionType: 'call',
+              expiration: chain.expirations[0],
+              strike: 101,
+            },
+          }),
+          'unaccepted-positions-down',
+        ),
+      ).rejects.toMatchObject({ status: 503, code: 'POSITIONS_UNAVAILABLE' });
+      expect(prisma.orderAudits.some((audit) => audit.idempotencyKey)).toBe(false);
     });
   });
 
@@ -516,7 +965,11 @@ describe('TradingService', () => {
      */
     it('returns the order when the audit write fails after the broker accepted', async () => {
       const place = jest.spyOn(gateway, 'placeOrder');
-      jest.spyOn(prisma.orderAudit, 'update').mockRejectedValueOnce(new Error('connection reset'));
+      const originalUpdate = prisma.orderAudit.update.bind(prisma.orderAudit);
+      jest
+        .spyOn(prisma.orderAudit, 'update')
+        .mockImplementationOnce(originalUpdate)
+        .mockRejectedValueOnce(new Error('connection reset'));
 
       const result = await trading.place(userId, autoOtmCall(), 'idem-audit-fail');
 
@@ -644,6 +1097,34 @@ describe('TradingService', () => {
       // Positions couldn't be read at all, so there is no held quantity to
       // hand the gateway — it falls back to its own lookup.
       expect(place.mock.calls[0][4]).toBeUndefined();
+    });
+
+    it('fails closed when an unattended close-only order cannot read positions', async () => {
+      jest.spyOn(gateway, 'getPositions').mockRejectedValue(new Error('broker down'));
+      const place = jest.spyOn(gateway, 'placeOrder');
+
+      await expect(
+        trading.place(
+          userId,
+          autoOtmCall({ side: 'sell', quantity: 3 }),
+          'idem-close-only-1',
+          'live',
+          true,
+        ),
+      ).rejects.toMatchObject({ code: 'POSITIONS_UNAVAILABLE' });
+
+      expect(place).not.toHaveBeenCalled();
+    });
+
+    it('fails closed when an unattended close-only order would open a position', async () => {
+      jest.spyOn(gateway, 'getPositions').mockResolvedValue([]);
+      const place = jest.spyOn(gateway, 'placeOrder');
+
+      await expect(
+        trading.place(userId, autoOtmCall({ side: 'sell' }), 'idem-close-only-2', 'live', true),
+      ).rejects.toMatchObject({ code: 'CLOSE_ONLY_NO_POSITION' });
+
+      expect(place).not.toHaveBeenCalled();
     });
   });
 

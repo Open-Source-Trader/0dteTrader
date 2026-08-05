@@ -180,4 +180,16 @@ export class UsersService {
     }
     return this.getMe(userId);
   }
+
+  async deleteAccount(userId: string, confirmEmail: string): Promise<void> {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw errors.unauthorized('USER_NOT_FOUND', 'User no longer exists');
+    if (user.email.toLowerCase() !== confirmEmail.trim().toLowerCase()) {
+      throw errors.validation('Enter your account email to confirm deletion');
+    }
+    // Every user-owned model has an onDelete:Cascade relation. The database
+    // performs one atomic erasure of credentials, tokens, orders, events,
+    // notifications and legal acceptances with the user row.
+    await this.prisma.user.delete({ where: { id: userId } });
+  }
 }

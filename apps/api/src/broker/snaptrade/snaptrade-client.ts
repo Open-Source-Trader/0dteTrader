@@ -188,6 +188,20 @@ export class SnapTradeClient {
     );
   }
 
+  async getRecentOrders(
+    mode: TradingMode,
+    clientId: string,
+    consumerKey: string,
+    accountId: string,
+    days = 2,
+  ): Promise<AccountOrderRecord[]> {
+    return this.call(mode, clientId, consumerKey, (sdk) =>
+      sdk.accountInformation
+        .getUserAccountOrders({ accountId, state: 'all', days })
+        .then((response) => response.data),
+    );
+  }
+
   // -------------------------------------------------------------------------
   // Trading — preview
   // -------------------------------------------------------------------------

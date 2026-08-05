@@ -5,22 +5,28 @@ import { PrismaClient } from '@prisma/client';
 /**
  * Real Prisma service used in dev/prod. In tests this provider is overridden
  * with the in-memory fake (test/in-memory-prisma.service.ts), so the app code
- * only ever uses the small delegate surface below (never $queryRaw,
- * transactions, or selects the fake cannot mirror):
+ * only ever uses the small delegate surface below (plus parameterized row-lock
+ * SQL for identity merges, mirrored as serialized transactions by the fake).
+ * The test double also implements callback
+ * transactions for the bracket state machine:
  *   user:             findUnique, findMany, create, update
  *   webullCredential: upsert, findUnique, delete
  *   refreshToken:     create, findUnique, update, updateMany
  *   orderAudit:       findUnique, create, update, delete, findMany
- *   tradeOrder:       findUnique, findFirst, upsert, findMany, updateMany
+ *   tradeOrder:       findUnique, findFirst, upsert, findMany, updateMany, delete
  *   tradeOrderExecution: create, findMany
  *   chartOrder:       create, findUnique, findFirst, findMany, count, update, updateMany
+ *   bracketGroup:     create, upsert, findUnique, findFirst, findMany, update, updateMany
  *   optionsAnalyticsSnapshotRecord: create, findMany, deleteMany
- *   scheduledJobLease: create, updateMany
+ *   scheduledJobLease: findUnique, create, updateMany
  *   brokerCredential: findUnique, findMany, upsert, delete
  *   brokerApiToken:   findUnique, upsert, deleteMany
  *   brokerConnection: findUnique, findMany, updateMany, upsert, delete, deleteMany
  *   deviceToken:      findMany, upsert, deleteMany
- *   pushDelivery:     create, deleteMany
+ *   pushDelivery:     create, findFirst, deleteMany
+ *   userEvent:        create, findUnique, findFirst, findMany
+ *   eventTransportState: upsert
+ *   discordDelivery:  create, findFirst, update, deleteMany
  */
 @Injectable()
 export class PrismaService extends PrismaClient implements OnModuleInit, OnModuleDestroy {

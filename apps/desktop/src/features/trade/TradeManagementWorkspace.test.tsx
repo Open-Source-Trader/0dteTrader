@@ -228,15 +228,23 @@ describe('TradeManagementWorkspace helpers', () => {
     yesterday.setDate(yesterday.getDate() - 1);
 
     const history: TradeHistoryEntry[] = [
-      { ...order, orderId: 'closed-today', realizedPnl: 40, timestamp: earlierToday.toISOString() },
       {
         ...order,
+        internalOrderId: 'internal-closed-today',
+        orderId: 'closed-today',
+        realizedPnl: 40,
+        timestamp: earlierToday.toISOString(),
+      },
+      {
+        ...order,
+        internalOrderId: 'internal-closed-yesterday',
         orderId: 'closed-yesterday',
         realizedPnl: 500,
         timestamp: yesterday.toISOString(),
       },
       {
         ...order,
+        internalOrderId: 'internal-opening-fill',
         orderId: 'opening-fill',
         realizedPnl: null,
         timestamp: earlierToday.toISOString(),

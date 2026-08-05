@@ -178,7 +178,10 @@ sweep). Configured by `CHART_ORDER_WATCHER_ENABLED`, `CHART_ORDER_WATCHER_TICK_M
 
 ## WebSocket
 
-`GET /v1/stream?token=<accessToken>` (upgrade).
+`GET /v1/stream?token=<accessToken>&cursor=<lastSequence>` (upgrade). `cursor`
+is optional for a brand-new client; reconnecting clients persist and send the
+last sequence they synchronously consumed. The server replays every later
+event before switching the connection to live fan-out.
 
 Client → server:
 
@@ -191,10 +194,34 @@ Server → client:
 
 ```json
 { "type": "quote",      "data": Quote }
-{ "type": "orderUpdate","data": OrderResult }
-{ "type": "chartOrder", "data": ChartOrder }
+{ "type": "orderUpdate", "eventId": "uuid", "sequence": 42, "data": OrderResult }
+{ "type": "chartOrder",  "eventId": "uuid", "sequence": 43, "data": ChartOrder }
+{ "type": "eventCursor", "sequence": 43 }
 { "type": "error",      "error": { "code": "...", "message": "..." } }
 ```
+
+`sequence` is contiguous within one user's durable stream. `eventCursor` is
+the post-replay tail/handshake (including zero); clients should not report the
+stream ready or persist a delivered sequence until the relevant synchronous
+consumer has observed its payload. A detected gap reconnects from the last
+confirmed cursor. During a rolling deploy, new clients allow a bounded
+five-second readiness fallback for an older server that sends no `eventCursor`;
+that fallback does not manufacture or persist a replay cursor.
+
+The stream is ordered, resumable, at-least-once delivery after an observation
+has reached `user_events`; semantic keys collapse repeated observations. It is
+not a claim that every broker/domain write and its event append are one atomic
+transaction. The in-process order and chart buses serialize ingestion per user
+and give a transiently failed append three ordered, idempotent attempts with
+explicit sanitized logging before advancing to the next observation. SnapTrade
+webhooks remain leased in the durable inbox until all
+ingestors (including the event append) finish, so a failed append is retried.
+Webull/Alpaca terminal-status polls likewise await ingestion and give a failed
+append a dedicated bounded retry before stopping, even on their final broker
+poll. Chart orders remain authoritative in Postgres and are re-read after
+reconnect. Desktop/iOS refresh aggregate trading state after mutations and on
+reconnect (desktop also polls periodically), so a missed live notification
+cannot become permanent UI state.
 
 ## Health
 
@@ -212,7 +239,7 @@ OptionsChain:     { underlying, underlyingPrice, expirations: string[], contract
 Position:         { symbol, assetClass, quantity, avgPrice, markPrice, unrealizedPnl, multiplier }
 OrderPreview:     { resolved: { contractSymbol, price, estBuyingPower }, warnings: string[] }
 OrderResult:      { orderId, status, contractSymbol, side, quantity, orderType, limitPrice?, filledPrice?, filledQuantity?, timestamp }
-TradeHistoryEntry: OrderResult & { realizedPnl: number | null }
+TradeHistoryEntry: OrderResult & { internalOrderId: UUID, brokerOrderId?, clientOrderId?, realizedPnl: number | null }
 TradeHistory:     { entries: TradeHistoryEntry[], totalRealizedPnl: number }
 OptionsAnalyticsSnapshot:
   {

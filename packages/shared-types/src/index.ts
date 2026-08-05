@@ -67,7 +67,7 @@ export type SelectionMode = 'auto_otm' | 'explicit';
 export type OrderStatus = 'submitted' | 'filled' | 'partially_filled' | 'cancelled' | 'rejected';
 export type ChartOrderKind = 'limit' | 'target' | 'stop';
 export type ChartOrderStatus =
-  'working' | 'triggered' | 'filled' | 'cancelled' | 'failed' | 'expired';
+  'working' | 'pending_fire' | 'triggered' | 'filled' | 'cancelled' | 'failed' | 'expired';
 /** Which side of its trigger the underlying sat on when the order was armed. */
 export type ChartOrderArmedSide = 'above' | 'below';
 export type CandleInterval = '1m' | '5m' | '15m' | '30m' | '1h' | '4h' | '1d' | '1w';
@@ -539,6 +539,13 @@ export interface Position {
 
 /** A historical order with the realized P/L its fill produced (closing fills only). */
 export interface TradeHistoryEntry extends OrderResult {
+  /** Stable app-owned identity. Unlike broker/client ids, this is unique when
+   * history combines providers and accounts. Use it for list identity. */
+  internalOrderId: string;
+  /** Provider identities are included so integrations can reconcile a
+   * webhook-time broker id with a placement-time client id on the same row. */
+  brokerOrderId?: string;
+  clientOrderId?: string;
   /** Realized P/L from the position this fill closed; null for opening fills and non-fills. */
   realizedPnl: number | null;
 }
@@ -709,6 +716,53 @@ export interface DeviceRegistration {
   platform: 'ios';
 }
 
+export interface DiscordNotificationSettings {
+  configured: boolean;
+  /** Mask only; the webhook secret is never returned after save. */
+  maskedWebhookUrl: string | null;
+  enabled: boolean;
+  includePnl: boolean;
+}
+
+export interface DiscordNotificationSettingsUpdate {
+  /** Omit to keep the existing write-only webhook. */
+  webhookUrl?: string;
+  enabled: boolean;
+  includePnl: boolean;
+}
+
+export type LegalDocumentSlug = 'about' | 'terms' | 'privacy' | 'risk' | 'open-source-licenses';
+
+export interface LegalDocumentSummary {
+  slug: LegalDocumentSlug;
+  title: string;
+  version: string;
+  publicUrl: string;
+  requiresAcceptance: boolean;
+}
+
+export interface LegalDocument extends LegalDocumentSummary {
+  markdown: string;
+}
+
+export interface LegalAcceptanceStatus {
+  documents: Array<
+    LegalDocumentSummary & {
+      acceptedAt: string | null;
+      accepted: boolean;
+    }
+  >;
+}
+
+export interface LegalAcceptanceRequest {
+  document: 'terms' | 'risk';
+  version: string;
+}
+
+export interface DeleteAccountRequest {
+  confirmEmail: string;
+}
+
 // ---------------------------------------------------------------------------
 // Errors & WebSocket protocol
 // ---------------------------------------------------------------------------
@@ -732,13 +786,25 @@ export interface StreamQuoteMessage {
 
 export interface StreamOrderUpdateMessage {
   type: 'orderUpdate';
+  eventId: string;
+  sequence: number;
   data: OrderResult;
 }
 
 /** Server-side watcher fired, expired, or reconciled a chart order. */
 export interface StreamChartOrderMessage {
   type: 'chartOrder';
+  eventId: string;
+  sequence: number;
   data: ChartOrder;
+}
+
+/** Durable-event tail acknowledged by the server after initial catch-up.
+ * Persisting this even when it is zero lets a later reconnect distinguish a
+ * previously synchronized client from a brand-new installation. */
+export interface StreamEventCursorMessage {
+  type: 'eventCursor';
+  sequence: number;
 }
 
 export interface StreamErrorMessage {
@@ -750,4 +816,8 @@ export interface StreamErrorMessage {
 }
 
 export type StreamServerMessage =
-  StreamQuoteMessage | StreamOrderUpdateMessage | StreamChartOrderMessage | StreamErrorMessage;
+  | StreamQuoteMessage
+  | StreamOrderUpdateMessage
+  | StreamChartOrderMessage
+  | StreamEventCursorMessage
+  | StreamErrorMessage;

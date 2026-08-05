@@ -111,7 +111,7 @@ struct HistoryView: View {
                 .listRowBackground(Color.appSurface)
 
                 Section {
-                    ForEach(history.entries, id: \.orderId) { entry in
+                    ForEach(history.entries, id: \.internalOrderId) { entry in
                         row(entry)
                     }
                 }

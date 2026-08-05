@@ -67,6 +67,17 @@ export class StubBrokerGateway implements BrokerGateway {
   private readonly positions = new Map<string, Map<string, PositionAgg>>();
   private counter = 0;
 
+  /** Seeds a broker position for close-only bracket tests. */
+  setPosition(userId: string, contractSymbol: string, quantity: number, avgPrice = 1): void {
+    let positions = this.positions.get(userId);
+    if (!positions) {
+      positions = new Map();
+      this.positions.set(userId, positions);
+    }
+    if (quantity === 0) positions.delete(contractSymbol);
+    else positions.set(contractSymbol, { quantity, avgPrice });
+  }
+
   async getQuote(_userId: string, symbol: string): Promise<Quote> {
     const last = this.price;
     return {

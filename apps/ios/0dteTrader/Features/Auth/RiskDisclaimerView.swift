@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// First-launch risk disclosure (SECURITY.md §6). The user must accept before
-/// any other screen is reachable; acceptance is persisted in SettingsStore.
+/// Preliminary first-launch warning (SECURITY.md §6). Versioned legal
+/// acceptance happens against the server after authentication.
 struct RiskDisclaimerView: View {
     @ObservedObject var viewModel: AuthViewModel
 
@@ -41,7 +41,7 @@ struct RiskDisclaimerView: View {
                 Haptics.success()
                 viewModel.acceptDisclaimer()
             } label: {
-                Text("I Understand and Accept")
+                Text("Acknowledge and Continue")
                     .font(.hudButton)
                     .kerning(1)
                     .foregroundStyle(Color.appAccent)
@@ -50,7 +50,7 @@ struct RiskDisclaimerView: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(HudActionButtonStyle(accent: .appAccent))
-            .accessibilityHint("Accepts the risk disclosure and continues to sign in")
+            .accessibilityHint("Acknowledges this warning and continues to sign in")
             .padding(.top, AppSpacing.lg)
             .padding(.bottom, AppSpacing.sm)
         }
@@ -60,13 +60,13 @@ struct RiskDisclaimerView: View {
     // swiftlint:disable line_length
     private var disclaimerText: String {
         """
-        Trading securities, options, and futures involves substantial risk of loss and is not suitable for every investor. You may lose all of your invested capital.
+        Trading securities and options involves substantial risk of loss and is not suitable for every investor. You may lose all of your invested capital.
 
-        Options on their expiration date ("0DTE") are especially volatile: prices can move violently in minutes, liquidity can disappear, and positions can expire worthless the same day. Futures trading involves leverage and can result in losses exceeding your initial investment.
+        Options on their expiration date ("0DTE") are especially volatile: prices can move violently in minutes, liquidity can disappear, and positions can expire worthless the same day.
 
-        0dteTrader is an order-entry tool only. It does not provide investment advice, recommendations, or analysis, and nothing in the app should be interpreted as such. Order routing, contract selection, and pricing are validated by the backend, but market conditions, connectivity, or broker outages may prevent or delay execution.
+        0dteTrader provides order-entry and optional informational analysis tools. AI-generated and market analysis can be wrong, incomplete, or outdated and is not personalized investment advice or an order instruction. Market conditions, connectivity, or broker outages may prevent or delay execution.
 
-        By tapping "I Understand and Accept" you acknowledge these risks and agree that you are solely responsible for every order submitted through this app.
+        Continuing acknowledges this first-launch warning. After signing in, you must review and accept the current server-hosted Terms and Options Risk Disclosure before arming or placing trades. You remain responsible for every order submitted through your account.
         """
     }
     // swiftlint:enable line_length

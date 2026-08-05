@@ -536,6 +536,14 @@ export class WebullClient {
     if (status === 429) {
       return brokerErrors.rateLimited(`Webull rate limit persisted after retries (${path})`);
     }
+    if (
+      isTradeEndpoint &&
+      (status === 404 ||
+        haystack.includes('ORDER_NOT_FOUND') ||
+        haystack.includes('ORDER NOT FOUND'))
+    ) {
+      return brokerErrors.orderNotFound(code ?? 'unknown');
+    }
     // Buying-power failures only make sense on order endpoints; a 400 from
     // /market-data/* mentioning "insufficient" is a parameter problem.
     if (

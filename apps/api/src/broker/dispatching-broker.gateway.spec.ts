@@ -1,7 +1,7 @@
 import { BrokerGateway } from './broker-gateway.interface';
 import { DispatchingBrokerGateway } from './dispatching-broker.gateway';
 
-/** Builds a 9-method jest mock gateway. */
+/** Builds a minimal jest mock gateway. */
 function makeGateway(): jest.Mocked<BrokerGateway> {
   return {
     getQuote: jest.fn(),
@@ -82,6 +82,7 @@ describe('DispatchingBrokerGateway', () => {
       'key',
       undefined,
       undefined,
+      undefined,
     );
     expect(webull.getQuote).not.toHaveBeenCalled();
     expect(alpaca.getQuote).not.toHaveBeenCalled();
@@ -98,8 +99,33 @@ describe('DispatchingBrokerGateway', () => {
       selection: { mode: 'auto_otm', optionType: 'call' },
     } as never;
     await gw.placeOrder('u1', order, 'key');
-    expect(alpaca.placeOrder).toHaveBeenCalledWith('u1', order, 'key', undefined, undefined);
+    expect(alpaca.placeOrder).toHaveBeenCalledWith(
+      'u1',
+      order,
+      'key',
+      undefined,
+      undefined,
+      undefined,
+    );
     expect(webull.placeOrder).not.toHaveBeenCalled();
+  });
+
+  it('forwards the already-resolved contract to avoid resolving it again at the provider', async () => {
+    const order = {} as never;
+    const contract = {
+      symbol: 'SPY260805C00500000',
+      underlying: 'SPY',
+      expiration: '2026-08-05',
+      strike: 500,
+      optionType: 'call' as const,
+      bid: 1.2,
+      ask: 1.3,
+      last: 1.25,
+    };
+
+    await gw.placeOrder('u1', order, 'key', 'live', 2, contract);
+
+    expect(webull.placeOrder).toHaveBeenCalledWith('u1', order, 'key', 'live', 2, contract);
   });
 
   it('delegates reauthenticate (Webull = token reset, Alpaca = no-op)', async () => {
@@ -148,19 +174,19 @@ describe('DispatchingBrokerGateway', () => {
     await expect(gw.getAccountSummary('u2')).resolves.toBeNull();
   });
 
-  describe('provider caching', () => {
-    it('reads the DB once and reuses the cached provider across calls', async () => {
+  describe('fresh provider routing', () => {
+    it('re-reads the provider for every call', async () => {
       await gw.getQuote('u1', 'SPY');
       await gw.getPositions('u1');
       await gw.getOpenOrders('u1');
 
-      expect(prisma.user.findUnique).toHaveBeenCalledTimes(1);
+      expect(prisma.user.findUnique).toHaveBeenCalledTimes(3);
       expect(webull.getQuote).toHaveBeenCalled();
       expect(webull.getPositions).toHaveBeenCalled();
       expect(webull.getOpenOrders).toHaveBeenCalled();
     });
 
-    it("caches per user — a second user is not served from the first user's cache entry", async () => {
+    it('keeps users isolated when their selected providers differ', async () => {
       await gw.getQuote('u1', 'SPY');
       provider = 'alpaca';
       await gw.getQuote('u2', 'SPY');
@@ -170,21 +196,64 @@ describe('DispatchingBrokerGateway', () => {
       expect(alpaca.getQuote).toHaveBeenCalledWith('u2', 'SPY');
     });
 
-    it('re-reads the DB after the cache entry expires, picking up a provider switch', async () => {
-      jest.useFakeTimers();
-      try {
-        await gw.getQuote('u1', 'SPY');
-        expect(webull.getQuote).toHaveBeenCalledTimes(1);
+    it('picks up a provider switch on the very next call', async () => {
+      await gw.getQuote('u1', 'SPY');
+      expect(webull.getQuote).toHaveBeenCalledTimes(1);
 
-        provider = 'alpaca';
-        jest.advanceTimersByTime(31_000);
+      provider = 'alpaca';
+      await gw.getQuote('u1', 'SPY');
 
-        await gw.getQuote('u1', 'SPY');
-        expect(alpaca.getQuote).toHaveBeenCalledTimes(1);
-        expect(prisma.user.findUnique).toHaveBeenCalledTimes(2);
-      } finally {
-        jest.useRealTimers();
-      }
+      expect(alpaca.getQuote).toHaveBeenCalledTimes(1);
+      expect(prisma.user.findUnique).toHaveBeenCalledTimes(2);
+    });
+
+    it('pins interrupted-order history to the expected provider and account', async () => {
+      provider = 'snaptrade';
+      snaptrade.executionScope = jest.fn(async () => ({
+        provider: 'snaptrade' as const,
+        environment: 'live' as const,
+        accountId: 'account-b',
+      }));
+      snaptrade.getRecentOrders = jest.fn(async () => []);
+      const expected = {
+        provider: 'snaptrade' as const,
+        environment: 'live' as const,
+        accountId: 'account-a',
+      };
+
+      await expect(gw.getRecentOrders('u1', new Date(0), expected)).rejects.toThrow(
+        'selected account changed',
+      );
+      expect(snaptrade.getRecentOrders).not.toHaveBeenCalled();
+
+      (snaptrade.executionScope as jest.Mock).mockResolvedValue({
+        ...expected,
+        accountId: 'account-a',
+      });
+      await gw.getRecentOrders('u1', new Date(0), expected);
+      expect(snaptrade.getRecentOrders).toHaveBeenCalledWith('u1', new Date(0), expected);
+    });
+
+    it('routes exact keyed recovery only after the provider account scope matches', async () => {
+      const expected = {
+        provider: 'webull' as const,
+        environment: 'live' as const,
+        accountId: 'account-a',
+      };
+      webull.executionScope = jest.fn(async () => expected);
+      webull.recoverOrder = jest.fn(async () => null);
+
+      await expect(gw.recoverOrder('u1', 'chartorder:1', expected)).resolves.toBeNull();
+      expect(webull.recoverOrder).toHaveBeenCalledWith('u1', 'chartorder:1', expected);
+
+      (webull.executionScope as jest.Mock).mockResolvedValue({
+        ...expected,
+        accountId: 'account-b',
+      });
+      await expect(gw.recoverOrder('u1', 'chartorder:2', expected)).rejects.toThrow(
+        'selected account changed',
+      );
+      expect(webull.recoverOrder).toHaveBeenCalledTimes(1);
     });
   });
 });

@@ -1,7 +1,8 @@
-import { Body, Controller, Get, Patch } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, Patch } from '@nestjs/common';
 import { Me } from '@0dtetrader/shared-types';
 import { AuthenticatedUser, CurrentUser } from '../common/current-user.decorator';
 import { UpdateMeDto } from './dto/update-me.dto';
+import { DeleteAccountDto } from './dto/delete-account.dto';
 import { UsersService } from './users.service';
 
 @Controller('me')
@@ -23,5 +24,14 @@ export class UsersController {
       me = await this.users.setTradingProvider(user.userId, dto.tradingProvider);
     }
     return me;
+  }
+
+  @Delete()
+  @HttpCode(204)
+  deleteAccount(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: DeleteAccountDto,
+  ): Promise<void> {
+    return this.users.deleteAccount(user.userId, dto.confirmEmail);
   }
 }

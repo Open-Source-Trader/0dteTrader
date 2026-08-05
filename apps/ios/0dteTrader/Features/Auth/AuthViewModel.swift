@@ -9,6 +9,7 @@ final class AuthViewModel: ObservableObject {
         case checking
         case disclaimer
         case unauthenticated
+        case legal
         case authenticated
         /// Session restore failed for a non-auth reason (offline/server) — retryable.
         case restoreFailed
@@ -17,6 +18,7 @@ final class AuthViewModel: ObservableObject {
     @Published private(set) var state: State = .checking
     @Published private(set) var isLoading = false
     @Published var errorMessage: String?
+    @Published private(set) var legalDocuments: [LegalDocumentDTO] = []
 
     private let apiClient: APIClient
     private let sessionStore: SessionStore
@@ -80,6 +82,25 @@ final class AuthViewModel: ObservableObject {
         socket.disconnect()
         await sessionStore.signOut()
         state = .unauthenticated
+        legalDocuments = []
+    }
+
+    func acceptRequiredLegal() async {
+        guard !isLoading else { return }
+        isLoading = true
+        errorMessage = nil
+        defer { isLoading = false }
+        do {
+            for document in legalDocuments where document.requiresAcceptance {
+                guard document.slug == .terms || document.slug == .risk else { continue }
+                _ = try await apiClient.acceptLegal(document: document.slug, version: document.version)
+            }
+            await completeAuthenticatedSession()
+        } catch let error as APIError {
+            errorMessage = error.userMessage
+        } catch {
+            errorMessage = "Couldn't record acceptance. Please try again."
+        }
     }
 
     // MARK: - Internals
@@ -88,7 +109,7 @@ final class AuthViewModel: ObservableObject {
         state = .checking
         do {
             if try await sessionStore.restoreSession() {
-                becomeAuthenticated()
+                await completeAuthenticatedSession()
             } else {
                 state = .unauthenticated
             }
@@ -112,7 +133,7 @@ final class AuthViewModel: ObservableObject {
         do {
             let tokens = try await action()
             try await sessionStore.signIn(with: tokens)
-            becomeAuthenticated()
+            await completeAuthenticatedSession()
         } catch let error as APIError {
             switch error {
             case .network:
@@ -127,7 +148,35 @@ final class AuthViewModel: ObservableObject {
 
     private func becomeAuthenticated() {
         socket.connect()
+        legalDocuments = []
         state = .authenticated
+    }
+
+    private func completeAuthenticatedSession() async {
+        state = .checking
+        do {
+            let status = try await apiClient.legalStatus()
+            let missing = status.documents.filter { $0.requiresAcceptance && $0.accepted != true }
+            guard !missing.isEmpty else {
+                becomeAuthenticated()
+                return
+            }
+            var documents: [LegalDocumentDTO] = []
+            for summary in missing {
+                documents.append(try await apiClient.legalDocument(summary.slug))
+            }
+            socket.disconnect()
+            legalDocuments = documents
+            state = .legal
+        } catch let error as APIError {
+            socket.disconnect()
+            errorMessage = error.userMessage
+            state = .restoreFailed
+        } catch {
+            socket.disconnect()
+            errorMessage = "Couldn't verify the required disclosures."
+            state = .restoreFailed
+        }
     }
 
     private func handleSessionExpired() {

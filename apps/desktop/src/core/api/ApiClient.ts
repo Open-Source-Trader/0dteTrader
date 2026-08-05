@@ -24,6 +24,11 @@ import type {
   WebullCredentialsSaved,
   WebullAccount,
   WebullSessionRefreshed,
+  DiscordNotificationSettings,
+  DiscordNotificationSettingsUpdate,
+  LegalAcceptanceStatus,
+  LegalDocument,
+  LegalDocumentSlug,
 } from '@0dtetrader/shared-types';
 import {
   DesktopSnapTradeAuthorizeResponse,
@@ -276,6 +281,40 @@ export class ApiClient {
 
   orderHistory(): Promise<TradeHistory> {
     return this.request({ method: 'GET', path: 'v1/orders/history' });
+  }
+
+  discordSettings(): Promise<DiscordNotificationSettings> {
+    return this.request({ method: 'GET', path: 'v1/notifications/discord' });
+  }
+
+  updateDiscordSettings(
+    input: DiscordNotificationSettingsUpdate,
+  ): Promise<DiscordNotificationSettings> {
+    return this.request({ method: 'PUT', path: 'v1/notifications/discord', body: input });
+  }
+
+  testDiscord(): Promise<void> {
+    return this.requestVoid({ method: 'POST', path: 'v1/notifications/discord/test' });
+  }
+
+  legalStatus(): Promise<LegalAcceptanceStatus> {
+    return this.request({ method: 'GET', path: 'v1/me/legal' });
+  }
+
+  legalDocument(slug: LegalDocumentSlug): Promise<LegalDocument> {
+    return this.request({ method: 'GET', path: `v1/legal/${slug}`, requiresAuth: false });
+  }
+
+  acceptLegal(document: 'terms' | 'risk', version: string): Promise<LegalAcceptanceStatus> {
+    return this.request({
+      method: 'POST',
+      path: 'v1/me/legal/accept',
+      body: { document, version },
+    });
+  }
+
+  deleteAccount(confirmEmail: string): Promise<void> {
+    return this.requestVoid({ method: 'DELETE', path: 'v1/me', body: { confirmEmail } });
   }
 
   /** Broker-reported equity/daily P&L; null when the broker exposes none

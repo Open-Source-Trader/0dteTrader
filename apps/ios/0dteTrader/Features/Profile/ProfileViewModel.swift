@@ -85,6 +85,13 @@ final class ProfileViewModel: ObservableObject {
     /// runs the authorization flow and a denial has to revert the switch.
     @Published var pushNotificationsEnabled: Bool
 
+    @Published private(set) var discordSettings: DiscordNotificationSettingsDTO?
+    @Published private(set) var legalStatus: LegalAcceptanceStatusDTO?
+    @Published private(set) var selectedLegalDocument: LegalDocumentDTO?
+    @Published private(set) var isComplianceBusy = false
+    @Published private(set) var complianceErrorMessage: String?
+    @Published private(set) var complianceSuccessMessage: String?
+
     private let apiClient: APIClient
     private let settingsStore: SettingsStore
     private let quoteSocket: QuoteSocketClient
@@ -276,6 +283,124 @@ final class ProfileViewModel: ObservableObject {
         // Push teardown lives in RootView's signOut(), which every sign-out
         // route — this one included — funnels through.
         await onLogout()
+    }
+
+    func loadCompliance() async {
+        guard !isComplianceBusy else { return }
+        isComplianceBusy = true
+        defer { isComplianceBusy = false }
+        clearComplianceMessages()
+        var failures: [String] = []
+        do {
+            discordSettings = try await apiClient.discordSettings()
+        } catch {
+            failures.append("Discord: \(userMessage(for: error))")
+        }
+        do {
+            legalStatus = try await apiClient.legalStatus()
+        } catch {
+            failures.append("Legal: \(userMessage(for: error))")
+        }
+        if !failures.isEmpty {
+            complianceErrorMessage = failures.joined(separator: " ")
+        }
+    }
+
+    func saveDiscord(webhookUrl: String, enabled: Bool, includePnl: Bool) async {
+        guard !isComplianceBusy else { return }
+        isComplianceBusy = true
+        defer { isComplianceBusy = false }
+        clearComplianceMessages()
+        do {
+            discordSettings = try await apiClient.updateDiscordSettings(
+                DiscordNotificationSettingsUpdateDTO(
+                    webhookUrl: webhookUrl.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        ? nil
+                        : webhookUrl.trimmingCharacters(in: .whitespacesAndNewlines),
+                    enabled: enabled,
+                    includePnl: includePnl
+                )
+            )
+            complianceSuccessMessage = "Discord settings saved."
+        } catch {
+            setComplianceError(error)
+        }
+    }
+
+    func testDiscord() async {
+        guard !isComplianceBusy else { return }
+        isComplianceBusy = true
+        defer { isComplianceBusy = false }
+        clearComplianceMessages()
+        do {
+            try await apiClient.testDiscord()
+            complianceSuccessMessage = "Test notification sent."
+        } catch {
+            setComplianceError(error)
+        }
+    }
+
+    func showLegalDocument(_ slug: LegalDocumentSlug) async {
+        guard !isComplianceBusy else { return }
+        isComplianceBusy = true
+        defer { isComplianceBusy = false }
+        clearComplianceMessages()
+        selectedLegalDocument = nil
+        do {
+            selectedLegalDocument = try await apiClient.legalDocument(slug)
+        } catch {
+            setComplianceError(error)
+        }
+    }
+
+    func closeLegalDocument() {
+        selectedLegalDocument = nil
+    }
+
+    func acceptLegal(_ document: LegalDocumentDTO) async {
+        guard !isComplianceBusy,
+              document.slug == .terms || document.slug == .risk else { return }
+        isComplianceBusy = true
+        defer { isComplianceBusy = false }
+        clearComplianceMessages()
+        do {
+            legalStatus = try await apiClient.acceptLegal(
+                document: document.slug,
+                version: document.version
+            )
+            complianceSuccessMessage = "\(document.title) accepted."
+        } catch {
+            setComplianceError(error)
+        }
+    }
+
+    func deleteAccount(confirmEmail: String) async {
+        guard !isComplianceBusy else { return }
+        isComplianceBusy = true
+        defer { isComplianceBusy = false }
+        clearComplianceMessages()
+        do {
+            try await apiClient.deleteAccount(confirmEmail: confirmEmail)
+            await onLogout()
+        } catch {
+            setComplianceError(error)
+        }
+    }
+
+    private func clearComplianceMessages() {
+        complianceErrorMessage = nil
+        complianceSuccessMessage = nil
+    }
+
+    private func setComplianceError(_ error: Error) {
+        complianceErrorMessage = userMessage(for: error)
+    }
+
+    private func userMessage(for error: Error) -> String {
+        if let apiError = error as? APIError {
+            return apiError.userMessage
+        }
+        return error.localizedDescription
     }
 
     // MARK: - Alpaca credentials (generic broker-credentials endpoint)

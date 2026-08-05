@@ -460,31 +460,37 @@ describe('TradeStore.arm confirmation bypass', () => {
   });
 });
 
-describe('TradeStore — refresh after placement does not stack on the WS push', () => {
-  it('skips its own refresh when the order-update socket is connected', async () => {
+describe('TradeStore — refresh after placement', () => {
+  it('refreshes directly instead of treating socket connectivity as delivery proof', async () => {
     const placeOrder = vi.fn(async () => placedOrder);
     const positions = vi.fn(async () => []);
     const openOrders = vi.fn(async () => []);
-    const apiClient = { placeOrder, positions, openOrders } as unknown as ApiClient;
+    const orderHistory = vi.fn(async () => ({ entries: [], totalRealizedPnl: 0 }));
+    const accountSummary = vi.fn(async () => null);
+    const apiClient = {
+      placeOrder,
+      positions,
+      openOrders,
+      orderHistory,
+      accountSummary,
+    } as unknown as ApiClient;
     const store = new TradeStore(apiClient);
-    store.isSocketConnected = () => true;
 
     store.arm('buy', 'SPY', autoModeChainStore(), true);
     await vi.waitFor(() => expect(store.getState().armedTicket).toBeNull());
 
-    // The placement's own orderUpdate push is what refreshes when connected —
-    // submitOrder must not also call positions/openOrders directly.
-    expect(positions).not.toHaveBeenCalled();
-    expect(openOrders).not.toHaveBeenCalled();
+    await vi.waitFor(() => {
+      expect(positions).toHaveBeenCalledTimes(1);
+      expect(openOrders).toHaveBeenCalledTimes(1);
+    });
   });
 
-  it('falls back to a direct refresh when the socket is disconnected', async () => {
+  it('refreshes when no order-update callback arrives', async () => {
     const placeOrder = vi.fn(async () => placedOrder);
     const positions = vi.fn(async () => []);
     const openOrders = vi.fn(async () => []);
     const apiClient = { placeOrder, positions, openOrders } as unknown as ApiClient;
     const store = new TradeStore(apiClient);
-    store.isSocketConnected = () => false;
 
     store.arm('buy', 'SPY', autoModeChainStore(), true);
     await vi.waitFor(() => expect(store.getState().armedTicket).toBeNull());
@@ -547,7 +553,6 @@ describe('TradeStore position-management exits', () => {
       openOrders: async () => [],
     } as unknown as ApiClient;
     const store = withResolver(new TradeStore(apiClient), [CONTRACT]);
-    store.isSocketConnected = () => true;
     const held = position(2);
 
     const first = store.flatten(held);
@@ -566,7 +571,6 @@ describe('TradeStore position-management exits', () => {
       openOrders: async () => [],
     } as unknown as ApiClient;
     const store = withResolver(new TradeStore(apiClient), [CONTRACT]);
-    store.isSocketConnected = () => true;
 
     await store.trimHalf(position(5));
 

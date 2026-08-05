@@ -1,4 +1,39 @@
 import type { OptionContract } from '@0dtetrader/shared-types';
+
+/** Where an entry line's level came from — and what it may be used for. */
+export interface EntryLineSource {
+  price: number;
+  /** True only for a fill-time observation (`underlyingEntryPrice`). The
+   *  placement-derived estimate draws and labels a line but must never
+   *  classify, create, move or arm an order: if it differs from the true
+   *  fill level, a drag across it would build the wrong bracket kind and
+   *  move the wrong OCO sibling. */
+  authoritative: boolean;
+}
+
+export function entryLineSource(position: {
+  underlyingEntryPrice?: number;
+  underlyingEntryEstimate?: number;
+}): EntryLineSource | null {
+  if (position.underlyingEntryPrice !== undefined) {
+    return { price: position.underlyingEntryPrice, authoritative: true };
+  }
+  if (position.underlyingEntryEstimate !== undefined) {
+    return { price: position.underlyingEntryEstimate, authoritative: false };
+  }
+  return null;
+}
+
+/** Whether a bracket drag may begin from this entry line. The close (✕)
+ *  affordance is deliberately NOT gated on this — flattening a position does
+ *  not consult the entry level. */
+export function canBracketFromEntry(
+  source: Pick<EntryLineSource, 'authoritative'>,
+  bracketDragEnabled: boolean,
+): boolean {
+  return bracketDragEnabled && source.authoritative;
+}
+
 import { Format } from '../../design/format';
 import type { ChartPalette } from './chartColors';
 

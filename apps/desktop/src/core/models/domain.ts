@@ -12,6 +12,7 @@ import type {
  * mirroring the server's computeMid validation; a locked market is allowed.
  */
 export function midPrice(bid: number, ask: number, precision = 2): number | null {
+  if (!Number.isFinite(bid) || !Number.isFinite(ask)) return null;
   if (!(bid > 0) || !(ask > 0) || bid > ask) return null;
   const factor = Math.pow(10, precision);
   return Math.round(((bid + ask) / 2) * factor) / factor;
@@ -37,7 +38,14 @@ export function midPrice(bid: number, ask: number, precision = 2): number | null
  */
 export function quotesPending(contract: OptionContract | null): boolean {
   return (
-    contract !== null && !(contract.bid > 0 && contract.ask > 0 && contract.bid <= contract.ask)
+    contract !== null &&
+    !(
+      Number.isFinite(contract.bid) &&
+      Number.isFinite(contract.ask) &&
+      contract.bid > 0 &&
+      contract.ask > 0 &&
+      contract.bid <= contract.ask
+    )
   );
 }
 

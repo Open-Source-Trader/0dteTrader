@@ -12,7 +12,7 @@ import type {
 } from '@0dtetrader/shared-types';
 import type { ApiClient } from '../../core/api/ApiClient';
 import { errorMessage } from '../../core/api/ApiError';
-import { orderStatusDisplayName, sideDisplayName } from '../../core/models/domain';
+import { quotesPending, orderStatusDisplayName, sideDisplayName } from '../../core/models/domain';
 import { parseOccSymbol } from '../../core/models/occSymbol';
 import { roundToTick } from '../../core/models/priceInput';
 import { Store } from '../../core/observable';
@@ -267,10 +267,10 @@ export class TradeStore extends Store<TradeStoreState> {
         return;
       }
       // A leg resolved from its OCC symbol has no quotes until its
-      // expiration's contracts load — never trade off a 0.00 display. Same
-      // two-sided, non-crossed rule as quotesPending (and as iOS).
+      // expiration's contracts load — never trade off a 0.00 display. The
+      // ONE canonical readiness predicate, not a re-implementation of it.
       const selected = chainStore.selectedContract;
-      if (selected && !(selected.bid > 0 && selected.ask > 0 && selected.bid <= selected.ask)) {
+      if (selected && quotesPending(selected)) {
         this.showToast('Quotes are still loading for that expiration.', 'error');
         return;
       }

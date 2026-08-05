@@ -11,7 +11,12 @@ import { useStore } from '../../core/observable';
 import { dayString } from '../../core/models/dates';
 import { Format } from '../../design/format';
 import { chartPalette } from './chartColors';
-import { entryLineLabel, entryLineStroke } from './entryLineStyle';
+import {
+  canBracketFromEntry,
+  entryLineLabel,
+  entryLineSource,
+  entryLineStroke,
+} from './entryLineStyle';
 import { positionsForUnderlying } from './positionsForUnderlying';
 import { isPointerClaimed } from './chartPointerClaim';
 import type { ChartCandle } from './ChartStore';
@@ -77,6 +82,9 @@ interface OrderLineLayerProps {
 }
 
 interface EntryLine {
+  /** False when the level is the placement-derived estimate — display and
+   *  close only, never bracket classification (see entryLineSource). */
+  authoritative: boolean;
   position: Position;
   contract: OptionContract;
   price: number;
@@ -181,13 +189,18 @@ export function OrderLineLayer({
     for (const position of positionsForUnderlying(current, sym, contracts)) {
       // Display falls back to the placement-derived ESTIMATE; the
       // authoritative fill-time field (reserved, unset today) wins when it
-      // exists. Automated actions never take this fallback — "Move stop to
-      // entry" consumes only the authoritative field.
-      const entry = position.underlyingEntryPrice ?? position.underlyingEntryEstimate;
-      if (position.quantity === 0 || entry === undefined) continue;
+      // exists. Provenance rides the line: an estimate draws and closes but
+      // never classifies a bracket.
+      const source = entryLineSource(position);
+      if (position.quantity === 0 || source === null) continue;
       const contract = resolve(position.symbol);
       if (!contract) continue;
-      lines.push({ position, contract, price: entry });
+      lines.push({
+        position,
+        contract,
+        price: source.price,
+        authoritative: source.authoritative,
+      });
     }
     return lines;
   };
@@ -331,7 +344,11 @@ export function OrderLineLayer({
           entry.position.unrealizedPnl >= 0 ? colors.pnlPositive : colors.pnlNegative;
         const pills = layoutRow(
           [
-            { key: 'label', label: entryLineLabel(entry.contract, todayIso) },
+            {
+              key: 'label',
+              // "~": approximate — the level is the placement estimate.
+              label: (entry.authoritative ? '' : '~') + entryLineLabel(entry.contract, todayIso),
+            },
             { key: 'quantity', label: Format.signedQuantity(entry.position.quantity) },
             {
               key: 'pnl',
@@ -628,9 +645,13 @@ export function OrderLineLayer({
 
       // Line body: drag it.
       if (entryId) {
-        if (!latest.current.settings.bracketDrag) return;
         const entry = entryLines().find((e) => e.position.symbol === entryId);
         if (!entry) return;
+        // An estimated entry cannot begin a bracket drag: classifying
+        // target-vs-stop against a level that may sit on the wrong side of
+        // the true fill would move the wrong OCO sibling. The ✕ close pill
+        // above is untouched — flattening never consults the entry level.
+        if (!canBracketFromEntry(entry, latest.current.settings.bracketDrag)) return;
         dragRef.current = {
           kind: 'bracket',
           id: entryId,
@@ -872,6 +893,9 @@ export function OrderLineLayer({
 
   /** Commits a bracket leg dragged off an entry line into the position's OCO group. */
   const placeBracket = async (entry: EntryLine, price: number) => {
+    // Defensive twin of the drag-start gate: nothing may classify a bracket
+    // against an estimated entry, even if a future code path re-enters here.
+    if (!entry.authoritative) return;
     const kind = bracketKindFor(
       entry.contract.optionType,
       entry.position.quantity,

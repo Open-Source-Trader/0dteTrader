@@ -8,6 +8,29 @@ import {
   quotesPending,
 } from './domain';
 
+describe('midPrice — every successful midpoint is finite', () => {
+  it.each([
+    [1.0, Number.POSITIVE_INFINITY],
+    [Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY],
+    [Number.NEGATIVE_INFINITY, 1.0],
+  ])('returns null rather than arithmetic on a non-finite book (%s, %s)', (bid, ask) => {
+    expect(midPrice(bid, ask)).toBeNull();
+  });
+
+  it('never returns a non-finite number for any book it accepts', () => {
+    const books = [
+      [1.0, 1.04],
+      [1.0, 1.0],
+      [0.01, 0.02],
+    ] as const;
+    for (const [bid, ask] of books) {
+      const mid = midPrice(bid, ask);
+      expect(mid).not.toBeNull();
+      expect(Number.isFinite(mid)).toBe(true);
+    }
+  });
+});
+
 describe('midPrice', () => {
   it('averages bid and ask rounded to pennies', () => {
     expect(midPrice(1.0, 1.04)).toBe(1.02);
@@ -111,6 +134,10 @@ describe('quotesPending — one readiness matrix for every order type', () => {
     ['NaN bid', Number.NaN, 1.1],
     ['NaN ask', 1.0, Number.NaN],
     ['negative bid', -0.05, 1.1],
+    ['infinite ask', 1.0, Number.POSITIVE_INFINITY],
+    ['infinite bid', Number.POSITIVE_INFINITY, 1.1],
+    ['infinite both', Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY],
+    ['negative-infinite bid', Number.NEGATIVE_INFINITY, 1.1],
   ])('refuses a %s book', (_label, bid, ask) => {
     expect(quotesPending(contract(bid as number, ask as number))).toBe(true);
   });

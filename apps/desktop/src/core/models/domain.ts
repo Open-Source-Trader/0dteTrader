@@ -18,21 +18,27 @@ export function midPrice(bid: number, ask: number, precision = 2): number | null
 }
 
 /**
- * No TWO-SIDED quote — a CURR leg synthesized from its OCC symbol before its
- * expiration's contracts load, or a contract with nothing but a stale last
- * trade. Every trading gate (split panel, desktop rail, fullscreen
- * buttons/shortcuts) disables on it so a 0.00 display is never tradeable;
- * TradeStore.arm keeps a matching guard as the backstop.
+ * No usable book: anything but a two-sided, non-crossed quote. Every trading
+ * gate (split panel, desktop rail, fullscreen buttons/shortcuts) disables on
+ * it so a broken display is never tradeable; TradeStore.arm keeps a matching
+ * guard as the backstop.
  *
- * `last` deliberately does not count. It is a print from whenever the
- * contract last traded, which on an illiquid strike can be hours old, and
- * every order type this app sends is priced from the live bid/ask — a mid
- * order with no book has nothing to compute a limit from. iOS applies the
- * same rule (`hasTradeableQuote`), and the two clients disagreeing about
- * whether an order can be sent is worse than either rule alone.
+ * One matrix for every order type, deliberately:
+ * - mid, bid, ask: the server prices these from the live book, so both sides
+ *   must be positive and bid ≤ ask (a crossed book is a broken feed; a
+ *   LOCKED book, bid == ask, is legal and tradeable).
+ * - market, custom: the price does not come from the book, but sending an
+ *   order into a one-sided or crossed 0DTE book is how a market order fills
+ *   at garbage — the same gate applies as the safety rule.
+ * `last` never counts: it is a print from whenever the contract last traded,
+ * hours old on an illiquid strike. iOS applies the identical rule
+ * (`hasTradeableQuote`), so the two clients cannot disagree about whether an
+ * order can be sent. NaN fails every comparison and stays untradeable.
  */
 export function quotesPending(contract: OptionContract | null): boolean {
-  return contract !== null && contract.bid <= 0 && contract.ask <= 0;
+  return (
+    contract !== null && !(contract.bid > 0 && contract.ask > 0 && contract.bid <= contract.ask)
+  );
 }
 
 export function oppositeSide(side: OrderSide): OrderSide {

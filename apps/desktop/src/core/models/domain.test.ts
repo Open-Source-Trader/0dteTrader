@@ -5,6 +5,7 @@ import {
   orderPricingDescription,
   orderStatusHistoryLabel,
   orderTypeDisplayName,
+  quotesPending,
 } from './domain';
 
 describe('midPrice', () => {
@@ -78,5 +79,47 @@ describe('orderStatusHistoryLabel', () => {
     expect(orderStatusHistoryLabel('cancelled')).toBe('Cancelled');
     expect(orderStatusHistoryLabel('rejected')).toBe('Rejected');
     expect(orderStatusHistoryLabel('weird_broker_state')).toBe('Unknown');
+  });
+});
+
+describe('quotesPending — one readiness matrix for every order type', () => {
+  const contract = (bid: number, ask: number, last = 0) =>
+    ({
+      symbol: 'SPY260717C00505000',
+      underlying: 'SPY',
+      expiration: '2026-07-17',
+      strike: 505,
+      optionType: 'call',
+      bid,
+      ask,
+      last,
+    }) as never;
+
+  it('accepts a two-sided, non-crossed book', () => {
+    expect(quotesPending(contract(1.0, 1.1))).toBe(false);
+  });
+
+  it('accepts a LOCKED book — bid equal to ask is legal', () => {
+    expect(quotesPending(contract(1.0, 1.0))).toBe(false);
+  });
+
+  it.each([
+    ['bid-only', 1.0, 0],
+    ['ask-only', 0, 1.1],
+    ['zero both', 0, 0],
+    ['crossed', 1.2, 1.0],
+    ['NaN bid', Number.NaN, 1.1],
+    ['NaN ask', 1.0, Number.NaN],
+    ['negative bid', -0.05, 1.1],
+  ])('refuses a %s book', (_label, bid, ask) => {
+    expect(quotesPending(contract(bid as number, ask as number))).toBe(true);
+  });
+
+  it('refuses a last-only quote — an old print is not a book to price from', () => {
+    expect(quotesPending(contract(0, 0, 1.05))).toBe(true);
+  });
+
+  it('treats no contract at all as not-pending (nothing selected to gate on)', () => {
+    expect(quotesPending(null)).toBe(false);
   });
 });

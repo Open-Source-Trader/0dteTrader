@@ -179,10 +179,15 @@ export function OrderLineLayer({
       .filter((contract): contract is OptionContract => contract !== null);
     const lines: EntryLine[] = [];
     for (const position of positionsForUnderlying(current, sym, contracts)) {
-      if (position.quantity === 0 || position.underlyingEntryPrice === undefined) continue;
+      // Display falls back to the placement-derived ESTIMATE; the
+      // authoritative fill-time field (reserved, unset today) wins when it
+      // exists. Automated actions never take this fallback — "Move stop to
+      // entry" consumes only the authoritative field.
+      const entry = position.underlyingEntryPrice ?? position.underlyingEntryEstimate;
+      if (position.quantity === 0 || entry === undefined) continue;
       const contract = resolve(position.symbol);
       if (!contract) continue;
-      lines.push({ position, contract, price: position.underlyingEntryPrice });
+      lines.push({ position, contract, price: entry });
     }
     return lines;
   };

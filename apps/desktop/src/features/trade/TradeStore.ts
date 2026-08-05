@@ -268,10 +268,9 @@ export class TradeStore extends Store<TradeStoreState> {
       }
       // A leg resolved from its OCC symbol has no quotes until its
       // expiration's contracts load — never trade off a 0.00 display. Same
-      // two-sided rule as quotesPending (and as iOS): a lone last print is
-      // not a quote to price an order from.
+      // two-sided, non-crossed rule as quotesPending (and as iOS).
       const selected = chainStore.selectedContract;
-      if (selected && selected.bid <= 0 && selected.ask <= 0) {
+      if (selected && !(selected.bid > 0 && selected.ask > 0 && selected.bid <= selected.ask)) {
         this.showToast('Quotes are still loading for that expiration.', 'error');
         return;
       }

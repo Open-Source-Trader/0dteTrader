@@ -78,7 +78,10 @@ function isFill(row: TradeOrder): boolean {
 /** The isFill test for an incoming event, before it becomes a row. */
 function isFillEvent(order: OrderResult): boolean {
   return (
-    order.filledPrice !== undefined &&
+    // Strictly positive, like the quantity below: a zero or negative price
+    // is refused at the door rather than advancing the watermark and then
+    // being filtered out of every replay.
+    isFinitePositive(order.filledPrice) &&
     (order.filledQuantity ?? order.quantity) > 0 &&
     (order.status === 'filled' ||
       order.status === 'partially_filled' ||
@@ -133,7 +136,17 @@ interface FillPoint {
   time: Date;
 }
 
-const isFinitePositive = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
+/** Prices and quantities are strictly positive in this domain: a zero or
+ *  negative one is junk that would poison an average-cost book, so it is
+ *  refused rather than booked. */
+const isFinitePositive = (v: unknown): v is number =>
+  typeof v === 'number' && Number.isFinite(v) && v > 0;
+
+/** How late a fill may be, relative to placement, and still be anchored on the
+ *  underlying price captured when the order was sent. A market or marketable
+ *  limit fills inside this; a resting limit that fills minutes later did so at
+ *  an underlying level nobody recorded. */
+const FILL_ANCHOR_MAX_LAG_MS = 60_000;
 
 /**
  * Reconstructs one order's cumulative fill curve from its recorded rows,
@@ -248,13 +261,28 @@ function fillEventsFor(rows: TradeOrder[], executions: TradeOrderExecution[]): F
       prevCumulative = point.cumulative;
       prevAvgPrice = point.avgPrice;
     }
-    // The k-th increment executed no later than the k-th earliest time we
-    // observed for this order. Assigning sorted times to cumulative-ordered
-    // increments is a no-op when the broker reports true execution times, and
-    // is what keeps an order's own fills in order when it does not: Webull
-    // reports none at all, so an observation is stamped when it ARRIVED, and
-    // a late partial arrives after the fill that superseded it.
-    const times = increments.map((increment) => increment.time).sort((a, b) => +a - +b);
+    // An observation time is an UPPER BOUND on execution, not the execution
+    // itself: it is when the broker reported a cumulative, and every unit up
+    // to that cumulative had already executed by then. So each increment is
+    // placed at the earliest time any observation vouched for it — the
+    // suffix minimum over the cumulative-ordered increments, which is
+    // non-decreasing by construction, keeping an order's own fills in
+    // sequence.
+    //
+    // This matters when a report arrives out of order and the broker stamps
+    // no execution time of its own (Webull reports none, so an observation is
+    // stamped on ARRIVAL): a terminal report of cumulative 3 proves all three
+    // units executed by then, and a partial arriving later must not push two
+    // of them past a close that happened in between. Where the broker does
+    // report execution times (Alpaca, SnapTrade) they are already
+    // non-decreasing in cumulative and this is the identity.
+    const times: Date[] = new Array(increments.length);
+    let bound: Date | null = null;
+    for (let k = increments.length - 1; k >= 0; k -= 1) {
+      const observed = increments[k].time;
+      bound = bound === null || +observed < +bound ? observed : bound;
+      times[k] = bound;
+    }
 
     let covered = 0;
     let coveredNotional = 0;
@@ -323,11 +351,17 @@ function applyExecution(
   const signed = row.side === 'buy' ? event.quantity : -event.quantity;
   const size = Math.abs(signed);
   const price = event.price;
-  // Rows predating the column (and any source reporting a junk price) must be
-  // skipped rather than averaged in as zero, which would drag the anchor to a
-  // level the position was never opened at.
+  // The underlying price was captured when the order was SENT, so it anchors
+  // the entry only for a fill that happened promptly. A resting limit that
+  // filled minutes later did so at a level nobody recorded, and "Move stop to
+  // entry" would then arm an unattended stop at a price the position never
+  // opened at — better to report no anchor and let the button disable.
+  // Rows predating the column (and any source reporting a junk price) are
+  // skipped for the same reason: averaged in as zero they would drag the
+  // anchor to a level the position was never opened at.
+  const promptFill = event.time.getTime() - row.placedAt.getTime() <= FILL_ANCHOR_MAX_LAG_MS;
   const underlying =
-    typeof row.underlyingPrice === 'number' && Number.isFinite(row.underlyingPrice)
+    promptFill && typeof row.underlyingPrice === 'number' && Number.isFinite(row.underlyingPrice)
       ? row.underlyingPrice
       : null;
   let realized: number | null = null;
@@ -387,11 +421,46 @@ export class OrdersService implements OnModuleDestroy {
     orderEvents: OrderEventsService,
   ) {
     this.eventsSub = orderEvents.events$.subscribe((event) => {
-      void this.record(event.userId, event.order).catch((err) =>
-        this.logger.warn(`failed to persist order update: ${(err as Error).message}`),
-      );
+      void this.recordWithRetry(event.userId, event.order);
     });
   }
+
+  /**
+   * Persist an order update, retrying a failed attempt before giving up.
+   *
+   * record() writes in several statements — ensure-exists, the status
+   * transition, the earliest-fill stamp, the watermark advance, the
+   * observation — and a failure part-way leaves the earlier ones committed.
+   * Every one of them is idempotent by construction (an upsert, three
+   * predicate-guarded updates, and an insert under a unique index), so
+   * replaying the whole call is safe and converges. That is what this repo
+   * has instead of a transaction, which it deliberately does not use: a
+   * rollback would be WORSE here, discarding a fill the broker already
+   * reported rather than leaving a partial record the replay can still
+   * account for and a later report can complete.
+   *
+   * Retries are bounded and in-process. What survives a process death is the
+   * broker redelivering (a webhook retry, the next poll tick); a terminal
+   * poll event that fires exactly once and fails every attempt is lost, and
+   * that gap closes only with durable webhook ingestion.
+   */
+  private async recordWithRetry(userId: string, order: OrderResult): Promise<void> {
+    for (let attempt = 1; attempt <= OrdersService.RECORD_ATTEMPTS; attempt += 1) {
+      try {
+        await this.record(userId, order);
+        return;
+      } catch (err) {
+        if (attempt === OrdersService.RECORD_ATTEMPTS) {
+          this.logger.warn(
+            `failed to persist order update for ${order.orderId} after ` +
+              `${attempt} attempts: ${(err as Error).message}`,
+          );
+        }
+      }
+    }
+  }
+
+  private static readonly RECORD_ATTEMPTS = 3;
 
   onModuleDestroy(): void {
     this.eventsSub.unsubscribe();

@@ -538,6 +538,50 @@ describe('OrdersService', () => {
       ).toBe(0);
     });
 
+    it('refuses the entry anchor when the fill was not prompt after placement', async () => {
+      // The underlying price is captured when the order is SENT. A resting
+      // limit that fills five minutes later did so at a level nobody
+      // recorded, and "Move stop to entry" would arm an unattended stop at a
+      // price the position never opened at. No anchor is the honest answer —
+      // the clients already degrade to no entry line.
+      const placed = new Date('2026-08-02T14:00:00.000Z');
+      const late = new Date('2026-08-02T14:05:00.000Z');
+      await orders.recordUnderlyingPrice(
+        USER,
+        fill({
+          side: 'buy',
+          quantity: 1,
+          filledPrice: 1.0,
+          timestamp: placed.toISOString(),
+          filledAt: late.toISOString(),
+        }),
+        600,
+      );
+
+      const anchor = (await orders.positionAnchors(USER, [OCC])).get(OCC);
+      expect(anchor?.underlyingEntryPrice).toBeUndefined();
+      // The opening TIME is still known — only the price is unanchored.
+      expect(anchor?.openedAt).toEqual(late);
+    });
+
+    it('keeps the entry anchor for a fill that lands promptly after placement', async () => {
+      const placed = new Date('2026-08-02T14:00:00.000Z');
+      const prompt = new Date('2026-08-02T14:00:03.000Z');
+      await orders.recordUnderlyingPrice(
+        USER,
+        fill({
+          side: 'buy',
+          quantity: 1,
+          filledPrice: 1.0,
+          timestamp: placed.toISOString(),
+          filledAt: prompt.toISOString(),
+        }),
+        600,
+      );
+
+      expect((await orders.positionAnchors(USER, [OCC])).get(OCC)?.underlyingEntryPrice).toBe(600);
+    });
+
     it('reports the replayed signed quantity, shorts included', async () => {
       await orders.record(USER, fill({ side: 'sell', quantity: 2, filledPrice: 1.5 }));
 
@@ -804,11 +848,12 @@ describe('OrdersService', () => {
       expect(cumulativesFor('OOO')).toEqual([1, 3]);
     });
 
-    it('keeps an order’s own fills in sequence when the broker reports no execution times', async () => {
+    it('never dates an increment later than a report that already counted it', async () => {
       // Webull reports no execution timestamp, so an observation is stamped
-      // when it ARRIVED — and a late partial arrives AFTER the fill that
-      // superseded it. Ordering the replay by those stamps would put the
-      // 2-lot increment before the 1-lot one it followed.
+      // when it ARRIVED. The terminal report says cumulative 3 at t+0, which
+      // PROVES all three lots executed by then; the partial arriving at t+2
+      // is only evidence about how they were split, not about when. So a
+      // close at t+1 meets a 3-lot book at the blended 1.20 average.
       const arrival = new Date('2026-08-04T14:00:00.000Z');
       const partial = fill({
         orderId: 'NOTIME',
@@ -841,8 +886,49 @@ describe('OrdersService', () => {
         }),
       );
 
-      // The sell closed the 1.00 lot: $50. Replaying the increments in
-      // arrival order would close a 1.30 lot instead and report $20.
+      // (1.50 − 1.20) × 1 × 100. Dating the 2-lot increment at its own
+      // arrival would move it past the close and report 50 — a chronology
+      // the terminal report rules out.
+      expect((await orders.history(USER)).totalRealizedPnl).toBe(30);
+    });
+
+    it('still sequences an order’s own fills when they are observed in order', async () => {
+      // The same timestamp-less broker, reporting normally: the partial is
+      // seen BEFORE the terminal, so each observation genuinely bounds only
+      // what had executed by then and the close falls between them.
+      const arrival = new Date('2026-08-04T14:00:00.000Z');
+      const partial = fill({
+        orderId: 'INORDER',
+        status: 'partially_filled' as const,
+        quantity: 3,
+        filledQuantity: 1,
+        filledPrice: 1.0,
+        filledAt: undefined,
+      });
+      jest.useFakeTimers({ now: arrival });
+      try {
+        await orders.record(USER, partial);
+        jest.setSystemTime(new Date(arrival.getTime() + 2000));
+        await orders.record(USER, {
+          ...partial,
+          status: 'filled',
+          filledQuantity: 3,
+          filledPrice: 1.2,
+        });
+      } finally {
+        jest.useRealTimers();
+      }
+      await orders.record(
+        USER,
+        fill({
+          orderId: 'BETWEEN2',
+          side: 'sell',
+          filledPrice: 1.5,
+          filledAt: new Date(arrival.getTime() + 1000).toISOString(),
+        }),
+      );
+
+      // Only the 1.00 lot was open when the close landed: (1.50 − 1.00) × 100.
       expect((await orders.history(USER)).totalRealizedPnl).toBe(50);
     });
 
@@ -891,6 +977,45 @@ describe('OrdersService', () => {
         }),
       );
       expect((await orders.history(USER)).totalRealizedPnl).toBe(240);
+    });
+
+    it.each([
+      ['zero', 0],
+      ['negative', -1.5],
+    ])('refuses a %s fill price instead of booking it', async (_label, filledPrice) => {
+      await orders.record(USER, fill({ orderId: 'JUNK', quantity: 2, filledPrice }));
+
+      // Nothing is recorded and no authority is claimed, so the junk price
+      // can never reach the average-cost book.
+      expect(prisma.tradeOrderExecutions.filter((e) => e.orderId === 'JUNK')).toHaveLength(0);
+      expect(prisma.tradeOrders.find((o) => o.id === 'JUNK').executedQuantity).toBe(0);
+      expect((await orders.positionAnchors(USER, [OCC])).size).toBe(0);
+
+      // A later valid report of the same order still records normally.
+      await orders.record(USER, fill({ orderId: 'JUNK', quantity: 2, filledPrice: 1.25 }));
+      expect(cumulativesFor('JUNK')).toEqual([2]);
+    });
+
+    it('retries a failed persist, since every write in it is idempotent', async () => {
+      // A transient database failure mid-sequence used to be logged once and
+      // dropped, leaving whichever writes had already landed.
+      const create = prisma.tradeOrderExecution.create;
+      let failuresLeft = 1;
+      prisma.tradeOrderExecution.create = async (args: any) => {
+        if (failuresLeft > 0) {
+          failuresLeft -= 1;
+          throw new Error('connection reset');
+        }
+        return create(args);
+      };
+      events.emit(
+        USER,
+        fill({ orderId: 'RETRY', quantity: 2, filledPrice: 1.0, filledAt: t(10).toISOString() }),
+      );
+      await new Promise((resolve) => setImmediate(resolve));
+
+      expect(cumulativesFor('RETRY')).toEqual([2]);
+      expect((await orders.positionAnchors(USER, [OCC])).get(OCC)?.quantity).toBe(2);
     });
 
     it('replays a row with no recorded executions from its cumulative state', async () => {

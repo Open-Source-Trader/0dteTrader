@@ -565,11 +565,25 @@ export class OrdersService implements OnModuleDestroy {
     // cover. filledAt is dropped with them — the first-fill write below
     // stamps it with the same fillTimeOf in the same call.
     const base = await this.createData(userId, order, undefined, environment);
-    await this.prisma.tradeOrder.upsert({
+    const row = await this.prisma.tradeOrder.upsert({
       where: { id: order.orderId },
       create: { ...base, filledQuantity: null, filledPrice: null, filledAt: null },
       update: {},
     });
+    // The primary key is the BROKER's order id, unique only within a
+    // brokerage account. If the id already belongs to a different user, this
+    // event is a collision, and processing it would let one user's fill
+    // write executions and fill state into another user's order. Every write
+    // below is additionally {id, userId}-scoped as a belt, but the execution
+    // insert keys on orderId alone — so nothing at all may proceed until
+    // ownership is positively established.
+    if (row.userId !== userId) {
+      this.logger.warn(
+        `broker order id collision: ${order.orderId} belongs to another user; ` +
+          `dropping event for user ${userId} (status ${order.status})`,
+      );
+      return;
+    }
 
     // Status only moves FORWARD, each transition a predicate-guarded write so
     // concurrent recorders on other instances cannot interleave a regression:
@@ -709,17 +723,33 @@ export class OrdersService implements OnModuleDestroy {
     underlyingPrice: number,
   ): Promise<void> {
     try {
-      await this.prisma.tradeOrder.upsert({
+      // Ensure-exists first, with NO update: the upsert's where is the id
+      // alone, and the id is only unique within a brokerage account. An
+      // unconditional update here once let one user's placement overwrite
+      // another user's entry anchor on a colliding id. Ownership is checked
+      // on the returned row, and only an owned row takes the scoped write.
+      const row = await this.prisma.tradeOrder.upsert({
         where: { id: order.orderId },
         create: await this.createData(userId, order, underlyingPrice),
-        update: { underlyingPrice },
+        update: {},
+      });
+      if (row.userId !== userId) {
+        this.logger.warn(
+          `broker order id collision: ${order.orderId} belongs to another user; ` +
+            `dropping underlying price from user ${userId}`,
+        );
+        return;
+      }
+      await this.prisma.tradeOrder.updateMany({
+        where: { id: order.orderId, userId },
+        data: { underlyingPrice },
       });
       return;
     } catch (err) {
       // The events bus won the race to create this row between the upsert's own
-      // read and its insert. The row exists now, so the narrow update the upsert
-      // *would* have taken is still the right write — retry it rather than
-      // losing the anchor and drawing the entry line at the wrong level.
+      // read and its insert. The row exists now, so the narrow, owner-scoped
+      // update is still the right write — retry it rather than losing the
+      // anchor and drawing the entry line at the wrong level.
       const { count } = await this.prisma.tradeOrder.updateMany({
         where: { id: order.orderId, userId },
         data: { underlyingPrice },

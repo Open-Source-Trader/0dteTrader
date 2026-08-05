@@ -1403,6 +1403,72 @@ describe('OrdersService', () => {
     });
   });
 
+  describe('cross-tenant containment (two users, one broker order id)', () => {
+    const t = (s: number) => new Date(1_753_000_000_000 + s * 1000);
+    const USER_B = 'user-2';
+
+    it("refuses another user's event on a colliding id — status, fill state and executions", async () => {
+      // Broker order ids are unique only within a brokerage account. User A
+      // owns the row; user B's broker happens to reuse the same id.
+      await orders.record(
+        USER,
+        fill({
+          orderId: 'SHARED',
+          status: 'partially_filled',
+          quantity: 3,
+          filledQuantity: 1,
+          filledPrice: 1.0,
+          filledAt: t(10).toISOString(),
+        }),
+      );
+      // B's cumulative (2) is one A's order has NOT recorded, so without the
+      // ownership gate the observation dedupe does not save us: the insert
+      // keys on orderId alone and B's execution lands on A's book.
+      await orders.record(USER_B, {
+        ...fill({
+          orderId: 'SHARED',
+          quantity: 2,
+          filledQuantity: 2,
+          filledPrice: 9.9,
+          filledAt: t(20).toISOString(),
+        }),
+        side: 'sell',
+      });
+
+      const row = prisma.tradeOrders.find((o) => o.id === 'SHARED');
+      expect(row.userId).toBe(USER);
+      expect(row.status).toBe('partially_filled');
+      expect(row.filledPrice).toBe(1.0);
+      expect(row.executedQuantity).toBe(1);
+      // B's fill minted no execution against A's order — the exact
+      // reproduction: the insert keys on orderId alone, so without the
+      // ownership gate it would land on A's book.
+      expect(cumulativesFor('SHARED')).toEqual([1]);
+      const anchorA = (await orders.positionAnchors(USER, [OCC])).get(OCC);
+      expect(anchorA?.quantity).toBe(1);
+      expect((await orders.history(USER)).totalRealizedPnl).toBe(0);
+    });
+
+    it("refuses another user's underlying price on a colliding id", async () => {
+      await orders.recordUnderlyingPrice(
+        USER,
+        fill({ orderId: 'SHARED2', quantity: 1, filledPrice: 1.0 }),
+        600,
+      );
+      await orders.recordUnderlyingPrice(
+        USER_B,
+        fill({ orderId: 'SHARED2', quantity: 1, filledPrice: 1.0 }),
+        999,
+      );
+
+      const row = prisma.tradeOrders.find((o) => o.id === 'SHARED2');
+      expect(row.userId).toBe(USER);
+      expect(row.underlyingPrice).toBe(600);
+      const anchor = (await orders.positionAnchors(USER, [OCC])).get(OCC);
+      expect(anchor?.underlyingEntryPrice).toBe(600);
+    });
+  });
+
   it("stamps the order with the user's current trading mode", async () => {
     const practiceUser = await prisma.user.create({
       data: { email: 'p@example.com', passwordHash: 'h', tradingMode: 'practice' },

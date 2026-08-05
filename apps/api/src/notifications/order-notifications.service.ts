@@ -276,7 +276,7 @@ export class OrderNotificationsService implements OnModuleInit, OnModuleDestroy 
   private async runRetention(now: Date): Promise<void> {
     const leaseName = `push-delivery-retention:${now.toISOString().slice(0, 10)}`;
     const workLeaseExpiresAt = new Date(now.getTime() + 5 * 60_000);
-    let claimed = await this.prisma.scheduledJobLease.updateMany({
+    const claimed = await this.prisma.scheduledJobLease.updateMany({
       where: { name: leaseName, expiresAt: { lt: now } },
       data: { ownerId: this.ownerId, expiresAt: workLeaseExpiresAt },
     });
@@ -285,7 +285,6 @@ export class OrderNotificationsService implements OnModuleInit, OnModuleDestroy 
         await this.prisma.scheduledJobLease.create({
           data: { name: leaseName, ownerId: this.ownerId, expiresAt: workLeaseExpiresAt },
         });
-        claimed = { count: 1 };
       } catch (error) {
         if (isUniqueViolation(error)) return;
         throw error;

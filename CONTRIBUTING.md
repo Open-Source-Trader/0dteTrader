@@ -15,7 +15,8 @@ are scoped for newcomers. Help is especially welcome on:
 > **Risk warning.** This software can place **real orders** against a live brokerage account.
 > Contributions that touch trading, auth, or credential handling are held to a high bar — read
 > [`docs/SECURITY.md`](docs/SECURITY.md) before changing anything in those areas. Always validate
-> against a paper (practice) account first.
+> against a paper (practice) account first. See [`DISCLAIMER.md`](DISCLAIMER.md) for the full
+> risk disclosure and liability terms.
 
 ## Code of Conduct
 

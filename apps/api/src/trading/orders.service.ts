@@ -79,6 +79,35 @@ function isFill(row: TradeOrder): boolean {
   );
 }
 
+/**
+ * Why an incoming event's QUANTITIES cannot be trusted, or null when they
+ * can. Option contracts trade in whole, positive contracts, and a cumulative
+ * above the order's own size is an overfill no broker here reports —
+ * signed-but-malformed data would otherwise poison the average-cost replay
+ * (a NaN in one average corrupts every fill after it). A rejected event is
+ * quarantined whole: no row, no status, no watermark, no execution. A later
+ * well-formed report records normally.
+ *
+ * `filledQuantity: 0` stays legal — it is a real transient poll state,
+ * handled (not booked) downstream. Prices are not judged here: a junk price
+ * only ever refuses the FILL (isFillEvent), because a cancel that happens to
+ * carry a zero price must still record its cancel.
+ */
+function quantityRejection(order: OrderResult): string | null {
+  if (!Number.isInteger(order.quantity) || order.quantity <= 0) {
+    return `order quantity ${order.quantity} is not a positive whole number`;
+  }
+  if (order.filledQuantity !== undefined) {
+    if (!Number.isInteger(order.filledQuantity) || order.filledQuantity < 0) {
+      return `filled quantity ${order.filledQuantity} is not a whole number of contracts`;
+    }
+    if (order.filledQuantity > order.quantity) {
+      return `filled quantity ${order.filledQuantity} exceeds order quantity ${order.quantity}`;
+    }
+  }
+  return null;
+}
+
 /** The isFill test for an incoming event, before it becomes a row. */
 function isFillEvent(order: OrderResult): boolean {
   return (
@@ -571,6 +600,11 @@ export class OrdersService implements OnModuleDestroy {
     order: OrderResult,
     environment?: TradingMode,
   ): Promise<void> {
+    const rejection = quantityRejection(order);
+    if (rejection) {
+      this.logger.warn(`quarantined order event ${order.orderId} (${order.status}): ${rejection}`);
+      return;
+    }
     // Ensure the row exists (native ON CONFLICT under the hood: atomic across
     // instances). Fill fields are deliberately absent from THIS create: they
     // move only in the same statement as the executedQuantity watermark
@@ -735,6 +769,11 @@ export class OrdersService implements OnModuleDestroy {
     order: OrderResult,
     underlyingPrice: number,
   ): Promise<void> {
+    const rejection = quantityRejection(order);
+    if (rejection) {
+      this.logger.warn(`quarantined underlying price for ${order.orderId}: ${rejection}`);
+      return;
+    }
     try {
       // Ensure-exists first, with NO update: the upsert's where is the id
       // alone, and the id is only unique within a brokerage account. An

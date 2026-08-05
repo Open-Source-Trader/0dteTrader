@@ -980,6 +980,53 @@ describe('OrdersService', () => {
     });
 
     it.each([
+      ['NaN', Number.NaN],
+      ['Infinity', Number.POSITIVE_INFINITY],
+      ['negative', -1],
+      ['zero', 0],
+      ['fractional', 1.5],
+    ])('quarantines an event whose order quantity is %s', async (_label, quantity) => {
+      await orders.record(USER, fill({ orderId: 'BADQ', quantity, filledQuantity: undefined }));
+
+      // Nothing at all was recorded — signed-but-malformed data must not
+      // create a row it could later poison.
+      expect(prisma.tradeOrders.find((o) => o.id === 'BADQ')).toBeUndefined();
+      expect(prisma.tradeOrderExecutions.filter((e) => e.orderId === 'BADQ')).toHaveLength(0);
+
+      // A later well-formed report records normally.
+      await orders.record(USER, fill({ orderId: 'BADQ', quantity: 2, filledPrice: 1.0 }));
+      expect(prisma.tradeOrders.find((o) => o.id === 'BADQ').executedQuantity).toBe(2);
+    });
+
+    it.each([
+      ['fractional', 1.5],
+      ['negative', -1],
+      ['NaN', Number.NaN],
+    ])('quarantines an event whose filled quantity is %s', async (_label, filledQuantity) => {
+      await orders.record(USER, fill({ orderId: 'BADF', quantity: 3, filledQuantity }));
+
+      expect(prisma.tradeOrders.find((o) => o.id === 'BADF')).toBeUndefined();
+      expect(prisma.tradeOrderExecutions.filter((e) => e.orderId === 'BADF')).toHaveLength(0);
+    });
+
+    it('quarantines an overfill — cumulative above the order’s own size', async () => {
+      await orders.record(
+        USER,
+        fill({ orderId: 'OVER', quantity: 3, filledQuantity: 5, filledPrice: 1.0 }),
+      );
+
+      expect(prisma.tradeOrders.find((o) => o.id === 'OVER')).toBeUndefined();
+      expect(prisma.tradeOrderExecutions.filter((e) => e.orderId === 'OVER')).toHaveLength(0);
+
+      // The repaired report is not blocked by the quarantined one.
+      await orders.record(
+        USER,
+        fill({ orderId: 'OVER', quantity: 3, filledQuantity: 3, filledPrice: 1.0 }),
+      );
+      expect(prisma.tradeOrders.find((o) => o.id === 'OVER').executedQuantity).toBe(3);
+    });
+
+    it.each([
       ['zero', 0],
       ['negative', -1.5],
     ])('refuses a %s fill price instead of booking it', async (_label, filledPrice) => {

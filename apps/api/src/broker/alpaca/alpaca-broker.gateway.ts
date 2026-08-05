@@ -303,7 +303,7 @@ export class AlpacaBrokerGateway implements BrokerGateway, MarketDataProvider {
     const placed = await this.guard(() => client.trading.orders.submit(input));
     const result: OrderResult = {
       ...toOrderResult(placed),
-      orderId: placed.client_order_id ?? clientOrderId,
+      orderId: placed.clientOrderId ?? clientOrderId,
     };
     this.events.emit(userId, result);
     this.startStatusPoll(userId, client, result);

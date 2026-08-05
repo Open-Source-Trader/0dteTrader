@@ -47,26 +47,26 @@ export interface SdkBar {
 
 export interface SdkOrder {
   id?: string;
-  client_order_id?: string;
+  clientOrderId?: string;
   status?: string;
   symbol?: string;
   side?: string;
   type?: string;
   qty?: string | number;
-  filled_qty?: string | number;
-  filled_avg_price?: string | number | null;
-  limit_price?: string | number | null;
-  submitted_at?: string | number | Date;
-  filled_at?: string | number | Date | null;
+  filledQty?: string | number;
+  filledAvgPrice?: string | number | null;
+  limitPrice?: string | number | null;
+  submittedAt?: string | number | Date;
+  filledAt?: string | number | Date | null;
 }
 
 export interface SdkPosition {
   symbol?: string;
   qty?: string | number;
-  avg_entry_price?: string | number;
-  current_price?: string | number;
-  unrealized_pl?: string | number;
-  asset_class?: string;
+  avgEntryPrice?: string | number;
+  currentPrice?: string | number;
+  unrealizedPl?: string | number;
+  assetClass?: string;
 }
 
 export interface SdkAccount {

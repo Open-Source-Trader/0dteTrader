@@ -9,6 +9,15 @@ import {
 /** A normal, penny-wide 0DTE quote. */
 const quote = { bid: 2.45, ask: 2.47, last: 2.46 };
 
+describe('price ceiling parity', () => {
+  it('pins the shared ceiling at 100,000 — the value the iOS mirror hard-codes', () => {
+    // iOS cannot import the TypeScript constant, so PriceMath.maxOptionPrice
+    // mirrors it (its own test pins the same number). Changing the ceiling
+    // means updating BOTH languages; this failing is the reminder.
+    expect(MAX_LIMIT_PRICE).toBe(100_000);
+  });
+});
+
 describe('resolveLimitPrice', () => {
   it('prices each limit variant off the server quote, not the client', () => {
     expect(resolveLimitPrice('bid', quote)).toBe(2.45);

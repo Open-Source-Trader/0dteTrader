@@ -179,3 +179,14 @@ describe('quotesPending — one readiness matrix for every order type', () => {
     expect(quotesPending(null)).toBe(false);
   });
 });
+
+describe('price ceiling parity', () => {
+  it('typed input, readiness and resolution all share one ceiling', async () => {
+    const { PRICE_MAX } = await import('./priceInput');
+    const { MAX_OPTION_PRICE } = await import('@0dtetrader/shared-types');
+    expect(PRICE_MAX).toBe(MAX_OPTION_PRICE);
+    // The iOS mirror (PriceMath.maxOptionPrice) hard-codes this number;
+    // its own test pins it. Move one, move both.
+    expect(MAX_OPTION_PRICE).toBe(100_000);
+  });
+});

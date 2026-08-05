@@ -69,6 +69,15 @@ final class MidPriceTests: XCTestCase {
         }
     }
 
+    /// Parity with the TypeScript source of truth: MAX_OPTION_PRICE in
+    /// @0dtetrader/shared-types is 100,000, and this mirror (plus
+    /// PlacementGuide.levelMaximum, which derives from it) must move with
+    /// it. This failing is the cross-language reminder.
+    func testMaxOptionPrice_matchesTheSharedContractValue() {
+        XCTAssertEqual(PriceMath.maxOptionPrice, 100_000)
+        XCTAssertEqual(AppPlacementGuide.levelMaximum, PriceMath.maxOptionPrice)
+    }
+
     /// Boundary behavior at the shared option-price ceiling: the exact cap
     /// prices; one tick past it (and absurd magnitudes) return nil.
     func testMidPrice_capBoundaries() {

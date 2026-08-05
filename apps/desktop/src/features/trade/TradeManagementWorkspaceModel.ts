@@ -1,4 +1,5 @@
 import type {
+  AccountSummary,
   ChartOrder,
   ChartOrderKind,
   ChartOrderStatus,
@@ -56,13 +57,24 @@ export function pnlPercent(position: Position): number {
 }
 
 /**
- * Day P&L = unrealized P&L on currently-open positions + realized P&L from
- * fills that closed a position earlier today. `history.totalRealizedPnl` is
- * all-time, so today's closing fills are picked out by `timestamp` here
- * instead — a position closed and reopened (or closed for good) earlier
- * today must still count, even though it no longer appears in `positions`.
+ * Day P&L, preferring the broker's own account equity change
+ * (`accountSummary.dailyPnl` = today's equity minus yesterday's close) over a
+ * local reconstruction — the broker sees every fill (fees, assignment,
+ * trades placed outside this app), so it's authoritative whenever available.
+ *
+ * Falls back to unrealized P&L on open positions + realized P&L from fills
+ * that closed a position earlier today, for brokers with no equity endpoint
+ * (Webull, SnapTrade today). `history.totalRealizedPnl` is all-time, so
+ * today's closing fills are picked out by `timestamp` here instead — a
+ * position closed and reopened (or closed for good) earlier today must
+ * still count, even though it no longer appears in `positions`.
  */
-export function dayPnl(positions: Position[], history: TradeHistoryEntry[] = []): number {
+export function dayPnl(
+  positions: Position[],
+  history: TradeHistoryEntry[] = [],
+  accountSummary: AccountSummary | null = null,
+): number {
+  if (accountSummary !== null) return accountSummary.dailyPnl;
   const unrealized = positions.reduce((sum, position) => sum + position.unrealizedPnl, 0);
   const startOfDay = new Date();
   startOfDay.setHours(0, 0, 0, 0);

@@ -129,6 +129,25 @@ describe('DispatchingBrokerGateway', () => {
     expect(webull.getCandles).not.toHaveBeenCalled();
   });
 
+  it('getAccountSummary forwards to the routed gateway, defaulting to null when unsupported', async () => {
+    provider = 'alpaca';
+    alpaca.getAccountSummary = jest.fn(async () => ({
+      equity: 1000,
+      lastEquity: 1075.97,
+      dailyPnl: -75.97,
+    }));
+    await expect(gw.getAccountSummary('u1')).resolves.toEqual({
+      equity: 1000,
+      lastEquity: 1075.97,
+      dailyPnl: -75.97,
+    });
+
+    // Webull's mock (from makeGateway) has no getAccountSummary at all —
+    // the dispatching gateway must not throw, just report unsupported.
+    provider = 'webull';
+    await expect(gw.getAccountSummary('u2')).resolves.toBeNull();
+  });
+
   describe('provider caching', () => {
     it('reads the DB once and reuses the cached provider across calls', async () => {
       await gw.getQuote('u1', 'SPY');

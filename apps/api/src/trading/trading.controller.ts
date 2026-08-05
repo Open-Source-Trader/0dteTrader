@@ -1,6 +1,12 @@
 import { Body, Controller, Delete, Get, Headers, HttpCode, Param, Post } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
-import { OrderPreview, OrderResult, Position, TradeHistory } from '@0dtetrader/shared-types';
+import {
+  AccountSummary,
+  OrderPreview,
+  OrderResult,
+  Position,
+  TradeHistory,
+} from '@0dtetrader/shared-types';
 import { errors } from '../common/api-exception';
 import { AuthenticatedUser, CurrentUser } from '../common/current-user.decorator';
 import { OrderRequestDto } from './dto/order-request.dto';
@@ -72,5 +78,10 @@ export class TradingController {
   @Get('positions')
   getPositions(@CurrentUser() user: AuthenticatedUser): Promise<Position[]> {
     return this.trading.getPositions(user.userId);
+  }
+
+  @Get('account-summary')
+  getAccountSummary(@CurrentUser() user: AuthenticatedUser): Promise<AccountSummary | null> {
+    return this.trading.getAccountSummary(user.userId);
   }
 }

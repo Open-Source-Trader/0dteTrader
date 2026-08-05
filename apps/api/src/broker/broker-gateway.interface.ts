@@ -1,4 +1,5 @@
 import {
+  AccountSummary,
   Candle,
   CandleRequest,
   OptionContract,
@@ -100,6 +101,14 @@ export interface BrokerGateway {
    * reconcile" rather than an error.
    */
   getRecentOrders?(userId: string, since?: Date): Promise<OrderResult[]>;
+  /**
+   * Broker-reported account equity (current and prior-close), the
+   * authoritative source for today's P&L. Optional: only brokers that expose
+   * a previous-close equity reference implement it (Alpaca today); others
+   * are treated as unsupported and `OrdersService`/clients fall back to a
+   * locally-computed estimate.
+   */
+  getAccountSummary?(userId: string): Promise<AccountSummary | null>;
   /**
    * Drop the cached Webull client/token for the user's current trading mode
    * and mint a fresh access token. Returns the mode it applied to.

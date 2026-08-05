@@ -40,6 +40,7 @@ import { SymbolSpotlight } from '../chart/SymbolSpotlight';
 import { ProfileView } from '../profile/ProfileView';
 import { DesktopTradeTicket } from './DesktopTradeTicket';
 import { FloatingTradeButtons } from './FloatingTradeButtons';
+import { GexHeatmapModal } from '../gexHeatmap/GexHeatmapModal';
 import { TradeManagementWorkspace } from './TradeManagementWorkspace';
 import {
   desktopTradeWorkspaceHeight,
@@ -107,6 +108,7 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
   const [showIndicatorSettings, setShowIndicatorSettings] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
+  const [showGexHeatmap, setShowGexHeatmap] = useState(false);
 
   // 'practice' is only the pre-fetch placeholder; the server value wins.
   const [tradingMode, setTradingMode] = useState<TradingMode>('practice');
@@ -460,6 +462,7 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
       openOrders={trade.openOrders}
       chartOrders={chartOrders.orders}
       history={trade.history}
+      accountSummary={trade.accountSummary}
       workingSymbols={trade.workingSymbols}
       expanded={desktopWorkspaceExpanded}
       onExpandedChange={setDesktopWorkspaceExpanded}
@@ -504,6 +507,7 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
               onToggleLock={toggleLock}
               onShowHistory={() => setShowHistory(true)}
               onShowProfile={() => setShowProfile(true)}
+              onShowGexHeatmap={() => setShowGexHeatmap(true)}
             />
           </div>
 
@@ -845,6 +849,14 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
       ) : null}
       {showHistory ? (
         <HistoryView onDismiss={() => setShowHistory(false)} dense={isDesktopGrid} />
+      ) : null}
+      {showGexHeatmap ? (
+        <GexHeatmapModal
+          symbol={chain.chain?.underlying ?? chain.underlying}
+          spotPrice={chain.underlyingLast ?? chain.chain?.underlyingPrice ?? 0}
+          expirations={chain.chain?.expirations.slice(0, 7) ?? []}
+          onDismiss={() => setShowGexHeatmap(false)}
+        />
       ) : null}
       {showModeConfirmation ? (
         <AlertDialog

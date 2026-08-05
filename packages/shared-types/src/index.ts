@@ -550,6 +550,22 @@ export interface TradeHistory {
   totalRealizedPnl: number;
 }
 
+/**
+ * Broker-reported account equity, the authoritative source for today's P&L —
+ * `equity - lastEquity`, not a client-side replay of locally-known fills.
+ * Only brokers that expose a previous-close equity reference can supply
+ * this (Alpaca); others return null and clients fall back to computing an
+ * estimate from positions and trade history.
+ */
+export interface AccountSummary {
+  /** Current total account equity. */
+  equity: number;
+  /** Equity as of the prior trading day's close. */
+  lastEquity: number;
+  /** `equity - lastEquity`. */
+  dailyPnl: number;
+}
+
 // ---------------------------------------------------------------------------
 // Chart trading (docs/ARCHITECTURE.md — order lines)
 // ---------------------------------------------------------------------------

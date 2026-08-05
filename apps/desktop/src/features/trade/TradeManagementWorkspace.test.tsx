@@ -115,6 +115,7 @@ function renderWorkspace(overrides: Partial<Parameters<typeof TradeManagementWor
       openOrders: [],
       chartOrders: [],
       history: [],
+      accountSummary: null,
       workingSymbols: [],
       expanded: false,
       onExpandedChange: () => undefined,
@@ -190,8 +191,9 @@ describe('moveStopToEntryRequest', () => {
 
 describe('TradeManagementWorkspace helpers', () => {
   it('collapses while flat and expands to resize the chart area', () => {
-    expect(desktopTradeWorkspaceHeight({ expanded: false })).toBe(36);
-    expect(desktopTradeWorkspaceHeight({ expanded: true })).toBe(220);
+    expect(desktopTradeWorkspaceHeight({ expanded: false, hasActivity: false })).toBe(36);
+    expect(desktopTradeWorkspaceHeight({ expanded: false, hasActivity: true })).toBe(124);
+    expect(desktopTradeWorkspaceHeight({ expanded: true, hasActivity: false })).toBe(220);
   });
 
   it('budgets the docked editor row — the footer is fixed-pixel with nothing elastic', () => {
@@ -245,6 +247,12 @@ describe('TradeManagementWorkspace helpers', () => {
     // the null (opening) fill must not bleed into today's figure.
     expect(dayPnl([position], history)).toBe(124);
   });
+
+  it("prefers the broker's own account summary over the local reconstruction", () => {
+    expect(dayPnl([position], [], { equity: 1000, lastEquity: 1075.97, dailyPnl: -75.97 })).toBe(
+      -75.97,
+    );
+  });
 });
 
 describe('TradeManagementWorkspace rendering', () => {
@@ -257,7 +265,7 @@ describe('TradeManagementWorkspace rendering', () => {
     expect(markup).not.toContain('active-position-strip');
   });
 
-  it('shows only the status bar while flat with a position, not an auto-expanded table', () => {
+  it('auto-shows the compact position strip without auto-expanding the full table', () => {
     const markup = renderWorkspace({
       positions: [position],
       chartOrders: [stop],
@@ -265,8 +273,11 @@ describe('TradeManagementWorkspace rendering', () => {
       expanded: false,
     });
 
-    expect(markup).toContain('Positions 1');
-    expect(markup).toContain('Day P&amp;L +$84.00');
+    expect(markup).toContain('active-position-strip');
+    expect(markup).toContain('SPY 729C · Qty 1');
+    expect(markup).toContain('+$84.00 · +56%');
+    expect(markup).toContain('Expiry B/E $730.50');
+    expect(markup).toContain('Stop $1.50');
     expect(markup).not.toContain('<th style="text-align:left">Expiration</th>');
   });
 
@@ -291,12 +302,11 @@ describe('TradeManagementWorkspace rendering', () => {
     const markup = renderWorkspace({
       positions: [position],
       resolveContract: () => contract,
-      expanded: true,
+      expanded: false,
     });
 
-    // Stop and Target columns both fall back to an em dash when there's no
-    // working chart order of that kind for the position.
-    expect(markup.match(/—/g)?.length).toBeGreaterThanOrEqual(2);
+    expect(markup).toContain('Stop —');
+    expect(markup).toContain('Target —');
   });
 
   it('enables stop/target actions once a stop line and entry anchor exist', () => {

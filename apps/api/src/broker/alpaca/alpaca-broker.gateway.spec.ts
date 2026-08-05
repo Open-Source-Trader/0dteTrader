@@ -147,6 +147,12 @@ function makeFakeClient() {
           ];
         },
       },
+      account: {
+        getAccount: async () => {
+          calls.push({ method: 'getAccount' });
+          return { equity: '1000', lastEquity: '1075.97' };
+        },
+      },
     },
   };
   return { client, calls };
@@ -338,5 +344,11 @@ describe('AlpacaBrokerGateway (SDK-backed)', () => {
     } finally {
       jest.useRealTimers();
     }
+  });
+
+  it('getAccountSummary computes daily P&L from equity minus prior-close equity', async () => {
+    env = buildGateway();
+    const summary = await env.gateway.getAccountSummary('user-1');
+    expect(summary).toEqual({ equity: 1000, lastEquity: 1075.97, dailyPnl: -75.97 });
   });
 });

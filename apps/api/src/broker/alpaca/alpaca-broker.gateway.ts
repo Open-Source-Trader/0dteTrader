@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import {
+  AccountSummary,
   Candle,
   CandleInterval,
   CandleRequest,
@@ -39,7 +40,14 @@ import {
   SdkOrderInput,
   SdkStockSnapshot,
 } from './alpaca-sdk.types';
-import { toCandle, toOptionContract, toOrderResult, toPosition, toQuote } from './alpaca-mappers';
+import {
+  toAccountSummary,
+  toCandle,
+  toOptionContract,
+  toOrderResult,
+  toPosition,
+  toQuote,
+} from './alpaca-mappers';
 
 interface ResolvedContract {
   contractSymbol: string;
@@ -346,6 +354,14 @@ export class AlpacaBrokerGateway implements BrokerGateway, MarketDataProvider {
       }),
     );
     return raw.map((o) => toOrderResult(o));
+  }
+
+  /** Broker-reported equity (current and prior-close) — the authoritative
+   *  source for today's account P&L. */
+  async getAccountSummary(userId: string): Promise<AccountSummary> {
+    const client = await this.clientFor(userId);
+    const account = await this.guard(() => client.trading.account.getAccount());
+    return toAccountSummary(account);
   }
 
   async reauthenticate(userId: string): Promise<TradingMode> {

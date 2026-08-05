@@ -507,7 +507,13 @@ describe('TradeStore.refreshTradingData — concurrent calls coalesce', () => {
     );
     const openOrders = vi.fn(async () => []);
     const orderHistory = vi.fn(async () => ({ entries: [], totalRealizedPnl: 0 }));
-    const apiClient = { positions, openOrders, orderHistory } as unknown as ApiClient;
+    const accountSummary = vi.fn(async () => null);
+    const apiClient = {
+      positions,
+      openOrders,
+      orderHistory,
+      accountSummary,
+    } as unknown as ApiClient;
     const store = new TradeStore(apiClient);
 
     // Simulates the submitted + terminal-status WS pushes both landing while
@@ -587,7 +593,13 @@ describe('TradeStore.refreshTradingData — positions and open orders run in par
     );
     const openOrders = vi.fn(async () => []);
     const orderHistory = vi.fn(async () => ({ entries: [], totalRealizedPnl: 0 }));
-    const apiClient = { positions, openOrders, orderHistory } as unknown as ApiClient;
+    const accountSummary = vi.fn(async () => null);
+    const apiClient = {
+      positions,
+      openOrders,
+      orderHistory,
+      accountSummary,
+    } as unknown as ApiClient;
     const store = new TradeStore(apiClient);
 
     const refresh = store.refreshTradingData();
@@ -605,7 +617,13 @@ describe('TradeStore.refreshTradingData — positions and open orders run in par
     });
     const openOrders = vi.fn(async () => []);
     const orderHistory = vi.fn(async () => ({ entries: [], totalRealizedPnl: 0 }));
-    const apiClient = { positions, openOrders, orderHistory } as unknown as ApiClient;
+    const accountSummary = vi.fn(async () => null);
+    const apiClient = {
+      positions,
+      openOrders,
+      orderHistory,
+      accountSummary,
+    } as unknown as ApiClient;
     const store = new TradeStore(apiClient);
 
     await store.refreshTradingData();
@@ -762,7 +780,13 @@ describe('TradeStore broker polling', () => {
       const positions = vi.fn(async () => []);
       const openOrders = vi.fn(async () => []);
       const orderHistory = vi.fn(async () => ({ entries: [], totalRealizedPnl: 0 }));
-      const apiClient = { positions, openOrders, orderHistory } as unknown as ApiClient;
+      const accountSummary = vi.fn(async () => null);
+      const apiClient = {
+        positions,
+        openOrders,
+        orderHistory,
+        accountSummary,
+      } as unknown as ApiClient;
       const store = new TradeStore(apiClient);
 
       store.startPolling(60_000);
@@ -788,7 +812,13 @@ describe('TradeStore broker polling', () => {
       const positions = vi.fn(async () => []);
       const openOrders = vi.fn(async () => []);
       const orderHistory = vi.fn(async () => ({ entries: [], totalRealizedPnl: 0 }));
-      const apiClient = { positions, openOrders, orderHistory } as unknown as ApiClient;
+      const accountSummary = vi.fn(async () => null);
+      const apiClient = {
+        positions,
+        openOrders,
+        orderHistory,
+        accountSummary,
+      } as unknown as ApiClient;
       const store = new TradeStore(apiClient);
 
       store.startPolling(60_000);

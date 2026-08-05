@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import type {
+  AccountSummary,
   ChartOrder,
   ChartOrderDraft,
   ChartOrderType,
@@ -42,6 +43,8 @@ interface TradeManagementWorkspaceProps {
   chartOrders: ChartOrder[];
   /** Newest first. Powers the Recent Trades tab and today's realized P&L. */
   history: TradeHistoryEntry[];
+  /** Broker-reported equity/daily P&L; null falls back to a local estimate. */
+  accountSummary: AccountSummary | null;
   workingSymbols: string[];
   expanded: boolean;
   onExpandedChange: (expanded: boolean) => void;
@@ -153,6 +156,7 @@ export function TradeManagementWorkspace({
   openOrders,
   chartOrders,
   history,
+  accountSummary,
   workingSymbols,
   expanded,
   onExpandedChange,
@@ -197,7 +201,7 @@ export function TradeManagementWorkspace({
   );
   const activePosition = positions[0] ?? null;
   const activeMeta = activePosition ? metas.get(activePosition.symbol) : null;
-  const totalDayPnl = dayPnl(positions, history);
+  const totalDayPnl = dayPnl(positions, history, accountSummary);
   const activeWorking = activePosition ? workingSymbols.includes(activePosition.symbol) : false;
   // Why a Set stop/target could not create a leg right now; null means it can.
   let legActionBlockedReason: string | null = null;

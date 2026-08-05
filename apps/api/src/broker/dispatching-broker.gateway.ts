@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import {
+  AccountSummary,
   Candle,
   CandleRequest,
   OptionsChain,
@@ -115,6 +116,11 @@ export class DispatchingBrokerGateway implements BrokerGateway {
   async getRecentOrders(userId: string, since?: Date): Promise<OrderResult[]> {
     const gateway = await this.gatewayFor(userId);
     return (await gateway.getRecentOrders?.(userId, since)) ?? [];
+  }
+
+  async getAccountSummary(userId: string): Promise<AccountSummary | null> {
+    const gateway = await this.gatewayFor(userId);
+    return (await gateway.getAccountSummary?.(userId)) ?? null;
   }
 
   async reauthenticate(userId: string): Promise<TradingMode> {

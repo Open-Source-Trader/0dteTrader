@@ -1,6 +1,7 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { Prisma, type User } from '@prisma/client';
 import {
+  AccountSummary,
   OptionContract,
   OrderPreview,
   OrderRequest,
@@ -194,6 +195,12 @@ export class TradingService {
 
   getOpenOrders(userId: string): Promise<OrderResult[]> {
     return this.gateway.getOpenOrders(userId);
+  }
+
+  /** Broker-reported account equity, when the broker exposes one — null for
+   *  gateways with no previous-close reference (Webull, SnapTrade today). */
+  getAccountSummary(userId: string): Promise<AccountSummary | null> {
+    return this.gateway.getAccountSummary?.(userId) ?? Promise.resolve(null);
   }
 
   /**

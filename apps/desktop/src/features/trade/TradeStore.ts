@@ -1,4 +1,5 @@
 import type {
+  AccountSummary,
   OptionContract,
   OptionType,
   OrderPreview,
@@ -59,6 +60,9 @@ interface TradeStoreState {
   workingSymbols: string[];
   /** Newest first; refreshed alongside positions/orders. */
   history: TradeHistoryEntry[];
+  /** Broker-reported equity/daily P&L; null when the broker exposes none
+   *  (Webull, SnapTrade today) or before the first successful fetch. */
+  accountSummary: AccountSummary | null;
 
   armedTicket: ArmedOrderTicket | null;
   preview: OrderPreview | null;
@@ -124,6 +128,7 @@ export class TradeStore extends Store<TradeStoreState> {
       openOrders: [],
       workingSymbols: [],
       history: [],
+      accountSummary: null,
       armedTicket: null,
       preview: null,
       isPreviewLoading: false,
@@ -554,10 +559,11 @@ export class TradeStore extends Store<TradeStoreState> {
   }
 
   private async runRefresh(): Promise<void> {
-    const [positions, openOrders, history] = await Promise.allSettled([
+    const [positions, openOrders, history, accountSummary] = await Promise.allSettled([
       this.apiClient.positions(),
       this.apiClient.openOrders(),
       this.apiClient.orderHistory(),
+      this.apiClient.accountSummary(),
     ]);
     if (positions.status === 'fulfilled') {
       this.set({ positions: positions.value });
@@ -572,8 +578,11 @@ export class TradeStore extends Store<TradeStoreState> {
     if (history.status === 'fulfilled') {
       this.set({ history: history.value.entries });
     }
-    // History failures don't toast: it's supplementary (Recent Trades, Day
-    // P&L's realized component) and a broker hiccup already surfaced a toast
+    if (accountSummary.status === 'fulfilled') {
+      this.set({ accountSummary: accountSummary.value });
+    }
+    // History/account-summary failures don't toast: they're supplementary
+    // (Recent Trades, Day P&L) and a broker hiccup already surfaced a toast
     // from the positions/orders calls above.
   }
 

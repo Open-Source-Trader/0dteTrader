@@ -20,6 +20,7 @@ import { PrismaClient } from '@prisma/client';
  *   brokerApiToken:   findUnique, upsert, deleteMany
  *   brokerConnection: findUnique, findMany, updateMany, upsert, delete, deleteMany
  *   deviceToken:      findMany, upsert, deleteMany
+ *   pushDelivery:     create, deleteMany
  */
 @Injectable()
 export class PrismaService extends PrismaClient implements OnModuleInit, OnModuleDestroy {

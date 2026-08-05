@@ -8,8 +8,10 @@ import { randomUUID } from 'node:crypto';
  *   - unique constraints on user.email, refreshToken.tokenHash,
  *     webullCredential.(userId, environment),
  *     brokerCredential.(userId, provider, environment),
- *     orderAudit.(userId, idempotencyKey) and
- *     tradeOrderExecution.(orderId, cumulative)
+ *     orderAudit.(userId, idempotencyKey),
+ *     tradeOrderExecution.(orderId, cumulative) and
+ *     pushDelivery.(userId, key) — the one whose columns are both NOT NULL,
+ *     so it has no nullable-unique semantics to emulate
  *     (violations throw a P2002-coded error like the real client)
  *   - nullable unique column semantics for orderAudit.idempotencyKey and
  *     tradeOrderExecution.cumulative
@@ -89,6 +91,7 @@ export class InMemoryPrismaService {
   readonly brokerApiTokens: any[] = [];
   readonly brokerConnections: any[] = [];
   readonly deviceTokens: any[] = [];
+  readonly pushDeliveries: any[] = [];
 
   readonly user = {
     findUnique: async ({ where }: any) => {
@@ -626,6 +629,26 @@ export class InMemoryPrismaService {
     },
   };
 
+  readonly pushDelivery = {
+    create: async ({ data }: any) => {
+      // `key` is NOT NULL in the schema, so — unlike orderAudit.idempotencyKey
+      // and tradeOrderExecution.cumulative — there is no null-skip here.
+      if (this.pushDeliveries.some((d) => d.userId === data.userId && d.key === data.key)) {
+        throw p2002('userId, key');
+      }
+      const row = { id: randomUUID(), createdAt: new Date(), ...data };
+      this.pushDeliveries.push(row);
+      return row;
+    },
+    deleteMany: async ({ where }: any = {}) => {
+      const keep = this.pushDeliveries.filter((d) => !matches(d, where));
+      const count = this.pushDeliveries.length - keep.length;
+      this.pushDeliveries.length = 0;
+      this.pushDeliveries.push(...keep);
+      return { count };
+    },
+  };
+
   // Prisma lifecycle no-ops.
   async $connect(): Promise<void> {}
   async $disconnect(): Promise<void> {}
@@ -647,6 +670,7 @@ export class InMemoryPrismaService {
     this.brokerApiTokens.length = 0;
     this.brokerConnections.length = 0;
     this.deviceTokens.length = 0;
+    this.pushDeliveries.length = 0;
   }
 
   /** Test helper: flip the kill switch for a user. */

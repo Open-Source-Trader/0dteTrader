@@ -1,6 +1,7 @@
 import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import { Subscription } from 'rxjs';
 import { ChartOrder, OrderResult, OrderStatus } from '@0dtetrader/shared-types';
+import { isUniqueViolation } from '../common/api-exception';
 import { OrderEventsService } from '../broker/order-events.service';
 import { ChartOrderEventsService } from '../chart-orders/chart-order-events.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -13,10 +14,19 @@ const TERMINAL_ORDER_STATUSES = new Set<OrderStatus>(['filled', 'rejected', 'can
  * Pushes order outcomes to the user's registered devices, subscribing to the
  * same in-process buses the WebSocket gateway and OrdersService already ride.
  *
- * Multi-instance note: these buses do not cross processes — but the instance
- * that runs the broker status poll (or holds the chart-order watcher lease) is
- * the one that emits the event, so each event pushes exactly once today. If
- * events ever move to a shared bus, this subscriber needs a dedupe story.
+ * Those buses do not cross processes, and the same outcome legitimately
+ * reaches more than one of them: a SnapTrade fill arrives as two webhook
+ * kinds load-balanced across instances (and SnapTrade retries a webhook it
+ * thinks was lost), and a cancel served by any instance emits a synthetic
+ * terminal status while the placing instance's poll emits its own. Delivery
+ * is therefore deduped in the database — an insert-to-claim on (userId, key)
+ * before the send, keyed only on what every emitter reports identically.
+ *
+ * The claim is per user+event, not per device token, so a device whose send
+ * failed is not retried unless NO device took the push. That is the intended
+ * trade: push is not the system of record (the fill is persisted regardless,
+ * and the WebSocket stream carries the same update), while a duplicate "Order
+ * filled" seconds apart reads as two fills and can prompt a wrong trade.
  */
 @Injectable()
 export class OrderNotificationsService implements OnModuleDestroy {
@@ -60,6 +70,12 @@ export class OrderNotificationsService implements OnModuleDestroy {
     const price = order.filledPrice !== undefined ? ` @ ${order.filledPrice}` : '';
     await this.notify(
       userId,
+      // SnapTrade can report a trade update with no brokerage order id (it
+      // maps to ''), which is no identity to dedupe on. Push it unkeyed
+      // rather than claiming `order::filled`, which one such event would
+      // hold forever and use to suppress every later id-less fill for this
+      // user. At worst that fill is announced twice.
+      order.orderId === '' ? null : `order:${order.orderId}:${order.status}`,
       titles[order.status] as string,
       `${order.side.toUpperCase()} ${order.quantity} ${order.contractSymbol}${price}`,
       async () => {
@@ -76,6 +92,11 @@ export class OrderNotificationsService implements OnModuleDestroy {
     const title = order.status === 'triggered' ? 'Chart order fired' : 'Chart order failed';
     await this.notify(
       userId,
+      // A line's fire is already claimed in the database before it emits, so
+      // this key is for uniformity and for same-instance redelivery rather
+      // than a reachable cross-instance duplicate. `triggered` then `failed`
+      // are two genuinely different alerts, which is why status is in it.
+      `chartorder:${order.id}:${order.status}`,
       title,
       `${order.side.toUpperCase()} ${order.quantity} ${order.contractSymbol} — ` +
         `${order.underlying} crossed ${order.triggerPrice}`,
@@ -88,6 +109,9 @@ export class OrderNotificationsService implements OnModuleDestroy {
 
   private async notify(
     userId: string,
+    /** Stable identity of the notifiable event, unique per user. Null when
+     *  the event carries no id to key on — see handleOrderUpdate. */
+    key: string | null,
     title: string,
     body: string,
     /** The environment stamped on the persisted order — immutable, unlike the
@@ -97,6 +121,18 @@ export class OrderNotificationsService implements OnModuleDestroy {
   ): Promise<void> {
     const tokens = await this.devices.listForUser(userId);
     if (tokens.length === 0) return;
+    // Claimed after the no-devices check, so a fill that arrives before the
+    // user has registered anything does not claim a key it never delivered
+    // and then suppress the redelivery that could have.
+    let claimId: string | null = null;
+    if (key !== null) {
+      try {
+        claimId = (await this.prisma.pushDelivery.create({ data: { userId, key } })).id;
+      } catch (err) {
+        if (isUniqueViolation(err)) return;
+        throw err;
+      }
+    }
     let environment = await recordedEnvironment();
     if (environment === null) {
       // The row may not be written yet (this subscriber and the persister ride
@@ -105,15 +141,28 @@ export class OrderNotificationsService implements OnModuleDestroy {
       environment = user?.tradingMode === 'practice' ? 'practice' : 'live';
     }
     const fullTitle = environment === 'practice' ? `PRACTICE · ${title}` : title;
+    let delivered = false;
+    let retryable = false;
     for (const device of tokens) {
       const result = await this.apns.send(device.token, { title: fullTitle, body });
-      if (isDeadToken(result)) {
+      if (result.status === 200) {
+        delivered = true;
+      } else if (isDeadToken(result)) {
         await this.devices.prune(device.token);
-      } else if (result.status !== 200) {
+      } else {
+        retryable = true;
         this.logger.warn(
           `APNs send failed (${result.status}${result.reason ? ` ${result.reason}` : ''})`,
         );
       }
+    }
+    // Nothing reached a device and the failure was not "this token is dead":
+    // release the claim so the other emitter's next report — or the webhook
+    // retry — is allowed to try again. Without this the dedupe would turn the
+    // very race it exists to fix into a missed alert. Deliberately kept on
+    // PARTIAL success: a device that already showed it must not show it twice.
+    if (claimId !== null && !delivered && retryable) {
+      await this.prisma.pushDelivery.deleteMany({ where: { id: claimId } });
     }
   }
 }

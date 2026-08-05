@@ -39,6 +39,7 @@ model User {
   tradeOrders     TradeOrder[]
   chartOrders     ChartOrder[]
   deviceTokens    DeviceToken[]
+  pushDeliveries  PushDelivery[]
 
   @@map("users")
 }
@@ -343,6 +344,24 @@ model DeviceToken {
 
   @@index([userId])
   @@map("device_tokens")
+}
+
+// One row per push already claimed for a (user, event). Written BEFORE the
+// APNs send: the insert IS the claim, and a unique violation means another
+// API instance — or an earlier delivery of the same broker event — already
+// pushed it. `key` is built only from fields every emitter reports
+// identically (the order's id and its terminal status), never from the
+// price, quantity or timestamps, which differ between a poller's
+// placement-derived view and a webhook's and would defeat the dedupe.
+model PushDelivery {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @db.Uuid
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  key       String
+  createdAt DateTime @default(now())
+
+  @@unique([userId, key])
+  @@map("push_deliveries")
 }
 
 model ScheduledJobLease {

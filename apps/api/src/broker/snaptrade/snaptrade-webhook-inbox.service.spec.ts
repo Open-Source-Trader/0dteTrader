@@ -30,6 +30,8 @@ describe('SnapTradeWebhookInboxService', () => {
     expect(prisma.webhookInboxRows).toHaveLength(1);
     expect(prisma.webhookInboxRows[0].payload).toEqual(input().payload);
     expect(prisma.webhookInboxRows[0].status).toBe('pending');
+    await expect(service.exists(input().webhookId)).resolves.toBe(true);
+    await expect(service.exists('unseen')).resolves.toBe(false);
   });
 
   it('lets two instances race while exactly one processor owns the lease', async () => {
@@ -81,5 +83,62 @@ describe('SnapTradeWebhookInboxService', () => {
       failureStage: 'dispatch',
       lastError: 'database unavailable',
     });
+  });
+
+  it('dead-letters a poison webhook after the bounded retry budget', async () => {
+    const process = jest.fn(async () => Promise.reject(new Error('ambiguous account scope')));
+    const service = new SnapTradeWebhookInboxService(
+      prisma as never,
+      { process } as unknown as SnapTradeWebhookProcessorService,
+    );
+    await service.enqueue(input());
+    const firstAttemptAt = prisma.webhookInboxRows[0].nextAttemptAt.getTime() + 1;
+
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      await service.processDue(new Date(firstAttemptAt + attempt * 60 * 60_000));
+    }
+
+    expect(process).toHaveBeenCalledTimes(8);
+    expect(prisma.webhookInboxRows[0]).toMatchObject({
+      status: 'dead',
+      attempts: 8,
+      failureStage: 'dispatch',
+      lastError: 'ambiguous account scope',
+    });
+  });
+
+  it('renews the lease while a slow processor is still in flight', async () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-08-05T12:00:00Z'));
+    let release: (() => void) | undefined;
+    const process = jest.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+        }),
+    );
+    const service = new SnapTradeWebhookInboxService(
+      prisma as never,
+      { process } as unknown as SnapTradeWebhookProcessorService,
+    );
+    try {
+      await service.enqueue(input());
+      const draining = service.processDue();
+      for (let turn = 0; turn < 10 && process.mock.calls.length === 0; turn += 1) {
+        await Promise.resolve();
+      }
+      expect(process).toHaveBeenCalledTimes(1);
+      const firstExpiry = prisma.webhookInboxRows[0].leaseExpiresAt.getTime();
+
+      await jest.advanceTimersByTimeAsync(10_001);
+
+      expect(prisma.webhookInboxRows[0].leaseExpiresAt.getTime()).toBeGreaterThan(firstExpiry);
+      release?.();
+      await draining;
+      expect(prisma.webhookInboxRows[0].status).toBe('processed');
+    } finally {
+      release?.();
+      jest.useRealTimers();
+    }
   });
 });

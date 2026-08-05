@@ -1,14 +1,14 @@
-# SnapTrade Integration — 0dteTrader
+# SnapTrade Integration — Historical Design Record
 
-> **Status:** Planning. Not yet implemented. Companion tracking file:
-> `docs/plans/snaptrade-provider-plan.md`.
+> **Status:** Implemented. This document preserves the original design proposal and is not an
+> operator runbook. Its proposed Commercial/multi-user credential model was superseded before
+> implementation: the shipped application uses **per-user SnapTrade Personal API credentials**
+> (`clientId` + `consumerKey`) stored through the same encrypted, environment-scoped credential
+> boundary as the other brokers. It does not mint or share server-owned SnapTrade users.
 >
-> **Confirmed scope (2026-07-20):** SnapTrade owns **trade execution + account data**
-> (order placement, cancel, positions, open orders, order-status webhooks) for the user's
-> _connected brokerage_. Market data (candles, quotes, options chain + Greeks) **stays on the
-> existing Webull + Tradier layers**. Auth model: **Commercial / multi-user** — each app user
-> gets a SnapTrade user (`userId` + `userSecret`) minted by our server, then connects their own
-> brokerage through SnapTrade's OAuth Connection Portal.
+> For current behavior, use `docs/API-SPEC.md` and the implementation under
+> `apps/api/src/broker/snaptrade/`. Any Commercial-mode flow described below is historical and
+> must not be used to configure a deployment.
 
 ## 1. What SnapTrade is (and isn't)
 

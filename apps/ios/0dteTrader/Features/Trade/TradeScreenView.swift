@@ -225,7 +225,6 @@ struct TradeScreenView: View {
             tradeViewModel.optionContractResolver = { symbol in
                 chainViewModel.chain?.contracts.first { $0.symbol == symbol }
             }
-            tradeViewModel.isSocketConnected = { container.quoteSocket.connectionState == .connected }
             // CURR mode filters the chain's menus to held contracts.
             chainViewModel.positionsProvider = { tradeViewModel.positions }
             tradeViewModel.toastPolicy = { settingsStore.toastsEnabled }
@@ -242,15 +241,17 @@ struct TradeScreenView: View {
             chartTrading.onFlattenConfirmed = { position in
                 Task { await tradeViewModel.flatten(position) }
             }
-            // Per-message delivery: an OCO fire pushes two updates back-to-back
-            // and both must land — see QuoteSocketClient.onChartOrder.
-            // Pushes that landed while the socket was down are gone; re-read on
-            // the way back rather than drawing a bracket that already fired.
+            // Per-message delivery: rapid updates must not coalesce in a
+            // single @Published slot. Re-read after replay catch-up as a cheap
+            // consistency check; refresh calls coalesce with these callbacks.
             container.quoteSocket.onReconnected = { [weak chartOrdersModel, weak tradeViewModel] in
                 Task {
                     await chartOrdersModel?.load()
                     await tradeViewModel?.refreshTradingData()
                 }
+            }
+            container.quoteSocket.onOrderUpdate = { [weak tradeViewModel] update in
+                tradeViewModel?.handleOrderUpdate(update)
             }
             container.quoteSocket.onChartOrder = { [weak chartOrdersModel, weak tradeViewModel] order in
                 chartOrdersModel?.applyServerUpdate(order)
@@ -283,11 +284,6 @@ struct TradeScreenView: View {
             // the symbol, which covers a strike change, an expiration change
             // and AUTO repicking alike.
             tradeViewModel.clearCustomLimitPrice()
-        }
-        .onChange(of: container.quoteSocket.lastOrderUpdate) { _, update in
-            if let update {
-                tradeViewModel.handleOrderUpdate(update)
-            }
         }
         .onChange(of: chartViewModel.alertNotice) { _, notice in
             if let notice {

@@ -5,6 +5,7 @@ import { StubBrokerGateway } from '../../test/stub-broker.gateway';
 import { BrokerGateway } from '../broker/broker-gateway.interface';
 import { OrderEventsService } from '../broker/order-events.service';
 import { optionExpirations, optionSettlementAt } from '../broker/expiration-calendar';
+import { brokerErrors } from '../common/broker-error';
 import { OrdersService } from '../trading/orders.service';
 import { TradingService } from '../trading/trading.service';
 import { ChartOrderEventsService } from './chart-order-events.service';
@@ -72,15 +73,17 @@ describe('ChartOrderWatcherService', () => {
   beforeEach(async () => {
     prisma = new InMemoryPrismaService();
     gateway = new StubBrokerGateway();
+    const orderEvents = new OrderEventsService();
     orders = new OrdersService(
       prisma as unknown as ConstructorParameters<typeof OrdersService>[0],
-      new OrderEventsService(),
+      orderEvents,
       gateway as BrokerGateway,
     );
     trading = new TradingService(
       prisma as unknown as ConstructorParameters<typeof TradingService>[0],
       gateway as BrokerGateway,
       orders,
+      orderEvents,
     );
     events = new ChartOrderEventsService();
     chartOrders = new ChartOrdersService(
@@ -314,7 +317,7 @@ describe('ChartOrderWatcherService', () => {
 
     it('marks a rejected fire failed with the reason, instead of losing the line', async () => {
       const order = await chartOrders.create(userId, draft({ triggerPrice: 98 }));
-      gateway.placeError = new Error('insufficient buying power');
+      gateway.placeError = brokerErrors.insufficientBuyingPower('insufficient buying power');
 
       gateway.price = 90;
       await watcher.tick(IN_SESSION);

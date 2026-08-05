@@ -303,6 +303,12 @@ export class StreamGateway implements OnGatewayConnection, OnGatewayDisconnect, 
         // the current tail instead of replaying the user's entire lifetime of
         // events (and re-firing historical desktop notifications).
         const baseline = await this.eventTransport.latestSequence(userId);
+        // Subscribe/buffering starts before this query, but another instance's
+        // committed row may not have reached this process's polling Subject
+        // yet. Force a transport drain before inspecting the buffer so a row
+        // included in `baseline` cannot be silently checkpointed and dropped.
+        await this.eventTransport.pollOnce();
+        if (this.clients.get(client) !== state) return;
         // Events committed while the baseline query was in flight are also
         // queued by the live subscription. Keep the baseline immediately
         // before the first such event so none is mistaken for old history.

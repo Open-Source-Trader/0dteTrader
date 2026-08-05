@@ -18,6 +18,7 @@ import { Sheet } from '../../design/components/Sheet';
 import { Spinner } from '../../design/components/Spinner';
 import { Toggle } from '../../design/components/Toggle';
 import { CheckCircleFillIcon, WarningFillIcon } from '../../design/icons';
+import { LegalMarkdown } from '../legal/LegalMarkdown';
 import { ProfileStore } from './ProfileStore';
 import { ProfileStoreProvider } from './ProfileStoreContext';
 import { useProfileStore } from './useProfileStore';
@@ -125,20 +126,76 @@ function DiscordAndLegalSection({ onAccountDeleted }: { onAccountDeleted: () => 
   const [deleteEmail, setDeleteEmail] = useState('');
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [discordLoadFailed, setDiscordLoadFailed] = useState(false);
+  const [legalLoadFailed, setLegalLoadFailed] = useState(false);
 
   useEffect(() => {
-    void Promise.all([container.apiClient.discordSettings(), container.apiClient.legalStatus()])
-      .then(([discordSettings, legalStatus]) => {
-        setDiscord(discordSettings);
-        setLegal(legalStatus);
+    let cancelled = false;
+    void container.apiClient
+      .discordSettings()
+      .then((value) => {
+        if (cancelled) return;
+        setDiscord(value);
+        setDiscordLoadFailed(false);
       })
-      .catch((error) => setMessage(error instanceof Error ? error.message : String(error)));
+      .catch((error) => {
+        if (cancelled) return;
+        setDiscordLoadFailed(true);
+        setMessage(error instanceof Error ? error.message : String(error));
+      });
+    void container.apiClient
+      .legalStatus()
+      .then((value) => {
+        if (cancelled) return;
+        setLegal(value);
+        setLegalLoadFailed(false);
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        setLegalLoadFailed(true);
+        setMessage(error instanceof Error ? error.message : String(error));
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [container]);
+
+  const reloadDiscord = async () => {
+    setBusy(true);
+    setMessage(null);
+    try {
+      setDiscord(await container.apiClient.discordSettings());
+      setDiscordLoadFailed(false);
+    } catch (error) {
+      setDiscordLoadFailed(true);
+      setMessage(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const reloadLegalStatus = async () => {
+    setBusy(true);
+    setMessage(null);
+    try {
+      setLegal(await container.apiClient.legalStatus());
+      setLegalLoadFailed(false);
+    } catch (error) {
+      setLegalLoadFailed(true);
+      setMessage(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const openDocument = async (slug: LegalDocumentSlug) => {
     setBusy(true);
+    setMessage(null);
+    setDocument(null);
     try {
       setDocument(await container.apiClient.legalDocument(slug));
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : String(error));
     } finally {
       setBusy(false);
     }
@@ -149,6 +206,15 @@ function DiscordAndLegalSection({ onAccountDeleted }: { onAccountDeleted: () => 
       <div className="grouped-section">
         <div className="section-header">Discord</div>
         <div className="section-card">
+          {discordLoadFailed ? (
+            <button
+              className="grouped-row button-row"
+              disabled={busy}
+              onClick={() => void reloadDiscord()}
+            >
+              Retry Loading Discord Settings
+            </button>
+          ) : null}
           <label className="grouped-row">
             <span>Webhook URL</span>
             <input
@@ -225,9 +291,19 @@ function DiscordAndLegalSection({ onAccountDeleted }: { onAccountDeleted: () => 
       <div className="grouped-section">
         <div className="section-header">About & Legal</div>
         <div className="section-card">
+          <div className="grouped-row">
+            <span>Version</span>
+            <span className="row-value">
+              {__APP_VERSION__} ({__BUILD_IDENTIFIER__.slice(0, 12)})
+            </span>
+          </div>
           {legal?.documents.map((item) => (
             <div className="grouped-row" key={item.slug}>
-              <button className="inline-button" onClick={() => void openDocument(item.slug)}>
+              <button
+                className="inline-button"
+                disabled={busy}
+                onClick={() => void openDocument(item.slug)}
+              >
                 {item.title}
               </button>
               {item.requiresAcceptance &&
@@ -236,6 +312,7 @@ function DiscordAndLegalSection({ onAccountDeleted }: { onAccountDeleted: () => 
                 ) : (
                   <button
                     className="inline-button row-value"
+                    disabled={busy}
                     onClick={() => void openDocument(item.slug)}
                   >
                     Review & accept
@@ -243,23 +320,39 @@ function DiscordAndLegalSection({ onAccountDeleted }: { onAccountDeleted: () => 
                 ))}
             </div>
           ))}
+          {legalLoadFailed ? (
+            <button
+              className="grouped-row button-row"
+              disabled={busy}
+              onClick={() => void reloadLegalStatus()}
+            >
+              Retry Loading Legal Documents
+            </button>
+          ) : null}
           {document ? (
             <div className="grouped-row legal-document" role="region">
               <div>
                 <strong>{document.title}</strong>
-                <div style={{ whiteSpace: 'pre-wrap', marginTop: 8 }}>{document.markdown}</div>
+                <LegalMarkdown markdown={document.markdown} style={{ marginTop: 8 }} />
                 {document.requiresAcceptance &&
                 !legal?.documents.find((item) => item.slug === document.slug)?.accepted ? (
                   <button
                     className="inline-button"
-                    onClick={() =>
+                    disabled={busy}
+                    onClick={() => {
+                      setBusy(true);
+                      setMessage(null);
                       void container.apiClient
                         .acceptLegal(document.slug as 'terms' | 'risk', document.version)
                         .then((value) => {
                           setLegal(value);
                           setMessage(`${document.title} accepted.`);
                         })
-                    }
+                        .catch((error) =>
+                          setMessage(error instanceof Error ? error.message : String(error)),
+                        )
+                        .finally(() => setBusy(false));
+                    }}
                   >
                     Accept {document.title}
                   </button>

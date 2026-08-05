@@ -13,10 +13,13 @@ import {
   WebullAccount,
 } from '@0dtetrader/shared-types';
 import { PrismaService } from '../prisma/prisma.service';
-import { BrokerGateway, ResolvedContractHint } from './broker-gateway.interface';
-
-/** How long a resolved provider is trusted before re-reading it from the DB. */
-const PROVIDER_CACHE_TTL_MS = 30_000;
+import { brokerErrors } from '../common/broker-error';
+import {
+  BrokerExecutionScope,
+  BrokerGateway,
+  RecoveredOrderResult,
+  ResolvedContractHint,
+} from './broker-gateway.interface';
 
 /**
  * Provider dispatch seam. Routes every call to the user's selected trading
@@ -26,19 +29,6 @@ const PROVIDER_CACHE_TTL_MS = 30_000;
  */
 @Injectable()
 export class DispatchingBrokerGateway implements BrokerGateway {
-  /**
-   * Every call (quote streaming, the 1s order-status poll, ...) otherwise hit
-   * Prisma just to learn which provider a user is on — a value that changes
-   * only through a deliberate Profile action. Cached per user with a short TTL
-   * rather than invalidated on write: cheap, self-healing if a provider
-   * switch ever happens mid-flight, and needs no cross-module wiring into
-   * UsersService.setTradingProvider.
-   */
-  private readonly providerCache = new Map<
-    string,
-    { provider: string | null; expiresAt: number }
-  >();
-
   constructor(
     private readonly prisma: PrismaService,
     private readonly webull: BrokerGateway,
@@ -46,23 +36,46 @@ export class DispatchingBrokerGateway implements BrokerGateway {
     private readonly snaptrade: BrokerGateway,
   ) {}
 
-  /** Resolve the gateway for a user from their stored trading provider. */
-  private async gatewayFor(userId: string): Promise<BrokerGateway> {
-    const cached = this.providerCache.get(userId);
-    let provider: string | null;
-    if (cached && cached.expiresAt > Date.now()) {
-      provider = cached.provider;
-    } else {
-      const user = await this.prisma.user.findUnique({
-        where: { id: userId },
-        select: { tradingProvider: true },
-      });
-      provider = user?.tradingProvider ?? null;
-      this.providerCache.set(userId, { provider, expiresAt: Date.now() + PROVIDER_CACHE_TTL_MS });
-    }
+  private gatewayForProvider(provider: string | null): BrokerGateway {
     if (provider === 'alpaca') return this.alpaca;
     if (provider === 'snaptrade') return this.snaptrade;
     return this.webull;
+  }
+
+  /** Resolve the gateway for a user from their stored trading provider. */
+  private async gatewayFor(userId: string): Promise<BrokerGateway> {
+    // Provider selection is a routing identity, not a display preference.
+    // Read it fresh so a switch cannot leave quotes/positions — and especially
+    // a placement — talking to the previous provider for a cache interval.
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { tradingProvider: true },
+    });
+    const provider = user?.tradingProvider ?? null;
+    return this.gatewayForProvider(provider);
+  }
+
+  /** Deliberately bypasses the provider cache. An unattended order uses this
+   * value as a money-boundary assertion, where a 30-second stale route is not
+   * acceptable. */
+  async executionScope(userId: string, expectedMode?: TradingMode): Promise<BrokerExecutionScope> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { tradingProvider: true, tradingMode: true },
+    });
+    const provider =
+      user?.tradingProvider === 'alpaca' || user?.tradingProvider === 'snaptrade'
+        ? user.tradingProvider
+        : 'webull';
+    const environment: TradingMode = user?.tradingMode === 'practice' ? 'practice' : 'live';
+    if (expectedMode && expectedMode !== environment) {
+      throw brokerErrors.orderRejected(
+        `Account switched to ${environment} while this ${expectedMode} order was being placed — nothing was sent`,
+      );
+    }
+    const gateway = this.gatewayForProvider(provider);
+    const childScope = await gateway.executionScope?.(userId, environment);
+    return childScope ?? { provider, environment, accountId: 'default' };
   }
 
   async getQuote(userId: string, symbol: string): Promise<Quote> {
@@ -92,32 +105,113 @@ export class DispatchingBrokerGateway implements BrokerGateway {
     expectedMode?: TradingMode,
     heldQuantity?: number,
     resolvedContract?: ResolvedContractHint,
+    expectedScope?: BrokerExecutionScope,
   ): Promise<OrderResult> {
-    return (await this.gatewayFor(userId)).placeOrder(
-      userId,
-      order,
-      idempotencyKey,
-      expectedMode,
-      heldQuantity,
-      resolvedContract,
-    );
+    const scope = expectedScope ?? null;
+    const current = scope ? await this.executionScope(userId, expectedMode) : null;
+    const gateway = current
+      ? this.gatewayForProvider(current.provider)
+      : await this.gatewayFor(userId);
+    if (scope && current) {
+      if (
+        current.provider !== scope.provider ||
+        current.environment !== scope.environment ||
+        current.accountId !== scope.accountId
+      ) {
+        throw brokerErrors.orderRejected(
+          'Broker provider or selected account changed while this bracket was armed — nothing was sent',
+        );
+      }
+    }
+    return expectedScope
+      ? gateway.placeOrder(
+          userId,
+          order,
+          idempotencyKey,
+          expectedMode,
+          heldQuantity,
+          resolvedContract,
+          expectedScope,
+        )
+      : gateway.placeOrder(
+          userId,
+          order,
+          idempotencyKey,
+          expectedMode,
+          heldQuantity,
+          resolvedContract,
+        );
   }
 
   async cancelOrder(userId: string, orderId: string): Promise<void> {
     return (await this.gatewayFor(userId)).cancelOrder(userId, orderId);
   }
 
-  async getPositions(userId: string): Promise<Position[]> {
-    return (await this.gatewayFor(userId)).getPositions(userId);
+  async getPositions(userId: string, expectedScope?: BrokerExecutionScope): Promise<Position[]> {
+    if (!expectedScope) return (await this.gatewayFor(userId)).getPositions(userId);
+    const current = await this.executionScope(userId, expectedScope.environment);
+    if (
+      current.provider !== expectedScope.provider ||
+      current.accountId !== expectedScope.accountId
+    ) {
+      throw brokerErrors.orderRejected(
+        'Broker provider or selected account changed while this bracket was armed — positions were not read',
+      );
+    }
+    return this.gatewayForProvider(current.provider).getPositions(userId, expectedScope);
   }
 
   async getOpenOrders(userId: string): Promise<OrderResult[]> {
     return (await this.gatewayFor(userId)).getOpenOrders(userId);
   }
 
-  async getRecentOrders(userId: string, since?: Date): Promise<OrderResult[]> {
-    const gateway = await this.gatewayFor(userId);
-    return (await gateway.getRecentOrders?.(userId, since)) ?? [];
+  async getRecentOrders(
+    userId: string,
+    since?: Date,
+    expectedScope?: BrokerExecutionScope,
+  ): Promise<OrderResult[]> {
+    const current = expectedScope
+      ? await this.executionScope(userId, expectedScope.environment)
+      : null;
+    if (
+      expectedScope &&
+      current &&
+      (current.provider !== expectedScope.provider ||
+        current.environment !== expectedScope.environment ||
+        current.accountId !== expectedScope.accountId)
+    ) {
+      throw brokerErrors.orderRejected(
+        'Broker provider or selected account changed while the interrupted order was being reconciled',
+      );
+    }
+    const gateway = current
+      ? this.gatewayForProvider(current.provider)
+      : await this.gatewayFor(userId);
+    if (!gateway.getRecentOrders) {
+      throw brokerErrors.unavailable(
+        'This broker cannot confirm historical orders; interrupted placement cannot be retried safely',
+      );
+    }
+    return gateway.getRecentOrders(userId, since, expectedScope);
+  }
+
+  async recoverOrder(
+    userId: string,
+    idempotencyKey: string,
+    expectedScope: BrokerExecutionScope,
+  ): Promise<RecoveredOrderResult | null | undefined> {
+    const current = await this.executionScope(userId, expectedScope.environment);
+    if (
+      current.provider !== expectedScope.provider ||
+      current.environment !== expectedScope.environment ||
+      current.accountId !== expectedScope.accountId
+    ) {
+      throw brokerErrors.orderRejected(
+        'Broker provider or selected account changed while the interrupted order was being reconciled',
+      );
+    }
+    const gateway = this.gatewayForProvider(current.provider);
+    return gateway.recoverOrder?.(userId, idempotencyKey, expectedScope);
   }
 
   async getAccountSummary(userId: string): Promise<AccountSummary | null> {

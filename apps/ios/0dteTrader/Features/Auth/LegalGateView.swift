@@ -28,10 +28,9 @@ struct LegalGateView: View {
                         VStack(alignment: .leading, spacing: AppSpacing.md) {
                             Text(document.title)
                                 .font(.headline)
-                            Text(document.markdown)
+                            LegalMarkdownText(markdown: document.markdown)
                                 .font(.callout)
                                 .foregroundStyle(.secondary)
-                                .textSelection(.enabled)
                             Toggle(isOn: binding(for: document.slug)) {
                                 Text("I reviewed and accept version \(document.version).")
                                     .font(.subheadline)

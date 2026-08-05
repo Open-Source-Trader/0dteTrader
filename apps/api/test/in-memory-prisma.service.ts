@@ -66,11 +66,14 @@ function matches(row: any, where: any): boolean {
       if (operator.has !== undefined && !(Array.isArray(actual) && actual.includes(operator.has))) {
         return false;
       }
+      if (operator.startsWith !== undefined) {
+        if (typeof actual !== 'string' || !actual.startsWith(operator.startsWith)) return false;
+      }
       // Fail loudly on anything this double does not implement. Returning true
       // means an unsupported operator silently matches EVERY row, so a query
       // that should select one selects all — tests then pass on behaviour the
       // database would never produce.
-      const supported = ['lt', 'lte', 'gt', 'gte', 'equals', 'in', 'has'];
+      const supported = ['lt', 'lte', 'gt', 'gte', 'equals', 'in', 'has', 'startsWith'];
       const unsupported = Object.keys(operator).filter((k) => !supported.includes(k));
       if (unsupported.length > 0) {
         throw new Error(
@@ -102,6 +105,7 @@ export class InMemoryPrismaService {
   readonly pushDeliveries: any[] = [];
   readonly webhookInboxRows: any[] = [];
   readonly userEvents: any[] = [];
+  readonly eventTransportStates: any[] = [];
   readonly discordSettingsRows: any[] = [];
   readonly discordDeliveries: any[] = [];
   readonly legalAcceptances: any[] = [];
@@ -401,6 +405,17 @@ export class InMemoryPrismaService {
       }
       return { count };
     },
+    delete: async ({ where }: any) => {
+      const index = this.tradeOrders.findIndex((row) => row.id === where.id);
+      if (index === -1) throw Object.assign(new Error('Record not found'), { code: 'P2025' });
+      const [row] = this.tradeOrders.splice(index, 1);
+      const executions = this.tradeOrderExecutions.filter(
+        (execution) => execution.orderId !== where.id,
+      );
+      this.tradeOrderExecutions.length = 0;
+      this.tradeOrderExecutions.push(...executions);
+      return row;
+    },
   };
 
   readonly tradeOrderExecution = {
@@ -594,6 +609,8 @@ export class InMemoryPrismaService {
   };
 
   readonly scheduledJobLease = {
+    findUnique: async ({ where }: any) =>
+      this.scheduledJobLeases.find((row) => row.name === where.name) ?? null,
     create: async ({ data }: any) => {
       if (this.scheduledJobLeases.some((row) => row.name === data.name)) {
         throw p2002('name');
@@ -976,10 +993,16 @@ export class InMemoryPrismaService {
       ) {
         throw p2002('userId, dedupeKey');
       }
-      let ordinal = 1n;
-      for (const event of this.userEvents)
-        if (event.ordinal >= ordinal) ordinal = event.ordinal + 1n;
-      const row = { ordinal, id: randomUUID(), createdAt: new Date(), ...data };
+      let ordinal = data.ordinal;
+      if (ordinal === undefined) {
+        ordinal = 1n;
+        for (const event of this.userEvents)
+          if (event.ordinal >= ordinal) ordinal = event.ordinal + 1n;
+      }
+      if (this.userEvents.some((event) => event.ordinal === ordinal)) {
+        throw p2002('ordinal');
+      }
+      const row = { id: randomUUID(), createdAt: new Date(), ...data, ordinal };
       this.userEvents.push(row);
       return row;
     },
@@ -1002,6 +1025,21 @@ export class InMemoryPrismaService {
       if (orderBy?.ordinal === 'asc') rows.sort((a, b) => (a.ordinal > b.ordinal ? 1 : -1));
       if (orderBy?.sequence === 'asc') rows.sort((a, b) => a.sequence - b.sequence);
       return take === undefined ? rows : rows.slice(0, take);
+    },
+  };
+
+  readonly eventTransportState = {
+    upsert: async ({ where, create, update }: any) => {
+      const existing = this.eventTransportStates.find((row) => row.name === where.name);
+      if (existing) {
+        const increment = update.nextOrdinal?.increment;
+        if (increment !== undefined) existing.nextOrdinal += increment;
+        else Object.assign(existing, definedOnly(update));
+        return existing;
+      }
+      const row = { ...create };
+      this.eventTransportStates.push(row);
+      return row;
     },
   };
 
@@ -1029,6 +1067,8 @@ export class InMemoryPrismaService {
   };
 
   readonly discordDelivery = {
+    findFirst: async ({ where }: any = {}) =>
+      this.discordDeliveries.find((row) => matches(row, where)) ?? null,
     create: async ({ data }: any) => {
       if (
         this.discordDeliveries.some((row) => row.userId === data.userId && row.key === data.key)
@@ -1108,6 +1148,16 @@ export class InMemoryPrismaService {
     return run;
   }
 
+  /** Advisory locks are covered by this fake's globally serialized callback
+   * transactions; the SQL itself therefore has no additional in-memory work. */
+  async $executeRaw(_query: unknown): Promise<number> {
+    return 0;
+  }
+
+  async $queryRaw<T = unknown>(_query: unknown): Promise<T> {
+    return [] as T;
+  }
+
   private mutableTables(): Array<Array<Record<string, unknown>>> {
     return [
       this.users,
@@ -1127,6 +1177,7 @@ export class InMemoryPrismaService {
       this.pushDeliveries,
       this.webhookInboxRows,
       this.userEvents,
+      this.eventTransportStates,
       this.discordSettingsRows,
       this.discordDeliveries,
       this.legalAcceptances,
@@ -1180,6 +1231,7 @@ export class InMemoryPrismaService {
     this.pushDeliveries.length = 0;
     this.webhookInboxRows.length = 0;
     this.userEvents.length = 0;
+    this.eventTransportStates.length = 0;
     this.discordSettingsRows.length = 0;
     this.discordDeliveries.length = 0;
     this.legalAcceptances.length = 0;

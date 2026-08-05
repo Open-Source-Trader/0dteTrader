@@ -43,6 +43,7 @@ function makeCredentials(opts?: {
 
 function makePrisma() {
   const brokerConnection = {
+    findUnique: jest.fn(),
     upsert: jest.fn(),
     updateMany: jest.fn(),
   };
@@ -104,11 +105,9 @@ describe('SnapTradeWebhookController', () => {
     });
 
     it('returns 400 when the payload carries no timestamp anywhere', async () => {
+      const body = { clientId: CLIENT_ID };
       const { response, sendStatus } = makeResponse();
-      await controller.handle(
-        { body: { clientId: CLIENT_ID }, headers: { signature: 'sig' } } as any,
-        response,
-      );
+      await controller.handle({ body, headers: { signature: sign(body) } } as any, response);
       expect(sendStatus).toHaveBeenCalledWith(400);
     });
 
@@ -195,6 +194,76 @@ describe('SnapTradeWebhookController', () => {
       const { response, sendStatus } = makeResponse();
       await controller.handle({ body, headers: headersFor(body) } as any, response);
       expect(sendStatus).toHaveBeenCalledWith(400);
+    });
+
+    it('acknowledges an authenticated stale duplicate already in the durable inbox', async () => {
+      const inbox = {
+        exists: jest.fn(async () => true),
+        enqueue: jest.fn(async () => undefined),
+      };
+      controller = new SnapTradeWebhookController(credentials, prisma, events, inbox as any);
+      const body = {
+        webhookId: 'webhook-already-seen',
+        eventType: 'TRADE_UPDATE',
+        clientId: CLIENT_ID,
+        eventTimestamp: new Date(Date.now() - 1000 * 60 * 60 * 25).toISOString(),
+      };
+      const { response, sendStatus } = makeResponse();
+
+      await controller.handle({ body, headers: headersFor(body) } as any, response);
+
+      expect(sendStatus).toHaveBeenCalledWith(200);
+      expect(inbox.exists).toHaveBeenCalledWith('webhook-already-seen');
+      expect(inbox.enqueue).not.toHaveBeenCalled();
+    });
+
+    it('still rejects a stale webhook id the durable inbox has never seen', async () => {
+      const inbox = {
+        exists: jest.fn(async () => false),
+        enqueue: jest.fn(async () => undefined),
+      };
+      controller = new SnapTradeWebhookController(credentials, prisma, events, inbox as any);
+      const body = {
+        webhookId: 'webhook-new',
+        eventType: 'TRADE_UPDATE',
+        clientId: CLIENT_ID,
+        eventTimestamp: new Date(Date.now() - 1000 * 60 * 60 * 25).toISOString(),
+      };
+      const { response, sendStatus } = makeResponse();
+
+      await controller.handle({ body, headers: headersFor(body) } as any, response);
+
+      expect(sendStatus).toHaveBeenCalledWith(400);
+      expect(inbox.enqueue).not.toHaveBeenCalled();
+    });
+
+    it('snapshots the sole connection account into a durable trade inbox row', async () => {
+      const inbox = {
+        exists: jest.fn(async () => false),
+        enqueue: jest.fn(async () => undefined),
+      };
+      prisma.brokerConnection.findUnique.mockResolvedValue({
+        accountIds: ['account-at-receipt'],
+        selectedAccountId: 'mutable-selection',
+      });
+      controller = new SnapTradeWebhookController(credentials, prisma, events, inbox as any);
+      const body = stamped({
+        webhookId: 'webhook-account-snapshot',
+        eventType: 'TRADE_UPDATE',
+        clientId: CLIENT_ID,
+        details: { orders: [{ brokerage_order_id: 'broker-1' }] },
+      });
+      const { response, sendStatus } = makeResponse();
+
+      await controller.handle({ body, headers: headersFor(body) } as any, response);
+
+      expect(sendStatus).toHaveBeenCalledWith(200);
+      expect(inbox.enqueue).toHaveBeenCalledWith(
+        expect.objectContaining({
+          webhookId: 'webhook-account-snapshot',
+          accountId: 'account-at-receipt',
+        }),
+      );
     });
 
     it('returns 400 when the signed eventTimestamp sits beyond the future skew allowance', async () => {

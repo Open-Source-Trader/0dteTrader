@@ -66,6 +66,7 @@ describe('OrderNotificationsService', () => {
   let orderEvents: OrderEventsService;
   let chartOrderEvents: ChartOrderEventsService;
   let service: OrderNotificationsService;
+  let devices: DevicesService;
   let userId: string;
 
   beforeEach(async () => {
@@ -73,7 +74,7 @@ describe('OrderNotificationsService', () => {
     apns = new FakeApns();
     orderEvents = new OrderEventsService();
     chartOrderEvents = new ChartOrderEventsService();
-    const devices = new DevicesService(prisma as never);
+    devices = new DevicesService(prisma as never);
     service = new OrderNotificationsService(
       prisma as never,
       devices,
@@ -131,13 +132,21 @@ describe('OrderNotificationsService', () => {
     prisma.tradeOrders.push({
       id: 'O-1',
       userId,
+      provider: 'webull',
+      accountId: 'default',
+      brokerOrderId: 'O-1',
+      clientOrderId: null,
       environment: 'practice',
       contractSymbol: 'SPY260717C00505000',
       placedAt: new Date(),
     });
     prisma.users.find((u) => u.id === userId).tradingMode = 'live';
 
-    await service.handleOrderUpdate(userId, orderResult());
+    await service.handleOrderUpdate(userId, orderResult(), 'practice', {
+      provider: 'webull',
+      accountId: 'default',
+      brokerOrderId: 'O-1',
+    });
 
     expect(apns.sent[0].title).toBe('PRACTICE · Order filled');
   });
@@ -146,13 +155,21 @@ describe('OrderNotificationsService', () => {
     prisma.tradeOrders.push({
       id: 'O-1',
       userId,
+      provider: 'webull',
+      accountId: 'default',
+      brokerOrderId: 'O-1',
+      clientOrderId: null,
       environment: 'live',
       contractSymbol: 'SPY260717C00505000',
       placedAt: new Date(),
     });
     prisma.users.find((u) => u.id === userId).tradingMode = 'practice';
 
-    await service.handleOrderUpdate(userId, orderResult());
+    await service.handleOrderUpdate(userId, orderResult(), 'live', {
+      provider: 'webull',
+      accountId: 'default',
+      brokerOrderId: 'O-1',
+    });
 
     expect(apns.sent[0].title).toBe('Order filled');
   });
@@ -213,6 +230,61 @@ describe('OrderNotificationsService', () => {
     expect(apns.sent[0].body).toBe('BUY 2 SPY260717C00505000');
   });
 
+  it('awaits every per-device outbox insert before order ingestion resolves', async () => {
+    const persisted = await prisma.tradeOrder.create({
+      data: {
+        userId,
+        provider: 'snaptrade',
+        environment: 'live',
+        accountId: 'account-a',
+        brokerOrderId: 'broker-durable',
+        clientOrderId: 'client-durable',
+        contractSymbol: 'SPY260717C00505000',
+        assetClass: 'option',
+        side: 'buy',
+        quantity: 2,
+        filledQuantity: 2,
+        orderType: 'mid',
+        limitPrice: null,
+        filledPrice: 1.23,
+        filledAt: new Date(),
+        executedQuantity: 2,
+        underlyingPrice: null,
+        status: 'filled',
+        placedAt: new Date(),
+      },
+    });
+    const create = prisma.pushDelivery.create;
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    prisma.pushDelivery.create = jest.fn(async (args: any) => {
+      await gate;
+      return create(args);
+    });
+    let resolved = false;
+    const ingestion = orderEvents
+      .ingest(userId, orderResult({ orderId: 'broker-durable' }), 'live', {
+        provider: 'snaptrade',
+        accountId: 'account-a',
+        brokerOrderId: 'broker-durable',
+        clientOrderId: 'client-durable',
+      })
+      .then(() => {
+        resolved = true;
+      });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(resolved).toBe(false);
+
+    release?.();
+    await ingestion;
+
+    expect(prisma.pushDeliveries).toHaveLength(1);
+    expect(prisma.pushDeliveries[0].key).toBe(`order:${persisted.id}:filled`);
+  });
+
   describe('delivery dedupe', () => {
     /** A second API instance: its own sender and buses, the same database. */
     const secondInstance = () => {
@@ -233,6 +305,127 @@ describe('OrderNotificationsService', () => {
 
       expect(apns.sent).toHaveLength(1);
       expect(prisma.pushDeliveries).toHaveLength(1);
+    });
+
+    it('keys broker-only and linked client/broker events by one canonical internal order', async () => {
+      const persisted = await prisma.tradeOrder.create({
+        data: {
+          userId,
+          provider: 'snaptrade',
+          environment: 'live',
+          accountId: 'account-a',
+          brokerOrderId: 'broker-alias',
+          clientOrderId: 'client-alias',
+          contractSymbol: 'SPY260717C00505000',
+          assetClass: 'option',
+          side: 'buy',
+          quantity: 2,
+          filledQuantity: null,
+          orderType: 'mid',
+          limitPrice: null,
+          filledPrice: null,
+          filledAt: null,
+          executedQuantity: 0,
+          underlyingPrice: null,
+          status: 'cancelled',
+          placedAt: new Date(),
+        },
+      });
+      const cancelled = orderResult({
+        orderId: 'broker-alias',
+        status: 'cancelled',
+        filledPrice: undefined,
+      });
+
+      await service.handleOrderUpdate(userId, cancelled, 'live', {
+        provider: 'snaptrade',
+        accountId: 'account-a',
+        brokerOrderId: 'broker-alias',
+      });
+      await service.handleOrderUpdate(userId, cancelled, 'live', {
+        provider: 'snaptrade',
+        accountId: 'account-a',
+        brokerOrderId: 'broker-alias',
+        clientOrderId: 'client-alias',
+      });
+
+      expect(apns.sent).toHaveLength(1);
+      expect(prisma.pushDeliveries).toHaveLength(1);
+      expect(prisma.pushDeliveries[0].key).toBe(`order:${persisted.id}:cancelled`);
+    });
+
+    it('honors aggregate delivery tombstones retained by the migration', async () => {
+      const tombstone = await prisma.pushDelivery.create({
+        data: {
+          userId,
+          key: 'order:broker-old:filled',
+          deviceToken: 'legacy:claim-id',
+          environment: 'legacy',
+          title: '',
+          body: '',
+        },
+      });
+      Object.assign(tombstone, { status: 'delivered', deliveredAt: new Date() });
+
+      await service.handleOrderUpdate(userId, orderResult({ orderId: 'broker-old' }), 'live', {
+        provider: 'snaptrade',
+        accountId: 'account-a',
+        brokerOrderId: 'broker-old',
+      });
+
+      expect(apns.sent).toHaveLength(0);
+      expect(prisma.pushDeliveries).toEqual([tombstone]);
+    });
+
+    it('honors an old client-alias tombstone when redelivery carries only the broker alias', async () => {
+      await prisma.tradeOrder.create({
+        data: {
+          userId,
+          provider: 'snaptrade',
+          environment: 'live',
+          accountId: 'account-a',
+          brokerOrderId: 'broker-after-migration',
+          clientOrderId: 'client-before-migration',
+          contractSymbol: 'SPY260717C00505000',
+          assetClass: 'option',
+          side: 'buy',
+          quantity: 2,
+          filledQuantity: 2,
+          orderType: 'mid',
+          limitPrice: null,
+          filledPrice: 1.23,
+          filledAt: new Date(),
+          executedQuantity: 2,
+          underlyingPrice: null,
+          status: 'filled',
+          placedAt: new Date(),
+        },
+      });
+      const tombstone = await prisma.pushDelivery.create({
+        data: {
+          userId,
+          key: 'order:client-before-migration:filled',
+          deviceToken: 'legacy:client-claim',
+          environment: 'legacy',
+          title: '',
+          body: '',
+        },
+      });
+      Object.assign(tombstone, { status: 'delivered', deliveredAt: new Date() });
+
+      await service.handleOrderUpdate(
+        userId,
+        orderResult({ orderId: 'broker-after-migration' }),
+        'live',
+        {
+          provider: 'snaptrade',
+          accountId: 'account-a',
+          brokerOrderId: 'broker-after-migration',
+        },
+      );
+
+      expect(apns.sent).toHaveLength(0);
+      expect(prisma.pushDeliveries).toEqual([tombstone]);
     });
 
     it('pushes once when two API instances report the same outcome', async () => {
@@ -289,6 +482,79 @@ describe('OrderNotificationsService', () => {
       expect(apns.sent).toHaveLength(2);
       expect(prisma.pushDeliveries).toHaveLength(1);
       expect(prisma.pushDeliveries[0].status).toBe('delivered');
+    });
+
+    it('supersedes an old owner retry permanently when a token changes accounts', async () => {
+      const otherUser = await prisma.user.create({
+        data: { email: 'moved-token@example.com', passwordHash: 'x' },
+      });
+      const stale = await prisma.pushDelivery.create({
+        data: {
+          userId,
+          key: 'order:private:filled',
+          deviceToken: TOKEN,
+          environment: 'live',
+          title: 'Order filled',
+          body: 'Private order',
+        },
+      });
+      Object.assign(stale, { status: 'retry', nextAttemptAt: new Date(0) });
+
+      await devices.register(otherUser.id, TOKEN, 'ios');
+      await devices.register(userId, TOKEN, 'ios');
+      await service.processDue();
+
+      expect(stale).toMatchObject({
+        status: 'dead',
+        lastError: 'device token ownership changed',
+      });
+      expect(apns.sent).toHaveLength(0);
+    });
+
+    it('serializes token transfer with the bounded APNs send', async () => {
+      const otherUser = await prisma.user.create({
+        data: { email: 'move-during-send@example.com', passwordHash: 'x' },
+      });
+      await prisma.pushDelivery.create({
+        data: {
+          userId,
+          key: 'order:in-flight:filled',
+          deviceToken: TOKEN,
+          environment: 'live',
+          title: 'Order filled',
+          body: 'In flight',
+        },
+      });
+      let release: (() => void) | undefined;
+      let entered: (() => void) | undefined;
+      const started = new Promise<void>((resolve) => {
+        entered = resolve;
+      });
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      jest.spyOn(apns, 'send').mockImplementation(async (token, alert) => {
+        apns.sent.push({ token, title: alert.title, body: alert.body });
+        entered?.();
+        await gate;
+        return { status: 200 };
+      });
+
+      const draining = service.processDue();
+      await started;
+      let moved = false;
+      const moving = devices.register(otherUser.id, TOKEN, 'ios').then(() => {
+        moved = true;
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(moved).toBe(false);
+
+      release?.();
+      await Promise.all([draining, moving]);
+
+      expect(apns.sent).toHaveLength(1);
+      expect((await devices.listForUser(otherUser.id)).map((row) => row.token)).toContain(TOKEN);
     });
 
     it('keeps the claim when a device already took the alert', async () => {
@@ -401,6 +667,51 @@ describe('OrderNotificationsService', () => {
       expect(row.status).toBe('delivered');
     });
 
+    it('takes a fresh clock reading before every delivery lease', async () => {
+      jest.useFakeTimers();
+      const startedAt = new Date('2026-08-05T12:00:00Z');
+      jest.setSystemTime(startedAt);
+      const secondToken = 'f'.repeat(64);
+      try {
+        await devices.register(userId, secondToken, 'ios');
+        for (const [token, key] of [
+          [TOKEN, 'order:fresh-clock-1:filled'],
+          [secondToken, 'order:fresh-clock-2:filled'],
+        ]) {
+          await prisma.pushDelivery.create({
+            data: {
+              userId,
+              key,
+              deviceToken: token,
+              environment: 'live',
+              title: 'Order filled',
+              body: key,
+            },
+          });
+        }
+        const expiries: Date[] = [];
+        const updateMany = prisma.pushDelivery.updateMany;
+        jest.spyOn(prisma.pushDelivery, 'updateMany').mockImplementation(async (args: any) => {
+          if (args.data?.status === 'leased') expiries.push(args.data.leaseExpiresAt);
+          return updateMany(args);
+        });
+        let sends = 0;
+        jest.spyOn(apns, 'send').mockImplementation(async (token, alert) => {
+          apns.sent.push({ token, title: alert.title, body: alert.body });
+          sends += 1;
+          if (sends === 1) jest.setSystemTime(new Date(startedAt.getTime() + 40_000));
+          return { status: 200 };
+        });
+
+        await service.processDue();
+
+        expect(expiries).toHaveLength(2);
+        expect(expiries[1].getTime() - expiries[0].getTime()).toBe(40_000);
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
     it('sweeps terminal delivery rows older than seven days under a daily lease', async () => {
       const row = await prisma.pushDelivery.create({
         data: {
@@ -415,12 +726,13 @@ describe('OrderNotificationsService', () => {
       Object.assign(row, {
         status: 'delivered',
         createdAt: new Date('2026-07-01T00:00:00Z'),
+        updatedAt: new Date('2026-07-01T00:00:00Z'),
       });
 
       await service.processDue(new Date('2026-08-05T12:00:00Z'));
 
       expect(prisma.pushDeliveries).toHaveLength(0);
-      expect(prisma.scheduledJobLeases[0].name).toBe('push-delivery-retention:2026-08-05');
+      expect(prisma.scheduledJobLeases[0].name).toBe('push-delivery-retention');
     });
 
     it('keeps recent terminal rows and old retryable rows inside the dedupe window', async () => {
@@ -438,6 +750,7 @@ describe('OrderNotificationsService', () => {
       Object.assign(recent, {
         status: 'delivered',
         createdAt: new Date(now.getTime() - 6 * 24 * 60 * 60_000),
+        updatedAt: new Date(now.getTime() - 6 * 24 * 60 * 60_000),
       });
       const retryable = await prisma.pushDelivery.create({
         data: {
@@ -463,17 +776,89 @@ describe('OrderNotificationsService', () => {
       ]);
     });
 
-    it('retries the same daily retention lease after a failed sweep', async () => {
+    it('retries the same daily retention lease after a failed sweep without blocking delivery', async () => {
       const now = new Date('2026-08-05T12:00:00Z');
       const remove = jest
         .spyOn(prisma.pushDelivery, 'deleteMany')
         .mockRejectedValueOnce(new Error('database unavailable'));
+      const delivery = await prisma.pushDelivery.create({
+        data: {
+          userId,
+          key: 'order:retention-failure:filled',
+          deviceToken: TOKEN,
+          environment: 'live',
+          title: 'Order filled',
+          body: 'Still deliver me',
+        },
+      });
+      delivery.nextAttemptAt = now;
 
-      await expect(service.processDue(now)).rejects.toThrow('database unavailable');
+      await expect(service.processDue(now)).resolves.toBeUndefined();
       expect(prisma.scheduledJobLeases[0].expiresAt).toEqual(now);
+      expect(apns.sent[apns.sent.length - 1]?.body).toBe('Still deliver me');
 
       await service.processDue(new Date(now.getTime() + 1));
       expect(remove).toHaveBeenCalledTimes(2);
+    });
+
+    it('runs a successful retention sweep only once per local day', async () => {
+      const now = new Date('2026-08-05T12:00:00Z');
+      const remove = jest.spyOn(prisma.pushDelivery, 'deleteMany');
+
+      await service.processDue(now);
+      await service.processDue(new Date(now.getTime() + 60_000));
+
+      expect(remove).toHaveBeenCalledTimes(1);
+    });
+
+    it("waits for another instance's persisted retention lease instead of colliding every tick", async () => {
+      const now = new Date('2026-08-05T12:00:00Z');
+      await prisma.scheduledJobLease.create({
+        data: {
+          name: 'push-delivery-retention',
+          ownerId: 'other-instance',
+          expiresAt: new Date(now.getTime() + 25 * 60 * 60_000),
+        },
+      });
+      const create = jest.spyOn(prisma.scheduledJobLease, 'create');
+
+      await service.processDue(now);
+      await service.processDue(new Date(now.getTime() + 500));
+
+      expect(create).toHaveBeenCalledTimes(1);
+    });
+
+    it('retains a terminal tombstone for seven days after its final transition', async () => {
+      const now = new Date('2026-08-05T12:00:00Z');
+      const recentlyDelivered = await prisma.pushDelivery.create({
+        data: {
+          userId,
+          key: 'order:slow-retry:filled',
+          deviceToken: TOKEN,
+          environment: 'live',
+          title: 'Order filled',
+          body: 'Delivered after a long retry period',
+        },
+      });
+      Object.assign(recentlyDelivered, {
+        status: 'delivered',
+        createdAt: new Date(now.getTime() - 30 * 24 * 60 * 60_000),
+        updatedAt: new Date(now.getTime() - 60_000),
+        deliveredAt: new Date(now.getTime() - 60_000),
+      });
+
+      await service.processDue(now);
+
+      expect(prisma.pushDeliveries).toContain(recentlyDelivered);
+    });
+
+    it('reuses one stable retention lease across UTC days', async () => {
+      const firstDay = new Date('2026-08-05T12:00:00Z');
+      await service.processDue(firstDay);
+      await service.processDue(new Date('2026-08-06T00:00:01Z'));
+
+      expect(prisma.scheduledJobLeases).toHaveLength(1);
+      expect(prisma.scheduledJobLeases[0].name).toBe('push-delivery-retention');
     });
 
     it('runs retention even when APNs delivery is disabled', async () => {
@@ -490,6 +875,7 @@ describe('OrderNotificationsService', () => {
       Object.assign(row, {
         status: 'delivered',
         createdAt: new Date('2026-07-01T00:00:00Z'),
+        updatedAt: new Date('2026-07-01T00:00:00Z'),
       });
       Object.defineProperty(apns, 'enabled', { value: false });
 
@@ -509,6 +895,69 @@ describe('OrderNotificationsService', () => {
       expect(tokens).not.toContain('0'.repeat(64));
       expect(tokens).not.toContain('0'.repeat(63) + '1');
       expect(tokens).toContain('0'.repeat(63) + 'b');
+    });
+
+    it('serializes concurrent cap enforcement across different device tokens for one user', async () => {
+      const devices = new DevicesService(prisma as never);
+      for (let index = 0; index < 9; index += 1) {
+        await devices.register(userId, index.toString(16).padStart(64, '0'), 'ios');
+      }
+      const executeRaw = jest.spyOn(prisma, '$executeRaw');
+
+      await Promise.all([
+        devices.register(userId, 'a'.repeat(64), 'ios'),
+        devices.register(userId, 'b'.repeat(64), 'ios'),
+      ]);
+
+      expect(await devices.listForUser(userId)).toHaveLength(10);
+      expect(
+        executeRaw.mock.calls.some(([query]) =>
+          ((query as { values?: unknown[] }).values ?? []).includes(`push-device-user:${userId}`),
+        ),
+      ).toBe(true);
+    });
+
+    it('locks both prior and destination users before row mutation during a token transfer', async () => {
+      const destination = await prisma.user.create({
+        data: { email: 'lock-order-destination@example.com', passwordHash: 'x' },
+      });
+      const sequence: string[] = [];
+      const executeRaw = prisma.$executeRaw.bind(prisma);
+      jest.spyOn(prisma, '$executeRaw').mockImplementation(async (query) => {
+        const value = ((query as { values?: unknown[] }).values ?? [])[0];
+        if (typeof value === 'string') sequence.push(value);
+        return executeRaw(query);
+      });
+      const upsert = prisma.deviceToken.upsert.bind(prisma.deviceToken);
+      jest.spyOn(prisma.deviceToken, 'upsert').mockImplementation(async (args) => {
+        sequence.push('upsert');
+        return upsert(args);
+      });
+
+      await devices.register(destination.id, TOKEN, 'ios');
+
+      const userLocks = [userId, destination.id].sort().map((id) => `push-device-user:${id}`);
+      expect(sequence.slice(0, 4)).toEqual([TOKEN, ...userLocks, 'upsert']);
+    });
+
+    it('retries a database-aborted registration transaction without losing the device', async () => {
+      const transaction = prisma.$transaction.bind(prisma);
+      let attempts = 0;
+      jest.spyOn(prisma, '$transaction').mockImplementation((async (
+        operation: (database: InMemoryPrismaService) => Promise<unknown>,
+      ) => {
+        attempts += 1;
+        if (attempts === 1) {
+          throw Object.assign(new Error('transaction deadlocked'), { code: 'P2034' });
+        }
+        return transaction(operation);
+      }) as typeof prisma.$transaction);
+      const token = 'c'.repeat(64);
+
+      await devices.register(userId, token, 'ios');
+
+      expect(attempts).toBe(2);
+      expect((await devices.listForUser(userId)).map((device) => device.token)).toContain(token);
     });
   });
 });

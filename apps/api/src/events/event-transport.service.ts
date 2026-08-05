@@ -1,7 +1,6 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { Subject } from 'rxjs';
 import type { UserEvent } from '@prisma/client';
-import { isUniqueViolation } from '../common/api-exception';
 import { PrismaService } from '../prisma/prisma.service';
 
 export type DurableEventType = 'orderUpdate' | 'chartOrder';
@@ -18,7 +17,7 @@ const POLL_MS = 250;
 const SEEN_LIMIT = 2_048;
 
 /**
- * Postgres-backed event transport. The table is the durable outbox and polling
+ * Postgres-backed event transport. The table is the durable event log and polling
  * is the shared transport: it needs no Redis policy decision and, unlike
  * LISTEN/NOTIFY alone, reconnect catch-up is inherent.
  */
@@ -29,7 +28,8 @@ export class EventTransportService implements OnModuleInit, OnModuleDestroy {
   readonly events$ = this.subject.asObservable();
   private timer: NodeJS.Timeout | null = null;
   private lastOrdinal = 0n;
-  private polling = false;
+  private pollPromise: Promise<void> | null = null;
+  private pollRequested = false;
   private readonly seen = new Set<string>();
   private readonly seenOrder: string[] = [];
 
@@ -38,7 +38,8 @@ export class EventTransportService implements OnModuleInit, OnModuleDestroy {
   async onModuleInit(): Promise<void> {
     const latest = await this.prisma.userEvent.findFirst({ orderBy: { ordinal: 'desc' } });
     this.lastOrdinal = latest?.ordinal ?? 0n;
-    this.timer = setInterval(() => void this.pollOnce(), POLL_MS);
+    await this.pollSafely('initial');
+    this.timer = setInterval(() => void this.pollSafely('scheduled'), POLL_MS);
     this.timer.unref?.();
   }
 
@@ -53,14 +54,34 @@ export class EventTransportService implements OnModuleInit, OnModuleDestroy {
     payload: unknown,
     dedupeKey?: string,
   ): Promise<DurableUserEvent> {
-    for (let attempt = 0; attempt < 8; attempt += 1) {
-      const latest = await this.prisma.userEvent.findFirst({
-        where: { userId },
-        orderBy: { sequence: 'desc' },
-      });
-      try {
-        const row = await this.prisma.userEvent.create({
+    const row = await this.prisma.$transaction(
+      async (database) => {
+        // This singleton is the commit-order barrier for every publisher. The
+        // update takes a row lock which remains held until this transaction has
+        // inserted its event and commits. Thus a greater ordinal can never be
+        // visible before a smaller one, and the same lock also makes the user's
+        // next sequence allocation race-free.
+        const allocation = await database.eventTransportState.upsert({
+          where: { name: 'global' },
+          create: { name: 'global', nextOrdinal: 2n },
+          update: { nextOrdinal: { increment: 1n } },
+        });
+        const ordinal = allocation.nextOrdinal - 1n;
+
+        if (dedupeKey) {
+          const existing = await database.userEvent.findUnique({
+            where: { userId_dedupeKey: { userId, dedupeKey } },
+          });
+          if (existing) return existing;
+        }
+
+        const latest = await database.userEvent.findFirst({
+          where: { userId },
+          orderBy: { sequence: 'desc' },
+        });
+        return database.userEvent.create({
           data: {
+            ordinal,
             userId,
             sequence: (latest?.sequence ?? 0) + 1,
             dedupeKey,
@@ -68,26 +89,17 @@ export class EventTransportService implements OnModuleInit, OnModuleDestroy {
             payload: JSON.parse(JSON.stringify(payload)),
           },
         });
-        const event = this.toEvent(row);
-        // Never emit the just-created row directly. Another instance may have
-        // committed an earlier per-user sequence that this process has not
-        // polled yet; direct local fan-out would then deliver N+1 before N and
-        // make the socket cursor permanently discard N. Polling by the global
-        // ordinal drains every earlier row first and still gives local
-        // publishers near-immediate delivery.
-        await this.pollOnce();
-        return event;
-      } catch (error) {
-        if (!isUniqueViolation(error) || attempt === 7) throw error;
-        if (dedupeKey) {
-          const existing = await this.prisma.userEvent.findUnique({
-            where: { userId_dedupeKey: { userId, dedupeKey } },
-          });
-          if (existing) return this.toEvent(existing);
-        }
-      }
-    }
-    throw new Error('could not allocate user event sequence');
+      },
+      // A burst queues behind the singleton by design; the default 2s maxWait
+      // is too short for a healthy but busy publisher cohort.
+      { maxWait: 10_000, timeout: 10_000 },
+    );
+    const event = this.toEvent(row);
+    // Do not fan out directly: polling preserves global commit order on every
+    // instance. A transient poll failure must not turn a committed publish
+    // into an application-level failure; the scheduled poll will retry it.
+    await this.pollSafely('publish');
+    return event;
   }
 
   async replay(userId: string, afterSequence: number, limit = 1_000): Promise<DurableUserEvent[]> {
@@ -109,9 +121,24 @@ export class EventTransportService implements OnModuleInit, OnModuleDestroy {
 
   /** Exposed for deterministic two-instance tests. */
   async pollOnce(): Promise<void> {
-    if (this.polling) return;
-    this.polling = true;
-    try {
+    this.pollRequested = true;
+    if (!this.pollPromise) {
+      this.pollPromise = this.runPollLoop().finally(() => {
+        this.pollPromise = null;
+      });
+    }
+    return this.pollPromise;
+  }
+
+  private async runPollLoop(): Promise<void> {
+    do {
+      this.pollRequested = false;
+      await this.drainAvailableRows();
+    } while (this.pollRequested);
+  }
+
+  private async drainAvailableRows(): Promise<void> {
+    for (;;) {
       const rows = await this.prisma.userEvent.findMany({
         where: { ordinal: { gt: this.lastOrdinal } },
         orderBy: { ordinal: 'asc' },
@@ -121,10 +148,15 @@ export class EventTransportService implements OnModuleInit, OnModuleDestroy {
         if (row.ordinal > this.lastOrdinal) this.lastOrdinal = row.ordinal;
         this.emitUnseen(this.toEvent(row));
       }
+      if (rows.length < 500) return;
+    }
+  }
+
+  private async pollSafely(context: 'initial' | 'scheduled' | 'publish'): Promise<void> {
+    try {
+      await this.pollOnce();
     } catch (error) {
-      this.logger.warn(`user-event poll failed: ${(error as Error).message}`);
-    } finally {
-      this.polling = false;
+      this.logger.warn(`user-event ${context} poll failed: ${(error as Error).message}`);
     }
   }
 

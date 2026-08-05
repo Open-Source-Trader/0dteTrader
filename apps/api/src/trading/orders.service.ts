@@ -8,7 +8,11 @@ import {
   TradeHistoryEntry,
   TradingMode,
 } from '@0dtetrader/shared-types';
-import { BROKER_GATEWAY, BrokerGateway } from '../broker/broker-gateway.interface';
+import {
+  BROKER_GATEWAY,
+  BrokerExecutionScope,
+  BrokerGateway,
+} from '../broker/broker-gateway.interface';
 import { OPTION_MULTIPLIER } from '../broker/contract-resolution';
 import { OrderEventsService, OrderUpdateEvent } from '../broker/order-events.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -67,6 +71,18 @@ interface OrderScope {
   accountId: string;
   brokerOrderId: string | null;
   clientOrderId: string | null;
+}
+
+const STATUS_RANK: Record<string, number> = {
+  submitted: 0,
+  partially_filled: 1,
+  cancelled: 2,
+  rejected: 2,
+  filled: 3,
+};
+
+function advancedStatus(left: string, right: string): string {
+  return (STATUS_RANK[right] ?? -1) > (STATUS_RANK[left] ?? -1) ? right : left;
 }
 
 /**
@@ -516,15 +532,34 @@ export class OrdersService implements OnModuleDestroy {
   private async reconcileWithBroker(userId: string): Promise<void> {
     if (!this.gateway.getRecentOrders) return;
     const lookbackFloor = new Date(Date.now() - RECONCILE_LOOKBACK_MS);
-    const newest = await this.prisma.tradeOrder.findFirst({
-      where: { userId, placedAt: { gte: lookbackFloor } },
-      orderBy: { placedAt: 'desc' },
-      select: { placedAt: true },
-    });
-    const since = newest?.placedAt ?? lookbackFloor;
     let brokerOrders: OrderResult[];
+    let reconciliationScope: BrokerExecutionScope | undefined;
     try {
-      brokerOrders = await this.gateway.getRecentOrders(userId, since);
+      reconciliationScope = this.gateway.executionScope
+        ? await this.gateway.executionScope(userId)
+        : undefined;
+      // A broker history query is for one immutable provider/account scope.
+      // Derive its cursor from that same scope: a newer order in account A
+      // must not advance the starting point for account B and hide B's
+      // intervening broker-side activity. Legacy gateways without an exposed
+      // scope retain the original user-wide cursor as a compatibility path.
+      const newest = await this.prisma.tradeOrder.findFirst({
+        where: {
+          userId,
+          ...(reconciliationScope
+            ? {
+                provider: reconciliationScope.provider,
+                environment: reconciliationScope.environment,
+                accountId: reconciliationScope.accountId,
+              }
+            : {}),
+          placedAt: { gte: lookbackFloor },
+        },
+        orderBy: { placedAt: 'desc' },
+        select: { placedAt: true },
+      });
+      const since = newest?.placedAt ?? lookbackFloor;
+      brokerOrders = await this.gateway.getRecentOrders(userId, since, reconciliationScope);
     } catch (err) {
       // Reconciliation is best-effort: a broker hiccup here must not break
       // the history read, which already has everything this app recorded.
@@ -532,7 +567,17 @@ export class OrdersService implements OnModuleDestroy {
       return;
     }
     for (const order of brokerOrders) {
-      await this.recordWithRetry({ userId, order }).catch((err) =>
+      const identity = reconciliationScope
+        ? {
+            environment: reconciliationScope.environment,
+            provider: reconciliationScope.provider,
+            accountId: reconciliationScope.accountId,
+            ...(reconciliationScope.provider === 'snaptrade'
+              ? { brokerOrderId: order.orderId }
+              : { clientOrderId: order.orderId }),
+          }
+        : {};
+      await this.recordWithRetry({ userId, order, ...identity }).catch((err) =>
         this.logger.warn(`failed to reconcile broker order ${order.orderId}: ${err.message}`),
       );
     }
@@ -608,7 +653,21 @@ export class OrdersService implements OnModuleDestroy {
           userId_provider_environment: { userId, provider: 'snaptrade', environment },
         },
       });
-      accountId = connection?.selectedAccountId?.trim() || null;
+      const accountIds = Array.from(
+        new Set(
+          (connection?.accountIds ?? [])
+            .map((candidate) => candidate.trim())
+            .filter((candidate) => candidate !== ''),
+        ),
+      );
+      if (accountIds.length !== 1) {
+        throw new Error(
+          `cannot infer SnapTrade order account: ${
+            accountIds.length === 0 ? 'no account is known' : 'multiple accounts exist'
+          }`,
+        );
+      }
+      [accountId] = accountIds;
     }
     return {
       provider: provider as OrderScope['provider'],
@@ -624,34 +683,297 @@ export class OrdersService implements OnModuleDestroy {
   }
 
   private async findByScope(userId: string, scope: OrderScope): Promise<TradeOrder | null> {
-    if (scope.brokerOrderId) {
-      const row = await this.prisma.tradeOrder.findUnique({
-        where: {
-          userId_provider_environment_accountId_brokerOrderId: {
-            userId,
-            provider: scope.provider,
-            environment: scope.environment,
-            accountId: scope.accountId,
-            brokerOrderId: scope.brokerOrderId,
+    const rows = await this.identityRows(userId, scope);
+    return rows.broker ?? rows.client;
+  }
+
+  private async identityRows(
+    userId: string,
+    scope: OrderScope,
+  ): Promise<{ broker: TradeOrder | null; client: TradeOrder | null }> {
+    const [broker, client] = await Promise.all([
+      scope.brokerOrderId
+        ? this.prisma.tradeOrder.findUnique({
+            where: {
+              userId_provider_environment_accountId_brokerOrderId: {
+                userId,
+                provider: scope.provider,
+                environment: scope.environment,
+                accountId: scope.accountId,
+                brokerOrderId: scope.brokerOrderId,
+              },
+            },
+          })
+        : Promise.resolve(null),
+      scope.clientOrderId
+        ? this.prisma.tradeOrder.findUnique({
+            where: {
+              userId_provider_environment_accountId_clientOrderId: {
+                userId,
+                provider: scope.provider,
+                environment: scope.environment,
+                accountId: scope.accountId,
+                clientOrderId: scope.clientOrderId,
+              },
+            },
+          })
+        : Promise.resolve(null),
+    ]);
+    return { broker, client };
+  }
+
+  /**
+   * SnapTrade option placement cannot send our idempotency key, so its first
+   * response can create a client-only row while the webhook later knows only
+   * the brokerage id. Reconcile only a unique, tightly matching app placement:
+   * the audit claim proves the candidate client id belongs to this user and
+   * the immutable order shape/time prevents an unrelated broker order joining.
+   */
+  private async snapTradeReconciliationCandidate(
+    userId: string,
+    order: OrderResult,
+    scope: OrderScope,
+  ): Promise<TradeOrder | null> {
+    if (scope.provider !== 'snaptrade') return null;
+    const brokerOnly = scope.brokerOrderId !== null && scope.clientOrderId === null;
+    const clientOnly = scope.clientOrderId !== null && scope.brokerOrderId === null;
+    if (!brokerOnly && !clientOnly) return null;
+    const placedAt = new Date(order.timestamp);
+    if (Number.isNaN(placedAt.getTime())) return null;
+    const windowMs = 30_000;
+    const candidates = await this.prisma.tradeOrder.findMany({
+      where: {
+        userId,
+        provider: 'snaptrade',
+        environment: scope.environment,
+        accountId: scope.accountId,
+        contractSymbol: order.contractSymbol,
+        side: order.side,
+        quantity: order.quantity,
+        orderType: order.orderType,
+        limitPrice: order.limitPrice ?? null,
+        placedAt: {
+          gte: new Date(placedAt.getTime() - windowMs),
+          lte: new Date(placedAt.getTime() + windowMs),
+        },
+      },
+    });
+    const verified: TradeOrder[] = [];
+    for (const candidate of candidates) {
+      if (brokerOnly && (candidate.brokerOrderId !== null || !candidate.clientOrderId)) continue;
+      if (clientOnly && (candidate.clientOrderId !== null || !candidate.brokerOrderId)) continue;
+      const clientOrderId = scope.clientOrderId ?? candidate.clientOrderId;
+      if (!clientOrderId) continue;
+      const audit = await this.prisma.orderAudit.findUnique({
+        where: { userId_idempotencyKey: { userId, idempotencyKey: clientOrderId } },
+      });
+      if (!audit) continue;
+      const request =
+        audit.request && typeof audit.request === 'object' && !Array.isArray(audit.request)
+          ? (audit.request as Record<string, unknown>)
+          : null;
+      if (request?.['action'] !== 'place') continue;
+      const response =
+        audit.response && typeof audit.response === 'object' && !Array.isArray(audit.response)
+          ? (audit.response as Record<string, unknown>)
+          : null;
+      const responseTimestamp =
+        typeof response?.['timestamp'] === 'string'
+          ? new Date(response['timestamp'] as string)
+          : null;
+      // A true one-sided placement is exactly the case where SnapTrade's
+      // response omitted brokerage_order_id and the gateway returned our
+      // idempotency key as orderId. Without that proof, a similar manual order
+      // inside the time window must remain separate.
+      if (response?.['orderId'] !== clientOrderId) continue;
+      const auditTimes = [audit.createdAt, responseTimestamp].filter(
+        (value): value is Date => value instanceof Date && !Number.isNaN(value.getTime()),
+      );
+      if (auditTimes.some((value) => Math.abs(value.getTime() - placedAt.getTime()) <= windowMs)) {
+        verified.push(candidate);
+      }
+    }
+    return verified.length === 1 ? verified[0] : null;
+  }
+
+  private async convergedIdentityRow(
+    userId: string,
+    order: OrderResult,
+    scope: OrderScope,
+  ): Promise<TradeOrder | null> {
+    const identities = await this.identityRows(userId, scope);
+    let row: TradeOrder | null;
+    if (identities.broker && identities.client && identities.broker.id !== identities.client.id) {
+      row = await this.mergeIdentityRows(userId, identities.client, identities.broker, scope);
+    } else {
+      row = identities.broker ?? identities.client;
+    }
+
+    // Do this even when the incoming one-sided alias already found its own
+    // row. A webhook and placement can each create one side concurrently; a
+    // later broker-only MLEG event may be the only opportunity to join them.
+    const opposite = await this.snapTradeReconciliationCandidate(userId, order, scope);
+    if (opposite && row && opposite.id !== row.id) {
+      let canonical = row;
+      if (!row.clientOrderId && opposite.clientOrderId) canonical = opposite;
+      const duplicate = canonical.id === row.id ? opposite : row;
+      row = await this.mergeIdentityRows(userId, canonical, duplicate, scope);
+    } else if (!row) {
+      row = opposite;
+    }
+    return row ? this.attachIdentity(userId, row, scope) : null;
+  }
+
+  /** Merge a split client-id/broker-id identity without losing executions. */
+  private async mergeIdentityRows(
+    userId: string,
+    first: TradeOrder,
+    second: TradeOrder,
+    scope: OrderScope,
+  ): Promise<TradeOrder> {
+    if (first.id === second.id) return first;
+    return this.prisma.$transaction(async (database) => {
+      const lockIds = [first.id, second.id].sort();
+      await database.$queryRaw(
+        Prisma.sql`SELECT "id" FROM "trade_orders"
+          WHERE "id" IN (${Prisma.join(lockIds)})
+          ORDER BY "id" FOR UPDATE`,
+      );
+      const [currentFirst, currentSecond] = await Promise.all([
+        database.tradeOrder.findUnique({ where: { id: first.id } }),
+        database.tradeOrder.findUnique({ where: { id: second.id } }),
+      ]);
+      if (!currentFirst && !currentSecond) {
+        throw new Error('trade orders disappeared during identity merge');
+      }
+      if (!currentFirst) return currentSecond as TradeOrder;
+      if (!currentSecond) return currentFirst;
+      if (
+        currentFirst.userId !== userId ||
+        currentSecond.userId !== userId ||
+        currentFirst.provider !== currentSecond.provider ||
+        currentFirst.environment !== currentSecond.environment ||
+        currentFirst.accountId !== currentSecond.accountId
+      ) {
+        throw new Error('refused to merge trade orders across identity scopes');
+      }
+
+      const isDurablyReferenced = async (internalId: string): Promise<boolean> => {
+        const [userEvent, pushDelivery, discordDelivery] = await Promise.all([
+          database.userEvent.findFirst({
+            where: { userId, dedupeKey: { startsWith: `order:${internalId}:` } },
+            select: { id: true },
+          }),
+          database.pushDelivery.findFirst({
+            where: { userId, key: { startsWith: `order:${internalId}:` } },
+            select: { id: true },
+          }),
+          database.discordDelivery.findFirst({
+            where: { userId, key: { startsWith: `order:internal:${internalId}:` } },
+            select: { id: true },
+          }),
+        ]);
+        return userEvent !== null || pushDelivery !== null || discordDelivery !== null;
+      };
+      const [firstReferenced, secondReferenced] = await Promise.all([
+        isDurablyReferenced(currentFirst.id),
+        isDurablyReferenced(currentSecond.id),
+      ]);
+      // A terminal event may already have escaped on one side before the
+      // placement/webhook split was discovered. Preserve that internal UUID
+      // so a redelivery resolves the same durable push/event/Discord keys.
+      // With equal reference state, UUID ordering gives every contender the
+      // same choice without relying on mutable alias preference.
+      const preserveSecond =
+        (!firstReferenced && secondReferenced) ||
+        (firstReferenced === secondReferenced && currentSecond.id < currentFirst.id);
+      const currentCanonical = preserveSecond ? currentSecond : currentFirst;
+      const currentDuplicate = preserveSecond ? currentFirst : currentSecond;
+
+      const duplicateExecutions = await database.tradeOrderExecution.findMany({
+        where: { orderId: currentDuplicate.id },
+      });
+      for (const execution of duplicateExecutions) {
+        const known =
+          execution.cumulative === null
+            ? []
+            : await database.tradeOrderExecution.findMany({
+                where: { orderId: currentCanonical.id, cumulative: execution.cumulative },
+              });
+        if (known.length > 0) continue;
+        await database.tradeOrderExecution.create({
+          data: {
+            orderId: currentCanonical.id,
+            cumulative: execution.cumulative,
+            avgPrice: execution.avgPrice,
+            quantity: execution.quantity,
+            price: execution.price,
+            executedAt: execution.executedAt,
+            createdAt: execution.createdAt,
           },
+        });
+      }
+
+      // Delete first to release the duplicate row's external-id unique slot;
+      // the copied executions survive on canonical and the rest cascade away.
+      await database.tradeOrder.delete({ where: { id: currentDuplicate.id } });
+      const fillSource =
+        currentDuplicate.executedQuantity > currentCanonical.executedQuantity
+          ? currentDuplicate
+          : currentCanonical;
+      const filledTimes = [currentCanonical.filledAt, currentDuplicate.filledAt].filter(
+        (value): value is Date => value instanceof Date,
+      );
+      const updated = await database.tradeOrder.updateMany({
+        where: { id: currentCanonical.id, userId },
+        data: {
+          brokerOrderId:
+            scope.brokerOrderId ?? currentCanonical.brokerOrderId ?? currentDuplicate.brokerOrderId,
+          clientOrderId:
+            scope.clientOrderId ?? currentCanonical.clientOrderId ?? currentDuplicate.clientOrderId,
+          status: advancedStatus(currentCanonical.status, currentDuplicate.status),
+          executedQuantity: Math.max(
+            currentCanonical.executedQuantity,
+            currentDuplicate.executedQuantity,
+          ),
+          filledQuantity: fillSource.filledQuantity,
+          filledPrice: fillSource.filledPrice,
+          filledAt:
+            filledTimes.length === 0
+              ? null
+              : new Date(Math.min(...filledTimes.map((value) => value.getTime()))),
+          underlyingPrice: currentCanonical.underlyingPrice ?? currentDuplicate.underlyingPrice,
+          placedAt: new Date(
+            Math.min(currentCanonical.placedAt.getTime(), currentDuplicate.placedAt.getTime()),
+          ),
         },
       });
-      if (row) return row;
-    }
-    if (scope.clientOrderId) {
-      return this.prisma.tradeOrder.findUnique({
-        where: {
-          userId_provider_environment_accountId_clientOrderId: {
-            userId,
-            provider: scope.provider,
-            environment: scope.environment,
-            accountId: scope.accountId,
-            clientOrderId: scope.clientOrderId,
-          },
-        },
-      });
-    }
-    return null;
+      if (updated.count !== 1) {
+        throw new Error('canonical trade order update lost during identity merge');
+      }
+      const merged = await database.tradeOrder.findUnique({ where: { id: currentCanonical.id } });
+      if (!merged) throw new Error('canonical trade order disappeared during identity merge');
+      return merged;
+    });
+  }
+
+  private async attachIdentity(
+    userId: string,
+    row: TradeOrder,
+    scope: OrderScope,
+  ): Promise<TradeOrder> {
+    const identityUpdate: { brokerOrderId?: string; clientOrderId?: string } = {};
+    if (!row.brokerOrderId && scope.brokerOrderId)
+      identityUpdate.brokerOrderId = scope.brokerOrderId;
+    if (!row.clientOrderId && scope.clientOrderId)
+      identityUpdate.clientOrderId = scope.clientOrderId;
+    if (Object.keys(identityUpdate).length === 0) return row;
+    const updated = await this.prisma.tradeOrder.updateMany({
+      where: { id: row.id, userId },
+      data: identityUpdate,
+    });
+    if (updated.count !== 1) throw new Error('trade order disappeared while attaching identity');
+    return { ...row, ...identityUpdate };
   }
 
   /** The full row for an order seen for the first time. */
@@ -754,7 +1076,7 @@ export class OrdersService implements OnModuleDestroy {
     // cover. filledAt is dropped with them — the first-fill write below
     // stamps it with the same fillTimeOf in the same call.
     const base = await this.createData(userId, order, scope);
-    let row = await this.findByScope(userId, scope);
+    let row = await this.convergedIdentityRow(userId, order, scope);
     if (!row) {
       try {
         row = await this.prisma.tradeOrder.create({
@@ -767,20 +1089,16 @@ export class OrdersService implements OnModuleDestroy {
       }
     }
 
+    // Re-read after create. The opposite one-sided alias may have committed
+    // concurrently after the pre-create lookup; converging here means the two
+    // placement/webhook calls themselves repair the split without requiring a
+    // future event that an option MLEG payload may never provide.
+    row = (await this.convergedIdentityRow(userId, order, scope)) ?? row;
+
     // Placement can initially know only the provider client id; a later
     // webhook adds the real broker id. Both identities attach to the same
     // internal row, guarded by the scoped unique indexes.
-    const identityUpdate: { brokerOrderId?: string; clientOrderId?: string } = {};
-    if (!row.brokerOrderId && scope.brokerOrderId)
-      identityUpdate.brokerOrderId = scope.brokerOrderId;
-    if (!row.clientOrderId && scope.clientOrderId)
-      identityUpdate.clientOrderId = scope.clientOrderId;
-    if (Object.keys(identityUpdate).length > 0) {
-      await this.prisma.tradeOrder.updateMany({
-        where: { id: row.id, userId },
-        data: identityUpdate,
-      });
-    }
+    row = await this.attachIdentity(userId, row, scope);
 
     // Status only moves FORWARD, each transition a predicate-guarded write so
     // concurrent recorders on other instances cannot interleave a regression:
@@ -907,10 +1225,19 @@ export class OrdersService implements OnModuleDestroy {
     userId: string,
     order: OrderResult,
     underlyingPrice: number,
+    environment?: TradingMode,
+    identity: Partial<OrderUpdateEvent> = {},
   ): Promise<void> {
-    const scope = await this.scopeFor(userId, order);
+    const scope = await this.scopeFor(userId, order, environment, identity);
     return this.enqueueForOrder(
-      [userId, scope.provider, scope.environment, order.orderId].join('|'),
+      [
+        userId,
+        scope.provider,
+        scope.environment,
+        scope.accountId,
+        scope.brokerOrderId ?? '',
+        scope.clientOrderId ?? '',
+      ].join('|'),
       () => this.recordUnderlyingPriceSerialized(userId, order, underlyingPrice, scope),
     );
   }
@@ -928,29 +1255,14 @@ export class OrdersService implements OnModuleDestroy {
     }
     try {
       // The gateway emits before returning, but its durable ingestors finish
-      // asynchronously. Give that scoped row a bounded chance to appear so
-      // the placement-only underlying quote attaches to the exact account.
-      let candidates: TradeOrder[] = [];
+      // asynchronously. Give the exact provider/environment/account aliases a
+      // bounded chance to appear. Never search order.orderId across accounts.
+      let row: TradeOrder | null = null;
       for (let attempt = 0; attempt < 3; attempt += 1) {
-        candidates = await this.prisma.tradeOrder.findMany({
-          where: {
-            userId,
-            provider: scope.provider,
-            environment: scope.environment,
-            OR: [{ brokerOrderId: order.orderId }, { clientOrderId: order.orderId }],
-          },
-          orderBy: { placedAt: 'desc' },
-        });
-        if (candidates.length > 0) break;
+        row = await this.convergedIdentityRow(userId, order, scope);
+        if (row) break;
         await new Promise((resolve) => setTimeout(resolve, 10));
       }
-      if (candidates.length > 1) {
-        this.logger.warn(
-          `underlying price for ${order.orderId} is ambiguous across broker accounts; not recording`,
-        );
-        return;
-      }
-      let row = candidates[0];
       if (!row) {
         try {
           row = await this.prisma.tradeOrder.create({
@@ -958,10 +1270,11 @@ export class OrdersService implements OnModuleDestroy {
           });
         } catch (error) {
           if ((error as { code?: string }).code !== 'P2002') throw error;
-          row = (await this.findByScope(userId, scope)) as TradeOrder;
+          row = await this.convergedIdentityRow(userId, order, scope);
           if (!row) throw error;
         }
       }
+      row = (await this.convergedIdentityRow(userId, order, scope)) ?? row;
       await this.prisma.tradeOrder.updateMany({
         where: { id: row.id, userId },
         data: { underlyingPrice },
@@ -1009,9 +1322,14 @@ export class OrdersService implements OnModuleDestroy {
       where: { userId, environment, contractSymbol: { in: contractSymbols } },
       orderBy: { placedAt: 'asc' },
     });
+    // Rows migrated from the pre-scope schema deliberately live in `legacy`:
+    // their provider/account is unknowable. Attaching their entry quote or
+    // opening time to today's selected broker position could automate against
+    // a completely different account, so they remain historical display only.
+    const scopedRows = rows.filter((row) => row.provider !== 'legacy');
 
     const book = new Map<string, BookEntry>();
-    for (const event of fillEventsFor(rows, await this.executionsFor(rows))) {
+    for (const event of fillEventsFor(scopedRows, await this.executionsFor(scopedRows))) {
       applyExecution(
         book,
         [event.row.provider, event.row.accountId, event.row.contractSymbol].join('|'),
@@ -1058,25 +1376,12 @@ export class OrdersService implements OnModuleDestroy {
     // basis for a live sale of the same contract. The list itself stays one
     // entry per ORDER; an order's realized P/L is the sum over its closing
     // executions.
-    const book = new Map<string, BookEntry>();
-    const realizedByOrder = new Map<string, number>();
-    let total = 0;
-    for (const event of fillEventsFor(rows, await this.executionsFor(rows))) {
-      const { row } = event;
-      const realized = applyExecution(
-        book,
-        [row.provider, row.environment, row.accountId, row.contractSymbol].join('|'),
-        event,
-      );
-      if (realized !== null) {
-        realizedByOrder.set(row.id, (realizedByOrder.get(row.id) ?? 0) + realized);
-        total += realized;
-      }
-    }
+    const { realizedByOrder, total } = await this.realizedPnl(rows);
 
     const entries: TradeHistoryEntry[] = rows.map((row) => {
       const realized = realizedByOrder.get(row.id);
       return {
+        internalOrderId: row.id,
         orderId: row.clientOrderId ?? row.brokerOrderId ?? row.id,
         ...(row.brokerOrderId && { brokerOrderId: row.brokerOrderId }),
         ...(row.clientOrderId && { clientOrderId: row.clientOrderId }),
@@ -1093,5 +1398,48 @@ export class OrdersService implements OnModuleDestroy {
     });
 
     return { entries: entries.reverse(), totalRealizedPnl: round2(total) };
+  }
+
+  /** Realized P/L for one persisted order identity. Notification delivery uses
+   * the internal UUID after resolving provider/environment/account, avoiding
+   * an external broker id collision across accounts. */
+  async realizedPnlForInternalOrder(
+    userId: string,
+    internalOrderId: string,
+  ): Promise<number | null> {
+    const rows = await this.prisma.tradeOrder.findMany({
+      where: { userId },
+      orderBy: { placedAt: 'asc' },
+    });
+    if (!rows.some((row) => row.id === internalOrderId)) return null;
+    const { realizedByOrder } = await this.realizedPnl(rows);
+    const realized = realizedByOrder.get(internalOrderId);
+    return realized === undefined ? null : round2(realized);
+  }
+
+  private async realizedPnl(
+    rows: TradeOrder[],
+  ): Promise<{ realizedByOrder: Map<string, number>; total: number }> {
+    const book = new Map<string, BookEntry>();
+    const realizedByOrder = new Map<string, number>();
+    let total = 0;
+    for (const event of fillEventsFor(rows, await this.executionsFor(rows))) {
+      const { row } = event;
+      // Migration cannot recover the provider/account behind legacy rows.
+      // Pairing a buy from one old account with a sell from another would
+      // fabricate realized profit, so keep those history entries visible but
+      // intentionally leave their realizedPnl null.
+      if (row.provider === 'legacy') continue;
+      const realized = applyExecution(
+        book,
+        [row.provider, row.environment, row.accountId, row.contractSymbol].join('|'),
+        event,
+      );
+      if (realized !== null) {
+        realizedByOrder.set(row.id, (realizedByOrder.get(row.id) ?? 0) + realized);
+        total += realized;
+      }
+    }
+    return { realizedByOrder, total };
   }
 }

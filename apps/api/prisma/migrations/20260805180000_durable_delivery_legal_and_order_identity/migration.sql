@@ -1,17 +1,21 @@
 -- Issues #58, #60 and #91-#96 share one persistence boundary. This migration
 -- is intentionally hand-written: trade_orders changes primary-key domains and
 -- trade_order_executions must be remapped without losing fill history.
+-- PostgreSQL DDL is transactional. Keep this multi-step key/FK/data rewrite
+-- atomic so a failed guard or index build leaves the pre-migration schema
+-- intact for the operator to mark rolled back, fix the data, and retry.
+BEGIN;
 
 -- ---------------------------------------------------------------------------
 -- Tenant-scoped trade order identity (#92)
 -- ---------------------------------------------------------------------------
 
 DO $$
-DECLARE empty_ids BIGINT;
+DECLARE blank_ids BIGINT;
 BEGIN
-  SELECT COUNT(*) INTO empty_ids FROM "trade_orders" WHERE BTRIM("id") = '';
-  IF empty_ids > 0 THEN
-    RAISE NOTICE 'trade_orders contains % empty legacy order ids; external ids will be NULL', empty_ids;
+  SELECT COUNT(*) INTO blank_ids FROM "trade_orders" WHERE BTRIM("id") = '';
+  IF blank_ids > 0 THEN
+    RAISE NOTICE 'trade_orders contains % blank legacy order ids; external ids will be NULL', blank_ids;
   END IF;
 END $$;
 
@@ -23,22 +27,15 @@ ALTER TABLE "trade_orders"
   ADD COLUMN "clientOrderId" TEXT;
 
 UPDATE "trade_orders" AS orders
-SET "provider" = users."tradingProvider",
-    "accountId" = CASE
-      WHEN users."tradingProvider" = 'snaptrade' THEN COALESCE((
-        SELECT connection."selectedAccountId"
-        FROM "broker_connections" AS connection
-        WHERE connection."userId" = orders."userId"
-          AND connection."provider" = 'snaptrade'
-          AND connection."environment" = orders."environment"
-        LIMIT 1
-      ), 'default')
-      ELSE 'default'
-    END,
-    "brokerOrderId" = NULLIF(BTRIM(orders."id"), ''),
-    "clientOrderId" = NULLIF(BTRIM(orders."id"), '')
-FROM "users" AS users
-WHERE users."id" = orders."userId";
+-- The old table did not record provider or broker-account identity. A user's
+-- current provider/selected account is mutable and therefore cannot truthfully
+-- scope historical rows. Keep them in an explicit immutable legacy partition.
+-- Preserve non-blank external ids byte-for-byte: trimming both "x" and " x "
+-- into one value would make the new unique indexes fail during deployment.
+SET "provider" = 'legacy',
+    "accountId" = 'legacy',
+    "brokerOrderId" = CASE WHEN BTRIM(orders."id") = '' THEN NULL ELSE orders."id" END,
+    "clientOrderId" = CASE WHEN BTRIM(orders."id") = '' THEN NULL ELSE orders."id" END;
 
 ALTER TABLE "trade_order_executions" ADD COLUMN "internalOrderId" UUID;
 UPDATE "trade_order_executions" AS execution
@@ -99,23 +96,45 @@ CREATE TABLE "bracket_groups" (
   CONSTRAINT "bracket_groups_pkey" PRIMARY KEY ("id")
 );
 
--- Preserve pre-existing groups. Their account scope was not stored, so the
--- explicit legacy scope prevents them from colliding with newly-created ones.
+-- Pre-existing groups did not store provider/account scope. A user's current
+-- selection is mutable, so inferring it could route an armed legacy leg to the
+-- wrong broker. Preserve history in a non-routable legacy scope and fail every
+-- group closed; users can deliberately recreate protection after deployment.
 INSERT INTO "bracket_groups" (
   "id", "userId", "provider", "environment", "accountId", "contractSymbol",
-  "closeSide", "protectedQuantity", "status", "createdAt", "updatedAt"
+  "closeSide", "protectedQuantity", "status", "lastError", "createdAt", "updatedAt"
 )
 SELECT
   DISTINCT ON (orders."ocoGroupId")
-  orders."ocoGroupId", orders."userId", users."tradingProvider",
-  orders."environment", 'default', orders."contractSymbol", orders."side",
-  orders."quantity",
-  CASE WHEN orders."status" = 'working' THEN 'working' ELSE 'closed' END,
-  orders."createdAt", orders."updatedAt"
+  orders."ocoGroupId", orders."userId", 'legacy',
+  orders."environment", 'legacy', orders."contractSymbol", orders."side",
+  orders."quantity", 'closed',
+  'Legacy bracket cancelled during migration because broker account scope was not recorded',
+  orders."createdAt", CURRENT_TIMESTAMP
 FROM "chart_orders" AS orders
-JOIN "users" AS users ON users."id" = orders."userId"
 WHERE orders."ocoGroupId" IS NOT NULL
 ORDER BY orders."ocoGroupId", orders."createdAt", orders."id";
+
+UPDATE "chart_orders" AS orders
+SET "status" = 'cancelled',
+    "lastError" = COALESCE(
+      orders."lastError",
+      'Legacy bracket cancelled during migration because broker account scope was not recorded'
+    ),
+    "updatedAt" = CURRENT_TIMESTAMP
+WHERE orders."ocoGroupId" IS NOT NULL
+  AND orders."status" = 'working';
+
+-- Ungrouped legacy protective legs are equally unscoped. They cannot be
+-- attached to a trustworthy account during migration, so fail them closed as
+-- well; newly armed target/stop orders persist immutable scope at creation.
+UPDATE "chart_orders"
+SET "status" = 'cancelled',
+    "lastError" = 'Legacy protective order cancelled during scope migration: broker account could not be determined safely',
+    "updatedAt" = CURRENT_TIMESTAMP
+WHERE "ocoGroupId" IS NULL
+  AND "kind" IN ('target', 'stop')
+  AND "status" = 'working';
 
 -- A legacy client-supplied UUID must never join tenants or incompatible
 -- contracts. Keep the owner's canonical scope and detach every mismatched leg.
@@ -184,17 +203,16 @@ ALTER TABLE "chart_orders" ADD CONSTRAINT "chart_orders_ocoGroupId_fkey"
 -- Per-device push outbox and retention (#93, #96)
 -- ---------------------------------------------------------------------------
 
--- Legacy rows are aggregate claims with no device identity and cannot be
--- safely converted. Removing them re-opens delivery only for an event that is
--- redelivered after this deployment; it cannot duplicate a specific known
--- device because the old table never recorded one.
-DELETE FROM "push_deliveries";
+-- Preserve aggregate claims as terminal tombstones. Deleting them would make
+-- a provider redelivery repeat an alert that the old service already sent.
+-- The application recognizes environment='legacy' when bridging old keys;
+-- normal retention removes these rows after the same seven-day dedupe window.
 DROP INDEX "push_deliveries_userId_key_key";
 ALTER TABLE "push_deliveries"
-  ADD COLUMN "deviceToken" TEXT NOT NULL,
-  ADD COLUMN "environment" TEXT NOT NULL,
-  ADD COLUMN "title" TEXT NOT NULL,
-  ADD COLUMN "body" TEXT NOT NULL,
+  ADD COLUMN "deviceToken" TEXT,
+  ADD COLUMN "environment" TEXT,
+  ADD COLUMN "title" TEXT,
+  ADD COLUMN "body" TEXT,
   ADD COLUMN "status" TEXT NOT NULL DEFAULT 'pending',
   ADD COLUMN "attempts" INTEGER NOT NULL DEFAULT 0,
   ADD COLUMN "nextAttemptAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -203,6 +221,20 @@ ALTER TABLE "push_deliveries"
   ADD COLUMN "lastError" TEXT,
   ADD COLUMN "deliveredAt" TIMESTAMP(3),
   ADD COLUMN "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP;
+
+UPDATE "push_deliveries"
+SET "deviceToken" = 'legacy:' || "id"::TEXT,
+    "environment" = 'legacy',
+    "title" = '',
+    "body" = '',
+    "status" = 'delivered',
+    "deliveredAt" = "createdAt";
+
+ALTER TABLE "push_deliveries"
+  ALTER COLUMN "deviceToken" SET NOT NULL,
+  ALTER COLUMN "environment" SET NOT NULL,
+  ALTER COLUMN "title" SET NOT NULL,
+  ALTER COLUMN "body" SET NOT NULL;
 CREATE UNIQUE INDEX "push_deliveries_userId_key_deviceToken_key"
   ON "push_deliveries"("userId", "key", "deviceToken");
 CREATE INDEX "push_deliveries_status_nextAttemptAt_leaseExpiresAt_idx"
@@ -246,7 +278,7 @@ ALTER TABLE "webhook_inbox" ADD CONSTRAINT "webhook_inbox_userId_fkey"
 -- ---------------------------------------------------------------------------
 
 CREATE TABLE "user_events" (
-  "ordinal" BIGSERIAL NOT NULL,
+  "ordinal" BIGINT NOT NULL,
   "id" UUID NOT NULL DEFAULT gen_random_uuid(),
   "userId" UUID NOT NULL,
   "sequence" INTEGER NOT NULL,
@@ -262,6 +294,16 @@ CREATE UNIQUE INDEX "user_events_userId_dedupeKey_key" ON "user_events"("userId"
 CREATE INDEX "user_events_userId_sequence_idx" ON "user_events"("userId", "sequence");
 ALTER TABLE "user_events" ADD CONSTRAINT "user_events_userId_fkey"
   FOREIGN KEY ("userId") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- A single locked allocator row makes event ordinals follow transaction commit
+-- order across API instances. Pollers may therefore advance monotonically
+-- without skipping an earlier ordinal that is still waiting to commit.
+CREATE TABLE "event_transport_state" (
+  "name" TEXT NOT NULL,
+  "nextOrdinal" BIGINT NOT NULL,
+  CONSTRAINT "event_transport_state_pkey" PRIMARY KEY ("name")
+);
+INSERT INTO "event_transport_state" ("name", "nextOrdinal") VALUES ('global', 1);
 
 -- ---------------------------------------------------------------------------
 -- Discord notifications (#58)
@@ -312,3 +354,5 @@ CREATE UNIQUE INDEX "legal_acceptances_userId_document_version_key"
 CREATE INDEX "legal_acceptances_userId_document_idx" ON "legal_acceptances"("userId", "document");
 ALTER TABLE "legal_acceptances" ADD CONSTRAINT "legal_acceptances_userId_fkey"
   FOREIGN KEY ("userId") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+COMMIT;

@@ -22,12 +22,13 @@ final class DurableEventCursorTests: XCTestCase {
     func testCursorPersistsPerUserAndRefusesGaps() throws {
         let first = DurableEventCursor(defaults: defaults, serverKey: "wss://example.test")
         first.activate(token: try token(subject: "user-a"))
-        XCTAssertEqual(first.accept(eventID: "event-7", sequence: 7), .accepted)
+        XCTAssertEqual(first.begin(eventID: "event-7", sequence: 7), .accepted)
+        XCTAssertTrue(first.commit(eventID: "event-7", sequence: 7))
 
         let restarted = DurableEventCursor(defaults: defaults, serverKey: "wss://example.test")
         restarted.activate(token: try token(subject: "user-a"))
         XCTAssertEqual(restarted.sequence, 7)
-        XCTAssertEqual(restarted.accept(eventID: "event-9", sequence: 9), .gap)
+        XCTAssertEqual(restarted.begin(eventID: "event-9", sequence: 9), .gap)
         XCTAssertEqual(restarted.sequence, 7)
 
         restarted.activate(token: try token(subject: "user-b"))
@@ -39,9 +40,10 @@ final class DurableEventCursorTests: XCTestCase {
         cursor.activate(token: try token(subject: "user-a"))
         for sequence in 1...700 {
             XCTAssertEqual(
-                cursor.accept(eventID: "event-\(sequence)", sequence: sequence),
+                cursor.begin(eventID: "event-\(sequence)", sequence: sequence),
                 .accepted
             )
+            XCTAssertTrue(cursor.commit(eventID: "event-\(sequence)", sequence: sequence))
         }
         XCTAssertEqual(cursor.retainedEventCount, 512)
     }
@@ -56,7 +58,34 @@ final class DurableEventCursorTests: XCTestCase {
         restarted.activate(token: try token(subject: "user-a"))
         XCTAssertTrue(restarted.isResumable)
         XCTAssertEqual(restarted.sequence, 0)
-        XCTAssertEqual(restarted.accept(eventID: "event-2", sequence: 2), .gap)
-        XCTAssertEqual(restarted.accept(eventID: "event-1", sequence: 1), .accepted)
+        XCTAssertEqual(restarted.begin(eventID: "event-2", sequence: 2), .gap)
+        XCTAssertEqual(restarted.begin(eventID: "event-1", sequence: 1), .accepted)
+    }
+
+    func testCursorDoesNotPersistBeforeConsumerCommit() throws {
+        let first = DurableEventCursor(defaults: defaults, serverKey: "wss://example.test")
+        first.activate(token: try token(subject: "user-a"))
+        XCTAssertEqual(first.begin(eventID: "event-1", sequence: 1), .accepted)
+        XCTAssertEqual(first.sequence, 0)
+
+        let beforeDelivery = DurableEventCursor(defaults: defaults, serverKey: "wss://example.test")
+        beforeDelivery.activate(token: try token(subject: "user-a"))
+        XCTAssertFalse(beforeDelivery.isResumable)
+
+        XCTAssertTrue(first.commit(eventID: "event-1", sequence: 1))
+        let afterDelivery = DurableEventCursor(defaults: defaults, serverKey: "wss://example.test")
+        afterDelivery.activate(token: try token(subject: "user-a"))
+        XCTAssertEqual(afterDelivery.sequence, 1)
+    }
+
+    func testPreEventBaselineReplaysAnEventQueuedBeforeItsConsumerExists() throws {
+        let first = DurableEventCursor(defaults: defaults, serverKey: "wss://example.test")
+        first.activate(token: try token(subject: "user-a"))
+        first.establish(sequence: 6)
+
+        let reconnected = DurableEventCursor(defaults: defaults, serverKey: "wss://example.test")
+        reconnected.activate(token: try token(subject: "user-a"))
+        XCTAssertEqual(reconnected.sequence, 6)
+        XCTAssertEqual(reconnected.begin(eventID: "event-7", sequence: 7), .accepted)
     }
 }

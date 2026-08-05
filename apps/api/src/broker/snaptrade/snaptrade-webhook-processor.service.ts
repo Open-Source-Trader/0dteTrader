@@ -20,6 +20,7 @@ export class SnapTradeWebhookProcessorService {
     environment: TradingMode,
     event: Record<string, unknown>,
     webhookId: string,
+    snapshottedAccountId?: string | null,
   ): Promise<void> {
     switch (eventType) {
       case 'CONNECTION_ADDED':
@@ -33,7 +34,7 @@ export class SnapTradeWebhookProcessorService {
         break;
       case 'TRADE_UPDATE':
       case 'TRADE_DETECTION':
-        await this.handleTradeUpdate(userId, environment, event, webhookId);
+        await this.handleTradeUpdate(userId, environment, event, webhookId, snapshottedAccountId);
         break;
       default:
         break;
@@ -106,6 +107,7 @@ export class SnapTradeWebhookProcessorService {
     environment: TradingMode,
     event: Record<string, unknown>,
     webhookId: string,
+    snapshottedAccountId?: string | null,
   ): Promise<void> {
     const details = event['details'] as Record<string, unknown> | undefined;
     const orders = Array.isArray(details?.['orders'])
@@ -118,11 +120,20 @@ export class SnapTradeWebhookProcessorService {
         this.string(order['client_order_id']) || this.string(order['clientOrderId']);
       if (brokerOrderId === '' && clientOrderId === '') continue;
       if (mapped.orderId === '') mapped.orderId = clientOrderId;
-      const accountId =
+      const explicitAccountId =
         this.string(order['account_id']) ||
         this.string(event['accountId']) ||
+        this.string(event['account_id']) ||
         this.string(details?.['accountId']) ||
-        'default';
+        this.string(details?.['account_id']) ||
+        this.string(snapshottedAccountId);
+      if (explicitAccountId === '' && snapshottedAccountId === null) {
+        throw new Error(
+          `SnapTrade webhook ${webhookId} account scope was missing or ambiguous at receipt`,
+        );
+      }
+      const accountId =
+        explicitAccountId || (await this.onlyBrokerAccount(userId, environment, webhookId));
       try {
         await this.events.ingest(userId, mapped, environment, {
           provider: 'snaptrade',
@@ -147,6 +158,37 @@ export class SnapTradeWebhookProcessorService {
         throw error;
       }
     }
+  }
+
+  /**
+   * An account-less trade webhook is safe only when the immutable connection
+   * scope has exactly one possible account. `selectedAccountId` is mutable UI
+   * state and must not be used to route an old delivery when several accounts
+   * exist. Throwing keeps the durable inbox retry/dead-letter semantics rather
+   * than silently filing the order under a made-up `default` account.
+   */
+  private async onlyBrokerAccount(
+    userId: string,
+    environment: TradingMode,
+    webhookId: string,
+  ): Promise<string> {
+    const connection = await this.prisma.brokerConnection.findUnique({
+      where: {
+        userId_provider_environment: { userId, provider: 'snaptrade', environment },
+      },
+    });
+    const accountIds = Array.from(
+      new Set(
+        (connection?.accountIds ?? [])
+          .map((accountId) => accountId.trim())
+          .filter((accountId) => accountId !== ''),
+      ),
+    );
+    if (accountIds.length === 1) return accountIds[0];
+    throw new Error(
+      `SnapTrade webhook ${webhookId} has no account id and ` +
+        `${accountIds.length === 0 ? 'no broker account is known' : 'multiple broker accounts exist'}`,
+    );
   }
 
   private mapOrderResult(order: Record<string, unknown>) {

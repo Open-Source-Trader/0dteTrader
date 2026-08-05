@@ -41,6 +41,7 @@ struct ProfileView: View {
                     preferencesCard
                     discordCard
                     legalCard
+                    complianceMessageCard
                     deleteAccountCard
                     logoutCard
                 }

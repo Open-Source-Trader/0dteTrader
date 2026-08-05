@@ -2,12 +2,9 @@
 import XCTest
 @testable import ZeroDTETrader
 
-/// An order placement's own `orderUpdate` push (submitted, then the terminal
-/// fill/reject) drives `handleOrderUpdate` -> `refreshTradingData` already —
-/// these tests guard against `submitOrder`/`flatten`/`cancel` stacking a
-/// redundant direct refresh on top of it, and against overlapping refreshes
-/// (submitted + terminal pushes landing close together) firing more than one
-/// extra network round trip.
+/// Mutations refresh directly because socket connectivity is not delivery
+/// proof. The coalescer still keeps overlapping direct/push-driven refreshes
+/// to one in-flight run plus at most one follow-up.
 @MainActor
 final class TradeViewModelRefreshTests: XCTestCase {
     override func tearDown() {
@@ -15,7 +12,7 @@ final class TradeViewModelRefreshTests: XCTestCase {
         super.tearDown()
     }
 
-    func testSubmitOrderSkipsItsOwnRefreshWhenSocketIsConnected() async {
+    func testSubmitOrderRefreshesWithoutAssumingSocketDelivery() async {
         var positionsCalls = 0
         var openOrdersCalls = 0
         RefreshCountingURLProtocol.handler = { request in
@@ -39,7 +36,6 @@ final class TradeViewModelRefreshTests: XCTestCase {
         }
         let (tradeViewModel, chainViewModel) = await makeViewModels()
         chainViewModel.isAutoMode = true
-        tradeViewModel.isSocketConnected = { true }
 
         // bypass: false + confirmArmedOrder exercises the same submitOrder
         // path as the bypass flow, but is directly awaitable (bypass fires
@@ -47,11 +43,11 @@ final class TradeViewModelRefreshTests: XCTestCase {
         tradeViewModel.arm(side: .buy, underlying: "SPY", chainViewModel: chainViewModel, bypass: false)
         await tradeViewModel.confirmArmedOrder()
 
-        XCTAssertEqual(positionsCalls, 0)
-        XCTAssertEqual(openOrdersCalls, 0)
+        XCTAssertEqual(positionsCalls, 1)
+        XCTAssertEqual(openOrdersCalls, 1)
     }
 
-    func testSubmitOrderFallsBackToDirectRefreshWhenSocketIsDisconnected() async {
+    func testSubmitOrderRefreshesWhenNoPushArrives() async {
         var positionsCalls = 0
         var openOrdersCalls = 0
         RefreshCountingURLProtocol.handler = { request in
@@ -75,7 +71,6 @@ final class TradeViewModelRefreshTests: XCTestCase {
         }
         let (tradeViewModel, chainViewModel) = await makeViewModels()
         chainViewModel.isAutoMode = true
-        tradeViewModel.isSocketConnected = { false }
 
         tradeViewModel.arm(side: .buy, underlying: "SPY", chainViewModel: chainViewModel, bypass: false)
         await tradeViewModel.confirmArmedOrder()

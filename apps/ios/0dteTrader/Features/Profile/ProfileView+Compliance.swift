@@ -33,7 +33,7 @@ extension ProfileView {
                             enabled: discordEnabled,
                             includePnl: discordIncludePnl
                         )
-                        if viewModel.errorMessage == nil { discordWebhookURL = "" }
+                        if viewModel.complianceErrorMessage == nil { discordWebhookURL = "" }
                     }
                 }
                 .buttonStyle(HudActionButtonStyle(accent: .appAccent, chamfer: 6))
@@ -55,6 +55,16 @@ extension ProfileView {
             Label("About & Legal", systemImage: "doc.text.fill")
                 .font(.panelLabel)
                 .foregroundStyle(Color.appAccent)
+
+            HStack {
+                Text("Version")
+                    .font(.panelLabel)
+                    .foregroundStyle(.white)
+                Spacer()
+                Text(appVersionLabel)
+                    .font(.chipLabel)
+                    .foregroundStyle(.secondary)
+            }
 
             ForEach(viewModel.legalStatus?.documents ?? []) { document in
                 Button {
@@ -78,6 +88,7 @@ extension ProfileView {
                     .padding(.vertical, AppSpacing.xs)
                 }
                 .buttonStyle(AppPressStyle())
+                .disabled(viewModel.isComplianceBusy)
             }
 
             if let document = viewModel.selectedLegalDocument {
@@ -85,16 +96,16 @@ extension ProfileView {
                 Text(document.title)
                     .font(.panelLabel)
                     .foregroundStyle(Color.appAccent)
-                Text(document.markdown)
+                LegalMarkdownText(markdown: document.markdown)
                     .font(.chipLabel)
                     .foregroundStyle(.secondary)
-                    .textSelection(.enabled)
                 if document.requiresAcceptance,
                    viewModel.legalStatus?.documents.first(where: { $0.slug == document.slug })?.accepted != true {
                     Button("Accept \(document.title)") {
                         Task { await viewModel.acceptLegal(document) }
                     }
                     .buttonStyle(HudActionButtonStyle(accent: .appAccent, chamfer: 6))
+                    .disabled(viewModel.isComplianceBusy)
                 }
                 Button("Close Document") { viewModel.closeLegalDocument() }
                     .font(.chipLabel)
@@ -103,6 +114,40 @@ extension ProfileView {
         }
         .padding(AppSpacing.lg)
         .hudCard(glow: false)
+    }
+
+    @ViewBuilder
+    var complianceMessageCard: some View {
+        if let errorMessage = viewModel.complianceErrorMessage {
+            VStack(alignment: .leading, spacing: AppSpacing.md) {
+                Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
+                    .font(.chipLabel)
+                    .foregroundStyle(Color.pnlNegative)
+                Button("Retry Compliance Settings") {
+                    Task { await viewModel.loadCompliance() }
+                }
+                .buttonStyle(HudActionButtonStyle(accent: .appAccent, chamfer: 6))
+                .disabled(viewModel.isComplianceBusy)
+            }
+            .padding(AppSpacing.lg)
+            .hudCard(glow: false)
+        } else if let successMessage = viewModel.complianceSuccessMessage {
+            Label(successMessage, systemImage: "checkmark.circle.fill")
+                .font(.chipLabel)
+                .foregroundStyle(Color.pnlPositive)
+                .padding(AppSpacing.lg)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .hudCard(glow: false)
+        }
+    }
+
+    private var appVersionLabel: String {
+        let version = Bundle.main.object(
+            forInfoDictionaryKey: "CFBundleShortVersionString"
+        ) as? String ?? "unknown"
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String
+            ?? "unknown"
+        return "\(version) (\(build))"
     }
 
     var deleteAccountCard: some View {
@@ -123,7 +168,10 @@ extension ProfileView {
                 showAccountDeleteConfirmation = true
             }
             .buttonStyle(HudActionButtonStyle(accent: .pnlNegative, chamfer: 6))
-            .disabled(deleteAccountEmail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            .disabled(
+                deleteAccountEmail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    || viewModel.isComplianceBusy
+            )
         }
         .padding(AppSpacing.lg)
         .hudCard(glow: false)

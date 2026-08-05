@@ -8,6 +8,7 @@ import { parseOccSymbol } from './contract-resolution';
 import { optionExpirations } from './expiration-calendar';
 import { WebullBrokerGateway } from './webull/webull-broker.gateway';
 import { FetchImpl, WebullCredentials } from './webull/webull-client';
+import { toClientOrderId } from './webull/webull-endpoints';
 
 /**
  * Gateway tests through its real seams: mocked CredentialsService (fixed fake
@@ -116,6 +117,7 @@ describe('WebullBrokerGateway', () => {
   /** Stored credentials per environment the fake CredentialsService reports. */
   let storedCreds: Partial<Record<'live' | 'practice', WebullCredentials>>;
   let configValues: Record<string, unknown>;
+  let getDecrypted: jest.Mock;
   let savedAccountIds: jest.Mock;
   let savedPracticeStored: jest.Mock;
   /** Saved override so the Prisma-client dotenv autoload can't leak into hosts(). */
@@ -159,14 +161,15 @@ describe('WebullBrokerGateway', () => {
         json: async () => res.body,
       };
     };
+    getDecrypted = jest.fn(
+      async (
+        _userId: string,
+        _provider?: 'webull' | 'alpaca',
+        environment: 'live' | 'practice' = 'live',
+      ) => storedCreds[environment] ?? null,
+    );
     const credentials = {
-      getDecrypted: jest.fn(
-        async (
-          _userId: string,
-          _provider?: 'webull' | 'alpaca',
-          environment: 'live' | 'practice' = 'live',
-        ) => storedCreds[environment] ?? null,
-      ),
+      getDecrypted,
       saveDiscoveredAccountId: jest.fn(async () => undefined),
       ensureWebullPracticeStored: jest.fn(async () => undefined),
     } as unknown as CredentialsService;
@@ -618,6 +621,59 @@ describe('WebullBrokerGateway', () => {
       }
     });
 
+    it('keeps polling the account that accepted the order after selection changes', async () => {
+      jest.useFakeTimers();
+      try {
+        const result = await gateway.placeOrder('u1', order, 'idem-key-account-poll');
+        storedCreds.live = { appKey: 'AK', appSecret: 'SK', accountId: 'ACC-2' };
+        // Re-resolving the cached client applies the newly selected account.
+        await gateway.getQuote('u1', 'SPY');
+        handlers['GET /openapi/trade/order/detail'] = () => ({
+          status: 200,
+          body: { client_order_id: result.orderId, status: 'SUBMITTED', quantity: '1' },
+        });
+
+        await jest.advanceTimersByTimeAsync(1_100);
+
+        const detail = callsTo('/openapi/trade/order/detail');
+        expect(detail).toHaveLength(1);
+        expect(new URL(detail[0].url).searchParams.get('account_id')).toBe('ACC-1');
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it('retries terminal ingestion without another broker detail request', async () => {
+      jest.useFakeTimers();
+      let unregister: (() => void) | undefined;
+      try {
+        const result = await gateway.placeOrder('u1', order, 'idem-key-ingest-retry');
+        let ingestAttempts = 0;
+        const ingestor = jest.fn(async () => {
+          ingestAttempts += 1;
+          if (ingestAttempts === 1) throw new Error('event database unavailable');
+        });
+        unregister = events.registerIngestor(ingestor);
+        handlers['GET /openapi/trade/order/detail'] = () => ({
+          status: 200,
+          body: {
+            client_order_id: result.orderId,
+            status: 'FILLED',
+            filled_price: '1.04',
+            quantity: '1',
+          },
+        });
+
+        await jest.advanceTimersByTimeAsync(1_300);
+
+        expect(callsTo('/openapi/trade/order/detail')).toHaveLength(1);
+        expect(ingestor).toHaveBeenCalledTimes(2);
+      } finally {
+        unregister?.();
+        jest.useRealTimers();
+      }
+    });
+
     it('carries the executed quantity when a partially filled order is cancelled', async () => {
       // A 3-lot order that filled 1 before being cancelled. The placement
       // result predates the fill, so the poll's parse is the only source of
@@ -696,6 +752,85 @@ describe('WebullBrokerGateway', () => {
         code: 'ORDER_NOT_FOUND',
       });
       expect(callsTo('/openapi/trade/order/cancel')).toHaveLength(0);
+    });
+
+    it('uses one account snapshot for the open-order lookup and cancellation', async () => {
+      handlers['GET /openapi/trade/order/open'] = () => ({
+        status: 200,
+        body: [openOptionOrder],
+      });
+      getDecrypted
+        .mockResolvedValueOnce({ appKey: 'AK', appSecret: 'SK', accountId: 'ACC-1' })
+        .mockResolvedValue({ appKey: 'AK', appSecret: 'SK', accountId: 'ACC-2' });
+
+      await gateway.cancelOrder('u1', 'abc');
+
+      expect(getDecrypted).toHaveBeenCalledTimes(1);
+      expect(callsTo('/openapi/trade/order/open')[0].url).toContain('account_id=ACC-1');
+      expect(callsTo('/openapi/trade/order/cancel')[0].body.account_id).toBe('ACC-1');
+    });
+  });
+
+  describe('recoverOrder', () => {
+    const scope = {
+      provider: 'webull' as const,
+      environment: 'live' as const,
+      accountId: 'ACC-1',
+    };
+
+    it('recovers the exact deterministic client order across terminal statuses', async () => {
+      const key = 'chartorder:lost-ack';
+      const clientOrderId = toClientOrderId('u1', key);
+      handlers['GET /openapi/trade/order/detail'] = () => ({
+        status: 200,
+        body: {
+          client_order_id: clientOrderId,
+          order_id: 'WB-accepted',
+          status: 'FILLED',
+          instrument_type: 'OPTION',
+          symbol: 'SPY',
+          side: 'SELL',
+          order_type: 'MARKET',
+          quantity: '1',
+          filled_quantity: '1',
+          filled_price: '1.05',
+          legs: [
+            {
+              symbol: 'SPY',
+              strike_price: '505',
+              option_expire_date: NEAREST_EXPIRATION,
+              option_type: 'CALL',
+            },
+          ],
+        },
+      });
+
+      await expect(gateway.recoverOrder('u1', key, scope)).resolves.toMatchObject({
+        orderId: clientOrderId,
+        status: 'filled',
+        filledQuantity: 1,
+      });
+      const [detail] = callsTo('/openapi/trade/order/detail');
+      expect(detail.url).toContain(`account_id=${scope.accountId}`);
+      expect(detail.url).toContain(`client_order_id=${clientOrderId}`);
+      expect(callsTo('/openapi/trade/order/place')).toHaveLength(0);
+    });
+
+    it('treats only an authoritative trade-detail 404 as definitive absence', async () => {
+      handlers['GET /openapi/trade/order/detail'] = () => ({
+        status: 404,
+        body: { code: 'ORDER_NOT_FOUND', message: 'order not found' },
+      });
+
+      await expect(gateway.recoverOrder('u1', 'missing-key', scope)).resolves.toBeNull();
+
+      handlers['GET /openapi/trade/order/detail'] = () => ({
+        status: 200,
+        body: {},
+      });
+      await expect(gateway.recoverOrder('u1', 'malformed-key', scope)).rejects.toMatchObject({
+        code: 'BROKER_UNAVAILABLE',
+      });
     });
   });
 
@@ -792,6 +927,31 @@ describe('WebullBrokerGateway', () => {
       await gateway.getPositions('u1');
       expect(callsTo('/openapi/account/list')).toHaveLength(0);
       expect(callsTo('/openapi/assets/positions')[0].url).toContain('account_id=ACC-1');
+    });
+
+    it('refreshes a cached client when another API instance changes the stored account', async () => {
+      await gateway.getPositions('u1');
+      storedCreds.live = { appKey: 'AK', appSecret: 'SK', accountId: 'ACC-2' };
+
+      await gateway.getPositions('u1');
+
+      const requests = callsTo('/openapi/assets/positions');
+      expect(requests[0].url).toContain('account_id=ACC-DISCOVERED');
+      expect(requests[1].url).toContain('account_id=ACC-2');
+    });
+
+    it('refuses a scoped positions read after the selected account changes', async () => {
+      await gateway.getPositions('u1');
+      storedCreds.live = { appKey: 'AK', appSecret: 'SK', accountId: 'ACC-2' };
+
+      await expect(
+        gateway.getPositions('u1', {
+          provider: 'webull',
+          environment: 'live',
+          accountId: 'ACC-1',
+        }),
+      ).rejects.toMatchObject({ code: 'ORDER_REJECTED' });
+      expect(callsTo('/openapi/assets/positions')).toHaveLength(1);
     });
   });
 });

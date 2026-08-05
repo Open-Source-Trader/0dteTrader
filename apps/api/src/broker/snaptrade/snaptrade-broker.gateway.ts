@@ -13,9 +13,11 @@ import {
 } from '@0dtetrader/shared-types';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
+  BrokerExecutionScope,
   BrokerGateway,
   MARKET_DATA_PROVIDER,
   MarketDataProvider,
+  ResolvedContractHint,
 } from '../broker-gateway.interface';
 import { CredentialsService } from '../../credentials/credentials.service';
 import { OrderEventsService } from '../order-events.service';
@@ -145,6 +147,9 @@ export class SnapTradeBrokerGateway implements BrokerGateway {
     order: OrderRequest,
     idempotencyKey: string,
     expectedMode?: TradingMode,
+    heldQuantity?: number,
+    _resolvedContract?: ResolvedContractHint,
+    expectedScope?: BrokerExecutionScope,
   ): Promise<OrderResult> {
     const { mode, clientId, consumerKey, accountId } = await this.credentialsFor(userId);
     // See the Webull gateway: the mode read here selects paper vs live, so it
@@ -154,10 +159,27 @@ export class SnapTradeBrokerGateway implements BrokerGateway {
         `Account switched to ${mode} while this ${expectedMode} order was being placed — nothing was sent`,
       );
     }
+    if (
+      expectedScope &&
+      (expectedScope.provider !== 'snaptrade' ||
+        expectedScope.environment !== mode ||
+        expectedScope.accountId !== accountId)
+    ) {
+      throw brokerErrors.orderRejected(
+        'SnapTrade account selection changed while this bracket was armed — nothing was sent',
+      );
+    }
     const limitPrice = order.orderType === 'market' ? undefined : this.estimatedMid(order);
 
     if (order.assetClass === 'option') {
-      const intent = await this.optionPositionIntent(userId, order);
+      // TradingService just read this exact account's position while applying
+      // the close-size cap. Reuse that signed quantity so a selected-account
+      // change cannot make the intent lookup drift to another account between
+      // validation and send.
+      const intent =
+        heldQuantity !== undefined
+          ? positionIntentFor(order.side, heldQuantity)
+          : await this.optionPositionIntent(userId, order);
       const payload = buildOptionOrderPayload(
         accountId,
         order,
@@ -210,8 +232,18 @@ export class SnapTradeBrokerGateway implements BrokerGateway {
     });
   }
 
-  async getPositions(userId: string): Promise<Position[]> {
+  async getPositions(userId: string, expectedScope?: BrokerExecutionScope): Promise<Position[]> {
     const { mode, clientId, consumerKey, accountId } = await this.credentialsFor(userId);
+    if (
+      expectedScope &&
+      (expectedScope.provider !== 'snaptrade' ||
+        expectedScope.environment !== mode ||
+        expectedScope.accountId !== accountId)
+    ) {
+      throw brokerErrors.orderRejected(
+        'SnapTrade account selection changed while this bracket was armed — positions were not read',
+      );
+    }
     const response = await this.client.getAllAccountPositions(
       mode,
       clientId,
@@ -229,8 +261,22 @@ export class SnapTradeBrokerGateway implements BrokerGateway {
       .filter((o) => o.status === 'submitted' || o.status === 'partially_filled');
   }
 
-  async getRecentOrders(userId: string, since?: Date): Promise<OrderResult[]> {
+  async getRecentOrders(
+    userId: string,
+    since?: Date,
+    expectedScope?: BrokerExecutionScope,
+  ): Promise<OrderResult[]> {
     const { mode, clientId, consumerKey, accountId } = await this.credentialsFor(userId);
+    if (
+      expectedScope &&
+      (expectedScope.provider !== 'snaptrade' ||
+        expectedScope.environment !== mode ||
+        expectedScope.accountId !== accountId)
+    ) {
+      throw brokerErrors.orderRejected(
+        'SnapTrade account selection changed while the interrupted order was being reconciled',
+      );
+    }
     const days = since
       ? Math.max(1, Math.min(30, Math.ceil((Date.now() - since.getTime()) / 86_400_000) + 1))
       : 2;
@@ -296,6 +342,16 @@ export class SnapTradeBrokerGateway implements BrokerGateway {
       );
     }
     return { mode, clientId: stored.clientId, consumerKey: stored.consumerKey, accountId };
+  }
+
+  async executionScope(userId: string, expectedMode?: TradingMode): Promise<BrokerExecutionScope> {
+    const { mode: environment, accountId } = await this.credentialsFor(userId);
+    if (expectedMode && environment !== expectedMode) {
+      throw brokerErrors.orderRejected(
+        `Account switched to ${environment} while this ${expectedMode} order was being placed — nothing was sent`,
+      );
+    }
+    return { provider: 'snaptrade', environment, accountId };
   }
 
   private async optionPositionIntent(userId: string, order: OrderRequest): Promise<PositionIntent> {

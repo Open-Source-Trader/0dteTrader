@@ -449,7 +449,7 @@ model WebhookInbox {
 // cursor; `sequence` is monotone inside one user's stream and is what clients
 // persist across reconnects.
 model UserEvent {
-  ordinal   BigInt   @id @default(autoincrement())
+  ordinal   BigInt   @id
   id        String   @unique @default(uuid()) @db.Uuid
   userId    String   @db.Uuid
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -463,6 +463,17 @@ model UserEvent {
   @@unique([userId, dedupeKey])
   @@index([userId, sequence])
   @@map("user_events")
+}
+
+// One transactional allocator serializes durable-event inserts across every
+// API instance. Because the allocator row is locked until the enclosing
+// transaction commits, ordinal order also represents commit order; a poller
+// can never advance past an earlier event that has not committed yet.
+model EventTransportState {
+  name        String @id
+  nextOrdinal BigInt
+
+  @@map("event_transport_state")
 }
 
 model DiscordNotificationSettings {

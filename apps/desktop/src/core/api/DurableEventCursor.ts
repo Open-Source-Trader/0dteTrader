@@ -51,25 +51,44 @@ export class DurableEventCursor {
   activate(token: string): void {
     const nextUserId = jwtSubject(token);
     if (nextUserId === this.userId) return;
-    this.userId = nextUserId;
-    this.seenIds.clear();
-    this.seenOrder.length = 0;
     if (!nextUserId) {
+      this.userId = null;
       this.lastSequence = 0;
       this.initialized = false;
+      this.seenIds.clear();
+      this.seenOrder.length = 0;
       return;
     }
+    // Read before changing identity. If storage throws, the connection attempt
+    // fails and a retry must try the read again; partially activating the user
+    // would make the next attempt hit the same-user fast path and open a socket
+    // with an uninitialized cursor.
     const raw = this.storage.getItem(this.key(nextUserId));
     const stored = Number.parseInt(raw ?? '0', 10);
+    this.userId = nextUserId;
     this.lastSequence = Number.isSafeInteger(stored) && stored >= 0 ? stored : 0;
     this.initialized = raw !== null;
+    this.seenIds.clear();
+    this.seenOrder.length = 0;
   }
 
-  accept(eventId: string, sequence: number): DurableCursorDecision {
+  /** Checks whether an event is the next deliverable item without advancing
+   *  the durable checkpoint. The socket calls commit only after every
+   *  synchronous consumer has observed the payload. */
+  begin(eventId: string, sequence: number): DurableCursorDecision {
     if (!Number.isSafeInteger(sequence) || sequence <= 0) return 'duplicate';
     if (this.seenIds.has(eventId) || sequence <= this.lastSequence) return 'duplicate';
     if (this.initialized && sequence !== this.lastSequence + 1) return 'gap';
 
+    return 'accepted';
+  }
+
+  commit(eventId: string, sequence: number): boolean {
+    if (this.begin(eventId, sequence) !== 'accepted') return false;
+
+    // Persist first so a storage failure leaves both the in-memory and durable
+    // cursors at the last confirmed event. The socket will reconnect/replay.
+    this.persist(sequence);
     this.seenIds.add(eventId);
     this.seenOrder.push(eventId);
     if (this.seenOrder.length > SEEN_LIMIT) {
@@ -77,15 +96,14 @@ export class DurableEventCursor {
       if (removed) this.seenIds.delete(removed);
     }
     this.lastSequence = sequence;
-    this.persist();
-    return 'accepted';
+    return true;
   }
 
   /** Records the server's post-replay tail, including zero. */
   establish(sequence: number): void {
     if (!Number.isSafeInteger(sequence) || sequence < this.lastSequence) return;
+    this.persist(sequence);
     this.lastSequence = sequence;
-    this.persist();
   }
 
   resetSession(): void {
@@ -100,9 +118,9 @@ export class DurableEventCursor {
     return `events.cursor.v1:${this.serverKey}:${userId}`;
   }
 
-  private persist(): void {
+  private persist(sequence: number): void {
     if (!this.userId) return;
+    this.storage.setItem(this.key(this.userId), String(sequence));
     this.initialized = true;
-    this.storage.setItem(this.key(this.userId), String(this.lastSequence));
   }
 }

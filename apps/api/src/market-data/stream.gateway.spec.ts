@@ -33,6 +33,7 @@ describe('StreamGateway.tickSymbol', () => {
   let durableEvents: Subject<DurableUserEvent>;
   let replay: jest.Mock;
   let latestSequence: jest.Mock;
+  let pollOnce: jest.Mock;
 
   beforeEach(() => {
     broker = {
@@ -53,6 +54,7 @@ describe('StreamGateway.tickSymbol', () => {
     durableEvents = new Subject<DurableUserEvent>();
     replay = jest.fn(async () => []);
     latestSequence = jest.fn(async () => 0);
+    pollOnce = jest.fn(async () => undefined);
     gateway = new StreamGateway(
       broker as unknown as BrokerGateway,
       crypto as unknown as CryptoDataService,
@@ -64,6 +66,7 @@ describe('StreamGateway.tickSymbol', () => {
         events$: durableEvents.asObservable(),
         replay,
         latestSequence,
+        pollOnce,
       } as unknown as EventTransportService,
     );
   });
@@ -251,6 +254,49 @@ describe('StreamGateway.tickSymbol', () => {
       'eventCursor',
     ]);
     expect(state.lastSequence).toBe(43);
+  });
+
+  it('drains a committed baseline event that has not reached the local Subject yet', async () => {
+    latestSequence.mockResolvedValue(43);
+    pollOnce.mockImplementation(async () => {
+      durableEvents.next({
+        id: 'event-43',
+        userId: 'u1',
+        sequence: 43,
+        type: 'orderUpdate',
+        payload: { orderId: 'committed-before-local-poll' },
+      });
+    });
+    const socket = fakeSocket();
+    const internals = gateway as unknown as {
+      clients: Map<
+        unknown,
+        {
+          userId: string;
+          symbols: Set<string>;
+          lastSequence: number;
+          replaying: boolean;
+          pending: DurableUserEvent[];
+        }
+      >;
+      replayClient(client: unknown, userId: string, cursor: number | null): Promise<void>;
+    };
+    internals.clients.set(socket, {
+      userId: 'u1',
+      symbols: new Set(),
+      lastSequence: 0,
+      replaying: true,
+      pending: [],
+    });
+
+    await internals.replayClient(socket, 'u1', null);
+
+    expect(pollOnce).toHaveBeenCalledTimes(1);
+    expect(socket.send.mock.calls.map(([raw]) => JSON.parse(raw).type)).toEqual([
+      'orderUpdate',
+      'eventCursor',
+    ]);
+    expect(JSON.parse(socket.send.mock.calls[0][0]).sequence).toBe(43);
   });
 
   it('closes instead of switching to live delivery when replay fails', async () => {

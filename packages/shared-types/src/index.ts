@@ -539,6 +539,9 @@ export interface Position {
 
 /** A historical order with the realized P/L its fill produced (closing fills only). */
 export interface TradeHistoryEntry extends OrderResult {
+  /** Stable app-owned identity. Unlike broker/client ids, this is unique when
+   * history combines providers and accounts. Use it for list identity. */
+  internalOrderId: string;
   /** Provider identities are included so integrations can reconcile a
    * webhook-time broker id with a placement-time client id on the same row. */
   brokerOrderId?: string;

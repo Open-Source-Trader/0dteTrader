@@ -51,6 +51,12 @@ export class AppContainer {
     this.drawingsStore = new DrawingsStore();
     this.chartOrdersStore = new ChartOrdersStore(this.apiClient);
   }
+
+  /** Stops background work before a server change retires this container. */
+  dispose(): void {
+    this.tradeStore.stopPolling();
+    this.quoteSocket.disconnect();
+  }
 }
 
 const ContainerContext = createContext<AppContainer | null>(null);

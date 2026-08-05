@@ -89,6 +89,8 @@ final class ProfileViewModel: ObservableObject {
     @Published private(set) var legalStatus: LegalAcceptanceStatusDTO?
     @Published private(set) var selectedLegalDocument: LegalDocumentDTO?
     @Published private(set) var isComplianceBusy = false
+    @Published private(set) var complianceErrorMessage: String?
+    @Published private(set) var complianceSuccessMessage: String?
 
     private let apiClient: APIClient
     private let settingsStore: SettingsStore
@@ -287,13 +289,20 @@ final class ProfileViewModel: ObservableObject {
         guard !isComplianceBusy else { return }
         isComplianceBusy = true
         defer { isComplianceBusy = false }
+        clearComplianceMessages()
+        var failures: [String] = []
         do {
-            async let discord = apiClient.discordSettings()
-            async let legal = apiClient.legalStatus()
-            discordSettings = try await discord
-            legalStatus = try await legal
+            discordSettings = try await apiClient.discordSettings()
         } catch {
-            setError(error)
+            failures.append("Discord: \(userMessage(for: error))")
+        }
+        do {
+            legalStatus = try await apiClient.legalStatus()
+        } catch {
+            failures.append("Legal: \(userMessage(for: error))")
+        }
+        if !failures.isEmpty {
+            complianceErrorMessage = failures.joined(separator: " ")
         }
     }
 
@@ -301,6 +310,7 @@ final class ProfileViewModel: ObservableObject {
         guard !isComplianceBusy else { return }
         isComplianceBusy = true
         defer { isComplianceBusy = false }
+        clearComplianceMessages()
         do {
             discordSettings = try await apiClient.updateDiscordSettings(
                 DiscordNotificationSettingsUpdateDTO(
@@ -311,9 +321,9 @@ final class ProfileViewModel: ObservableObject {
                     includePnl: includePnl
                 )
             )
-            successMessage = "Discord settings saved."
+            complianceSuccessMessage = "Discord settings saved."
         } catch {
-            setError(error)
+            setComplianceError(error)
         }
     }
 
@@ -321,11 +331,12 @@ final class ProfileViewModel: ObservableObject {
         guard !isComplianceBusy else { return }
         isComplianceBusy = true
         defer { isComplianceBusy = false }
+        clearComplianceMessages()
         do {
             try await apiClient.testDiscord()
-            successMessage = "Test notification sent."
+            complianceSuccessMessage = "Test notification sent."
         } catch {
-            setError(error)
+            setComplianceError(error)
         }
     }
 
@@ -333,10 +344,12 @@ final class ProfileViewModel: ObservableObject {
         guard !isComplianceBusy else { return }
         isComplianceBusy = true
         defer { isComplianceBusy = false }
+        clearComplianceMessages()
+        selectedLegalDocument = nil
         do {
             selectedLegalDocument = try await apiClient.legalDocument(slug)
         } catch {
-            setError(error)
+            setComplianceError(error)
         }
     }
 
@@ -345,15 +358,19 @@ final class ProfileViewModel: ObservableObject {
     }
 
     func acceptLegal(_ document: LegalDocumentDTO) async {
-        guard document.slug == .terms || document.slug == .risk else { return }
+        guard !isComplianceBusy,
+              document.slug == .terms || document.slug == .risk else { return }
+        isComplianceBusy = true
+        defer { isComplianceBusy = false }
+        clearComplianceMessages()
         do {
             legalStatus = try await apiClient.acceptLegal(
                 document: document.slug,
                 version: document.version
             )
-            successMessage = "\(document.title) accepted."
+            complianceSuccessMessage = "\(document.title) accepted."
         } catch {
-            setError(error)
+            setComplianceError(error)
         }
     }
 
@@ -361,12 +378,29 @@ final class ProfileViewModel: ObservableObject {
         guard !isComplianceBusy else { return }
         isComplianceBusy = true
         defer { isComplianceBusy = false }
+        clearComplianceMessages()
         do {
             try await apiClient.deleteAccount(confirmEmail: confirmEmail)
             await onLogout()
         } catch {
-            setError(error)
+            setComplianceError(error)
         }
+    }
+
+    private func clearComplianceMessages() {
+        complianceErrorMessage = nil
+        complianceSuccessMessage = nil
+    }
+
+    private func setComplianceError(_ error: Error) {
+        complianceErrorMessage = userMessage(for: error)
+    }
+
+    private func userMessage(for error: Error) -> String {
+        if let apiError = error as? APIError {
+            return apiError.userMessage
+        }
+        return error.localizedDescription
     }
 
     // MARK: - Alpaca credentials (generic broker-credentials endpoint)

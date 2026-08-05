@@ -1,4 +1,4 @@
-import { StrictMode, useMemo } from 'react';
+import { StrictMode, useEffect, useMemo } from 'react';
 import { createRoot } from 'react-dom/client';
 import { AppContainer, ContainerProvider } from './app/container';
 import { ServerConfigStore } from './core/api/ServerConfigStore';
@@ -23,6 +23,7 @@ const serverConfigStore = new ServerConfigStore();
 function App() {
   const { baseUrl } = useStore(serverConfigStore);
   const container = useMemo(() => new AppContainer(serverConfigStore, baseUrl), [baseUrl]);
+  useEffect(() => () => container.dispose(), [container]);
   return (
     <ContainerProvider value={container}>
       <RootView />

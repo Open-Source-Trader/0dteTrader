@@ -416,6 +416,7 @@ struct ChartOrderPatchDTO: Encodable, Equatable, Sendable {
 }
 
 struct TradeHistoryEntryDTO: Decodable, Equatable, Sendable {
+    let internalOrderId: String
     let orderId: String
     let status: String
     let contractSymbol: String
@@ -426,6 +427,45 @@ struct TradeHistoryEntryDTO: Decodable, Equatable, Sendable {
     let filledPrice: Double?
     let timestamp: String
     let realizedPnl: Double?
+
+    private enum CodingKeys: String, CodingKey {
+        case internalOrderId
+        case orderId
+        case status
+        case contractSymbol
+        case side
+        case quantity
+        case orderType
+        case limitPrice
+        case filledPrice
+        case timestamp
+        case realizedPnl
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        orderId = try container.decode(String.self, forKey: .orderId)
+        if let decodedInternalId = try container.decodeIfPresent(
+            String.self,
+            forKey: .internalOrderId
+        ), !decodedInternalId.isEmpty {
+            internalOrderId = decodedInternalId
+        } else {
+            // Older API instances do not return the app-owned UUID. Their
+            // broker id was the only available list identity, so preserve
+            // history during a rolling deployment instead of failing decode.
+            internalOrderId = orderId
+        }
+        status = try container.decode(String.self, forKey: .status)
+        contractSymbol = try container.decode(String.self, forKey: .contractSymbol)
+        side = try container.decode(String.self, forKey: .side)
+        quantity = try container.decode(Int.self, forKey: .quantity)
+        orderType = try container.decode(String.self, forKey: .orderType)
+        limitPrice = try container.decodeIfPresent(Double.self, forKey: .limitPrice)
+        filledPrice = try container.decodeIfPresent(Double.self, forKey: .filledPrice)
+        timestamp = try container.decode(String.self, forKey: .timestamp)
+        realizedPnl = try container.decodeIfPresent(Double.self, forKey: .realizedPnl)
+    }
 }
 
 struct TradeHistoryDTO: Decodable, Equatable, Sendable {

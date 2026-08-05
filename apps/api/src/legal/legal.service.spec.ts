@@ -45,4 +45,35 @@ describe('LegalService', () => {
       service.accept(userId, 'risk', 'old', 'https://trade.example'),
     ).rejects.toMatchObject({ code: 'LEGAL_VERSION_CHANGED', status: 409 });
   });
+
+  it('publishes explicit privacy practices and complete shipped runtime notices', () => {
+    const privacy = service.document('privacy', 'https://trade.example').markdown;
+    expect(privacy).toContain(
+      'No personal, brokerage, trading, prompt, device, or diagnostic data is sold',
+    );
+    expect(privacy).toContain('iOS client uses Keychain-backed credential storage');
+    expect(privacy).toContain('desktop client uses storage local to the application profile');
+
+    const notices = service.document('open-source-licenses', 'https://trade.example').markdown;
+    for (const dependency of [
+      'NestJS',
+      'Prisma Client',
+      'node-postgres',
+      'node-argon2',
+      'class-transformer',
+      'class-validator',
+      'Helmet',
+      'reflect-metadata',
+      'RxJS',
+      'ws',
+      'Alpaca Trade API',
+      'SnapTrade TypeScript SDK',
+      'React and React DOM',
+      'TradingView Lightweight Charts',
+      'Electron',
+    ]) {
+      expect(notices).toContain(dependency);
+    }
+    expect(notices).not.toContain('not a full notices file');
+  });
 });

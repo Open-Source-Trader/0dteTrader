@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useStore } from '../../core/observable';
+import { LegalMarkdown } from '../legal/LegalMarkdown';
 import type { AuthStore } from './AuthStore';
 
 /** Versioned, server-recorded Terms and risk gate shown after authentication. */
@@ -31,16 +32,14 @@ export function LegalGateView({ store }: { store: AuthStore }) {
             <h2 className="hud-title" style={{ fontSize: 'var(--fs-title3)' }}>
               {document.title}
             </h2>
-            <div
+            <LegalMarkdown
+              markdown={document.markdown}
               style={{
                 marginTop: 'var(--space-3)',
-                whiteSpace: 'pre-wrap',
                 fontSize: 'var(--fs-subheadline)',
                 lineHeight: 1.5,
               }}
-            >
-              {document.markdown}
-            </div>
+            />
             <label style={{ display: 'flex', gap: 'var(--space-3)', marginTop: 'var(--space-4)' }}>
               <input
                 type="checkbox"

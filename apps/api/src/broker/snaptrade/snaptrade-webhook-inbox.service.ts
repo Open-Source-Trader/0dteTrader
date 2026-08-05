@@ -8,6 +8,7 @@ import { SnapTradeWebhookProcessorService } from './snaptrade-webhook-processor.
 
 const POLL_MS = 500;
 const LEASE_MS = 30_000;
+const LEASE_RENEW_MS = 10_000;
 const MAX_ATTEMPTS = 8;
 
 @Injectable()
@@ -23,9 +24,9 @@ export class SnapTradeWebhookInboxService implements OnModuleInit, OnModuleDestr
   ) {}
 
   onModuleInit(): void {
-    this.timer = setInterval(() => void this.processDue(), POLL_MS);
+    this.timer = setInterval(() => this.kickWorker(), POLL_MS);
     this.timer.unref?.();
-    void this.processDue();
+    this.kickWorker();
   }
 
   onModuleDestroy(): void {
@@ -49,7 +50,10 @@ export class SnapTradeWebhookInboxService implements OnModuleInit, OnModuleDestr
           webhookId: input.webhookId,
           userId: input.userId,
           environment: input.environment,
-          accountId: input.accountId,
+          // Null is meaningful: the receiver could not safely snapshot a
+          // single account. The worker must not later reinterpret mutable
+          // connection state after a multi-account delivery has aged.
+          accountId: input.accountId ?? null,
           eventType: input.eventType,
           payload: input.payload as Prisma.InputJsonValue,
         },
@@ -59,29 +63,46 @@ export class SnapTradeWebhookInboxService implements OnModuleInit, OnModuleDestr
     }
   }
 
+  /** Lets the authenticated HTTP path acknowledge a provider redelivery even
+   * after its signed timestamp has aged outside the replay window. */
+  async exists(webhookId: string): Promise<boolean> {
+    const row = await this.prisma.webhookInbox.findUnique({
+      where: {
+        provider_webhookId: { provider: 'snaptrade', webhookId },
+      },
+    });
+    return row !== null;
+  }
+
   /** Exposed for deterministic two-instance and lease-recovery tests. */
-  async processDue(now = new Date()): Promise<void> {
+  async processDue(nowOverride?: Date): Promise<void> {
     if (this.draining) return;
     this.draining = true;
     try {
       for (;;) {
+        // A production drain may take much longer than one lease. Read the
+        // clock for every candidate instead of making all rows share the time
+        // at which the drain happened to start. The override is deliberately
+        // fixed for deterministic unit tests only.
+        const scanNow = nowOverride ?? new Date();
         const candidate = await this.prisma.webhookInbox.findFirst({
-          where: this.dueWhere(now),
+          where: this.dueWhere(scanNow),
           orderBy: { createdAt: 'asc' },
         });
         if (!candidate) break;
         const attempts = candidate.attempts + 1;
+        const claimNow = nowOverride ?? new Date();
         const claimed = await this.prisma.webhookInbox.updateMany({
-          where: { id: candidate.id, ...this.dueWhere(now) },
+          where: { id: candidate.id, ...this.dueWhere(claimNow) },
           data: {
             status: 'leased',
             attempts,
             leaseOwnerId: this.ownerId,
-            leaseExpiresAt: new Date(now.getTime() + LEASE_MS),
+            leaseExpiresAt: new Date(claimNow.getTime() + LEASE_MS),
           },
         });
         if (claimed.count !== 1) continue;
-        await this.processClaim(candidate, attempts, now);
+        await this.processClaim(candidate, attempts, nowOverride);
       }
     } finally {
       this.draining = false;
@@ -97,7 +118,29 @@ export class SnapTradeWebhookInboxService implements OnModuleInit, OnModuleDestr
     };
   }
 
-  private async processClaim(row: WebhookInbox, attempts: number, now: Date): Promise<void> {
+  private async processClaim(
+    row: WebhookInbox,
+    attempts: number,
+    nowOverride?: Date,
+  ): Promise<void> {
+    // Dispatch can legitimately outlive the initial 30-second claim (broker
+    // and database calls are both involved). Renew while it is in flight so a
+    // second API instance cannot take the same webhook and duplicate effects.
+    const heartbeat = setInterval(() => {
+      const renewedAt = nowOverride ?? new Date();
+      void this.prisma.webhookInbox
+        .updateMany({
+          where: { id: row.id, status: 'leased', leaseOwnerId: this.ownerId },
+          data: { leaseExpiresAt: new Date(renewedAt.getTime() + LEASE_MS) },
+        })
+        .catch((error: unknown) =>
+          this.logger.error(
+            `webhook lease renewal failed: webhookId=${row.webhookId} ` +
+              `message=${(error as Error).message}`,
+          ),
+        );
+    }, LEASE_RENEW_MS);
+    heartbeat.unref?.();
     try {
       await this.processor.process(
         row.eventType,
@@ -105,12 +148,15 @@ export class SnapTradeWebhookInboxService implements OnModuleInit, OnModuleDestr
         row.environment as TradingMode,
         row.payload as Record<string, unknown>,
         row.webhookId,
+        row.accountId,
       );
+      clearInterval(heartbeat);
+      const completedAt = nowOverride ?? new Date();
       await this.prisma.webhookInbox.updateMany({
         where: { id: row.id, status: 'leased', leaseOwnerId: this.ownerId },
         data: {
           status: 'processed',
-          processedAt: now,
+          processedAt: completedAt,
           leaseOwnerId: null,
           leaseExpiresAt: null,
           lastError: null,
@@ -118,12 +164,14 @@ export class SnapTradeWebhookInboxService implements OnModuleInit, OnModuleDestr
         },
       });
     } catch (error) {
+      clearInterval(heartbeat);
+      const failedAt = nowOverride ?? new Date();
       const terminal = attempts >= MAX_ATTEMPTS;
       await this.prisma.webhookInbox.updateMany({
         where: { id: row.id, status: 'leased', leaseOwnerId: this.ownerId },
         data: {
           status: terminal ? 'dead' : 'retry',
-          nextAttemptAt: new Date(now.getTime() + this.backoffMs(attempts)),
+          nextAttemptAt: new Date(failedAt.getTime() + this.backoffMs(attempts)),
           leaseOwnerId: null,
           leaseExpiresAt: null,
           lastError: (error as Error).message,
@@ -144,6 +192,12 @@ export class SnapTradeWebhookInboxService implements OnModuleInit, OnModuleDestr
         }),
       );
     }
+  }
+
+  private kickWorker(): void {
+    void this.processDue().catch((error: unknown) =>
+      this.logger.error(`webhook inbox drain failed: ${(error as Error).message}`),
+    );
   }
 
   private backoffMs(attempts: number): number {

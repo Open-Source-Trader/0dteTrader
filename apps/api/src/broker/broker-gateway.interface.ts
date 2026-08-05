@@ -30,6 +30,26 @@ export const BROKER_GATEWAY = 'BROKER_GATEWAY';
  */
 export type ResolvedContractHint = OptionContract;
 
+/**
+ * Immutable execution identity used by unattended orders.  Environment alone
+ * is not enough: a provider or selected brokerage account can change while a
+ * chart order is armed, and routing the old order to the new account would be
+ * a materially different trade.
+ */
+export interface BrokerExecutionScope {
+  provider: 'webull' | 'alpaca' | 'snaptrade';
+  environment: TradingMode;
+  accountId: string;
+}
+
+/** An exact recovery may expose both provider aliases even though the public
+ * OrderResult intentionally has one app-facing order id. The extra aliases
+ * stay inside recovery/audit ingestion and are stripped before API return. */
+export type RecoveredOrderResult = OrderResult & {
+  brokerOrderId?: string;
+  clientOrderId?: string;
+};
+
 /** Injection token for the MarketDataProvider seam. */
 export const MARKET_DATA_PROVIDER = 'MARKET_DATA_PROVIDER';
 
@@ -87,9 +107,14 @@ export interface BrokerGateway {
     expectedMode?: TradingMode,
     heldQuantity?: number,
     resolvedContract?: ResolvedContractHint,
+    expectedScope?: BrokerExecutionScope,
   ): Promise<OrderResult>;
+  /** Resolve the provider, environment and selected brokerage account that a
+   * placement would use right now. Gateways that cannot expose an account id
+   * may omit this; callers then use the conservative provider default. */
+  executionScope?(userId: string, expectedMode?: TradingMode): Promise<BrokerExecutionScope>;
   cancelOrder(userId: string, orderId: string): Promise<void>;
-  getPositions(userId: string): Promise<Position[]>;
+  getPositions(userId: string, expectedScope?: BrokerExecutionScope): Promise<Position[]>;
   getOpenOrders(userId: string): Promise<OrderResult[]>;
   /**
    * Every order the broker has on file (any status), optionally limited to
@@ -100,7 +125,20 @@ export interface BrokerGateway {
    * cheaply yet, so `OrdersService` treats its absence as "nothing to
    * reconcile" rather than an error.
    */
-  getRecentOrders?(userId: string, since?: Date): Promise<OrderResult[]>;
+  getRecentOrders?(
+    userId: string,
+    since?: Date,
+    expectedScope?: BrokerExecutionScope,
+  ): Promise<OrderResult[]>;
+  /** Exact keyed recovery for providers that can query the deterministic
+   * client-order id directly. `null` means the provider authoritatively says
+   * no such order; `undefined` means this gateway does not support the exact
+   * lookup and the caller may fall back to bounded history matching. */
+  recoverOrder?(
+    userId: string,
+    idempotencyKey: string,
+    expectedScope: BrokerExecutionScope,
+  ): Promise<RecoveredOrderResult | null | undefined>;
   /**
    * Broker-reported account equity (current and prior-close), the
    * authoritative source for today's P&L. Optional: only brokers that expose

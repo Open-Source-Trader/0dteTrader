@@ -81,24 +81,6 @@ export class SnapTradeWebhookController {
       return;
     }
 
-    // Freshness comes ONLY from the SIGNED payload. SnapTrade documents
-    // `eventTimestamp` as a body field and signs the body; a header is not
-    // covered by the HMAC, so accepting one — even as a fallback — would let
-    // a captured payload be replayed under a fresh unsigned stamp. Missing
-    // or malformed is a hard 400: an unverifiable age is not an acceptable
-    // age.
-    const signedTimestamp = body['eventTimestamp'];
-    const eventTimestamp =
-      typeof signedTimestamp === 'string' ? Date.parse(signedTimestamp) : Number.NaN;
-    if (
-      Number.isNaN(eventTimestamp) ||
-      Date.now() - eventTimestamp > MAX_EVENT_AGE_MS ||
-      eventTimestamp - Date.now() > MAX_FUTURE_SKEW_MS
-    ) {
-      res.sendStatus(HttpStatus.BAD_REQUEST);
-      return;
-    }
-
     // Resolve which app user this clientId belongs to, then verify the
     // signature with THAT user's own consumerKey — there is no shared
     // server-side key under the Personal API key model.
@@ -144,9 +126,75 @@ export class SnapTradeWebhookController {
       return;
     }
 
+    // A provider retry remains a successful no-op after its signed timestamp
+    // grows stale. Authenticate it first (otherwise the inbox becomes an id
+    // oracle), then consult the durable uniqueness boundary before applying
+    // freshness to previously unseen work.
+    if (this.inbox) {
+      try {
+        if (await this.inbox.exists(webhookId)) {
+          res.sendStatus(HttpStatus.OK);
+          return;
+        }
+      } catch (err) {
+        this.logger.error(
+          `webhook duplicate lookup failed: webhookId=${webhookId} ` +
+            `userId=${owner.userId} message=${(err as Error).message}`,
+        );
+        res.sendStatus(HttpStatus.INTERNAL_SERVER_ERROR);
+        return;
+      }
+    }
+
+    // Freshness comes ONLY from the SIGNED payload. SnapTrade documents
+    // `eventTimestamp` as a body field and signs the body; a header is not
+    // covered by the HMAC, so accepting one — even as a fallback — would let
+    // a captured payload be replayed under a fresh unsigned stamp. Missing,
+    // malformed, stale or implausibly future timestamps are rejected for new
+    // webhook ids.
+    const signedTimestamp = body['eventTimestamp'];
+    const eventTimestamp =
+      typeof signedTimestamp === 'string' ? Date.parse(signedTimestamp) : Number.NaN;
+    if (
+      Number.isNaN(eventTimestamp) ||
+      Date.now() - eventTimestamp > MAX_EVENT_AGE_MS ||
+      eventTimestamp - Date.now() > MAX_FUTURE_SKEW_MS
+    ) {
+      res.sendStatus(HttpStatus.BAD_REQUEST);
+      return;
+    }
+
     try {
       if (this.inbox) {
-        const accountId = typeof body['accountId'] === 'string' ? body['accountId'] : undefined;
+        const details =
+          body['details'] && typeof body['details'] === 'object' && !Array.isArray(body['details'])
+            ? (body['details'] as Record<string, unknown>)
+            : null;
+        let accountId: string | undefined;
+        if (typeof body['accountId'] === 'string') accountId = body['accountId'];
+        else if (typeof details?.['accountId'] === 'string') accountId = details['accountId'];
+        // Snapshot the only possible broker account at receipt time. This is
+        // deliberately not `selectedAccountId`: selection is mutable, so it
+        // cannot safely route a delayed delivery when multiple accounts exist.
+        if (!accountId && (eventType === 'TRADE_UPDATE' || eventType === 'TRADE_DETECTION')) {
+          const connection = await this.prisma.brokerConnection.findUnique({
+            where: {
+              userId_provider_environment: {
+                userId: owner.userId,
+                provider: 'snaptrade',
+                environment: owner.environment,
+              },
+            },
+          });
+          const accounts = Array.from(
+            new Set(
+              (connection?.accountIds ?? [])
+                .map((candidate) => candidate.trim())
+                .filter((candidate) => candidate !== ''),
+            ),
+          );
+          if (accounts.length === 1) [accountId] = accounts;
+        }
         await this.inbox.enqueue({
           webhookId,
           userId: owner.userId,

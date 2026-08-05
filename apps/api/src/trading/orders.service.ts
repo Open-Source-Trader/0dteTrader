@@ -1,6 +1,7 @@
 import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import { Prisma, type TradeOrder, type TradeOrderExecution } from '@prisma/client';
 import {
+  MAX_OPTION_PRICE,
   MAX_ORDER_QUANTITY,
   OrderResult,
   TradeHistory,
@@ -123,7 +124,7 @@ function isFillEvent(order: OrderResult): boolean {
     // zero, negative or absurd price is refused at the door rather than
     // advancing the watermark and then being filtered out of every replay.
     isFinitePositive(order.filledPrice) &&
-    order.filledPrice <= MAX_FILL_PRICE &&
+    order.filledPrice <= MAX_OPTION_PRICE &&
     (order.filledQuantity ?? order.quantity) > 0 &&
     (order.status === 'filled' ||
       order.status === 'partially_filled' ||
@@ -184,12 +185,8 @@ interface FillPoint {
 const isFinitePositive = (v: unknown): v is number =>
   typeof v === 'number' && Number.isFinite(v) && v > 0;
 
-/** Upper bound on a broker-reported fill price, in dollars per share. No
- *  US-listed option premium comes within two orders of magnitude of this;
- *  finite-and-positive alone still admits 1e308, whose notional overflows
- *  the book. A price past the bound refuses the FILL (the status still
- *  records), same as any other junk price. */
-const MAX_FILL_PRICE = 100_000;
+// A fill price past MAX_OPTION_PRICE refuses the FILL (the status still
+// records), same as any other junk price — see the shared constant's doc.
 
 /** How late a fill may be, relative to placement, and still be anchored on the
  *  underlying price captured when the order was sent. A market or marketable

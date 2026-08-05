@@ -471,6 +471,17 @@ export interface OrderPreview {
  */
 export const MAX_ORDER_QUANTITY = 1000;
 
+/**
+ * Ceiling on any option price this app will quote, resolve or book, in
+ * dollars per share — two orders of magnitude above any listed premium.
+ * Finiteness checks alone are not enough: two FINITE sides can still
+ * overflow the midpoint arithmetic (1e308 + 1e308 is Infinity), so
+ * readiness predicates, midpoint helpers and fill accounting all bound
+ * their inputs here, which makes every derived price finite by
+ * construction. Mirrored in iOS PriceMath.maxOptionPrice.
+ */
+export const MAX_OPTION_PRICE = 100_000;
+
 export interface OrderResult {
   orderId: string;
   status: OrderStatus;

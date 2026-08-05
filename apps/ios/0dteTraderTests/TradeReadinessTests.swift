@@ -64,6 +64,36 @@ final class TradeReadinessTests: XCTestCase {
         XCTAssertFalse(contract(bid: -.infinity, ask: 1).hasTradeableQuote)
     }
 
+    /// Readiness must agree with price resolution: two huge-but-FINITE sides
+    /// overflow midpoint arithmetic, so a book past the shared ceiling is not
+    /// tradeable — the exact cap is.
+    func testBookPastTheOptionPriceCeiling_isNotTradeable() {
+        let cap = PriceMath.maxOptionPrice
+        XCTAssertFalse(
+            contract(bid: .greatestFiniteMagnitude, ask: .greatestFiniteMagnitude)
+                .hasTradeableQuote
+        )
+        XCTAssertFalse(contract(bid: cap, ask: cap + 0.01).hasTradeableQuote)
+        XCTAssertTrue(contract(bid: cap - 0.01, ask: cap).hasTradeableQuote)
+    }
+
+    /// The invariant the ceiling exists for: every book readiness accepts
+    /// yields a finite, in-range midpoint.
+    func testEveryTradeableBook_yieldsAFiniteInRangeMid() {
+        let books: [(bid: Double, ask: Double)] = [
+            (0.01, 0.02),
+            (1.20, 1.28),
+            (5.0, 5.0),
+            (PriceMath.maxOptionPrice - 0.01, PriceMath.maxOptionPrice),
+        ]
+        for book in books where contract(bid: book.bid, ask: book.ask).hasTradeableQuote {
+            let mid = PriceMath.midPrice(bid: book.bid, ask: book.ask)
+            XCTAssertNotNil(mid, "tradeable book (\(book.bid), \(book.ask)) must price")
+            XCTAssertTrue((mid ?? .infinity).isFinite)
+            XCTAssertLessThanOrEqual(mid ?? .infinity, PriceMath.maxOptionPrice)
+        }
+    }
+
     func testStaleLastPrintAlone_isNotAMarket() {
         // The CURR placeholder can carry a last print copied from the
         // position's mark; with both live sides dead it stays untradeable.

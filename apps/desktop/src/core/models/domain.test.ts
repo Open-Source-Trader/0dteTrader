@@ -13,20 +13,31 @@ describe('midPrice — every successful midpoint is finite', () => {
     [1.0, Number.POSITIVE_INFINITY],
     [Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY],
     [Number.NEGATIVE_INFINITY, 1.0],
-  ])('returns null rather than arithmetic on a non-finite book (%s, %s)', (bid, ask) => {
+    // FINITE operands whose sum overflows — the round-9 fix checked only the
+    // operands and let these through as an infinite midpoint.
+    [1e308, 1e308],
+    [Number.MAX_VALUE, Number.MAX_VALUE],
+  ])('returns null rather than arithmetic on an unusable book (%s, %s)', (bid, ask) => {
     expect(midPrice(bid, ask)).toBeNull();
   });
 
-  it('never returns a non-finite number for any book it accepts', () => {
+  it('prices the exact ceiling and refuses one tick past it', () => {
+    expect(midPrice(99_999.99, 100_000)).not.toBeNull();
+    expect(midPrice(100_000, 100_000.01)).toBeNull();
+  });
+
+  it('never returns a non-finite or above-cap number for any book it accepts', () => {
     const books = [
       [1.0, 1.04],
       [1.0, 1.0],
       [0.01, 0.02],
+      [99_999.99, 100_000],
     ] as const;
     for (const [bid, ask] of books) {
       const mid = midPrice(bid, ask);
       expect(mid).not.toBeNull();
       expect(Number.isFinite(mid)).toBe(true);
+      expect(mid as number).toBeLessThanOrEqual(100_000);
     }
   });
 });
@@ -126,6 +137,22 @@ describe('quotesPending — one readiness matrix for every order type', () => {
     expect(quotesPending(contract(1.0, 1.0))).toBe(false);
   });
 
+  it('accepts the exact ceiling, and every accepted book prices finitely in range', () => {
+    // The invariant the ceiling exists for: readiness and price resolution
+    // must agree, so any book that reads as ready yields a finite mid ≤ cap.
+    const ready: Array<[number, number]> = [
+      [1.0, 1.1],
+      [99_999.99, 100_000],
+    ];
+    for (const [bid, ask] of ready) {
+      expect(quotesPending(contract(bid, ask))).toBe(false);
+      const mid = midPrice(bid, ask);
+      expect(mid).not.toBeNull();
+      expect(Number.isFinite(mid)).toBe(true);
+      expect(mid as number).toBeLessThanOrEqual(100_000);
+    }
+  });
+
   it.each([
     ['bid-only', 1.0, 0],
     ['ask-only', 0, 1.1],
@@ -138,6 +165,8 @@ describe('quotesPending — one readiness matrix for every order type', () => {
     ['infinite bid', Number.POSITIVE_INFINITY, 1.1],
     ['infinite both', Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY],
     ['negative-infinite bid', Number.NEGATIVE_INFINITY, 1.1],
+    ['huge-but-finite (midpoint would overflow)', 1e308, 1e308],
+    ['above the shared ceiling', 100_000, 100_000.01],
   ])('refuses a %s book', (_label, bid, ask) => {
     expect(quotesPending(contract(bid as number, ask as number))).toBe(true);
   });

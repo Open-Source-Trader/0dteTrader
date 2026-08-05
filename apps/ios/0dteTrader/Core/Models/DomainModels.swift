@@ -187,7 +187,12 @@ struct OptionContract: Equatable, Sendable, Identifiable {
     /// midpoints on it are garbage. Desktop applies this identical rule, so
     /// the two clients cannot disagree about whether an order can be sent.
     var hasTradeableQuote: Bool {
+        // The PriceMath.maxOptionPrice ceiling keeps readiness agreeing with
+        // price resolution: a book whose midpoint the helper would refuse
+        // (two huge-but-finite sides overflow the sum) must not read as
+        // tradeable.
         bid.isFinite && ask.isFinite && bid > 0 && ask > 0 && bid <= ask
+            && ask <= PriceMath.maxOptionPrice
     }
 }
 

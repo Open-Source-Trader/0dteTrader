@@ -5,6 +5,7 @@ import type {
   OrderStatus,
   OrderType,
 } from '@0dtetrader/shared-types';
+import { MAX_OPTION_PRICE } from '@0dtetrader/shared-types';
 
 /**
  * `(bid + ask) / 2` rounded to pennies (PriceMath.swift). Advisory only.
@@ -12,10 +13,14 @@ import type {
  * mirroring the server's computeMid validation; a locked market is allowed.
  */
 export function midPrice(bid: number, ask: number, precision = 2): number | null {
+  // The shared ceiling, not just finiteness: two FINITE sides can still
+  // overflow the sum (1e308 + 1e308 is Infinity). Bounded inputs make the
+  // result finite by construction; the final check is the belt.
   if (!Number.isFinite(bid) || !Number.isFinite(ask)) return null;
-  if (!(bid > 0) || !(ask > 0) || bid > ask) return null;
+  if (!(bid > 0) || !(ask > 0) || bid > ask || ask > MAX_OPTION_PRICE) return null;
   const factor = Math.pow(10, precision);
-  return Math.round(((bid + ask) / 2) * factor) / factor;
+  const mid = Math.round(((bid + ask) / 2) * factor) / factor;
+  return Number.isFinite(mid) && mid <= MAX_OPTION_PRICE ? mid : null;
 }
 
 /**
@@ -44,7 +49,10 @@ export function quotesPending(contract: OptionContract | null): boolean {
       Number.isFinite(contract.ask) &&
       contract.bid > 0 &&
       contract.ask > 0 &&
-      contract.bid <= contract.ask
+      contract.bid <= contract.ask &&
+      // The shared ceiling keeps readiness agreeing with price resolution:
+      // a book the midpoint helpers would refuse must not read as ready.
+      contract.ask <= MAX_OPTION_PRICE
     )
   );
 }

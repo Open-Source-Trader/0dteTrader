@@ -56,7 +56,7 @@ final class MidPriceTests: XCTestCase {
             (0.01, 0.02),
             (1.20, 1.28),
             (5.0, 5.0),
-            (999_999.99, 1_000_000.01),
+            (99_999.99, 100_000.0),
             (.greatestFiniteMagnitude, .greatestFiniteMagnitude),
             (1.0, .infinity),
             (.infinity, .infinity),
@@ -67,6 +67,16 @@ final class MidPriceTests: XCTestCase {
             guard let mid = PriceMath.midPrice(bid: quote.bid, ask: quote.ask) else { continue }
             XCTAssertTrue(mid.isFinite, "midPrice(\(quote.bid), \(quote.ask)) returned non-finite \(mid)")
         }
+    }
+
+    /// Boundary behavior at the shared option-price ceiling: the exact cap
+    /// prices; one tick past it (and absurd magnitudes) return nil.
+    func testMidPrice_capBoundaries() {
+        let cap = PriceMath.maxOptionPrice
+        XCTAssertNotNil(PriceMath.midPrice(bid: cap - 0.01, ask: cap))
+        XCTAssertNil(PriceMath.midPrice(bid: cap, ask: cap + 0.01))
+        XCTAssertNil(PriceMath.midPrice(bid: 1e308, ask: 1e308))
+        XCTAssertNil(PriceMath.midPrice(bid: .greatestFiniteMagnitude, ask: .greatestFiniteMagnitude))
     }
 
     /// The domain model exposes the same mid used by the trade panel.

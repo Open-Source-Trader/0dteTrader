@@ -101,6 +101,16 @@ describe('computeMid', () => {
     expect(() => computeMid(-1, 10)).toThrow(/crossed/);
   });
 
+  it('caps the book at the shared option-price ceiling — finite operands can still overflow', () => {
+    // computeMid(1e308, 1e308) survived every finiteness check on the
+    // OPERANDS and returned Infinity from the sum. Bounding inputs to
+    // MAX_OPTION_PRICE makes the result finite by construction.
+    expect(() => computeMid(1e308, 1e308)).toThrow(/crossed|invalid/);
+    expect(() => computeMid(Number.MAX_VALUE, Number.MAX_VALUE)).toThrow(/crossed|invalid/);
+    expect(() => computeMid(100_000, 100_000.01)).toThrow(/crossed|invalid/);
+    expect(computeMid(99_999.99, 100_000)).toBeCloseTo(100_000, 1);
+  });
+
   it('rejects non-finite sides before doing any arithmetic', () => {
     // bid 1 / ask ∞ passed every ordering comparison and returned an
     // infinite midpoint — the one price no order should ever be sent at.

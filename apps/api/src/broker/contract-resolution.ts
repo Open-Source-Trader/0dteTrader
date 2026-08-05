@@ -1,4 +1,4 @@
-import { OptionContract, OptionType } from '@0dtetrader/shared-types';
+import { MAX_OPTION_PRICE, OptionContract, OptionType } from '@0dtetrader/shared-types';
 import { errors } from '../common/api-exception';
 
 /**
@@ -92,14 +92,30 @@ export function findExplicitOption(
  * per docs/API-SPEC.md.
  */
 export function computeMid(bid: number, ask: number): number {
-  // Finiteness first: a feed glitch can deliver ±Infinity, and every later
-  // comparison here happily passes it through to an infinite midpoint.
-  if (!Number.isFinite(bid) || !Number.isFinite(ask) || !(bid > 0) || !(ask > 0) || bid > ask) {
+  // Finiteness AND the shared ceiling: a feed glitch can deliver ±Infinity,
+  // and two FINITE sides can still overflow the sum below (1e308 + 1e308 is
+  // Infinity). Bounding the inputs to MAX_OPTION_PRICE makes the result
+  // finite and in range by construction; the final check is the belt for
+  // any arithmetic surprise.
+  if (
+    !Number.isFinite(bid) ||
+    !Number.isFinite(ask) ||
+    !(bid > 0) ||
+    !(ask > 0) ||
+    bid > ask ||
+    ask > MAX_OPTION_PRICE
+  ) {
     throw errors.validation(
       `Cannot compute mid price: spread is crossed or invalid (bid=${bid}, ask=${ask})`,
     );
   }
-  return Math.round(((bid + ask) / 2) * 100) / 100;
+  const mid = Math.round(((bid + ask) / 2) * 100) / 100;
+  if (!Number.isFinite(mid) || mid > MAX_OPTION_PRICE) {
+    throw errors.validation(
+      `Cannot compute mid price: result out of range (bid=${bid}, ask=${ask})`,
+    );
+  }
+  return mid;
 }
 
 // ---------------------------------------------------------------------------

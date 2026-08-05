@@ -273,7 +273,9 @@ export class ChartOrderWatcherService implements OnModuleInit, OnModuleDestroy {
     for (const [userId, environment] of byUser) {
       try {
         const positions = await this.gateway.getPositions(userId);
-        const open = positions.filter((p) => p.quantity !== 0).map((p) => p.symbol);
+        const open = positions
+          .filter((p) => p.quantity !== 0)
+          .map((p) => ({ symbol: p.symbol, quantity: p.quantity }));
         const orphans = await this.chartOrders.cancelOrphanedBrackets(
           userId,
           environment,

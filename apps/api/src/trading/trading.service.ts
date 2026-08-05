@@ -1,6 +1,7 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { Prisma, type User } from '@prisma/client';
 import {
+  AccountSummary,
   OptionContract,
   OrderPreview,
   OrderRequest,
@@ -9,11 +10,17 @@ import {
   TradingMode,
 } from '@0dtetrader/shared-types';
 import { BROKER_GATEWAY, BrokerGateway } from '../broker/broker-gateway.interface';
-import { findExplicitOption, pickExpiration, resolveAutoOtm } from '../broker/contract-resolution';
+import {
+  findExplicitOption,
+  formatOccSymbol,
+  pickExpiration,
+  resolveAutoOtm,
+} from '../broker/contract-resolution';
 import { errors, isUniqueViolation } from '../common/api-exception';
 import { BrokerError } from '../common/broker-error';
 import { timed } from '../common/timing';
 import { PrismaService } from '../prisma/prisma.service';
+import { LEGAL_VERSION } from '../legal/legal.service';
 import { OrderRequestDto } from './dto/order-request.dto';
 import { OrdersService, type PositionAnchor } from './orders.service';
 
@@ -96,6 +103,18 @@ export class TradingService {
         contractSymbol,
         closeOnly,
       );
+      // Persist the exact normalized and size-capped broker request before the
+      // send. A stale claim after process death can then distinguish a
+      // crash-before-send from a broker-accepted option order without matching
+      // some unrelated AUTO order on underlying/side alone.
+      await this.prisma.orderAudit.update({
+        where: { id: replay.pendingId },
+        data: {
+          request: JSON.parse(
+            JSON.stringify({ action: 'place', order: dto, preparedOrder: capped }),
+          ),
+        },
+      });
       const result = await timed(this.logger, 'trading.place.gateway', () =>
         this.gateway.placeOrder(userId, capped, idempotencyKey, mode, heldQuantity, contract),
       );
@@ -177,10 +196,89 @@ export class TradingService {
         'An order with this idempotency key is already being placed',
       );
     }
-    // Stale pending row from a crashed attempt: remove and re-claim.
+    // A stale claim straddles the one inherently ambiguous crash boundary:
+    // the broker may have accepted immediately before this process died. Ask
+    // the broker for recent truth before reusing the key. This is especially
+    // important for SnapTrade multi-leg option orders, whose endpoint has no
+    // client_order_id field and therefore cannot deduplicate a blind retry.
+    const recoveryRequest = this.preparedOrder(prior.request) ?? dto;
+    const recovered = await this.recoverStalePlacement(userId, recoveryRequest, prior.createdAt);
+    if (recovered) {
+      await this.prisma.orderAudit
+        .update({
+          where: { id: prior.id },
+          data: { response: recovered as never, status: recovered.status },
+        })
+        .catch(() => undefined);
+      return { pendingId: null, result: recovered };
+    }
+
+    // The broker's recent-order view confirms nothing matching was accepted.
+    // This is the crash-before-send case, so reclaiming and submitting is safe.
     await this.prisma.orderAudit.delete({ where: { id: prior.id } });
     const reclaimed = await this.prisma.orderAudit.create({ data });
     return { pendingId: reclaimed.id, result: null };
+  }
+
+  private async recoverStalePlacement(
+    userId: string,
+    dto: OrderRequest,
+    claimedAt: Date,
+  ): Promise<OrderResult | null> {
+    const since = new Date(claimedAt.getTime() - 5_000);
+    const recent = this.gateway.getRecentOrders
+      ? await this.gateway.getRecentOrders(userId, since)
+      : await this.gateway.getOpenOrders(userId);
+    const expectedSymbol =
+      dto.assetClass === 'option' &&
+      dto.selection.expiration &&
+      dto.selection.optionType &&
+      dto.selection.strike !== undefined
+        ? formatOccSymbol(
+            dto.underlying,
+            dto.selection.expiration,
+            dto.selection.optionType,
+            dto.selection.strike,
+          )
+        : null;
+    const candidates = recent.filter((order) => {
+      const placedAt = Date.parse(order.timestamp);
+      if (Number.isFinite(placedAt) && placedAt < since.getTime()) return false;
+      if (order.side !== dto.side || order.quantity !== dto.quantity) return false;
+      if (order.orderType !== dto.orderType) return false;
+      if (expectedSymbol) return order.contractSymbol === expectedSymbol;
+      return order.contractSymbol.toUpperCase().startsWith(dto.underlying.toUpperCase());
+    });
+    if (candidates.length > 1) {
+      throw errors.conflict(
+        'ORDER_RECOVERY_AMBIGUOUS',
+        'Multiple recent broker orders match the interrupted placement; review the broker before retrying',
+      );
+    }
+    return candidates[0] ?? null;
+  }
+
+  private preparedOrder(request: Prisma.JsonValue): OrderRequest | null {
+    if (request === null || Array.isArray(request) || typeof request !== 'object') return null;
+    const candidate = (request as Prisma.JsonObject)['preparedOrder'];
+    if (candidate === null || Array.isArray(candidate) || typeof candidate !== 'object') {
+      return null;
+    }
+    const value = candidate as Prisma.JsonObject;
+    const selection = value['selection'];
+    if (
+      typeof value['underlying'] !== 'string' ||
+      value['assetClass'] !== 'option' ||
+      (value['side'] !== 'buy' && value['side'] !== 'sell') ||
+      !Number.isSafeInteger(value['quantity']) ||
+      (value['orderType'] !== 'market' && value['orderType'] !== 'mid') ||
+      selection === null ||
+      Array.isArray(selection) ||
+      typeof selection !== 'object'
+    ) {
+      return null;
+    }
+    return candidate as unknown as OrderRequest;
   }
 
   async cancel(userId: string, orderId: string): Promise<void> {
@@ -196,6 +294,12 @@ export class TradingService {
 
   getOpenOrders(userId: string): Promise<OrderResult[]> {
     return this.gateway.getOpenOrders(userId);
+  }
+
+  /** Broker-reported account equity, when the broker exposes one — null for
+   *  gateways with no previous-close reference (Webull, SnapTrade today). */
+  getAccountSummary(userId: string): Promise<AccountSummary | null> {
+    return this.gateway.getAccountSummary?.(userId) ?? Promise.resolve(null);
   }
 
   /**
@@ -263,6 +367,28 @@ export class TradingService {
         'TRADING_DISABLED',
         'Trading is disabled for this account (kill switch)',
       );
+    }
+    if (action === 'place') {
+      const accepted = await this.prisma.legalAcceptance.findMany({
+        where: {
+          userId,
+          version: LEGAL_VERSION,
+          document: { in: ['terms', 'risk'] },
+        },
+      });
+      if (new Set(accepted.map((row) => row.document)).size !== 2) {
+        await this.audit(
+          userId,
+          action,
+          request,
+          { error: { code: 'LEGAL_ACCEPTANCE_REQUIRED' } },
+          'blocked',
+        );
+        throw errors.forbidden(
+          'LEGAL_ACCEPTANCE_REQUIRED',
+          'Accept the current Terms and Options Risk Disclosure before placing orders',
+        );
+      }
     }
     return user;
   }

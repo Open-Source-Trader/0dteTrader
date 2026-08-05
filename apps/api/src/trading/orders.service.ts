@@ -1,4 +1,4 @@
-import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
+import { Inject, Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import { Prisma, type TradeOrder, type TradeOrderExecution } from '@prisma/client';
 import {
   MAX_OPTION_PRICE,
@@ -8,11 +8,19 @@ import {
   TradeHistoryEntry,
   TradingMode,
 } from '@0dtetrader/shared-types';
+import { BROKER_GATEWAY, BrokerGateway } from '../broker/broker-gateway.interface';
 import { OPTION_MULTIPLIER } from '../broker/contract-resolution';
 import { OrderEventsService, OrderUpdateEvent } from '../broker/order-events.service';
 import { PrismaService } from '../prisma/prisma.service';
 
 const round2 = (v: number): number => Math.round(v * 100) / 100;
+
+/**
+ * Reconciliation only pulls "recent" broker activity, not the full account
+ * history — 48h covers a weekend gap between sessions without slurping the
+ * account's entire order history back to a newest-known row from weeks ago.
+ */
+const RECONCILE_LOOKBACK_MS = 48 * 60 * 60 * 1000;
 
 /** Running average-cost state for one contract, rebuilt by replaying fills. */
 interface BookEntry {
@@ -476,6 +484,7 @@ export class OrdersService implements OnModuleDestroy {
   constructor(
     private readonly prisma: PrismaService,
     orderEvents: OrderEventsService,
+    @Inject(BROKER_GATEWAY) private readonly gateway: BrokerGateway,
   ) {
     // Registered as an INGESTOR, not a subscriber: the webhook path must be
     // able to await persistence before acknowledging the provider, and an
@@ -486,6 +495,47 @@ export class OrdersService implements OnModuleDestroy {
       (event) => this.recordWithRetry(event),
       100,
     );
+  }
+
+  /**
+   * Backfills recent orders the broker has on file that this app never saw
+   * placed — a trade made directly on the broker's own site/app never
+   * reaches {@link OrderEventsService}, so `record` never runs for it. Called
+   * before every `history()` read rather than on a timer: history is already
+   * polled every 60s from the desktop app, so a separate schedule would just
+   * be a second clock to keep in sync with the first.
+   *
+   * Bounded to the last {@link RECONCILE_LOOKBACK_MS} regardless of how old
+   * the newest known row is — this backfills *recent* broker activity, not
+   * the full account history, so a long-idle app doesn't suddenly pull weeks
+   * of orders on its next open.
+   *
+   * A no-op for gateways that don't implement `getRecentOrders` (Webull
+   * today).
+   */
+  private async reconcileWithBroker(userId: string): Promise<void> {
+    if (!this.gateway.getRecentOrders) return;
+    const lookbackFloor = new Date(Date.now() - RECONCILE_LOOKBACK_MS);
+    const newest = await this.prisma.tradeOrder.findFirst({
+      where: { userId, placedAt: { gte: lookbackFloor } },
+      orderBy: { placedAt: 'desc' },
+      select: { placedAt: true },
+    });
+    const since = newest?.placedAt ?? lookbackFloor;
+    let brokerOrders: OrderResult[];
+    try {
+      brokerOrders = await this.gateway.getRecentOrders(userId, since);
+    } catch (err) {
+      // Reconciliation is best-effort: a broker hiccup here must not break
+      // the history read, which already has everything this app recorded.
+      this.logger.warn(`broker history reconciliation failed: ${(err as Error).message}`);
+      return;
+    }
+    for (const order of brokerOrders) {
+      await this.recordWithRetry({ userId, order }).catch((err) =>
+        this.logger.warn(`failed to reconcile broker order ${order.orderId}: ${err.message}`),
+      );
+    }
   }
 
   /**
@@ -551,10 +601,19 @@ export class OrdersService implements OnModuleDestroy {
       knownEnvironment ?? (user?.tradingMode === 'practice' ? 'practice' : 'live');
     const explicitBroker = identity.brokerOrderId?.trim() || null;
     const explicitClient = identity.clientOrderId?.trim() || null;
+    let accountId = identity.accountId?.trim() || null;
+    if (accountId === null && provider === 'snaptrade') {
+      const connection = await this.prisma.brokerConnection.findUnique({
+        where: {
+          userId_provider_environment: { userId, provider: 'snaptrade', environment },
+        },
+      });
+      accountId = connection?.selectedAccountId?.trim() || null;
+    }
     return {
       provider: provider as OrderScope['provider'],
       environment,
-      accountId: identity.accountId?.trim() || 'default',
+      accountId: accountId ?? 'default',
       brokerOrderId:
         explicitBroker ??
         (provider === 'snaptrade' && explicitClient === null ? order.orderId || null : null),
@@ -637,9 +696,8 @@ export class OrdersService implements OnModuleDestroy {
    * on the placing one. Correctness therefore lives in the database — the
    * ensure-exists upsert, the guarded status writes, and the
    * compare-and-set watermark advance in recordFillProgress — none of which
-   * needs a transaction (the repo deliberately uses none; see
-   * PrismaService's doc comment). The chain merely keeps one instance from
-   * burning CAS retries against itself.
+   * needs a transaction. The chain merely keeps one instance from burning
+   * CAS retries against itself.
    */
   private readonly recordChains = new Map<string, Promise<void>>();
 
@@ -954,13 +1012,28 @@ export class OrdersService implements OnModuleDestroy {
 
     const book = new Map<string, BookEntry>();
     for (const event of fillEventsFor(rows, await this.executionsFor(rows))) {
-      // Already narrowed to one environment, so the symbol alone is the position.
-      applyExecution(book, event.row.contractSymbol, event);
+      applyExecution(
+        book,
+        [event.row.provider, event.row.accountId, event.row.contractSymbol].join('|'),
+        event,
+      );
     }
 
     const anchors = new Map<string, PositionAnchor>();
-    for (const [symbol, entry] of book) {
+    const ambiguous = new Set<string>();
+    for (const [scopeKey, entry] of book) {
       if (entry.quantity === 0) continue;
+      const symbol = scopeKey.slice(scopeKey.lastIndexOf('|') + 1);
+      if (anchors.has(symbol)) {
+        // The gateway returns positions for one selected account but its wire
+        // Position shape does not carry that account id. If two accounts hold
+        // the same contract, refusing the annotation is safer than attaching
+        // the other account's cost basis to an automated trading screen.
+        anchors.delete(symbol);
+        ambiguous.add(symbol);
+        continue;
+      }
+      if (ambiguous.has(symbol)) continue;
       const anchor: PositionAnchor = { quantity: entry.quantity };
       if (entry.underlyingQty > 0) anchor.underlyingEntryEstimate = round2(entry.avgUnderlying);
       if (entry.openedAt) anchor.openedAt = entry.openedAt;
@@ -972,6 +1045,7 @@ export class OrdersService implements OnModuleDestroy {
   }
 
   async history(userId: string): Promise<TradeHistory> {
+    await this.reconcileWithBroker(userId);
     const rows = await this.prisma.tradeOrder.findMany({
       where: { userId },
       orderBy: { placedAt: 'asc' },
@@ -989,7 +1063,11 @@ export class OrdersService implements OnModuleDestroy {
     let total = 0;
     for (const event of fillEventsFor(rows, await this.executionsFor(rows))) {
       const { row } = event;
-      const realized = applyExecution(book, `${row.environment}|${row.contractSymbol}`, event);
+      const realized = applyExecution(
+        book,
+        [row.provider, row.environment, row.accountId, row.contractSymbol].join('|'),
+        event,
+      );
       if (realized !== null) {
         realizedByOrder.set(row.id, (realizedByOrder.get(row.id) ?? 0) + realized);
         total += realized;
@@ -1000,6 +1078,8 @@ export class OrdersService implements OnModuleDestroy {
       const realized = realizedByOrder.get(row.id);
       return {
         orderId: row.clientOrderId ?? row.brokerOrderId ?? row.id,
+        ...(row.brokerOrderId && { brokerOrderId: row.brokerOrderId }),
+        ...(row.clientOrderId && { clientOrderId: row.clientOrderId }),
         status: row.status as TradeHistoryEntry['status'],
         contractSymbol: row.contractSymbol,
         side: row.side as TradeHistoryEntry['side'],

@@ -1,4 +1,5 @@
 import type {
+  AccountSummary,
   AuthTokens,
   BrokerCredentialsInput,
   BrokerCredentialsSaved,
@@ -314,6 +315,12 @@ export class ApiClient {
 
   deleteAccount(confirmEmail: string): Promise<void> {
     return this.requestVoid({ method: 'DELETE', path: 'v1/me', body: { confirmEmail } });
+  }
+
+  /** Broker-reported equity/daily P&L; null when the broker exposes none
+   *  (Webull, SnapTrade today). */
+  accountSummary(): Promise<AccountSummary | null> {
+    return this.request({ method: 'GET', path: 'v1/account-summary' });
   }
 
   // MARK: - Chart trading

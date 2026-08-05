@@ -23,7 +23,7 @@ describe('LegalService', () => {
       'open-source-licenses',
     ]);
     expect(documents.find((document) => document.slug === 'privacy')?.publicUrl).toBe(
-      'https://trade.example/v1/legal/privacy',
+      'https://trade.example/v1/legal/privacy-policy',
     );
     expect(service.document('privacy', 'https://trade.example').markdown).toContain(
       '# Privacy Policy',

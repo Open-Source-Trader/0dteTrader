@@ -1,4 +1,5 @@
 import {
+  AccountSummary,
   Candle,
   CandleRequest,
   OptionContract,
@@ -90,6 +91,24 @@ export interface BrokerGateway {
   cancelOrder(userId: string, orderId: string): Promise<void>;
   getPositions(userId: string): Promise<Position[]>;
   getOpenOrders(userId: string): Promise<OrderResult[]>;
+  /**
+   * Every order the broker has on file (any status), optionally limited to
+   * those placed at or after `since`. Backs history reconciliation for orders
+   * the user placed directly on the broker rather than through this app,
+   * which never reach {@link OrderEventsService} and so are never persisted
+   * by their own path. Optional: not every gateway can list historical orders
+   * cheaply yet, so `OrdersService` treats its absence as "nothing to
+   * reconcile" rather than an error.
+   */
+  getRecentOrders?(userId: string, since?: Date): Promise<OrderResult[]>;
+  /**
+   * Broker-reported account equity (current and prior-close), the
+   * authoritative source for today's P&L. Optional: only brokers that expose
+   * a previous-close equity reference implement it (Alpaca today); others
+   * are treated as unsupported and `OrdersService`/clients fall back to a
+   * locally-computed estimate.
+   */
+  getAccountSummary?(userId: string): Promise<AccountSummary | null>;
   /**
    * Drop the cached Webull client/token for the user's current trading mode
    * and mint a fresh access token. Returns the mode it applied to.

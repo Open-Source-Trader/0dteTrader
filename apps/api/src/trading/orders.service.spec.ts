@@ -1,6 +1,8 @@
 import { OrderResult } from '@0dtetrader/shared-types';
+import { BrokerGateway } from '../broker/broker-gateway.interface';
 import { OrderEventsService } from '../broker/order-events.service';
 import { InMemoryPrismaService } from '../../test/in-memory-prisma.service';
+import { StubBrokerGateway } from '../../test/stub-broker.gateway';
 import { OrdersService } from './orders.service';
 
 const USER = 'user-1';
@@ -39,6 +41,7 @@ describe('OrdersService', () => {
     orders = new OrdersService(
       prisma as unknown as ConstructorParameters<typeof OrdersService>[0],
       events,
+      new StubBrokerGateway() as BrokerGateway,
     );
   });
 
@@ -46,10 +49,22 @@ describe('OrdersService', () => {
     orders.onModuleDestroy();
   });
 
-  /** The cumulative fill curve recorded for one order, in curve order. */
-  const cumulativesFor = (orderId: string): number[] =>
-    prisma.tradeOrderExecutions
-      .filter((e) => e.orderId === orderId)
+  const rowFor = (orderId: string, userId = USER) =>
+    prisma.tradeOrders.find(
+      (row) =>
+        row.userId === userId && (row.clientOrderId === orderId || row.brokerOrderId === orderId),
+    );
+
+  const executionsFor = (orderId: string, userId = USER) => {
+    const internalId = rowFor(orderId, userId)?.id;
+    return internalId
+      ? prisma.tradeOrderExecutions.filter((execution) => execution.orderId === internalId)
+      : [];
+  };
+
+  /** The cumulative fill curve recorded for one external order, in curve order. */
+  const cumulativesFor = (orderId: string, userId = USER): number[] =>
+    executionsFor(orderId, userId)
       .map((e) => e.cumulative)
       .sort((a: number, b: number) => a - b);
 
@@ -195,6 +210,28 @@ describe('OrdersService', () => {
     expect(history.totalRealizedPnl).toBe(0);
   });
 
+  it('keeps realized P/L and anchors independent across brokerage accounts', async () => {
+    await orders.record(
+      USER,
+      fill({ orderId: 'ACCOUNT-A-BUY', side: 'buy', filledPrice: 1 }),
+      'live',
+      { provider: 'snaptrade', accountId: 'account-a', brokerOrderId: 'ACCOUNT-A-BUY' },
+    );
+    await orders.record(
+      USER,
+      fill({ orderId: 'ACCOUNT-B-SELL', side: 'sell', filledPrice: 2 }),
+      'live',
+      { provider: 'snaptrade', accountId: 'account-b', brokerOrderId: 'ACCOUNT-B-SELL' },
+    );
+
+    const history = await orders.history(USER);
+    expect(history.totalRealizedPnl).toBe(0);
+    expect(history.entries.every((entry) => entry.realizedPnl === null)).toBe(true);
+    // Both accounts hold the same contract in opposite directions and the
+    // Position wire type has no account id. Refuse an ambiguous chart anchor.
+    expect((await orders.positionAnchors(USER, [OCC])).has(OCC)).toBe(false);
+  });
+
   describe('recordUnderlyingPrice', () => {
     /**
      * The broker's status poll starts before the placement path gets control,
@@ -210,7 +247,7 @@ describe('OrdersService', () => {
       // Placement path stamps the anchor, still holding the submitted result.
       await orders.recordUnderlyingPrice(USER, submitted, 600);
 
-      const row = prisma.tradeOrders.find((o) => o.id === submitted.orderId);
+      const row = rowFor(submitted.orderId);
       expect(row.status).toBe('filled');
       expect(row.filledPrice).toBe(1.42);
       expect(row.underlyingPrice).toBe(600);
@@ -221,7 +258,7 @@ describe('OrdersService', () => {
 
       await orders.recordUnderlyingPrice(USER, order, 600);
 
-      const row = prisma.tradeOrders.find((o) => o.id === order.orderId);
+      const row = rowFor(order.orderId);
       expect(row.underlyingPrice).toBe(600);
       expect(row.status).toBe('filled');
     });
@@ -232,7 +269,7 @@ describe('OrdersService', () => {
 
       await orders.record(USER, { ...order, status: 'filled', filledPrice: 1.1 });
 
-      const row = prisma.tradeOrders.find((o) => o.id === order.orderId);
+      const row = rowFor(order.orderId);
       expect(row.underlyingPrice).toBe(600);
       expect(row.filledPrice).toBe(1.1);
     });
@@ -466,7 +503,7 @@ describe('OrdersService', () => {
         filledAt: t2.toISOString(),
       });
 
-      expect(prisma.tradeOrders.find((o) => o.id === order.orderId).filledAt).toEqual(t1);
+      expect(rowFor(order.orderId).filledAt).toEqual(t1);
       const anchor = (await orders.positionAnchors(USER, [OCC])).get(OCC);
       expect(anchor?.openedAt).toEqual(t1);
     });
@@ -514,7 +551,7 @@ describe('OrdersService', () => {
       await orders.record(USER, opening);
       // A row persisted before the filledAt column (and the executions
       // table) existed carries neither.
-      prisma.tradeOrders.find((o) => o.id === opening.orderId).filledAt = null;
+      rowFor(opening.orderId).filledAt = null;
       prisma.tradeOrderExecutions.length = 0;
 
       const anchor = (await orders.positionAnchors(USER, [OCC])).get(OCC);
@@ -822,7 +859,7 @@ describe('OrdersService', () => {
         }),
       );
 
-      const row = prisma.tradeOrders.find((o) => o.id === 'STALE');
+      const row = rowFor('STALE');
       expect(row.filledQuantity).toBe(3);
       expect(row.filledPrice).toBe(1.2);
       expect(row.executedQuantity).toBe(3);
@@ -1048,12 +1085,12 @@ describe('OrdersService', () => {
 
       // Nothing at all was recorded — signed-but-malformed data must not
       // create a row it could later poison.
-      expect(prisma.tradeOrders.find((o) => o.id === 'BADQ')).toBeUndefined();
-      expect(prisma.tradeOrderExecutions.filter((e) => e.orderId === 'BADQ')).toHaveLength(0);
+      expect(rowFor('BADQ')).toBeUndefined();
+      expect(executionsFor('BADQ')).toHaveLength(0);
 
       // A later well-formed report records normally.
       await orders.record(USER, fill({ orderId: 'BADQ', quantity: 2, filledPrice: 1.0 }));
-      expect(prisma.tradeOrders.find((o) => o.id === 'BADQ').executedQuantity).toBe(2);
+      expect(rowFor('BADQ').executedQuantity).toBe(2);
     });
 
     it.each([
@@ -1063,8 +1100,8 @@ describe('OrdersService', () => {
     ])('quarantines an event whose filled quantity is %s', async (_label, filledQuantity) => {
       await orders.record(USER, fill({ orderId: 'BADF', quantity: 3, filledQuantity }));
 
-      expect(prisma.tradeOrders.find((o) => o.id === 'BADF')).toBeUndefined();
-      expect(prisma.tradeOrderExecutions.filter((e) => e.orderId === 'BADF')).toHaveLength(0);
+      expect(rowFor('BADF')).toBeUndefined();
+      expect(executionsFor('BADF')).toHaveLength(0);
     });
 
     it.each([
@@ -1076,8 +1113,8 @@ describe('OrdersService', () => {
       // the shared cap keep a quantity like this out of notional arithmetic.
       await orders.record(USER, fill({ orderId: 'HUGE', quantity, filledQuantity: undefined }));
 
-      expect(prisma.tradeOrders.find((o) => o.id === 'HUGE')).toBeUndefined();
-      expect(prisma.tradeOrderExecutions.filter((e) => e.orderId === 'HUGE')).toHaveLength(0);
+      expect(rowFor('HUGE')).toBeUndefined();
+      expect(executionsFor('HUGE')).toHaveLength(0);
     });
 
     it('accepts the exact shared cap', async () => {
@@ -1086,7 +1123,7 @@ describe('OrdersService', () => {
         fill({ orderId: 'ATCAP', quantity: 1000, filledQuantity: 1000, filledPrice: 1.0 }),
       );
 
-      expect(prisma.tradeOrders.find((o) => o.id === 'ATCAP').executedQuantity).toBe(1000);
+      expect(rowFor('ATCAP').executedQuantity).toBe(1000);
     });
 
     it('refuses an absurd fill price but keeps the terminal status', async () => {
@@ -1098,17 +1135,17 @@ describe('OrdersService', () => {
         fill({ orderId: 'PRICEY', quantity: 1, filledQuantity: 1, filledPrice: 1e308 }),
       );
 
-      const row = prisma.tradeOrders.find((o) => o.id === 'PRICEY');
+      const row = rowFor('PRICEY');
       expect(row.status).toBe('filled');
       expect(row.executedQuantity).toBe(0);
-      expect(prisma.tradeOrderExecutions.filter((e) => e.orderId === 'PRICEY')).toHaveLength(0);
+      expect(executionsFor('PRICEY')).toHaveLength(0);
 
       // A plausible boundary-adjacent price books normally.
       await orders.record(
         USER,
         fill({ orderId: 'PRICEY', quantity: 1, filledQuantity: 1, filledPrice: 99_999 }),
       );
-      expect(prisma.tradeOrders.find((o) => o.id === 'PRICEY').executedQuantity).toBe(1);
+      expect(rowFor('PRICEY').executedQuantity).toBe(1);
     });
 
     it('quarantines an overfill — cumulative above the order’s own size', async () => {
@@ -1117,15 +1154,15 @@ describe('OrdersService', () => {
         fill({ orderId: 'OVER', quantity: 3, filledQuantity: 5, filledPrice: 1.0 }),
       );
 
-      expect(prisma.tradeOrders.find((o) => o.id === 'OVER')).toBeUndefined();
-      expect(prisma.tradeOrderExecutions.filter((e) => e.orderId === 'OVER')).toHaveLength(0);
+      expect(rowFor('OVER')).toBeUndefined();
+      expect(executionsFor('OVER')).toHaveLength(0);
 
       // The repaired report is not blocked by the quarantined one.
       await orders.record(
         USER,
         fill({ orderId: 'OVER', quantity: 3, filledQuantity: 3, filledPrice: 1.0 }),
       );
-      expect(prisma.tradeOrders.find((o) => o.id === 'OVER').executedQuantity).toBe(3);
+      expect(rowFor('OVER').executedQuantity).toBe(3);
     });
 
     it.each([
@@ -1136,8 +1173,8 @@ describe('OrdersService', () => {
 
       // Nothing is recorded and no authority is claimed, so the junk price
       // can never reach the average-cost book.
-      expect(prisma.tradeOrderExecutions.filter((e) => e.orderId === 'JUNK')).toHaveLength(0);
-      expect(prisma.tradeOrders.find((o) => o.id === 'JUNK').executedQuantity).toBe(0);
+      expect(executionsFor('JUNK')).toHaveLength(0);
+      expect(rowFor('JUNK').executedQuantity).toBe(0);
       expect((await orders.positionAnchors(USER, [OCC])).size).toBe(0);
 
       // A later valid report of the same order still records normally.
@@ -1262,10 +1299,10 @@ describe('OrdersService', () => {
       });
       await orders.record(USER, filled);
 
-      const row = prisma.tradeOrders.find((o) => o.id === 'REGRESS');
+      const row = rowFor('REGRESS');
       expect(row.status).toBe('filled');
       expect(row.executedQuantity).toBe(1);
-      expect(prisma.tradeOrderExecutions.filter((e) => e.orderId === 'REGRESS')).toHaveLength(1);
+      expect(executionsFor('REGRESS')).toHaveLength(1);
       const anchor = (await orders.positionAnchors(USER, [OCC])).get(OCC);
       expect(anchor?.quantity).toBe(1);
     });
@@ -1290,9 +1327,9 @@ describe('OrdersService', () => {
       });
       await orders.record(USER, filled);
 
-      const row = prisma.tradeOrders.find((o) => o.id === 'CXL');
+      const row = rowFor('CXL');
       expect(row.status).toBe('filled');
-      expect(prisma.tradeOrderExecutions.filter((e) => e.orderId === 'CXL')).toHaveLength(1);
+      expect(executionsFor('CXL')).toHaveLength(1);
     });
 
     it('clamps replay to the watermark, so a historical duplicate execution cannot double the book', async () => {
@@ -1340,10 +1377,11 @@ describe('OrdersService', () => {
         filledAt: t(20).toISOString(),
       };
       await orders.record(USER, partial);
+      const lostInternalId = rowFor('LOST').id;
       const create = prisma.tradeOrderExecution.create;
       let failing = true;
       prisma.tradeOrderExecution.create = async (args: any) => {
-        if (failing && args.data.orderId === 'LOST' && args.data.cumulative === 2) {
+        if (failing && args.data.orderId === lostInternalId && args.data.cumulative === 2) {
           throw new Error('connection reset');
         }
         return create(args);
@@ -1384,7 +1422,7 @@ describe('OrdersService', () => {
         USER,
         fill({ ...base, status: 'partially_filled', filledQuantity: 1, filledPrice: 1.0 }),
       );
-      const old = prisma.tradeOrderExecutions.find((e) => e.orderId === 'MIX');
+      const old = executionsFor('MIX')[0];
       Object.assign(old, { avgPrice: null, quantity: 1, price: 1.0 });
       await orders.record(
         USER,
@@ -1438,7 +1476,7 @@ describe('OrdersService', () => {
         createdAt: new Date(),
       });
 
-      expect(prisma.tradeOrders.find((o) => o.id === 'DUPCUM').executedQuantity).toBe(1);
+      expect(rowFor('DUPCUM').executedQuantity).toBe(1);
       expect((await orders.positionAnchors(USER, [OCC])).get(OCC)?.quantity).toBe(1);
     });
 
@@ -1479,6 +1517,7 @@ describe('OrdersService', () => {
       orders2 = new OrdersService(
         prisma as unknown as ConstructorParameters<typeof OrdersService>[0],
         events2,
+        new StubBrokerGateway() as BrokerGateway,
       );
     });
 
@@ -1507,10 +1546,10 @@ describe('OrdersService', () => {
       // cumulative — never 1 + 3 = 4.
       await Promise.all([orders.record(USER, partial), orders2.record(USER, full)]);
 
-      const row = prisma.tradeOrders.find((o) => o.id === 'MULTI');
+      const row = rowFor('MULTI');
       expect(row.status).toBe('filled');
       expect(row.executedQuantity).toBe(3);
-      const recorded = prisma.tradeOrderExecutions.filter((e) => e.orderId === 'MULTI');
+      const recorded = executionsFor('MULTI');
       expect(new Set(recorded.map((e) => e.cumulative)).size).toBe(recorded.length);
       // What the observations mean is the same under every interleaving: the
       // broker's cumulative, booked once.
@@ -1545,7 +1584,7 @@ describe('OrdersService', () => {
       });
       await orders.record(USER, partial);
 
-      const row = prisma.tradeOrders.find((o) => o.id === 'LATE');
+      const row = rowFor('LATE');
       expect(row.executedQuantity).toBe(3);
       expect(row.filledQuantity).toBe(3);
       expect(row.filledPrice).toBe(1.2);
@@ -1564,11 +1603,11 @@ describe('OrdersService', () => {
         filledAt: t(10).toISOString(),
       });
       await orders.record(USER, filled);
-      prisma.tradeOrders.find((o) => o.id === 'BELT').executedQuantity = 0;
+      rowFor('BELT').executedQuantity = 0;
 
       await orders2.record(USER, filled);
 
-      const recorded = prisma.tradeOrderExecutions.filter((e) => e.orderId === 'BELT');
+      const recorded = executionsFor('BELT');
       expect(recorded).toHaveLength(1);
       const anchor = (await orders.positionAnchors(USER, [OCC])).get(OCC);
       expect(anchor?.quantity).toBe(2);
@@ -1607,7 +1646,7 @@ describe('OrdersService', () => {
         side: 'sell',
       });
 
-      const row = prisma.tradeOrders.find((o) => o.id === 'SHARED');
+      const row = rowFor('SHARED');
       expect(row.userId).toBe(USER);
       expect(row.status).toBe('partially_filled');
       expect(row.filledPrice).toBe(1.0);
@@ -1644,7 +1683,7 @@ describe('OrdersService', () => {
         999,
       );
 
-      const row = prisma.tradeOrders.find((o) => o.id === 'SHARED2');
+      const row = rowFor('SHARED2');
       expect(row.userId).toBe(USER);
       expect(row.underlyingPrice).toBe(600);
       const anchor = (await orders.positionAnchors(USER, [OCC])).get(OCC);
@@ -1665,5 +1704,173 @@ describe('OrdersService', () => {
     const byUser = (userId: string) => prisma.tradeOrders.find((o) => o.userId === userId);
     expect(byUser(practiceUser.id as string).environment).toBe('practice');
     expect(byUser(USER).environment).toBe('live'); // unknown user → default
+  });
+});
+
+describe('OrdersService broker reconciliation', () => {
+  /** A gateway whose getRecentOrders is scripted per test — everything else
+   *  is unused by history() and left unimplemented. */
+  function fakeGateway(
+    recentOrders: (userId: string, since?: Date) => Promise<OrderResult[]>,
+  ): BrokerGateway {
+    return {
+      getRecentOrders: recentOrders,
+    } as unknown as BrokerGateway;
+  }
+
+  it('backfills an order placed directly on the broker, never seen on the events bus', async () => {
+    const prisma = new InMemoryPrismaService();
+    const brokerOnly = fill({ side: 'buy', quantity: 1, filledPrice: 2.0 });
+    const orders = new OrdersService(
+      prisma as unknown as ConstructorParameters<typeof OrdersService>[0],
+      new OrderEventsService(),
+      fakeGateway(async () => [brokerOnly]),
+    );
+
+    const history = await orders.history(USER);
+
+    expect(history.entries).toHaveLength(1);
+    expect(history.entries[0].orderId).toBe(brokerOnly.orderId);
+    expect(history.entries[0].filledPrice).toBe(2.0);
+  });
+
+  it('does not duplicate an order this app already recorded itself', async () => {
+    const prisma = new InMemoryPrismaService();
+    const events = new OrderEventsService();
+    const shared = fill({ side: 'buy', quantity: 1, filledPrice: 1.0 });
+    const orders = new OrdersService(
+      prisma as unknown as ConstructorParameters<typeof OrdersService>[0],
+      events,
+      // The broker reports the same order back — the upsert-by-id in
+      // `record` must update, not duplicate, the existing row.
+      fakeGateway(async () => [{ ...shared, status: 'filled' }]),
+    );
+    await orders.record(USER, shared);
+
+    const history = await orders.history(USER);
+
+    expect(history.entries).toHaveLength(1);
+  });
+
+  it('scopes broker reconciliation to the selected SnapTrade account', async () => {
+    const prisma = new InMemoryPrismaService();
+    const user = await prisma.user.create({
+      data: {
+        email: 'snap-reconcile@example.com',
+        passwordHash: 'x',
+        tradingProvider: 'snaptrade',
+      },
+    });
+    await prisma.brokerConnection.upsert({
+      where: {
+        userId_provider_environment: {
+          userId: user.id,
+          provider: 'snaptrade',
+          environment: 'live',
+        },
+      },
+      create: {
+        userId: user.id,
+        provider: 'snaptrade',
+        environment: 'live',
+        connectionId: 'connection-a',
+        accountIds: ['account-a'],
+        selectedAccountId: 'account-a',
+        status: 'active',
+      },
+      update: {},
+    });
+    const brokerOnly = fill({ orderId: 'snap-broker-order' });
+    const orders = new OrdersService(
+      prisma as unknown as ConstructorParameters<typeof OrdersService>[0],
+      new OrderEventsService(),
+      fakeGateway(async () => [brokerOnly]),
+    );
+
+    await orders.history(user.id);
+
+    expect(prisma.tradeOrders).toHaveLength(1);
+    expect(prisma.tradeOrders[0]).toMatchObject({
+      provider: 'snaptrade',
+      environment: 'live',
+      accountId: 'account-a',
+      brokerOrderId: brokerOnly.orderId,
+    });
+  });
+
+  it('is a no-op when the gateway does not support getRecentOrders', async () => {
+    const prisma = new InMemoryPrismaService();
+    const orders = new OrdersService(
+      prisma as unknown as ConstructorParameters<typeof OrdersService>[0],
+      new OrderEventsService(),
+      {} as BrokerGateway, // no getRecentOrders — e.g. Webull, SnapTrade
+    );
+
+    await expect(orders.history(USER)).resolves.toEqual({ entries: [], totalRealizedPnl: 0 });
+  });
+
+  it('tolerates a broker error during reconciliation and still returns known history', async () => {
+    const prisma = new InMemoryPrismaService();
+    const events = new OrderEventsService();
+    const orders = new OrdersService(
+      prisma as unknown as ConstructorParameters<typeof OrdersService>[0],
+      events,
+      fakeGateway(async () => {
+        throw new Error('broker unavailable');
+      }),
+    );
+    await orders.record(USER, fill({ filledPrice: 1.0 }));
+
+    const history = await orders.history(USER);
+
+    expect(history.entries).toHaveLength(1);
+  });
+
+  it('reconciles from the newest known fill when it falls inside the 48h window', async () => {
+    const prisma = new InMemoryPrismaService();
+    const events = new OrderEventsService();
+    const sinceArgs: Array<Date | undefined> = [];
+    const orders = new OrdersService(
+      prisma as unknown as ConstructorParameters<typeof OrdersService>[0],
+      events,
+      fakeGateway(async (_userId, since) => {
+        sinceArgs.push(since);
+        return [];
+      }),
+    );
+    const recentFill = fill({ filledPrice: 1.0, timestamp: new Date().toISOString() });
+    await orders.record(USER, recentFill);
+
+    await orders.history(USER);
+
+    expect(sinceArgs).toHaveLength(1);
+    expect(sinceArgs[0]?.toISOString()).toBe(new Date(recentFill.timestamp).toISOString());
+  });
+
+  it('falls back to the 48h floor rather than the full account history when the newest known fill is older than that', async () => {
+    const prisma = new InMemoryPrismaService();
+    const events = new OrderEventsService();
+    const sinceArgs: Array<Date | undefined> = [];
+    const orders = new OrdersService(
+      prisma as unknown as ConstructorParameters<typeof OrdersService>[0],
+      events,
+      fakeGateway(async (_userId, since) => {
+        sinceArgs.push(since);
+        return [];
+      }),
+    );
+    // `fill()`'s default timestamp is a fixed date years in the past.
+    await orders.record(USER, fill({ filledPrice: 1.0 }));
+
+    const before = Date.now();
+    await orders.history(USER);
+    const after = Date.now();
+
+    expect(sinceArgs).toHaveLength(1);
+    const sinceMs = sinceArgs[0]?.getTime() ?? NaN;
+    // 48h ago, give or take the test's own execution time — never the
+    // old recorded fill's timestamp from years back.
+    expect(sinceMs).toBeGreaterThanOrEqual(before - 48 * 60 * 60 * 1000 - 1000);
+    expect(sinceMs).toBeLessThanOrEqual(after - 48 * 60 * 60 * 1000 + 1000);
   });
 });

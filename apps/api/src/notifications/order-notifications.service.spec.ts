@@ -423,12 +423,92 @@ describe('OrderNotificationsService', () => {
       expect(prisma.scheduledJobLeases[0].name).toBe('push-delivery-retention:2026-08-05');
     });
 
+    it('keeps recent terminal rows and old retryable rows inside the dedupe window', async () => {
+      const now = new Date('2026-08-05T12:00:00Z');
+      const recent = await prisma.pushDelivery.create({
+        data: {
+          userId,
+          key: 'order:recent:filled',
+          deviceToken: TOKEN,
+          environment: 'live',
+          title: 'Recent',
+          body: 'Recent',
+        },
+      });
+      Object.assign(recent, {
+        status: 'delivered',
+        createdAt: new Date(now.getTime() - 6 * 24 * 60 * 60_000),
+      });
+      const retryable = await prisma.pushDelivery.create({
+        data: {
+          userId,
+          key: 'order:old:retry',
+          deviceToken: 'b'.repeat(64),
+          environment: 'live',
+          title: 'Retry',
+          body: 'Retry',
+        },
+      });
+      Object.assign(retryable, {
+        status: 'retry',
+        createdAt: new Date('2026-07-01T00:00:00Z'),
+        nextAttemptAt: new Date('2026-08-06T00:00:00Z'),
+      });
+
+      await service.processDue(now);
+
+      expect(prisma.pushDeliveries.map((row) => row.key).sort()).toEqual([
+        'order:old:retry',
+        'order:recent:filled',
+      ]);
+    });
+
+    it('retries the same daily retention lease after a failed sweep', async () => {
+      const now = new Date('2026-08-05T12:00:00Z');
+      const remove = jest
+        .spyOn(prisma.pushDelivery, 'deleteMany')
+        .mockRejectedValueOnce(new Error('database unavailable'));
+
+      await expect(service.processDue(now)).rejects.toThrow('database unavailable');
+      expect(prisma.scheduledJobLeases[0].expiresAt).toEqual(now);
+
+      await service.processDue(new Date(now.getTime() + 1));
+      expect(remove).toHaveBeenCalledTimes(2);
+    });
+
+    it('runs retention even when APNs delivery is disabled', async () => {
+      const row = await prisma.pushDelivery.create({
+        data: {
+          userId,
+          key: 'order:disabled:old',
+          deviceToken: TOKEN,
+          environment: 'live',
+          title: 'Old',
+          body: 'Old',
+        },
+      });
+      Object.assign(row, {
+        status: 'delivered',
+        createdAt: new Date('2026-07-01T00:00:00Z'),
+      });
+      Object.defineProperty(apns, 'enabled', { value: false });
+
+      await service.processDue(new Date('2026-08-05T12:00:00Z'));
+
+      expect(prisma.pushDeliveries).toHaveLength(0);
+      expect(apns.sent).toHaveLength(0);
+    });
+
     it('bounds each account to its ten most recently registered devices', async () => {
       const devices = new DevicesService(prisma as never);
       for (let index = 0; index < 12; index += 1) {
         await devices.register(userId, index.toString(16).padStart(64, '0'), 'ios');
       }
       expect(await devices.listForUser(userId)).toHaveLength(10);
+      const tokens = (await devices.listForUser(userId)).map((device) => device.token);
+      expect(tokens).not.toContain('0'.repeat(64));
+      expect(tokens).not.toContain('0'.repeat(63) + '1');
+      expect(tokens).toContain('0'.repeat(63) + 'b');
     });
   });
 });

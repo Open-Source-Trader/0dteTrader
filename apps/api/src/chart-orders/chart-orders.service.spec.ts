@@ -53,6 +53,7 @@ describe('ChartOrdersService', () => {
     const orders = new OrdersService(
       prisma as unknown as ConstructorParameters<typeof OrdersService>[0],
       new OrderEventsService(),
+      gateway as BrokerGateway,
     );
     service = new ChartOrdersService(
       prisma as unknown as ConstructorParameters<typeof ChartOrdersService>[0],
@@ -71,6 +72,7 @@ describe('ChartOrdersService', () => {
       data: { email: 'chart@example.com', passwordHash: 'x' },
     });
     userId = user.id as string;
+    prisma.acceptCurrentTradingLegal(userId);
   });
 
   /**
@@ -191,6 +193,24 @@ describe('ChartOrdersService', () => {
       expect(flipped.orderType).toBe('market');
       expect(flipped.armPrice).toBe(order.armPrice);
       expect(flipped.triggerPrice).toBe(order.triggerPrice);
+    });
+
+    it('returns the persisted resized bracket leg and keeps both siblings equal', async () => {
+      const groupId = '10101010-2222-3333-4444-555555555555';
+      const target = await service.create(
+        userId,
+        draft({ kind: 'target', quantity: 1, triggerPrice: 105, ocoGroupId: groupId }),
+      );
+      const stop = await service.create(
+        userId,
+        draft({ kind: 'stop', quantity: 1, triggerPrice: 95, ocoGroupId: groupId }),
+      );
+
+      const resized = await service.update(userId, target.id, { quantity: 2 });
+
+      expect(resized.quantity).toBe(2);
+      expect((await service.byId(stop.id))?.quantity).toBe(2);
+      expect(prisma.bracketGroups.find((group) => group.id === groupId)?.protectedQuantity).toBe(2);
     });
 
     it('refuses to change a line that already fired', async () => {
@@ -586,6 +606,41 @@ describe('ChartOrdersService', () => {
       ).rejects.toMatchObject({ status: 409, code: 'OCO_GROUP_CLOSED' });
     });
 
+    it('leaves no working late leg when add and fire race on the same group', async () => {
+      const groupId = '77777777-2222-3333-4444-666666666666';
+      const target = await service.create(
+        userId,
+        draft({
+          kind: 'target',
+          triggerPrice: 105,
+          orderType: 'market',
+          side: 'sell',
+          ocoGroupId: groupId,
+        }),
+      );
+
+      const [added, fired] = await Promise.allSettled([
+        service.create(
+          userId,
+          draft({
+            kind: 'stop',
+            triggerPrice: 95,
+            orderType: 'market',
+            side: 'sell',
+            ocoGroupId: groupId,
+          }),
+        ),
+        triggerCrossed(userId, target),
+      ]);
+
+      expect(fired.status).toBe('fulfilled');
+      expect(['fulfilled', 'rejected']).toContain(added.status);
+      expect(prisma.bracketGroups.find((group) => group.id === groupId)?.status).toBe('fired');
+      expect(
+        prisma.chartOrders.filter((row) => row.ocoGroupId === groupId && row.status === 'working'),
+      ).toHaveLength(0);
+    });
+
     it('still allows a second leg while the bracket is fully armed', async () => {
       const groupId = '88888888-2222-3333-4444-555555555555';
       await service.create(userId, draft({ kind: 'stop', triggerPrice: 95, ocoGroupId: groupId }));
@@ -593,6 +648,18 @@ describe('ChartOrdersService', () => {
       await expect(
         service.create(userId, draft({ kind: 'target', triggerPrice: 105, ocoGroupId: groupId })),
       ).resolves.toBeDefined();
+    });
+
+    it('rolls back a newly-created group when its first leg cannot be inserted', async () => {
+      const groupId = '88888888-2222-3333-4444-777777777777';
+      jest.spyOn(prisma.chartOrder, 'create').mockRejectedValueOnce(new Error('write failed'));
+
+      await expect(
+        service.create(userId, draft({ kind: 'stop', triggerPrice: 95, ocoGroupId: groupId })),
+      ).rejects.toThrow('write failed');
+
+      expect(prisma.bracketGroups.some((group) => group.id === groupId)).toBe(false);
+      expect(prisma.chartOrders.some((order) => order.ocoGroupId === groupId)).toBe(false);
     });
 
     /**
@@ -721,6 +788,110 @@ describe('ChartOrdersService', () => {
       expect((await service.byId(target.id))?.status).toBe('cancelled');
       expect(prisma.bracketGroups.find((group) => group.id === groupId)?.status).toBe('fired');
     });
+
+    it('repairs a legacy half-claim before recovery can send an order', async () => {
+      const groupId = 'aaaaaaaa-2222-3333-4444-666666666666';
+      const target = await service.create(
+        userId,
+        draft({
+          kind: 'target',
+          triggerPrice: 105,
+          orderType: 'market',
+          side: 'sell',
+          ocoGroupId: groupId,
+        }),
+      );
+      const stop = await service.create(
+        userId,
+        draft({
+          kind: 'stop',
+          triggerPrice: 95,
+          orderType: 'market',
+          side: 'sell',
+          ocoGroupId: groupId,
+        }),
+      );
+      const now = new Date();
+      Object.assign(
+        prisma.bracketGroups.find((group) => group.id === groupId),
+        {
+          status: 'pending_fire',
+          fireLegId: stop.id,
+          leaseOwnerId: 'dead-pre-transaction-instance',
+          leaseExpiresAt: new Date(now.getTime() - 1),
+        },
+      );
+      gateway.setPosition(userId, stop.contractSymbol, 1);
+      const brokerPlace = jest.spyOn(gateway, 'placeOrder');
+
+      expect(await service.recoverPendingBrackets(now)).toBe(1);
+
+      expect(brokerPlace).toHaveBeenCalledTimes(1);
+      expect((await service.byId(stop.id))?.status).toBe('triggered');
+      expect((await service.byId(target.id))?.status).toBe('cancelled');
+      expect(
+        prisma.chartOrders.filter(
+          (order) => order.ocoGroupId === groupId && order.status === 'working',
+        ),
+      ).toHaveLength(0);
+    });
+
+    it('uses the group protected quantity when recovering a fire after a partial scale-down', async () => {
+      const groupId = 'bbbbbbbb-2222-3333-4444-555555555555';
+      const target = await service.create(
+        userId,
+        draft({
+          kind: 'target',
+          triggerPrice: 105,
+          orderType: 'market',
+          quantity: 2,
+          side: 'sell',
+          ocoGroupId: groupId,
+        }),
+      );
+      const stop = await service.create(
+        userId,
+        draft({
+          kind: 'stop',
+          triggerPrice: 95,
+          orderType: 'market',
+          quantity: 2,
+          side: 'sell',
+          ocoGroupId: groupId,
+        }),
+      );
+      const now = new Date();
+      Object.assign(
+        prisma.bracketGroups.find((group) => group.id === groupId),
+        {
+          protectedQuantity: 1,
+          status: 'pending_fire',
+          fireLegId: stop.id,
+          leaseOwnerId: 'dead-instance',
+          leaseExpiresAt: new Date(now.getTime() - 1),
+        },
+      );
+      Object.assign(
+        prisma.chartOrders.find((row) => row.id === stop.id),
+        {
+          status: 'pending_fire',
+          triggeredAt: new Date(now.getTime() - 31_000),
+        },
+      );
+      Object.assign(
+        prisma.chartOrders.find((row) => row.id === target.id),
+        {
+          status: 'cancelled',
+        },
+      );
+      gateway.setPosition(userId, stop.contractSymbol, 1);
+      const brokerPlace = jest.spyOn(gateway, 'placeOrder');
+
+      expect(await service.recoverPendingBrackets(now)).toBe(1);
+
+      expect(brokerPlace).toHaveBeenCalledTimes(1);
+      expect(brokerPlace.mock.calls[0][1].quantity).toBe(1);
+    });
   });
 
   describe('reconciliation', () => {
@@ -758,6 +929,29 @@ describe('ChartOrdersService', () => {
       expect(cancelled).toEqual([]);
       expect((await service.list(userId))[0].id).toBe(stop.id);
       expect((await service.list(userId))[0].status).toBe('working');
+    });
+
+    it('scales both working siblings down when the protected position shrinks', async () => {
+      const groupId = '20202020-2222-3333-4444-555555555555';
+      const target = await service.create(
+        userId,
+        draft({ kind: 'target', quantity: 3, triggerPrice: 105, ocoGroupId: groupId }),
+      );
+      const stop = await service.create(
+        userId,
+        draft({ kind: 'stop', quantity: 3, triggerPrice: 95, ocoGroupId: groupId }),
+      );
+
+      await service.cancelOrphanedBrackets(
+        userId,
+        'live',
+        [{ symbol: stop.contractSymbol, quantity: 1 }],
+        new Date(Date.now() + 120_000),
+      );
+
+      expect((await service.byId(target.id))?.quantity).toBe(1);
+      expect((await service.byId(stop.id))?.quantity).toBe(1);
+      expect(prisma.bracketGroups.find((group) => group.id === groupId)?.protectedQuantity).toBe(1);
     });
 
     /**

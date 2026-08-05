@@ -82,6 +82,7 @@ describe('DispatchingBrokerGateway', () => {
       'key',
       undefined,
       undefined,
+      undefined,
     );
     expect(webull.getQuote).not.toHaveBeenCalled();
     expect(alpaca.getQuote).not.toHaveBeenCalled();
@@ -98,8 +99,33 @@ describe('DispatchingBrokerGateway', () => {
       selection: { mode: 'auto_otm', optionType: 'call' },
     } as never;
     await gw.placeOrder('u1', order, 'key');
-    expect(alpaca.placeOrder).toHaveBeenCalledWith('u1', order, 'key', undefined, undefined);
+    expect(alpaca.placeOrder).toHaveBeenCalledWith(
+      'u1',
+      order,
+      'key',
+      undefined,
+      undefined,
+      undefined,
+    );
     expect(webull.placeOrder).not.toHaveBeenCalled();
+  });
+
+  it('forwards the already-resolved contract to avoid resolving it again at the provider', async () => {
+    const order = {} as never;
+    const contract = {
+      symbol: 'SPY260805C00500000',
+      underlying: 'SPY',
+      expiration: '2026-08-05',
+      strike: 500,
+      optionType: 'call' as const,
+      bid: 1.2,
+      ask: 1.3,
+      last: 1.25,
+    };
+
+    await gw.placeOrder('u1', order, 'key', 'live', 2, contract);
+
+    expect(webull.placeOrder).toHaveBeenCalledWith('u1', order, 'key', 'live', 2, contract);
   });
 
   it('delegates reauthenticate (Webull = token reset, Alpaca = no-op)', async () => {
@@ -127,6 +153,25 @@ describe('DispatchingBrokerGateway', () => {
     expect(alpaca.getOpenOrders).toHaveBeenCalled();
     expect(alpaca.cancelOrder).toHaveBeenCalledWith('u1', 'oid');
     expect(webull.getCandles).not.toHaveBeenCalled();
+  });
+
+  it('getAccountSummary forwards to the routed gateway, defaulting to null when unsupported', async () => {
+    provider = 'alpaca';
+    alpaca.getAccountSummary = jest.fn(async () => ({
+      equity: 1000,
+      lastEquity: 1075.97,
+      dailyPnl: -75.97,
+    }));
+    await expect(gw.getAccountSummary('u1')).resolves.toEqual({
+      equity: 1000,
+      lastEquity: 1075.97,
+      dailyPnl: -75.97,
+    });
+
+    // Webull's mock (from makeGateway) has no getAccountSummary at all —
+    // the dispatching gateway must not throw, just report unsupported.
+    provider = 'webull';
+    await expect(gw.getAccountSummary('u2')).resolves.toBeNull();
   });
 
   describe('provider caching', () => {

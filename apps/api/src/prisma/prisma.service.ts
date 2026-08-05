@@ -5,8 +5,9 @@ import { PrismaClient } from '@prisma/client';
 /**
  * Real Prisma service used in dev/prod. In tests this provider is overridden
  * with the in-memory fake (test/in-memory-prisma.service.ts), so the app code
- * only ever uses the small delegate surface below (never $queryRaw,
- * transactions, or selects the fake cannot mirror):
+ * only ever uses the small delegate surface below (never $queryRaw or selects
+ * the fake cannot mirror). The test double also implements callback
+ * transactions for the bracket state machine:
  *   user:             findUnique, findMany, create, update
  *   webullCredential: upsert, findUnique, delete
  *   refreshToken:     create, findUnique, update, updateMany
@@ -14,6 +15,7 @@ import { PrismaClient } from '@prisma/client';
  *   tradeOrder:       findUnique, findFirst, upsert, findMany, updateMany
  *   tradeOrderExecution: create, findMany
  *   chartOrder:       create, findUnique, findFirst, findMany, count, update, updateMany
+ *   bracketGroup:     create, upsert, findUnique, findFirst, findMany, update, updateMany
  *   optionsAnalyticsSnapshotRecord: create, findMany, deleteMany
  *   scheduledJobLease: create, updateMany
  *   brokerCredential: findUnique, findMany, upsert, delete

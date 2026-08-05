@@ -221,6 +221,32 @@ describe('0dteTrader API (e2e)', () => {
     expect(res.body.error.code).toBe('UNAUTHORIZED');
   });
 
+  it('records the current Terms and risk disclosure before live order tests', async () => {
+    const auth = { Authorization: `Bearer ${accessToken}` };
+    const status = await request(server).get('/v1/me/legal').set(auth).expect(200);
+    const required = status.body.documents.filter(
+      (document: { requiresAcceptance: boolean; accepted: boolean }) =>
+        document.requiresAcceptance && !document.accepted,
+    );
+    expect(required.map((document: { slug: string }) => document.slug).sort()).toEqual([
+      'risk',
+      'terms',
+    ]);
+    for (const document of required) {
+      await request(server)
+        .post('/v1/me/legal/accept')
+        .set(auth)
+        .send({ document: document.slug, version: document.version })
+        .expect(201);
+    }
+    const accepted = await request(server).get('/v1/me/legal').set(auth).expect(200);
+    expect(
+      accepted.body.documents
+        .filter((document: { requiresAcceptance: boolean }) => document.requiresAcceptance)
+        .every((document: { accepted: boolean }) => document.accepted),
+    ).toBe(true);
+  });
+
   it('returns and idempotently persists the exact options analytics snapshot', async () => {
     const missingExpiration = await request(server)
       .get('/v1/market/options-analytics')

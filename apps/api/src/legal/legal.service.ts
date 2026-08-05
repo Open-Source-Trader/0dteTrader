@@ -10,7 +10,7 @@ import {
 import { errors, isUniqueViolation } from '../common/api-exception';
 import { PrismaService } from '../prisma/prisma.service';
 
-const VERSION = '2026-08-05';
+export const LEGAL_VERSION = '2026-08-05';
 const DOCUMENTS: ReadonlyArray<{
   slug: LegalDocumentSlug;
   title: string;
@@ -32,8 +32,11 @@ export class LegalService {
   summaries(origin: string): LegalDocumentSummary[] {
     return DOCUMENTS.map((document) => ({
       ...document,
-      version: VERSION,
-      publicUrl: `${origin}/v1/legal/${document.slug}`,
+      version: LEGAL_VERSION,
+      publicUrl:
+        document.slug === 'privacy'
+          ? `${origin}/v1/legal/privacy-policy`
+          : `${origin}/v1/legal/${document.slug}`,
     }));
   }
 
@@ -66,7 +69,7 @@ export class LegalService {
     version: string,
     origin: string,
   ): Promise<LegalAcceptanceStatus> {
-    if (version !== VERSION) {
+    if (version !== LEGAL_VERSION) {
       throw errors.conflict(
         'LEGAL_VERSION_CHANGED',
         'This document changed; review the current version before accepting',
@@ -78,6 +81,15 @@ export class LegalService {
       if (!isUniqueViolation(error)) throw error;
     }
     return this.status(userId, origin);
+  }
+
+  privacyHtml(origin: string): string {
+    const document = this.document('privacy', origin);
+    const escaped = document.markdown
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;');
+    return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>0dteTrader Privacy Policy</title><style>body{max-width:760px;margin:40px auto;padding:0 20px;background:#0b0f17;color:#e8edf6;font:16px/1.6 system-ui,sans-serif}pre{white-space:pre-wrap;font:inherit}a{color:#38bdf8}</style></head><body><pre>${escaped}</pre></body></html>`;
   }
 
   private read(slug: LegalDocumentSlug): string {

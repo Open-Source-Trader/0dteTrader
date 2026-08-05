@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import {
+  AccountSummary,
   Candle,
   CandleRequest,
   OptionsChain,
@@ -12,7 +13,7 @@ import {
   WebullAccount,
 } from '@0dtetrader/shared-types';
 import { PrismaService } from '../prisma/prisma.service';
-import { BrokerGateway } from './broker-gateway.interface';
+import { BrokerGateway, ResolvedContractHint } from './broker-gateway.interface';
 
 /** How long a resolved provider is trusted before re-reading it from the DB. */
 const PROVIDER_CACHE_TTL_MS = 30_000;
@@ -90,6 +91,7 @@ export class DispatchingBrokerGateway implements BrokerGateway {
     idempotencyKey: string,
     expectedMode?: TradingMode,
     heldQuantity?: number,
+    resolvedContract?: ResolvedContractHint,
   ): Promise<OrderResult> {
     return (await this.gatewayFor(userId)).placeOrder(
       userId,
@@ -97,6 +99,7 @@ export class DispatchingBrokerGateway implements BrokerGateway {
       idempotencyKey,
       expectedMode,
       heldQuantity,
+      resolvedContract,
     );
   }
 
@@ -110,6 +113,16 @@ export class DispatchingBrokerGateway implements BrokerGateway {
 
   async getOpenOrders(userId: string): Promise<OrderResult[]> {
     return (await this.gatewayFor(userId)).getOpenOrders(userId);
+  }
+
+  async getRecentOrders(userId: string, since?: Date): Promise<OrderResult[]> {
+    const gateway = await this.gatewayFor(userId);
+    return (await gateway.getRecentOrders?.(userId, since)) ?? [];
+  }
+
+  async getAccountSummary(userId: string): Promise<AccountSummary | null> {
+    const gateway = await this.gatewayFor(userId);
+    return (await gateway.getAccountSummary?.(userId)) ?? null;
   }
 
   async reauthenticate(userId: string): Promise<TradingMode> {

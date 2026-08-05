@@ -9,6 +9,7 @@ import { errors, isUniqueViolation } from '../common/api-exception';
 import { CryptoService } from '../credentials/crypto.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { OrdersService } from '../trading/orders.service';
+import { OPTION_MULTIPLIER, parseOccSymbol } from '../broker/contract-resolution';
 
 const REQUEST_TIMEOUT_MS = 3_000;
 
@@ -123,18 +124,40 @@ export class DiscordNotificationsService implements OnModuleDestroy {
     let pnl: number | null = null;
     if (settings.includePnl) {
       const history = await this.orders.history(userId).catch(() => null);
-      pnl = history?.entries.find((entry) => entry.orderId === order.orderId)?.realizedPnl ?? null;
+      const identifiers = new Set(
+        [event.clientOrderId, event.brokerOrderId, order.orderId].filter(
+          (identifier): identifier is string => Boolean(identifier),
+        ),
+      );
+      pnl =
+        history?.entries.find(
+          (entry) =>
+            identifiers.has(entry.orderId) ||
+            (entry.clientOrderId ? identifiers.has(entry.clientOrderId) : false) ||
+            (entry.brokerOrderId ? identifiers.has(entry.brokerOrderId) : false),
+        )?.realizedPnl ?? null;
     }
+    const fillQuantity = order.filledQuantity ?? order.quantity;
+    const contract = parseOccSymbol(order.contractSymbol);
+    const contractLabel = contract
+      ? `${contract.underlying} ${contract.expiration} ${contract.strike} ${contract.optionType.toUpperCase()}`
+      : order.contractSymbol;
     const fields: Array<{ name: string; value: string; inline: boolean }> = [
-      { name: 'Contract', value: order.contractSymbol, inline: true },
+      { name: 'Contract', value: contractLabel, inline: true },
       { name: 'Quantity', value: String(order.filledQuantity ?? order.quantity), inline: true },
       { name: 'Price', value: order.filledPrice?.toFixed(2) ?? '—', inline: true },
     ];
-    if (settings.includePnl) {
+    if (order.filledPrice !== undefined) {
+      fields.push({
+        name: 'Total Premium',
+        value: `$${(order.filledPrice * fillQuantity * OPTION_MULTIPLIER).toFixed(2)}`,
+        inline: true,
+      });
+    }
+    if (settings.includePnl && pnl !== null) {
       fields.push({
         name: 'Realized P/L',
-        value:
-          pnl === null ? 'Not available' : `${pnl >= 0 ? '+' : '-'}$${Math.abs(pnl).toFixed(2)}`,
+        value: `${pnl >= 0 ? '+' : '-'}$${Math.abs(pnl).toFixed(2)}`,
         inline: true,
       });
     }
@@ -171,6 +194,12 @@ export class DiscordNotificationsService implements OnModuleDestroy {
         if (response.status !== 429 && response.status < 500) return false;
       } catch {
         // One bounded retry covers timeouts and transient transport failures.
+      }
+      if (attempt === 0) {
+        // Yield outside the broker/order pipeline (delivery is a detached
+        // subscriber) and avoid immediately hammering the same rate-limit or
+        // transient outage.
+        await new Promise((resolve) => setTimeout(resolve, 250));
       }
     }
     return false;

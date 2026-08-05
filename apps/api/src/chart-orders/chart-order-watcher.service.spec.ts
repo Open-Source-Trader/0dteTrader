@@ -75,6 +75,7 @@ describe('ChartOrderWatcherService', () => {
     orders = new OrdersService(
       prisma as unknown as ConstructorParameters<typeof OrdersService>[0],
       new OrderEventsService(),
+      gateway as BrokerGateway,
     );
     trading = new TradingService(
       prisma as unknown as ConstructorParameters<typeof TradingService>[0],
@@ -97,6 +98,7 @@ describe('ChartOrderWatcherService', () => {
       data: { email: 'watcher@example.com', passwordHash: 'x' },
     });
     userId = user.id as string;
+    prisma.acceptCurrentTradingLegal(userId);
   });
 
   afterEach(() => {
@@ -211,6 +213,7 @@ describe('ChartOrderWatcherService', () => {
         data: { email: 'practice@example.com', passwordHash: 'x', tradingMode: 'practice' },
       });
       const practiceId = practice.id as string;
+      prisma.acceptCurrentTradingLegal(practiceId);
       await chartOrders.create(practiceId, draft({ triggerPrice: 98 }));
       expect(prisma.chartOrders[0].environment).toBe('practice');
 
@@ -230,6 +233,7 @@ describe('ChartOrderWatcherService', () => {
         data: { email: 'back@example.com', passwordHash: 'x', tradingMode: 'practice' },
       });
       const practiceId = practice.id as string;
+      prisma.acceptCurrentTradingLegal(practiceId);
       await chartOrders.create(practiceId, draft({ triggerPrice: 98 }));
 
       prisma.users.find((u) => u.id === practiceId).tradingMode = 'live';
@@ -393,6 +397,7 @@ describe('ChartOrderWatcherService', () => {
         data: { email: 'orphan@example.com', passwordHash: 'x', tradingMode: 'practice' },
       });
       const practiceId = practice.id as string;
+      prisma.acceptCurrentTradingLegal(practiceId);
       const stop = await chartOrders.create(practiceId, draft({ kind: 'stop', side: 'sell' }));
       prisma.users.find((u) => u.id === practiceId).tradingMode = 'live';
       // The live account has no such position — but that says nothing about the

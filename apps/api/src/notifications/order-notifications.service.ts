@@ -166,10 +166,13 @@ export class OrderNotificationsService implements OnModuleInit, OnModuleDestroy 
   /** Claims and processes all currently due rows. Public for deterministic
    * two-instance and crash-recovery tests. */
   async processDue(now = new Date()): Promise<void> {
-    if (this.draining || !this.apns.enabled) return;
+    if (this.draining) return;
     this.draining = true;
     try {
       await this.runRetention(now);
+      // Retention is database maintenance and must run even in deployments
+      // where APNs delivery is intentionally disabled.
+      if (!this.apns.enabled) return;
       for (;;) {
         const candidate = await this.prisma.pushDelivery.findFirst({
           where: this.dueWhere(now),
@@ -272,20 +275,43 @@ export class OrderNotificationsService implements OnModuleInit, OnModuleDestroy 
 
   private async runRetention(now: Date): Promise<void> {
     const leaseName = `push-delivery-retention:${now.toISOString().slice(0, 10)}`;
-    const expiresAt = new Date(now.getTime() + 25 * 60 * 60_000);
+    const workLeaseExpiresAt = new Date(now.getTime() + 5 * 60_000);
+    let claimed = await this.prisma.scheduledJobLease.updateMany({
+      where: { name: leaseName, expiresAt: { lt: now } },
+      data: { ownerId: this.ownerId, expiresAt: workLeaseExpiresAt },
+    });
+    if (claimed.count !== 1) {
+      try {
+        await this.prisma.scheduledJobLease.create({
+          data: { name: leaseName, ownerId: this.ownerId, expiresAt: workLeaseExpiresAt },
+        });
+        claimed = { count: 1 };
+      } catch (error) {
+        if (isUniqueViolation(error)) return;
+        throw error;
+      }
+    }
     try {
-      await this.prisma.scheduledJobLease.create({
-        data: { name: leaseName, ownerId: this.ownerId, expiresAt },
+      await this.prisma.pushDelivery.deleteMany({
+        where: {
+          status: { in: ['delivered', 'dead'] },
+          createdAt: { lt: new Date(now.getTime() - RETENTION_MS) },
+        },
+      });
+      await this.prisma.scheduledJobLease.updateMany({
+        where: { name: leaseName, ownerId: this.ownerId },
+        data: { expiresAt: new Date(now.getTime() + 25 * 60 * 60_000) },
       });
     } catch (error) {
-      if (isUniqueViolation(error)) return;
+      // Let another tick retry today's sweep after a transient database
+      // failure instead of treating the failed attempt as completed all day.
+      await this.prisma.scheduledJobLease
+        .updateMany({
+          where: { name: leaseName, ownerId: this.ownerId },
+          data: { expiresAt: now },
+        })
+        .catch(() => undefined);
       throw error;
     }
-    await this.prisma.pushDelivery.deleteMany({
-      where: {
-        status: { in: ['delivered', 'dead'] },
-        createdAt: { lt: new Date(now.getTime() - RETENTION_MS) },
-      },
-    });
   }
 }

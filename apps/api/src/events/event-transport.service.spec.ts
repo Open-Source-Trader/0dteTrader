@@ -57,4 +57,19 @@ describe('EventTransportService', () => {
       receiver.onModuleDestroy();
     }
   });
+
+  it('drains an unseen remote event before a newer local publish', async () => {
+    const remote = new EventTransportService(prisma as never);
+    const receiver = new EventTransportService(prisma as never);
+    const seen: number[] = [];
+    const subscription = receiver.events$.subscribe((event) => seen.push(event.sequence));
+    try {
+      await remote.publish(userId, 'orderUpdate', { orderId: 'remote' }, 'remote');
+      await receiver.publish(userId, 'orderUpdate', { orderId: 'local' }, 'local');
+
+      expect(seen).toEqual([1, 2]);
+    } finally {
+      subscription.unsubscribe();
+    }
+  });
 });

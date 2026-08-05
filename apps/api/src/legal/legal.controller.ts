@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Headers, Param, Post } from '@nestjs/common';
+import { Body, Controller, Get, Header, Headers, Param, Post } from '@nestjs/common';
 import {
   LegalAcceptanceStatus,
   LegalDocument,
@@ -25,6 +25,16 @@ export class PublicLegalController {
     @Headers('x-forwarded-proto') protocol?: string,
   ): LegalDocumentSummary[] {
     return this.legal.summaries(origin(host, protocol));
+  }
+
+  @Public()
+  @Get('privacy-policy')
+  @Header('content-type', 'text/html; charset=utf-8')
+  privacyPolicy(
+    @Headers('host') host?: string,
+    @Headers('x-forwarded-proto') protocol?: string,
+  ): string {
+    return this.legal.privacyHtml(origin(host, protocol));
   }
 
   @Public()

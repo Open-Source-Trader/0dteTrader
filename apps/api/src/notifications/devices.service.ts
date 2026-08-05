@@ -20,12 +20,22 @@ export class DevicesService {
     });
     const devices = await this.prisma.deviceToken.findMany({
       where: { userId },
-      orderBy: { updatedAt: 'desc' },
+    });
+    devices.sort((left, right) => {
+      // Always retain the token whose registration this call just committed,
+      // even when several rows share the database's millisecond timestamp.
+      if (left.token === token) return -1;
+      if (right.token === token) return 1;
+      const byUpdate = right.updatedAt.getTime() - left.updatedAt.getTime();
+      return byUpdate !== 0 ? byUpdate : right.token.localeCompare(left.token);
     });
     const overflow = devices.slice(DevicesService.MAX_DEVICES_PER_USER);
     if (overflow.length > 0) {
       await this.prisma.deviceToken.deleteMany({
-        where: { token: { in: overflow.map((device) => device.token) } },
+        // A token may have moved to another user after this stale list read.
+        // Keep the owner predicate so cleanup cannot delete the new owner's
+        // freshly registered device.
+        where: { userId, token: { in: overflow.map((device) => device.token) } },
       });
     }
   }

@@ -84,6 +84,7 @@ function matches(row: any, where: any): boolean {
 }
 
 export class InMemoryPrismaService {
+  private transactionTail: Promise<void> = Promise.resolve();
   readonly users: any[] = [];
   readonly credentials: any[] = [];
   readonly refreshTokens: any[] = [];
@@ -338,7 +339,15 @@ export class InMemoryPrismaService {
       }
       return null;
     },
-    findFirst: async ({ where }: any) => this.tradeOrders.find((o) => matches(o, where)) ?? null,
+    findFirst: async ({ where, orderBy }: any = {}) => {
+      const rows = this.tradeOrders.filter((o) => matches(o, where));
+      if (orderBy?.placedAt === 'asc') {
+        rows.sort((a, b) => a.placedAt.getTime() - b.placedAt.getTime());
+      } else if (orderBy?.placedAt === 'desc') {
+        rows.sort((a, b) => b.placedAt.getTime() - a.placedAt.getTime());
+      }
+      return rows[0] ?? null;
+    },
     create: async ({ data }: any) => {
       const normalized = {
         provider: 'webull',
@@ -348,13 +357,11 @@ export class InMemoryPrismaService {
         ...data,
       };
       if (this.tradeOrderConflict(normalized)) throw p2002('scoped external order id');
-      const external = normalized.clientOrderId ?? normalized.brokerOrderId;
       const row = {
-        id:
-          normalized.id ??
-          (external && !this.tradeOrders.some((order) => order.id === external)
-            ? external
-            : randomUUID()),
+        // Prisma's primary key is always an internal UUID. Reusing an external
+        // broker/client id here hid tenant-scoping bugs and made tests exercise
+        // a schema production never has.
+        id: normalized.id ?? randomUUID(),
         updatedAt: new Date(),
         ...normalized,
       };
@@ -541,6 +548,22 @@ export class InMemoryPrismaService {
       };
       this.bracketGroups.push(row);
       return row;
+    },
+    upsert: async ({
+      where,
+      create,
+      update,
+    }: {
+      where: { id: string };
+      create: Record<string, unknown>;
+      update: Record<string, unknown>;
+    }) => {
+      const existing = this.bracketGroups.find((group) => group.id === where.id);
+      if (existing) {
+        Object.assign(existing, definedOnly(update));
+        return existing;
+      }
+      return this.bracketGroup.create({ data: create });
     },
     findUnique: async ({ where }: any) =>
       this.bracketGroups.find((group) => group.id === where.id) ?? null,
@@ -1060,11 +1083,83 @@ export class InMemoryPrismaService {
       this.legalAcceptances.filter((row) => matches(row, where)),
   };
 
+  /** Serial transaction double with rollback. Serializing mirrors the row-lock
+   * behavior these bracket transactions rely on and keeps concurrent tests
+   * deterministic; structuredClone preserves Date and BigInt values. */
+  async $transaction<T>(operation: (database: this) => Promise<T>): Promise<T> {
+    const run = this.transactionTail.then(async () => {
+      const tables = this.mutableTables();
+      const snapshots = tables.map((table) => structuredClone(table));
+      try {
+        return await operation(this);
+      } catch (error) {
+        for (let index = 0; index < tables.length; index += 1) {
+          const table = tables[index];
+          const snapshot = snapshots[index];
+          if (table && snapshot) table.splice(0, table.length, ...snapshot);
+        }
+        throw error;
+      }
+    });
+    this.transactionTail = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
+  }
+
+  private mutableTables(): Array<Array<Record<string, unknown>>> {
+    return [
+      this.users,
+      this.credentials,
+      this.refreshTokens,
+      this.orderAudits,
+      this.tradeOrders,
+      this.tradeOrderExecutions,
+      this.chartOrders,
+      this.bracketGroups,
+      this.optionsAnalyticsSnapshots,
+      this.scheduledJobLeases,
+      this.brokerCredentials,
+      this.brokerApiTokens,
+      this.brokerConnections,
+      this.deviceTokens,
+      this.pushDeliveries,
+      this.webhookInboxRows,
+      this.userEvents,
+      this.discordSettingsRows,
+      this.discordDeliveries,
+      this.legalAcceptances,
+    ];
+  }
+
   // Prisma lifecycle no-ops.
   async $connect(): Promise<void> {}
   async $disconnect(): Promise<void> {}
   async onModuleInit(): Promise<void> {}
   async onModuleDestroy(): Promise<void> {}
+
+  /** Marks the current legal versions accepted for tests whose subject is
+   * trading behavior rather than the mandatory legal gate. */
+  acceptCurrentTradingLegal(userId: string): void {
+    for (const document of ['terms', 'risk']) {
+      if (
+        this.legalAcceptances.some(
+          (row) =>
+            row.userId === userId && row.document === document && row.version === '2026-08-05',
+        )
+      ) {
+        continue;
+      }
+      this.legalAcceptances.push({
+        id: randomUUID(),
+        userId,
+        document,
+        version: '2026-08-05',
+        acceptedAt: new Date(),
+      });
+    }
+  }
 
   /** Test helper: wipe all tables. */
   reset(): void {

@@ -1,6 +1,7 @@
 import type { ChartOrder, OrderResult, Quote, StreamServerMessage } from '@0dtetrader/shared-types';
 import { Store } from '../observable';
 import { timed } from '../timing';
+import { DurableEventCursor } from './DurableEventCursor';
 
 export type SocketConnectionState = 'disconnected' | 'connecting' | 'connected';
 
@@ -31,9 +32,7 @@ export class QuoteSocket extends Store<QuoteSocketState> {
   private quoteListeners = new Set<(quote: Quote) => void>();
   private chartOrderListeners = new Set<(order: ChartOrder) => void>();
   private reconnectListeners = new Set<() => void>();
-  private lastSequence = 0;
-  private readonly seenEventIds = new Set<string>();
-  private readonly seenEventOrder: string[] = [];
+  private readonly durableCursor: DurableEventCursor;
   /** Whether a connection has already been established once, so the next
    *  `connected` transition is a RE-connection with a gap to make up. */
   private hasConnected = false;
@@ -43,6 +42,7 @@ export class QuoteSocket extends Store<QuoteSocketState> {
     private readonly tokenProvider: () => Promise<string>,
   ) {
     super({ connectionState: 'disconnected', lastQuote: null, lastErrorMessage: null });
+    this.durableCursor = new DurableEventCursor(localStorage, streamUrl);
   }
 
   onOrderUpdate(listener: (update: OrderResult) => void): () => void {
@@ -89,9 +89,7 @@ export class QuoteSocket extends Store<QuoteSocketState> {
     this.clearReconnectTimer();
     this.teardownConnection();
     this.set({ connectionState: 'disconnected' });
-    this.lastSequence = 0;
-    this.seenEventIds.clear();
-    this.seenEventOrder.length = 0;
+    this.durableCursor.resetSession();
   }
 
   /** Called when the page becomes visible again: reconnect if dropped. */
@@ -157,6 +155,7 @@ export class QuoteSocket extends Store<QuoteSocketState> {
         this.scheduleReconnect();
         return;
       }
+      this.durableCursor.activate(token);
       // disconnect() may have fired while we were fetching a token.
       if (!this.shouldBeConnected) {
         this.set({ connectionState: 'disconnected' });
@@ -174,7 +173,9 @@ export class QuoteSocket extends Store<QuoteSocketState> {
         return;
       }
       url.searchParams.set('token', token);
-      if (this.lastSequence > 0) url.searchParams.set('cursor', String(this.lastSequence));
+      if (this.durableCursor.resumable) {
+        url.searchParams.set('cursor', String(this.durableCursor.sequence));
+      }
       const ws = new WebSocket(url.toString());
       this.ws = ws;
 
@@ -294,6 +295,9 @@ export class QuoteSocket extends Store<QuoteSocketState> {
         if (!this.acceptDurable(message.eventId, message.sequence)) break;
         this.chartOrderListeners.forEach((listener) => listener(message.data));
         break;
+      case 'eventCursor':
+        this.durableCursor.establish(message.sequence);
+        break;
       case 'error':
         this.set({ lastErrorMessage: message.error.message });
         break;
@@ -303,14 +307,8 @@ export class QuoteSocket extends Store<QuoteSocketState> {
   }
 
   private acceptDurable(eventId: string, sequence: number): boolean {
-    if (this.seenEventIds.has(eventId)) return false;
-    this.seenEventIds.add(eventId);
-    this.seenEventOrder.push(eventId);
-    if (this.seenEventOrder.length > 512) {
-      const removed = this.seenEventOrder.shift();
-      if (removed) this.seenEventIds.delete(removed);
-    }
-    this.lastSequence = Math.max(this.lastSequence, sequence);
-    return true;
+    const decision = this.durableCursor.accept(eventId, sequence);
+    if (decision === 'gap') this.handleUnexpectedDisconnect();
+    return decision === 'accepted';
   }
 }

@@ -464,6 +464,10 @@ struct SocketOrderUpdateMessage: Decodable, Sendable {
     let sequence: Int?
 }
 
+struct SocketEventCursorMessage: Decodable, Sendable {
+    let sequence: Int
+}
+
 struct SocketErrorMessage: Decodable, Sendable {
     let error: APIErrorBody
 }

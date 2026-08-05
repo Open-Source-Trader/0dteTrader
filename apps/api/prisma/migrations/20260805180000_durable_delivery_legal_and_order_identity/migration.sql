@@ -24,6 +24,17 @@ ALTER TABLE "trade_orders"
 
 UPDATE "trade_orders" AS orders
 SET "provider" = users."tradingProvider",
+    "accountId" = CASE
+      WHEN users."tradingProvider" = 'snaptrade' THEN COALESCE((
+        SELECT connection."selectedAccountId"
+        FROM "broker_connections" AS connection
+        WHERE connection."userId" = orders."userId"
+          AND connection."provider" = 'snaptrade'
+          AND connection."environment" = orders."environment"
+        LIMIT 1
+      ), 'default')
+      ELSE 'default'
+    END,
     "brokerOrderId" = NULLIF(BTRIM(orders."id"), ''),
     "clientOrderId" = NULLIF(BTRIM(orders."id"), '')
 FROM "users" AS users
@@ -136,6 +147,28 @@ SET "ocoGroupId" = NULL,
     "lastError" = COALESCE(orders."lastError", 'Detached duplicate bracket kind during migration')
 FROM ranked
 WHERE orders."id" = ranked."id" AND ranked.rank > 1;
+
+-- DISTINCT ON above chooses a canonical scope row, but not necessarily a
+-- working row. Recompute group liveness after mismatched/duplicate legs have
+-- been detached, then converge surviving sibling quantities to the smallest
+-- protected amount so migrated brackets cannot over-close.
+UPDATE "bracket_groups" AS groups
+SET "status" = CASE WHEN EXISTS (
+      SELECT 1 FROM "chart_orders" AS orders
+      WHERE orders."ocoGroupId" = groups."id" AND orders."status" = 'working'
+    ) THEN 'working' ELSE 'closed' END,
+    "protectedQuantity" = COALESCE((
+      SELECT MIN(orders."quantity")::INTEGER
+      FROM "chart_orders" AS orders
+      WHERE orders."ocoGroupId" = groups."id" AND orders."status" = 'working'
+    ), groups."protectedQuantity");
+
+UPDATE "chart_orders" AS orders
+SET "quantity" = groups."protectedQuantity"
+FROM "bracket_groups" AS groups
+WHERE orders."ocoGroupId" = groups."id"
+  AND orders."status" = 'working'
+  AND orders."quantity" <> groups."protectedQuantity";
 
 CREATE INDEX "bracket_groups_status_leaseExpiresAt_idx"
   ON "bracket_groups"("status", "leaseExpiresAt");

@@ -58,6 +58,23 @@ export function LayoutFullIcon({ size = 20, style }: IconProps) {
   );
 }
 
+export function GexHeatmapIcon({ size = 22, style }: IconProps) {
+  // square.grid.3x3.fill-ish heatmap glyph
+  return (
+    <svg {...svgProps(size, style)}>
+      <rect x="3" y="3" width="6" height="6" rx="1" />
+      <rect x="9" y="3" width="6" height="6" rx="1" />
+      <rect x="15" y="3" width="6" height="6" rx="1" />
+      <rect x="3" y="9" width="6" height="6" rx="1" />
+      <rect x="9" y="9" width="6" height="6" rx="1" />
+      <rect x="15" y="9" width="6" height="6" rx="1" />
+      <rect x="3" y="15" width="6" height="6" rx="1" />
+      <rect x="9" y="15" width="6" height="6" rx="1" />
+      <rect x="15" y="15" width="6" height="6" rx="1" />
+    </svg>
+  );
+}
+
 export function LockIcon({ size = 22, style }: IconProps) {
   // lock.fill
   return (

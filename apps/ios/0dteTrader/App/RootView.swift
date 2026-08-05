@@ -81,6 +81,8 @@ struct RootView: View {
             RiskDisclaimerView(viewModel: authViewModel)
         case .unauthenticated:
             LoginView(viewModel: authViewModel)
+        case .legal:
+            LegalGateView(viewModel: authViewModel)
         case .restoreFailed:
             ErrorStateView(
                 message: "Couldn't restore your session. Check your connection and try again.",

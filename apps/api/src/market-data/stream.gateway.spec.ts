@@ -3,12 +3,13 @@ import { Subject } from 'rxjs';
 import { ChartOrder, Quote } from '@0dtetrader/shared-types';
 import { BrokerGateway } from '../broker/broker-gateway.interface';
 import { DurableUserEvent, EventTransportService } from '../events/event-transport.service';
+import { InMemoryPrismaService } from '../../test/in-memory-prisma.service';
 import { CryptoDataService } from './crypto-data.service';
 import { IndexDataService } from './index-data.service';
 import { StreamGateway } from './stream.gateway';
 
-function fakeSocket(): { readyState: number; send: jest.Mock } {
-  return { readyState: WebSocket.OPEN, send: jest.fn() };
+function fakeSocket(): { readyState: number; send: jest.Mock; close: jest.Mock } {
+  return { readyState: WebSocket.OPEN, send: jest.fn(), close: jest.fn() };
 }
 
 function quoteFor(symbol: string, last: number): Quote {
@@ -31,6 +32,7 @@ describe('StreamGateway.tickSymbol', () => {
   let gateway: StreamGateway;
   let durableEvents: Subject<DurableUserEvent>;
   let replay: jest.Mock;
+  let latestSequence: jest.Mock;
 
   beforeEach(() => {
     broker = {
@@ -50,6 +52,7 @@ describe('StreamGateway.tickSymbol', () => {
     };
     durableEvents = new Subject<DurableUserEvent>();
     replay = jest.fn(async () => []);
+    latestSequence = jest.fn(async () => 0);
     gateway = new StreamGateway(
       broker as unknown as BrokerGateway,
       crypto as unknown as CryptoDataService,
@@ -60,6 +63,7 @@ describe('StreamGateway.tickSymbol', () => {
       {
         events$: durableEvents.asObservable(),
         replay,
+        latestSequence,
       } as unknown as EventTransportService,
     );
   });
@@ -146,7 +150,7 @@ describe('StreamGateway.tickSymbol', () => {
           pending: DurableUserEvent[];
         }
       >;
-      replayClient(client: unknown, userId: string, cursor: number): Promise<void>;
+      replayClient(client: unknown, userId: string, cursor: number | null): Promise<void>;
     };
     internals.clients.set(socket, {
       userId: 'u1',
@@ -160,7 +164,174 @@ describe('StreamGateway.tickSymbol', () => {
 
     expect(replay).toHaveBeenNthCalledWith(1, 'u1', 0, 1_000);
     expect(replay).toHaveBeenNthCalledWith(2, 'u1', 1_000, 1_000);
-    expect(socket.send).toHaveBeenCalledTimes(1_001);
+    expect(socket.send).toHaveBeenCalledTimes(1_002);
+    expect(JSON.parse(socket.send.mock.calls[1_001][0])).toEqual({
+      type: 'eventCursor',
+      sequence: 1_001,
+    });
+  });
+
+  it('starts a brand-new client at the current tail instead of replaying history', async () => {
+    latestSequence.mockResolvedValue(42);
+    const socket = fakeSocket();
+    const internals = gateway as unknown as {
+      clients: Map<
+        unknown,
+        {
+          userId: string;
+          symbols: Set<string>;
+          lastSequence: number;
+          replaying: boolean;
+          pending: DurableUserEvent[];
+        }
+      >;
+      replayClient(client: unknown, userId: string, cursor: number | null): Promise<void>;
+    };
+    const state = {
+      userId: 'u1',
+      symbols: new Set<string>(),
+      lastSequence: 0,
+      replaying: true,
+      pending: [] as DurableUserEvent[],
+    };
+    internals.clients.set(socket, state);
+
+    await internals.replayClient(socket, 'u1', null);
+
+    expect(latestSequence).toHaveBeenCalledWith('u1');
+    expect(replay).not.toHaveBeenCalled();
+    expect(state.lastSequence).toBe(42);
+    expect(JSON.parse(socket.send.mock.calls[0][0])).toEqual({
+      type: 'eventCursor',
+      sequence: 42,
+    });
+  });
+
+  it('does not skip an event committed while a brand-new baseline is loading', async () => {
+    let releaseLatest!: (value: number) => void;
+    latestSequence.mockImplementation(
+      () => new Promise<number>((resolve) => (releaseLatest = resolve)),
+    );
+    const socket = fakeSocket();
+    const internals = gateway as unknown as {
+      clients: Map<
+        unknown,
+        {
+          userId: string;
+          symbols: Set<string>;
+          lastSequence: number;
+          replaying: boolean;
+          pending: DurableUserEvent[];
+        }
+      >;
+      replayClient(client: unknown, userId: string, cursor: number | null): Promise<void>;
+    };
+    const state = {
+      userId: 'u1',
+      symbols: new Set<string>(),
+      lastSequence: 0,
+      replaying: true,
+      pending: [] as DurableUserEvent[],
+    };
+    internals.clients.set(socket, state);
+
+    const replaying = internals.replayClient(socket, 'u1', null);
+    durableEvents.next({
+      id: 'event-43',
+      userId: 'u1',
+      sequence: 43,
+      type: 'orderUpdate',
+      payload: { orderId: 'concurrent' },
+    });
+    releaseLatest(43);
+    await replaying;
+
+    expect(socket.send.mock.calls.map(([raw]) => JSON.parse(raw).type)).toEqual([
+      'orderUpdate',
+      'eventCursor',
+    ]);
+    expect(state.lastSequence).toBe(43);
+  });
+
+  it('closes instead of switching to live delivery when replay fails', async () => {
+    replay.mockRejectedValue(new Error('database down'));
+    const socket = fakeSocket();
+    const internals = gateway as unknown as {
+      clients: Map<
+        unknown,
+        {
+          userId: string;
+          symbols: Set<string>;
+          lastSequence: number;
+          replaying: boolean;
+          pending: DurableUserEvent[];
+        }
+      >;
+      replayClient(client: unknown, userId: string, cursor: number | null): Promise<void>;
+    };
+    const state = {
+      userId: 'u1',
+      symbols: new Set<string>(),
+      lastSequence: 5,
+      replaying: true,
+      pending: [
+        { id: 'event-6', userId: 'u1', sequence: 6, type: 'orderUpdate', payload: {} },
+      ] as DurableUserEvent[],
+    };
+    internals.clients.set(socket, state);
+
+    await internals.replayClient(socket, 'u1', 5);
+
+    expect(socket.close).toHaveBeenCalledWith(1011, 'Event replay failed');
+    expect(state.replaying).toBe(true);
+    expect(state.pending).toHaveLength(1);
+  });
+
+  it('delivers producer-B events to socket-A exactly once and in sequence', async () => {
+    const prisma = new InMemoryPrismaService();
+    const userId = (
+      await prisma.user.create({ data: { email: 'socket@example.com', passwordHash: 'x' } })
+    ).id;
+    const producer = new EventTransportService(prisma as never);
+    const receiver = new EventTransportService(prisma as never);
+    const socket = fakeSocket();
+    const actualGateway = new StreamGateway(
+      broker as unknown as BrokerGateway,
+      crypto as unknown as CryptoDataService,
+      index as unknown as IndexDataService,
+      {} as never,
+      {} as never,
+      receiver,
+    );
+    const internals = actualGateway as unknown as {
+      clients: Map<
+        unknown,
+        {
+          userId: string;
+          symbols: Set<string>;
+          lastSequence: number;
+          replaying: boolean;
+          pending: DurableUserEvent[];
+        }
+      >;
+    };
+    internals.clients.set(socket, {
+      userId,
+      symbols: new Set(),
+      lastSequence: 0,
+      replaying: false,
+      pending: [],
+    });
+    try {
+      await producer.publish(userId, 'orderUpdate', { orderId: 'remote' }, 'remote');
+      await receiver.publish(userId, 'chartOrder', { id: 'local' }, 'local');
+      await receiver.pollOnce();
+
+      const sequences = socket.send.mock.calls.map(([raw]) => JSON.parse(raw).sequence);
+      expect(sequences).toEqual([1, 2]);
+    } finally {
+      actualGateway.onModuleDestroy();
+    }
   });
 
   it('fetches broker quotes per user so credentials are never shared', async () => {

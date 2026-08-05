@@ -539,6 +539,10 @@ export interface Position {
 
 /** A historical order with the realized P/L its fill produced (closing fills only). */
 export interface TradeHistoryEntry extends OrderResult {
+  /** Provider identities are included so integrations can reconcile a
+   * webhook-time broker id with a placement-time client id on the same row. */
+  brokerOrderId?: string;
+  clientOrderId?: string;
   /** Realized P/L from the position this fill closed; null for opening fills and non-fills. */
   realizedPnl: number | null;
 }
@@ -548,6 +552,22 @@ export interface TradeHistory {
   entries: TradeHistoryEntry[];
   /** Sum of realized P/L across all closing fills. */
   totalRealizedPnl: number;
+}
+
+/**
+ * Broker-reported account equity, the authoritative source for today's P&L —
+ * `equity - lastEquity`, not a client-side replay of locally-known fills.
+ * Only brokers that expose a previous-close equity reference can supply
+ * this (Alpaca); others return null and clients fall back to computing an
+ * estimate from positions and trade history.
+ */
+export interface AccountSummary {
+  /** Current total account equity. */
+  equity: number;
+  /** Equity as of the prior trading day's close. */
+  lastEquity: number;
+  /** `equity - lastEquity`. */
+  dailyPnl: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -776,6 +796,14 @@ export interface StreamChartOrderMessage {
   data: ChartOrder;
 }
 
+/** Durable-event tail acknowledged by the server after initial catch-up.
+ * Persisting this even when it is zero lets a later reconnect distinguish a
+ * previously synchronized client from a brand-new installation. */
+export interface StreamEventCursorMessage {
+  type: 'eventCursor';
+  sequence: number;
+}
+
 export interface StreamErrorMessage {
   type: 'error';
   error: {
@@ -785,4 +813,8 @@ export interface StreamErrorMessage {
 }
 
 export type StreamServerMessage =
-  StreamQuoteMessage | StreamOrderUpdateMessage | StreamChartOrderMessage | StreamErrorMessage;
+  | StreamQuoteMessage
+  | StreamOrderUpdateMessage
+  | StreamChartOrderMessage
+  | StreamEventCursorMessage
+  | StreamErrorMessage;

@@ -69,7 +69,13 @@ export class EventTransportService implements OnModuleInit, OnModuleDestroy {
           },
         });
         const event = this.toEvent(row);
-        this.emitUnseen(event);
+        // Never emit the just-created row directly. Another instance may have
+        // committed an earlier per-user sequence that this process has not
+        // polled yet; direct local fan-out would then deliver N+1 before N and
+        // make the socket cursor permanently discard N. Polling by the global
+        // ordinal drains every earlier row first and still gives local
+        // publishers near-immediate delivery.
+        await this.pollOnce();
         return event;
       } catch (error) {
         if (!isUniqueViolation(error) || attempt === 7) throw error;
@@ -91,6 +97,14 @@ export class EventTransportService implements OnModuleInit, OnModuleDestroy {
       take: limit,
     });
     return rows.map((row) => this.toEvent(row));
+  }
+
+  async latestSequence(userId: string): Promise<number> {
+    const latest = await this.prisma.userEvent.findFirst({
+      where: { userId },
+      orderBy: { sequence: 'desc' },
+    });
+    return latest?.sequence ?? 0;
   }
 
   /** Exposed for deterministic two-instance tests. */

@@ -215,6 +215,7 @@ describe('TradingService', () => {
     orders = new OrdersService(
       prisma as unknown as ConstructorParameters<typeof OrdersService>[0],
       new OrderEventsService(),
+      gateway as BrokerGateway,
     );
     trading = new TradingService(
       prisma as unknown as ConstructorParameters<typeof TradingService>[0],
@@ -225,6 +226,7 @@ describe('TradingService', () => {
       data: { email: 'trader@example.com', passwordHash: 'x' },
     });
     userId = user.id;
+    prisma.acceptCurrentTradingLegal(userId);
   });
 
   describe('auto_otm re-validation', () => {
@@ -345,6 +347,11 @@ describe('TradingService', () => {
       const keyed = audits.filter((a) => a.idempotencyKey === 'idem-123');
       expect(keyed).toHaveLength(1);
       expect(keyed[0].status).toBe('filled');
+      expect(keyed[0].request).toMatchObject({
+        preparedOrder: {
+          selection: { mode: 'explicit' },
+        },
+      });
     });
 
     it('different keys execute independently', async () => {
@@ -392,6 +399,68 @@ describe('TradingService', () => {
       // The failure left only an unkeyed error audit behind.
       const audits = await prisma.orderAudit.findMany({ where: { userId } });
       expect(audits.filter((a) => a.idempotencyKey === 'idem-retry')).toHaveLength(1);
+    });
+
+    it('recovers an order accepted before a crash without submitting it again', async () => {
+      const chain = await gateway.getOptionsChain(userId, 'SPY');
+      const dto = autoOtmCall({
+        orderType: 'mid',
+        selection: {
+          mode: 'explicit',
+          optionType: 'call',
+          expiration: chain.expirations[0],
+          strike: 101,
+        },
+      });
+      const accepted = await gateway.placeOrder(userId, dto, 'crash-after-accept');
+      const pending = await prisma.orderAudit.create({
+        data: {
+          userId,
+          idempotencyKey: 'crash-after-accept',
+          request: { action: 'place', order: dto },
+          response: null,
+          status: 'pending',
+        },
+      });
+      pending.createdAt = new Date(Date.now() - 3 * 60_000);
+      const place = jest.spyOn(gateway, 'placeOrder');
+
+      await expect(trading.place(userId, dto, 'crash-after-accept')).resolves.toEqual(accepted);
+      expect(place).not.toHaveBeenCalled();
+    });
+
+    it('reclaims a stale pre-send crash only after broker history confirms no order', async () => {
+      const dto = autoOtmCall({ orderType: 'mid' });
+      const pending = await prisma.orderAudit.create({
+        data: {
+          userId,
+          idempotencyKey: 'crash-before-send',
+          request: { action: 'place', order: dto },
+          response: null,
+          status: 'pending',
+        },
+      });
+      pending.createdAt = new Date(Date.now() - 3 * 60_000);
+      const place = jest.spyOn(gateway, 'placeOrder');
+
+      await expect(trading.place(userId, dto, 'crash-before-send')).resolves.toBeDefined();
+      expect(place).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('legal gate', () => {
+    it('blocks placement until both current server-side acceptances exist', async () => {
+      prisma.legalAcceptances.length = 0;
+      const place = jest.spyOn(gateway, 'placeOrder');
+
+      await expect(trading.place(userId, autoOtmCall(), 'legal-blocked')).rejects.toMatchObject({
+        status: 403,
+        code: 'LEGAL_ACCEPTANCE_REQUIRED',
+      });
+      expect(place).not.toHaveBeenCalled();
+
+      prisma.acceptCurrentTradingLegal(userId);
+      await expect(trading.place(userId, autoOtmCall(), 'legal-accepted')).resolves.toBeDefined();
     });
   });
 
@@ -515,7 +584,11 @@ describe('TradingService', () => {
      */
     it('returns the order when the audit write fails after the broker accepted', async () => {
       const place = jest.spyOn(gateway, 'placeOrder');
-      jest.spyOn(prisma.orderAudit, 'update').mockRejectedValueOnce(new Error('connection reset'));
+      const originalUpdate = prisma.orderAudit.update.bind(prisma.orderAudit);
+      jest
+        .spyOn(prisma.orderAudit, 'update')
+        .mockImplementationOnce(originalUpdate)
+        .mockRejectedValueOnce(new Error('connection reset'));
 
       const result = await trading.place(userId, autoOtmCall(), 'idem-audit-fail');
 

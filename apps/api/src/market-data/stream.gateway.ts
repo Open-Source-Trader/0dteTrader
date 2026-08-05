@@ -89,7 +89,7 @@ export class StreamGateway implements OnGatewayConnection, OnGatewayDisconnect, 
     this.clients.set(client, {
       userId,
       symbols: new Set(),
-      lastSequence: cursor,
+      lastSequence: cursor ?? 0,
       replaying: true,
       pending: [],
     });
@@ -290,24 +290,53 @@ export class StreamGateway implements OnGatewayConnection, OnGatewayDisconnect, 
     }
   }
 
-  private async replayClient(client: WebSocket, userId: string, cursor: number): Promise<void> {
+  private async replayClient(
+    client: WebSocket,
+    userId: string,
+    cursor: number | null,
+  ): Promise<void> {
     try {
       const state = this.clients.get(client);
       if (!state) return;
-      let after = cursor;
-      for (;;) {
-        const missed = await this.eventTransport.replay(userId, after, 1_000);
-        if (this.clients.get(client) !== state) return;
-        for (const event of missed) this.sendDurable(client, state, event);
-        if (missed.length < 1_000) break;
-        after = missed[missed.length - 1].sequence;
+      if (cursor === null) {
+        // A brand-new client has no gap to recover. Establish a baseline at
+        // the current tail instead of replaying the user's entire lifetime of
+        // events (and re-firing historical desktop notifications).
+        const baseline = await this.eventTransport.latestSequence(userId);
+        // Events committed while the baseline query was in flight are also
+        // queued by the live subscription. Keep the baseline immediately
+        // before the first such event so none is mistaken for old history.
+        const firstPending = state.pending.reduce(
+          (lowest, event) => Math.min(lowest, event.sequence),
+          Number.POSITIVE_INFINITY,
+        );
+        state.lastSequence = Number.isFinite(firstPending)
+          ? Math.min(baseline, firstPending - 1)
+          : baseline;
+      } else {
+        let after = cursor;
+        for (;;) {
+          const missed = await this.eventTransport.replay(userId, after, 1_000);
+          if (this.clients.get(client) !== state) return;
+          for (const event of missed) this.sendDurable(client, state, event);
+          if (missed.length < 1_000) break;
+          after = missed[missed.length - 1].sequence;
+        }
       }
+      if (this.clients.get(client) !== state) return;
       state.replaying = false;
       const pending = state.pending.splice(0).sort((a, b) => a.sequence - b.sequence);
       for (const event of pending) this.sendDurable(client, state, event);
+      // A client that has never received a durable event still needs a saved
+      // baseline. Without this handshake, reconnecting with local cursor 0
+      // looks brand new and silently skips everything emitted while offline.
+      this.send(client, { type: 'eventCursor', sequence: state.lastSequence });
     } catch (error) {
       const state = this.clients.get(client);
-      if (state) state.replaying = false;
+      // Do not switch to live fan-out after a failed catch-up: pending events
+      // would either remain stranded or jump over the missing range. Closing
+      // forces the client to reconnect with its last confirmed cursor.
+      if (state) client.close(1011, 'Event replay failed');
       this.logger.warn(`event replay failed for user ${userId}: ${(error as Error).message}`);
     }
   }
@@ -345,13 +374,15 @@ export class StreamGateway implements OnGatewayConnection, OnGatewayDisconnect, 
     }
   }
 
-  private extractCursor(req: IncomingMessage): number {
+  private extractCursor(req: IncomingMessage): number | null {
     try {
       const url = new URL(req.url ?? '', 'http://localhost');
-      const parsed = Number.parseInt(url.searchParams.get('cursor') ?? '0', 10);
-      return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : 0;
+      const raw = url.searchParams.get('cursor');
+      if (raw === null) return null;
+      const parsed = Number.parseInt(raw, 10);
+      return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : null;
     } catch {
-      return 0;
+      return null;
     }
   }
 

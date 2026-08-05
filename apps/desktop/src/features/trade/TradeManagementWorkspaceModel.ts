@@ -1,4 +1,5 @@
 import type {
+  AccountSummary,
   ChartOrder,
   ChartOrderKind,
   ChartOrderStatus,
@@ -6,6 +7,7 @@ import type {
   OptionType,
   OrderSide,
   Position,
+  TradeHistoryEntry,
 } from '@0dtetrader/shared-types';
 import { positionProfitDirection } from '@0dtetrader/shared-types';
 import { parseDateTime } from '../../core/models/dates';
@@ -54,8 +56,35 @@ export function pnlPercent(position: Position): number {
   return basis > 0 ? (position.unrealizedPnl / basis) * 100 : 0;
 }
 
-export function dayPnl(positions: Position[]): number {
-  return positions.reduce((sum, position) => sum + position.unrealizedPnl, 0);
+/**
+ * Day P&L, preferring the broker's own account equity change
+ * (`accountSummary.dailyPnl` = today's equity minus yesterday's close) over a
+ * local reconstruction — the broker sees every fill (fees, assignment,
+ * trades placed outside this app), so it's authoritative whenever available.
+ *
+ * Falls back to unrealized P&L on open positions + realized P&L from fills
+ * that closed a position earlier today, for brokers with no equity endpoint
+ * (Webull, SnapTrade today). `history.totalRealizedPnl` is all-time, so
+ * today's closing fills are picked out by `timestamp` here instead — a
+ * position closed and reopened (or closed for good) earlier today must
+ * still count, even though it no longer appears in `positions`.
+ */
+export function dayPnl(
+  positions: Position[],
+  history: TradeHistoryEntry[] = [],
+  accountSummary: AccountSummary | null = null,
+): number {
+  if (accountSummary !== null) return accountSummary.dailyPnl;
+  const unrealized = positions.reduce((sum, position) => sum + position.unrealizedPnl, 0);
+  const startOfDay = new Date();
+  startOfDay.setHours(0, 0, 0, 0);
+  const realizedToday = history.reduce((sum, entry) => {
+    if (entry.realizedPnl === null) return sum;
+    const filledAt = new Date(entry.timestamp);
+    if (Number.isNaN(filledAt.getTime()) || filledAt < startOfDay) return sum;
+    return sum + entry.realizedPnl;
+  }, 0);
+  return unrealized + realizedToday;
 }
 
 /** The docked stop/target editor row's fixed height (see the matching

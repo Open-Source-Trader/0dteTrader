@@ -1,5 +1,99 @@
 import Foundation
 
+enum DurableCursorDecision: Equatable {
+    case accepted
+    case duplicate
+    case gap
+}
+
+/// Contiguous, per-user stream cursor persisted across launches. The ID set is
+/// intentionally session-only and bounded; sequence persistence is the durable
+/// duplicate barrier.
+final class DurableEventCursor {
+    private static let seenLimit = 512
+    private let defaults: UserDefaults
+    private let serverKey: String
+    private var userID: String?
+    private(set) var sequence = 0
+    private(set) var isResumable = false
+    private var seenIDs: Set<String> = []
+    private var seenOrder: [String] = []
+
+    init(defaults: UserDefaults, serverKey: String) {
+        self.defaults = defaults
+        self.serverKey = serverKey
+    }
+
+    var retainedEventCount: Int { seenIDs.count }
+
+    func activate(token: String) {
+        let nextUserID = Self.jwtSubject(token)
+        guard nextUserID != userID else { return }
+        userID = nextUserID
+        seenIDs.removeAll()
+        seenOrder.removeAll()
+        guard let nextUserID else {
+            sequence = 0
+            isResumable = false
+            return
+        }
+        let cursorKey = key(nextUserID)
+        isResumable = defaults.object(forKey: cursorKey) != nil
+        sequence = max(0, defaults.integer(forKey: cursorKey))
+    }
+
+    func accept(eventID: String, sequence next: Int) -> DurableCursorDecision {
+        guard next > 0 else { return .duplicate }
+        guard !seenIDs.contains(eventID), next > sequence else { return .duplicate }
+        guard !isResumable || next == sequence + 1 else { return .gap }
+        seenIDs.insert(eventID)
+        seenOrder.append(eventID)
+        if seenOrder.count > Self.seenLimit {
+            seenIDs.remove(seenOrder.removeFirst())
+        }
+        sequence = next
+        persist()
+        return .accepted
+    }
+
+    func establish(sequence next: Int) {
+        guard next >= sequence else { return }
+        sequence = next
+        persist()
+    }
+
+    func resetSession() {
+        userID = nil
+        sequence = 0
+        isResumable = false
+        seenIDs.removeAll()
+        seenOrder.removeAll()
+    }
+
+    private func key(_ userID: String) -> String {
+        "events.cursor.v1:\(serverKey):\(userID)"
+    }
+
+    private func persist() {
+        guard let userID else { return }
+        isResumable = true
+        defaults.set(sequence, forKey: key(userID))
+    }
+
+    private static func jwtSubject(_ token: String) -> String? {
+        let parts = token.split(separator: ".", omittingEmptySubsequences: false)
+        guard parts.count > 1 else { return nil }
+        var encoded = String(parts[1]).replacingOccurrences(of: "-", with: "+")
+            .replacingOccurrences(of: "_", with: "/")
+        encoded += String(repeating: "=", count: (4 - encoded.count % 4) % 4)
+        guard let data = Data(base64Encoded: encoded),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let subject = object["sub"] as? String,
+              !subject.isEmpty else { return nil }
+        return subject
+    }
+}
+
 enum SocketConnectionState: Equatable {
     case disconnected
     case connecting
@@ -50,14 +144,18 @@ final class QuoteSocketClient: ObservableObject {
     private var subscribedSymbols: Set<String> = []
     private var shouldBeConnected = false
     private var reconnectAttempt = 0
-    private var lastSequence = 0
-    private var seenEventIDs: Set<String> = []
-    private var seenEventOrder: [String] = []
+    private let durableCursor: DurableEventCursor
 
-    init(streamURL: URL, urlSession: URLSession = .shared, tokenProvider: @escaping () async throws -> String) {
+    init(
+        streamURL: URL,
+        urlSession: URLSession = .shared,
+        cursorDefaults: UserDefaults = .standard,
+        tokenProvider: @escaping () async throws -> String
+    ) {
         self.streamURL = streamURL
         self.urlSession = urlSession
         self.tokenProvider = tokenProvider
+        self.durableCursor = DurableEventCursor(defaults: cursorDefaults, serverKey: streamURL.absoluteString)
     }
 
     // MARK: - Lifecycle
@@ -76,9 +174,7 @@ final class QuoteSocketClient: ObservableObject {
         reconnectTask = nil
         teardownConnection()
         connectionState = .disconnected
-        lastSequence = 0
-        seenEventIDs.removeAll()
-        seenEventOrder.removeAll()
+        durableCursor.resetSession()
     }
 
     /// Called on app foreground: re-establish the stream if it dropped while suspended.
@@ -133,14 +229,15 @@ final class QuoteSocketClient: ObservableObject {
                 let token = try await self.tokenProvider()
                 // disconnect() may have fired while we were fetching a token.
                 guard self.shouldBeConnected else { return }
+                self.durableCursor.activate(token: token)
                 guard var components = URLComponents(url: self.streamURL, resolvingAgainstBaseURL: false) else {
                     throw APIError.invalidRequest
                 }
                 var queryItems = components.queryItems ?? []
                 queryItems.removeAll { $0.name == "token" || $0.name == "cursor" }
                 queryItems.append(URLQueryItem(name: "token", value: token))
-                if self.lastSequence > 0 {
-                    queryItems.append(URLQueryItem(name: "cursor", value: String(self.lastSequence)))
+                if self.durableCursor.isResumable {
+                    queryItems.append(URLQueryItem(name: "cursor", value: String(self.durableCursor.sequence)))
                 }
                 components.queryItems = queryItems
                 guard let url = components.url else {
@@ -214,6 +311,9 @@ final class QuoteSocketClient: ObservableObject {
             guard let payload = try? decoder.decode(SocketChartOrderMessage.self, from: data),
                   let order = ChartOrder(dto: payload.data) else { return nil }
             return .chartOrder(order, payload.eventId, payload.sequence)
+        case "eventCursor":
+            guard let payload = try? decoder.decode(SocketEventCursorMessage.self, from: data) else { return nil }
+            return .eventCursor(payload.sequence)
         case "error":
             guard let payload = try? decoder.decode(SocketErrorMessage.self, from: data) else { return nil }
             return .error(payload.error.message)
@@ -233,6 +333,8 @@ final class QuoteSocketClient: ObservableObject {
         case .chartOrder(let order, let eventId, let sequence):
             guard acceptDurable(eventId: eventId, sequence: sequence) else { return }
             onChartOrder?(order)
+        case .eventCursor(let sequence):
+            durableCursor.establish(sequence: sequence)
         case .error(let message):
             lastErrorMessage = message
         }
@@ -242,15 +344,15 @@ final class QuoteSocketClient: ObservableObject {
         // Older servers/tests have no metadata. They remain readable during a
         // rolling deploy, while new durable events use bounded id de-duplication.
         guard let eventId, let sequence else { return true }
-        guard !seenEventIDs.contains(eventId) else { return false }
-        seenEventIDs.insert(eventId)
-        seenEventOrder.append(eventId)
-        if seenEventOrder.count > 512 {
-            let removed = seenEventOrder.removeFirst()
-            seenEventIDs.remove(removed)
+        switch durableCursor.accept(eventID: eventId, sequence: sequence) {
+        case .accepted:
+            return true
+        case .duplicate:
+            return false
+        case .gap:
+            handleUnexpectedDisconnect()
+            return false
         }
-        lastSequence = max(lastSequence, sequence)
-        return true
     }
 
     private func startPingLoop() {
@@ -323,5 +425,6 @@ private enum DecodedSocketMessage {
     case quote(Quote)
     case orderUpdate(OrderResult, String?, Int?)
     case chartOrder(ChartOrder, String?, Int?)
+    case eventCursor(Int)
     case error(String)
 }

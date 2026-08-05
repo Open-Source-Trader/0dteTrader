@@ -225,8 +225,19 @@ export class SnapTradeBrokerGateway implements BrokerGateway {
     const { mode, clientId, consumerKey, accountId } = await this.credentialsFor(userId);
     const orders = await this.client.getOpenOrders(mode, clientId, consumerKey, accountId);
     return orders
-      .map((o: any) => toOrderResult(o))
+      .map((order) => toOrderResult(order))
       .filter((o) => o.status === 'submitted' || o.status === 'partially_filled');
+  }
+
+  async getRecentOrders(userId: string, since?: Date): Promise<OrderResult[]> {
+    const { mode, clientId, consumerKey, accountId } = await this.credentialsFor(userId);
+    const days = since
+      ? Math.max(1, Math.min(30, Math.ceil((Date.now() - since.getTime()) / 86_400_000) + 1))
+      : 2;
+    const orders = await this.client.getRecentOrders(mode, clientId, consumerKey, accountId, days);
+    return orders
+      .map((order) => toOrderResult(order))
+      .filter((order) => !since || Date.parse(order.timestamp) >= since.getTime());
   }
 
   async reauthenticate(userId: string): Promise<TradingMode> {

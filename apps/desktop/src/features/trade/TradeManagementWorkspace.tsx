@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import type {
+  AccountSummary,
   ChartOrder,
   ChartOrderDraft,
   ChartOrderType,
@@ -7,6 +8,7 @@ import type {
   OptionType,
   OrderResult,
   Position,
+  TradeHistoryEntry,
 } from '@0dtetrader/shared-types';
 import { AlertDialog } from '../../design/components/AlertDialog';
 import { Spinner } from '../../design/components/Spinner';
@@ -39,6 +41,10 @@ interface TradeManagementWorkspaceProps {
   positions: Position[];
   openOrders: OrderResult[];
   chartOrders: ChartOrder[];
+  /** Newest first. Powers the Recent Trades tab and today's realized P&L. */
+  history: TradeHistoryEntry[];
+  /** Broker-reported equity/daily P&L; null falls back to a local estimate. */
+  accountSummary: AccountSummary | null;
   workingSymbols: string[];
   expanded: boolean;
   onExpandedChange: (expanded: boolean) => void;
@@ -117,6 +123,11 @@ function submittedTime(iso: string): string {
   return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
+function realizedPnlClass(realizedPnl: number | null): string {
+  if (realizedPnl === null) return 'text-secondary';
+  return realizedPnl >= 0 ? 'is-positive' : 'is-negative';
+}
+
 function buildPositionMeta(
   position: Position,
   chartOrders: ChartOrder[],
@@ -144,6 +155,8 @@ export function TradeManagementWorkspace({
   positions,
   openOrders,
   chartOrders,
+  history,
+  accountSummary,
   workingSymbols,
   expanded,
   onExpandedChange,
@@ -188,7 +201,7 @@ export function TradeManagementWorkspace({
   );
   const activePosition = positions[0] ?? null;
   const activeMeta = activePosition ? metas.get(activePosition.symbol) : null;
-  const totalDayPnl = dayPnl(positions);
+  const totalDayPnl = dayPnl(positions, history, accountSummary);
   const activeWorking = activePosition ? workingSymbols.includes(activePosition.symbol) : false;
   // Why a Set stop/target could not create a leg right now; null means it can.
   let legActionBlockedReason: string | null = null;
@@ -256,11 +269,12 @@ export function TradeManagementWorkspace({
         <OrdersTable orders={openOrders} locked={locked} onCancel={setOrderPendingCancel} />
       );
   } else {
-    expandedBody = (
-      <div className="desktop-positions-empty text-secondary">
-        Recent trades stay in History and do not auto-expand.
-      </div>
-    );
+    expandedBody =
+      history.length === 0 ? (
+        <div className="desktop-positions-empty text-secondary">No trades yet</div>
+      ) : (
+        <RecentTradesTable entries={history} />
+      );
   }
 
   return (
@@ -809,6 +823,56 @@ function OrdersTable({
               >
                 <XCircleFillIcon size={14} />
               </button>
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+function RecentTradesTable({ entries }: { entries: TradeHistoryEntry[] }) {
+  return (
+    <table className="desktop-positions-table trade-management-table">
+      <thead>
+        <tr>
+          <th style={{ textAlign: 'left' }}>Contract</th>
+          <th style={{ textAlign: 'left' }}>Side</th>
+          <th style={{ textAlign: 'right' }}>Qty</th>
+          <th style={{ textAlign: 'left' }}>Status</th>
+          <th style={{ textAlign: 'right' }}>Fill</th>
+          <th style={{ textAlign: 'right' }}>Realized P&amp;L</th>
+          <th style={{ textAlign: 'right' }}>Time</th>
+        </tr>
+      </thead>
+      <tbody>
+        {entries.map((entry) => (
+          <tr key={entry.orderId}>
+            <td className="numeric">{entry.contractSymbol}</td>
+            <td
+              className="numeric"
+              style={{
+                color: entry.side === 'buy' ? 'var(--buy-green)' : 'var(--sell-red)',
+                fontWeight: 600,
+              }}
+            >
+              {sideDisplayName(entry.side)}
+            </td>
+            <td className="numeric" style={{ textAlign: 'right' }}>
+              {entry.quantity}
+            </td>
+            <td className="text-secondary">{orderStatusDisplayName(entry.status)}</td>
+            <td className="numeric" style={{ textAlign: 'right' }}>
+              {priceOrDash(entry.filledPrice)}
+            </td>
+            <td
+              className={`numeric ${realizedPnlClass(entry.realizedPnl)}`}
+              style={{ textAlign: 'right', fontWeight: entry.realizedPnl === null ? 400 : 600 }}
+            >
+              {entry.realizedPnl === null ? '—' : signedCurrency(entry.realizedPnl)}
+            </td>
+            <td className="numeric" style={{ textAlign: 'right' }}>
+              {submittedTime(entry.timestamp)}
             </td>
           </tr>
         ))}

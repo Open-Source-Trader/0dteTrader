@@ -1067,6 +1067,50 @@ describe('OrdersService', () => {
       expect(prisma.tradeOrderExecutions.filter((e) => e.orderId === 'BADF')).toHaveLength(0);
     });
 
+    it.each([
+      ['past the safe-integer boundary', Number.MAX_SAFE_INTEGER + 1],
+      ['1e308', 1e308],
+      ['one past the shared cap', 1001],
+    ])('quarantines an order quantity %s', async (_label, quantity) => {
+      // Number.isInteger(1e308) is TRUE — only the safe-integer check and
+      // the shared cap keep a quantity like this out of notional arithmetic.
+      await orders.record(USER, fill({ orderId: 'HUGE', quantity, filledQuantity: undefined }));
+
+      expect(prisma.tradeOrders.find((o) => o.id === 'HUGE')).toBeUndefined();
+      expect(prisma.tradeOrderExecutions.filter((e) => e.orderId === 'HUGE')).toHaveLength(0);
+    });
+
+    it('accepts the exact shared cap', async () => {
+      await orders.record(
+        USER,
+        fill({ orderId: 'ATCAP', quantity: 1000, filledQuantity: 1000, filledPrice: 1.0 }),
+      );
+
+      expect(prisma.tradeOrders.find((o) => o.id === 'ATCAP').executedQuantity).toBe(1000);
+    });
+
+    it('refuses an absurd fill price but keeps the terminal status', async () => {
+      // Finite-and-positive alone admits 1e308, whose notional overflows the
+      // book. The bound refuses the FILL; the status still records, exactly
+      // like any other junk price.
+      await orders.record(
+        USER,
+        fill({ orderId: 'PRICEY', quantity: 1, filledQuantity: 1, filledPrice: 1e308 }),
+      );
+
+      const row = prisma.tradeOrders.find((o) => o.id === 'PRICEY');
+      expect(row.status).toBe('filled');
+      expect(row.executedQuantity).toBe(0);
+      expect(prisma.tradeOrderExecutions.filter((e) => e.orderId === 'PRICEY')).toHaveLength(0);
+
+      // A plausible boundary-adjacent price books normally.
+      await orders.record(
+        USER,
+        fill({ orderId: 'PRICEY', quantity: 1, filledQuantity: 1, filledPrice: 99_999 }),
+      );
+      expect(prisma.tradeOrders.find((o) => o.id === 'PRICEY').executedQuantity).toBe(1);
+    });
+
     it('quarantines an overfill — cumulative above the order’s own size', async () => {
       await orders.record(
         USER,

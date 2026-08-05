@@ -92,7 +92,9 @@ export function findExplicitOption(
  * per docs/API-SPEC.md.
  */
 export function computeMid(bid: number, ask: number): number {
-  if (!(bid > 0) || !(ask > 0) || bid > ask) {
+  // Finiteness first: a feed glitch can deliver ±Infinity, and every later
+  // comparison here happily passes it through to an infinite midpoint.
+  if (!Number.isFinite(bid) || !Number.isFinite(ask) || !(bid > 0) || !(ask > 0) || bid > ask) {
     throw errors.validation(
       `Cannot compute mid price: spread is crossed or invalid (bid=${bid}, ask=${ask})`,
     );

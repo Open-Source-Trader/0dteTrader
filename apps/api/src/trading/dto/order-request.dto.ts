@@ -15,6 +15,7 @@ import {
   type ValidationOptions,
 } from 'class-validator';
 import {
+  MAX_ORDER_QUANTITY,
   AssetClass,
   OptionType,
   OrderSide,
@@ -94,7 +95,7 @@ export class OrderRequestDto {
 
   @IsInt()
   @Min(1)
-  @Max(1000)
+  @Max(MAX_ORDER_QUANTITY)
   quantity!: number;
 
   @IsIn(['custom', 'bid', 'mid', 'ask', 'market'])

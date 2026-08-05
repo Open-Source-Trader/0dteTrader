@@ -1,6 +1,7 @@
 import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import { Prisma, type TradeOrder, type TradeOrderExecution } from '@prisma/client';
 import {
+  MAX_ORDER_QUANTITY,
   OrderResult,
   TradeHistory,
   TradeHistoryEntry,
@@ -95,11 +96,17 @@ function isFill(row: TradeOrder): boolean {
  * carry a zero price must still record its cancel.
  */
 function quantityRejection(order: OrderResult): string | null {
-  if (!Number.isInteger(order.quantity) || order.quantity <= 0) {
+  // SAFE integers, not just integers: Number.isInteger(1e308) is true, and a
+  // quantity past 2^53 silently loses precision in every sum after it. The
+  // shared cap then bounds it to what the app could ever have placed.
+  if (!Number.isSafeInteger(order.quantity) || order.quantity <= 0) {
     return `order quantity ${order.quantity} is not a positive whole number`;
   }
+  if (order.quantity > MAX_ORDER_QUANTITY) {
+    return `order quantity ${order.quantity} exceeds the ${MAX_ORDER_QUANTITY}-contract cap`;
+  }
   if (order.filledQuantity !== undefined) {
-    if (!Number.isInteger(order.filledQuantity) || order.filledQuantity < 0) {
+    if (!Number.isSafeInteger(order.filledQuantity) || order.filledQuantity < 0) {
       return `filled quantity ${order.filledQuantity} is not a whole number of contracts`;
     }
     if (order.filledQuantity > order.quantity) {
@@ -112,10 +119,11 @@ function quantityRejection(order: OrderResult): string | null {
 /** The isFill test for an incoming event, before it becomes a row. */
 function isFillEvent(order: OrderResult): boolean {
   return (
-    // Strictly positive, like the quantity below: a zero or negative price
-    // is refused at the door rather than advancing the watermark and then
-    // being filtered out of every replay.
+    // Strictly positive and plausibly bounded, like the quantity below: a
+    // zero, negative or absurd price is refused at the door rather than
+    // advancing the watermark and then being filtered out of every replay.
     isFinitePositive(order.filledPrice) &&
+    order.filledPrice <= MAX_FILL_PRICE &&
     (order.filledQuantity ?? order.quantity) > 0 &&
     (order.status === 'filled' ||
       order.status === 'partially_filled' ||
@@ -175,6 +183,13 @@ interface FillPoint {
  *  refused rather than booked. */
 const isFinitePositive = (v: unknown): v is number =>
   typeof v === 'number' && Number.isFinite(v) && v > 0;
+
+/** Upper bound on a broker-reported fill price, in dollars per share. No
+ *  US-listed option premium comes within two orders of magnitude of this;
+ *  finite-and-positive alone still admits 1e308, whose notional overflows
+ *  the book. A price past the bound refuses the FILL (the status still
+ *  records), same as any other junk price. */
+const MAX_FILL_PRICE = 100_000;
 
 /** How late a fill may be, relative to placement, and still be anchored on the
  *  underlying price captured when the order was sent. A market or marketable

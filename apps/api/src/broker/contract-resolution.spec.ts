@@ -100,6 +100,17 @@ describe('computeMid', () => {
     expect(() => computeMid(0, 10)).toThrow(/crossed/);
     expect(() => computeMid(-1, 10)).toThrow(/crossed/);
   });
+
+  it('rejects non-finite sides before doing any arithmetic', () => {
+    // bid 1 / ask ∞ passed every ordering comparison and returned an
+    // infinite midpoint — the one price no order should ever be sent at.
+    expect(() => computeMid(1, Number.POSITIVE_INFINITY)).toThrow(/crossed|invalid/);
+    expect(() => computeMid(Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY)).toThrow(
+      /crossed|invalid/,
+    );
+    expect(() => computeMid(Number.NEGATIVE_INFINITY, 1)).toThrow(/crossed|invalid/);
+    expect(() => computeMid(Number.NaN, 1)).toThrow(/crossed|invalid/);
+  });
 });
 
 describe('findExplicitOption', () => {

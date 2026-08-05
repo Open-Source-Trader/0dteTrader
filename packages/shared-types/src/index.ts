@@ -464,6 +464,13 @@ export interface OrderPreview {
   warnings: string[];
 }
 
+/**
+ * Hard cap on contracts per order, shared by request validation and broker
+ * ingestion: a broker-reported quantity above what the app could ever have
+ * placed is feed garbage, not a position.
+ */
+export const MAX_ORDER_QUANTITY = 1000;
+
 export interface OrderResult {
   orderId: string;
   status: OrderStatus;

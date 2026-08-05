@@ -1,6 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import { buildTradeDeskViewState } from './tradeDeskPresenter';
-import type { AIAvailability, AnalysisContextIdentity, AnalysisResult } from './types';
+import {
+  buildFlatTradeDeskAnalysis,
+  buildTradeDeskViewState,
+  buildUnavailableTradeDeskAnalysis,
+} from './tradeDeskPresenter';
+import type {
+  AIAvailability,
+  AnalysisContextIdentity,
+  AnalysisDiscard,
+  AnalysisResult,
+} from './types';
 import type { OptionContract } from '@0dtetrader/shared-types';
 
 const availability: AIAvailability = { state: 'ready' };
@@ -41,6 +50,7 @@ function result(overrides: Partial<AnalysisResult> = {}): AnalysisResult {
     summary: 'Momentum intact; current premium is above preferred entry and needs a pullback.',
     tradeDeskPlan: {
       action: 'wait',
+      setupLifecycle: 'developing',
       setupLabel: 'Bullish pullback wait-for-entry continuation setup label that is very long',
       summary:
         'Momentum intact; current premium is above preferred entry. This sentence is intentionally long enough to verify presentation clamping by deterministic presenter.',
@@ -158,12 +168,27 @@ function result(overrides: Partial<AnalysisResult> = {}): AnalysisResult {
   };
 }
 
+function discard(overrides: Partial<AnalysisDiscard> = {}): AnalysisDiscard {
+  return {
+    code: 'runtime-failed',
+    message: 'boom',
+    requestId: 'req-1',
+    fingerprint: null,
+    symbol: context.symbol,
+    timeframe: context.timeframe,
+    selectedContractSymbol: context.selectedContractSymbol,
+    positionVersion: context.positionVersion,
+    occurredAt: '2026-07-31T14:30:00.000Z',
+    ...overrides,
+  };
+}
+
 function current(overrides = {}) {
   return buildTradeDeskViewState({
     availability,
     isAnalyzing: false,
     latestResult: result(),
-    errorMessage: null,
+    lastDiscard: null,
     currentContext: context,
     selectedContract: contract,
     currentPositionVersion: 0,
@@ -243,7 +268,7 @@ describe('buildTradeDeskViewState', () => {
     expect(
       current({ currentContext: { ...context, selectedContractSymbol: 'OTHER' } }).status,
     ).toBe('stale');
-    expect(current({ errorMessage: 'boom' }).status).toBe('failed');
+    expect(current({ lastDiscard: discard() }).status).toBe('failed');
     expect(
       current({ availability: { state: 'unavailable', reason: 'off' }, latestResult: null }).status,
     ).toBe('unavailable');
@@ -354,5 +379,201 @@ describe('buildTradeDeskViewState', () => {
     // The badge itself still reflects the held/confirmed result's action,
     // not the pending candidate.
     expect(state.presentation?.action).toBe(result().tradeDeskPlan!.action);
+  });
+
+  it('reports unavailable with a mapped reason when the last request was ineligible and there is no prior result', () => {
+    const state = current({
+      latestResult: null,
+      ineligibility: { reason: 'invalid-underlying-quote', userMessage: 'Bad quote.' },
+    });
+    expect(state.status).toBe('unavailable');
+    expect(state.unavailableReason).toBe('invalid-underlying-quote');
+  });
+
+  it('maps invalid-selected-contract-quote to the invalid-options-analytics UI reason', () => {
+    const state = current({
+      latestResult: null,
+      ineligibility: {
+        reason: 'invalid-selected-contract-quote',
+        userMessage: 'Bad contract quote.',
+      },
+    });
+    expect(state.unavailableReason).toBe('invalid-options-analytics');
+  });
+
+  it('prefers a still-valid prior presentation over a fresh ineligibility rejection', () => {
+    const state = current({
+      ineligibility: { reason: 'invalid-underlying-quote', userMessage: 'Bad quote.' },
+    });
+    expect(state.status).toBe('current');
+    expect(state.presentation).toBeDefined();
+  });
+
+  it('no prior valid analysis renders the specific discard reason, not a generic unavailable', () => {
+    const state = current({
+      latestResult: null,
+      lastDiscard: discard({
+        code: 'ungrounded-plan',
+        message: 'Plan referenced an unknown level.',
+      }),
+    });
+    expect(state.status).toBe('unavailable');
+    expect(state.unavailableReason).toBe('analysis-incomplete');
+    expect(state.staleReason).toBe('Plan referenced an unknown level.');
+  });
+
+  it('a matching failed result preserves the prior valid presentation and exposes a compact warning', () => {
+    const state = current({ lastDiscard: discard() });
+    expect(state.status).toBe('failed');
+    expect(state.presentation).toBeDefined();
+    expect(state.staleReason).toBe('boom');
+  });
+
+  it('an unrelated (different-instrument) discard does not downgrade a current valid presentation', () => {
+    const state = current({ lastDiscard: discard({ symbol: 'AAPL' }) });
+    expect(state.status).toBe('current');
+    expect(state.presentation).toBeDefined();
+  });
+});
+
+describe('buildFlatTradeDeskAnalysis contract-cell gating', () => {
+  it('renders the CONTRACT cell when the plan carries contract-premium guidance', () => {
+    const presentation = current().presentation!;
+    const analysis = buildFlatTradeDeskAnalysis(presentation, contract);
+    expect(analysis.contract.value).toBe('SPY 746C');
+  });
+
+  it('renders — for CONTRACT when a contract is selected but the plan has no contract guidance', () => {
+    const legacy = result({ tradeDeskPlan: undefined, recommendation: 'wait' });
+    const presentation = current({ latestResult: legacy }).presentation!;
+    // A contract is selected (module-level `contract` fixture), but the
+    // legacy-fallback presentation never populates entry.contract/
+    // preferredContractPrice — the CONTRACT cell must not fall back to the
+    // selected contract's label, since that's the exact "selected contract
+    // rendered as if it were AI guidance" bug this gating exists to prevent.
+    const analysis = buildFlatTradeDeskAnalysis(presentation, contract);
+    expect(analysis.contract.value).toBe('—');
+  });
+});
+
+describe('buildUnavailableTradeDeskAnalysis', () => {
+  it('renders all eight cells bounded, with a curated EXECUTION reason and no raw diagnostics', () => {
+    const analysis = buildUnavailableTradeDeskAnalysis('invalid-options-analytics');
+    expect(analysis.execution.value).toBe('Invalid option data');
+    expect(analysis.entry.value).toBe('—');
+    expect(analysis.invalidation.value).toBe('—');
+    expect(analysis.targets.value).toBe('—');
+    expect(analysis.contract.value).toBe('—');
+    expect(analysis.premiumLimit.value).toBe('—');
+    expect(analysis.runner.value).toBe('—');
+  });
+
+  it('maps each unavailable reason to a distinct short EXECUTION line', () => {
+    expect(buildUnavailableTradeDeskAnalysis('invalid-underlying-quote').execution.value).toBe(
+      'Invalid underlying quote',
+    );
+    expect(buildUnavailableTradeDeskAnalysis('insufficient-data').execution.value).toBe(
+      'Insufficient data',
+    );
+    expect(buildUnavailableTradeDeskAnalysis(undefined).execution.value).toBe('Data unavailable');
+  });
+});
+
+describe('setup-lifecycle-aware execution line and SETUP cell', () => {
+  function waitResultWithLifecycle(
+    setupLifecycle: NonNullable<AnalysisResult['tradeDeskPlan']>['setupLifecycle'],
+    setupLabel = 'Bullish reversal',
+  ): AnalysisResult {
+    return result({
+      tradeDeskPlan: {
+        action: 'wait',
+        setupLifecycle,
+        setupLabel,
+        summary: 'Setup evolving.',
+        targets: { contract: [] },
+        management: { holdConditions: [], scaleConditions: [], exitConditions: [] },
+      },
+    });
+  }
+
+  it('renders EXECUTION "Wait" for a plain no-setup wait', () => {
+    const presentation = current({
+      latestResult: waitResultWithLifecycle('none', 'No confirmed setup'),
+    }).presentation!;
+    const analysis = buildFlatTradeDeskAnalysis(presentation, contract);
+    expect(analysis.execution.value).toBe('Wait');
+    expect(analysis.setup.secondary).toBeUndefined();
+  });
+
+  it('renders EXECUTION "Wait for setup" for a developing setup', () => {
+    const presentation = current({
+      latestResult: waitResultWithLifecycle('developing'),
+    }).presentation!;
+    const analysis = buildFlatTradeDeskAnalysis(presentation, contract);
+    expect(analysis.execution.value).toBe('Wait for setup');
+    expect(analysis.setup.value).toBe('Bullish reversal');
+    expect(analysis.setup.secondary).toBe('DEVELOPING');
+  });
+
+  it('renders EXECUTION "Do not chase" for an extended setup — the reported regression', () => {
+    const presentation = current({
+      latestResult: waitResultWithLifecycle('extended'),
+    }).presentation!;
+    const analysis = buildFlatTradeDeskAnalysis(presentation, contract);
+    expect(analysis.setup.value).toBe('Bullish reversal');
+    expect(analysis.setup.secondary).toBe('EXTENDED');
+    expect(analysis.execution.value).toBe('Do not chase');
+  });
+
+  it('renders EXECUTION "Setup invalidated" for an invalidated setup', () => {
+    const presentation = current({
+      latestResult: waitResultWithLifecycle('invalidated'),
+    }).presentation!;
+    const analysis = buildFlatTradeDeskAnalysis(presentation, contract);
+    expect(analysis.execution.value).toBe('Setup invalidated');
+    expect(analysis.setup.secondary).toBe('INVALIDATED');
+  });
+
+  it('renders EXECUTION "Setup complete" for a completed setup', () => {
+    const presentation = current({
+      latestResult: waitResultWithLifecycle('completed'),
+    }).presentation!;
+    const analysis = buildFlatTradeDeskAnalysis(presentation, contract);
+    expect(analysis.execution.value).toBe('Setup complete');
+  });
+
+  it('never claims "Confirm and enter" for triggered/confirmed with no entry data — defense in depth for the second reported regression', () => {
+    // validation.ts's hasValidSetupLifecycleEvidence should already prevent
+    // this shape from reaching the presenter, but the presenter stays
+    // defensive rather than assuming that upstream guarantee always holds.
+    for (const lifecycle of ['triggered', 'confirmed'] as const) {
+      const presentation = current({
+        latestResult: waitResultWithLifecycle(lifecycle),
+      }).presentation!;
+      const analysis = buildFlatTradeDeskAnalysis(presentation, contract);
+      expect(analysis.execution.value).not.toBe('Confirm and enter');
+      expect(analysis.execution.value).toBe('Wait for setup');
+    }
+  });
+
+  it('renders EXECUTION "Confirm and enter" for triggered with real entry data', () => {
+    const base = waitResultWithLifecycle('triggered');
+    const withEntry: AnalysisResult = {
+      ...base,
+      tradeDeskPlan: {
+        ...base.tradeDeskPlan!,
+        entry: {
+          preferredContractPrice: {
+            value: 1.85,
+            priceDomain: 'contract-premium',
+            evidenceId: 'e1',
+            snapshotId: 'snap-1',
+          },
+        },
+      },
+    };
+    const presentation = current({ latestResult: withEntry }).presentation!;
+    const analysis = buildFlatTradeDeskAnalysis(presentation, contract);
+    expect(analysis.execution.value).toBe('Confirm and enter');
   });
 });

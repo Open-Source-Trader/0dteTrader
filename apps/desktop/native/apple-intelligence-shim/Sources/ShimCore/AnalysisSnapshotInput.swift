@@ -41,8 +41,49 @@ public struct AnalysisSnapshotInput: Codable, Sendable {
     public let options: JSONValue?
     public let position: JSONValue?
     public let strategyPolicy: JSONValue?
+    /// The setup tracked from the previous analysis for this instrument, if
+    /// any (see setupLifecycleHysteresis.ts on the TypeScript side) — tells
+    /// the model to continue an analysis rather than start from a blank
+    /// slate. Absent when no live, non-terminal setup is currently tracked.
+    public let priorSetup: JSONValue?
     public let quality: JSONValue
     public let omissions: [OmissionInput]
+
+    /// Explicit memberwise init with `priorSetup` defaulted to `nil` — the
+    /// synthesized one requires every field positionally, which would force
+    /// every existing call site (decode-from-wire callers never construct
+    /// this directly; only test fixtures do) to supply a field that's
+    /// legitimately absent most of the time. Decoding from the wire still
+    /// uses Codable's own synthesized `init(from:)`, untouched by this.
+    public init(
+        snapshotSchemaVersion: Int,
+        identity: IdentityInput,
+        trigger: TriggerInput,
+        market: JSONValue,
+        candles: JSONValue,
+        indicators: JSONValue,
+        levels: [CandidateLevelInput],
+        options: JSONValue? = nil,
+        position: JSONValue? = nil,
+        strategyPolicy: JSONValue? = nil,
+        priorSetup: JSONValue? = nil,
+        quality: JSONValue,
+        omissions: [OmissionInput]
+    ) {
+        self.snapshotSchemaVersion = snapshotSchemaVersion
+        self.identity = identity
+        self.trigger = trigger
+        self.market = market
+        self.candles = candles
+        self.indicators = indicators
+        self.levels = levels
+        self.options = options
+        self.position = position
+        self.strategyPolicy = strategyPolicy
+        self.priorSetup = priorSetup
+        self.quality = quality
+        self.omissions = omissions
+    }
 
     public struct IdentityInput: Codable, Sendable {
         public let snapshotId: String

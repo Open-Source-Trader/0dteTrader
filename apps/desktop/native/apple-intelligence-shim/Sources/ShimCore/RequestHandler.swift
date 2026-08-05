@@ -182,5 +182,10 @@ private func nativeError(forAnalysisRunError error: AnalysisRunError) -> NativeE
         return NativeErrorPayload(code: .modelGuardrailRejection, message: "model declined to generate")
     case .runtimeFailure:
         return NativeErrorPayload(code: .modelRuntimeFailure, message: "generation failed")
+    case .responseLikelyTruncated:
+        return NativeErrorPayload(
+            code: .structuredOutputInvalid,
+            message: "generation truncated before completing"
+        )
     }
 }

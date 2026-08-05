@@ -45,6 +45,21 @@ export interface AnalysisSnapshotIdentity {
   selectedContractSymbol?: string;
 }
 
+/** Prior-analysis setup context, attached by AnalysisStore (not the
+ * snapshot builder, which has no access to persisted cross-call state)
+ * immediately before submission — tells the model it is continuing an
+ * analysis rather than starting from a blank slate. Absent when no live,
+ * non-terminal setup is currently tracked for this instrument. */
+export interface PriorSetupContext {
+  setupId: string;
+  direction: 'bullish' | 'bearish';
+  label: string;
+  lifecycle: SetupLifecycle;
+  detectedAt: string;
+  triggeredAt?: string;
+  invalidationLevel?: number;
+}
+
 export interface AnalysisSnapshot {
   snapshotSchemaVersion: 1;
   identity: AnalysisSnapshotIdentity;
@@ -60,6 +75,7 @@ export interface AnalysisSnapshot {
   options?: Record<string, unknown>;
   position?: Record<string, unknown>;
   strategyPolicy?: Record<string, unknown>;
+  priorSetup?: PriorSetupContext;
   quality: DataQuality;
   omissions: Omission[];
 }
@@ -116,6 +132,19 @@ export type TradeDeskAction = 'wait' | 'enter' | 'hold' | 'scale' | 'exit' | 'av
 export type SetupState = 'none' | 'forming' | 'confirmed' | 'extended' | 'invalidated';
 export type Bias = 'bullish' | 'bearish' | 'neutral' | 'mixed';
 
+/**
+ * Independent of `TradeDeskAction` — `action: 'wait'` does not imply
+ * `setupLifecycle: 'none'`. A setup can trigger and then become too extended
+ * to enter (`action: 'wait'`, `setupLifecycle: 'extended'`) without ever
+ * having been invalidated; the label and evidence describing it must persist
+ * across analyses rather than reset just because there is no fresh entry
+ * right now. See setupLifecycleHysteresis.ts for the persistence layer that
+ * tracks a setup's identity across calls and gates state transitions with
+ * hysteresis, the same way actionHysteresis.ts already does for `action`.
+ */
+export type SetupLifecycle =
+  'none' | 'developing' | 'confirmed' | 'triggered' | 'extended' | 'completed' | 'invalidated';
+
 export interface ScaleAdvice {
   direction: 'in' | 'out';
   quantity?: number;
@@ -130,6 +159,14 @@ export interface TradeDeskTarget {
 
 export interface TradeDeskPlan {
   action: TradeDeskAction;
+  /** Where this setup stands, independent of `action` — see SetupLifecycle. */
+  setupLifecycle: SetupLifecycle;
+  /** Optional model-supplied identity for this setup, used defensively by
+   * setupLifecycleHysteresis.ts to help recognize "still the same setup" —
+   * the persistence layer does not require it and matches on direction +
+   * forward-progressing lifecycle when absent or when the model doesn't
+   * echo the id it was given in `AnalysisSnapshot.priorSetup`. */
+  setupId?: string;
   scaleAdvice?: ScaleAdvice;
   setupLabel: string;
   summary: string;
@@ -195,6 +232,67 @@ export type AIAvailability =
 export interface AnalyzeRequest {
   snapshot: AnalysisSnapshot;
 }
+
+/**
+ * Deterministic pre-model gate (snapshotValidation.ts). A snapshot must pass
+ * this check before it is ever sent to the model — no amount of downstream
+ * result validation can recover from bad input, since the model has no way
+ * to know a supplied quote or candle set is implausible rather than a real
+ * (if unusual) market condition.
+ */
+export type AnalysisIneligibilityReason =
+  | 'missing-underlying-quote'
+  | 'invalid-underlying-quote'
+  | 'missing-candles'
+  | 'stale-candles'
+  | 'invalid-candle-data'
+  | 'invalid-options-analytics'
+  | 'invalid-selected-contract-quote'
+  | 'snapshot-mismatch'
+  | 'insufficient-data';
+
+/**
+ * Every point past the pre-model eligibility gate where a completed or
+ * in-flight request can fail to produce current guidance. Distinct from
+ * `AnalysisIneligibilityReason` (rejected before the model was ever
+ * invoked) — a discard means a request was submitted, and something after
+ * that point (decode, schema, grounding, staleness, transport) rejected it.
+ */
+export type AnalysisDiscardCode =
+  | 'bridge-unavailable'
+  | 'request-failed'
+  | 'runtime-failed'
+  | 'invalid-result'
+  | 'ungrounded-plan'
+  | 'stale-context'
+  | 'superseded';
+
+/**
+ * A structured record of the most recent request that did not produce
+ * current guidance, kept alongside (not instead of) `latestResult` so a
+ * trader-facing reason survives until it's genuinely no longer relevant —
+ * see AnalysisStore's `lastDiscard` field and `isDiscardStillRelevant`.
+ */
+export interface AnalysisDiscard {
+  code: AnalysisDiscardCode;
+  message: string;
+  requestId: string;
+  fingerprint: string | null;
+  symbol: string;
+  timeframe: string;
+  selectedContractSymbol?: string;
+  positionVersion: number;
+  occurredAt: string;
+}
+
+export type AnalysisEligibility =
+  | { eligible: true; mode: MarketAnalysisState; snapshot: AnalysisSnapshot }
+  | {
+      eligible: false;
+      reason: AnalysisIneligibilityReason;
+      userMessage: string;
+      diagnostics?: Record<string, unknown>;
+    };
 
 export type AnalysisEvent =
   | { kind: 'accepted'; requestId: string }

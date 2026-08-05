@@ -18,12 +18,6 @@ enum GeneratedRecommendation: String, Sendable {
 
 @available(macOS 26, *)
 @Generable
-enum GeneratedSetupState: String, Sendable {
-    case none, forming, confirmed, extended, invalidated
-}
-
-@available(macOS 26, *)
-@Generable
 enum GeneratedBias: String, Sendable {
     case bullish, bearish, neutral, mixed
 }
@@ -45,6 +39,16 @@ struct GeneratedLevelReference: Sendable {
 @Generable
 enum GeneratedTradeDeskAction: String, Sendable {
     case wait, enter, hold, scale, exit, avoid
+}
+
+/// Independent of GeneratedTradeDeskAction — `action: wait` does not imply
+/// `setupLifecycle: none`. Mirrors TypeScript's SetupLifecycle (types.ts).
+/// See AnalysisRunner.systemInstructions for the continuity rules governing
+/// how this progresses across analyses of the same instrument.
+@available(macOS 26, *)
+@Generable
+enum GeneratedSetupLifecycle: String, Sendable {
+    case none, developing, confirmed, triggered, extended, completed, invalidated
 }
 
 /// Underlying price zones/levels are grounded by id only — the model
@@ -114,6 +118,7 @@ struct GeneratedTradeDeskInvalidation: Sendable {
 @Generable
 struct GeneratedTradeDeskPlan: Sendable {
     var action: GeneratedTradeDeskAction
+    var setupLifecycle: GeneratedSetupLifecycle
     @Guide(description: "Required only when action is scale")
     var scaleAdvice: GeneratedScaleAdvice?
     @Guide(description: "Short label for the current setup, e.g. 'Bullish pullback'")
@@ -135,9 +140,6 @@ struct GeneratedTradeDeskPlan: Sendable {
 struct GeneratedAnalysis: Sendable {
     @Guide(description: "wait | enter | hold | trim | exit | avoid")
     var recommendation: GeneratedRecommendation
-
-    @Guide(description: "none | forming | confirmed | extended | invalidated")
-    var setupState: GeneratedSetupState
 
     @Guide(description: "bullish | bearish | neutral | mixed")
     var bias: GeneratedBias
@@ -163,6 +165,7 @@ struct GeneratedAnalysis: Sendable {
     @Guide(description: "One paragraph plain-language summary")
     var summary: String
 
+    @Guide(description: "Always attempt this; omit only when evidence is too thin to say anything")
     var tradeDeskPlan: GeneratedTradeDeskPlan?
 }
 #endif

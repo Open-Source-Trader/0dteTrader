@@ -2957,14 +2957,23 @@
 
 .trade-desk__header-action {
   flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
   border: var(--border-hairline) solid var(--hud-stroke-dim);
   border-radius: 2px;
-  padding: 2px 6px;
+  color: var(--label-secondary);
+}
+
+.trade-desk__header-action:hover:not(:disabled) {
   color: var(--label-primary);
-  font-size: var(--fs-caption2-desktop);
-  font-weight: 900;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
+  border-color: var(--label-secondary);
+}
+
+.trade-desk__header-action:disabled {
+  opacity: var(--disabled-opacity);
 }
 
 .trade-desk--stale .trade-desk__status,

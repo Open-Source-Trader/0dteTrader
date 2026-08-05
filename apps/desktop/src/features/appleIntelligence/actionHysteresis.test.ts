@@ -38,6 +38,7 @@ function baseSnapshot(overrides: Partial<AnalysisSnapshot> = {}): AnalysisSnapsh
 function basePlan(overrides: Partial<TradeDeskPlan> = {}): TradeDeskPlan {
   return {
     action: 'wait',
+    setupLifecycle: 'none',
     setupLabel: 'Bullish desk check',
     summary: 'Waiting for confirmation.',
     targets: { contract: [] },

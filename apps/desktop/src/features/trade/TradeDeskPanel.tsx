@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { OptionContract, Position } from '@0dtetrader/shared-types';
 import { useStore, shallowEqual } from '../../core/observable';
+import { RefreshIcon } from '../../design/icons';
 import type { AnalysisSnapshot } from '../appleIntelligence/types';
 import type { AnalysisStore } from '../appleIntelligence/AnalysisStore';
 import { hashPositionVersion } from '../appleIntelligence/AnalysisSnapshotBuilder';
@@ -9,6 +10,7 @@ import {
   buildFlatTradeDeskAnalysis,
   buildPositionTradeDeskAnalysis,
   buildTradeDeskViewState,
+  buildUnavailableTradeDeskAnalysis,
   clampText,
   type FlatTradeDeskAnalysis,
   type PositionTradeDeskAnalysis,
@@ -53,8 +55,9 @@ export function TradeDeskPanel({
       availability: state.availability,
       isAnalyzing: state.isAnalyzing,
       latestResult: state.latestResult,
-      errorMessage: state.errorMessage,
+      lastDiscard: state.lastDiscard,
       pendingActionChange: state.pendingActionChange,
+      ineligibility: state.lastIneligibility,
     }),
     shallowEqual,
   );
@@ -63,7 +66,6 @@ export function TradeDeskPanel({
     (state) => ({ positions: state.positions, isSubmitting: state.isSubmitting }),
     shallowEqual,
   );
-  const [dismissedResultId, setDismissedResultId] = useState<string | null>(null);
   const [applyError, setApplyError] = useState<string | null>(null);
 
   const openPosition: Position | null = useMemo(() => {
@@ -105,7 +107,6 @@ export function TradeDeskPanel({
         currentContext,
         selectedContract,
         currentPositionVersion,
-        dismissedResultId,
         disabled: locked,
         marketSessionState,
         hasOpenPosition: openPosition !== null,
@@ -115,7 +116,6 @@ export function TradeDeskPanel({
       currentContext,
       selectedContract,
       currentPositionVersion,
-      dismissedResultId,
       locked,
       marketSessionState,
       openPosition,
@@ -123,8 +123,8 @@ export function TradeDeskPanel({
   );
 
   useEffect(() => {
-    if (viewState.presentation?.resultId !== dismissedResultId) setApplyError(null);
-  }, [viewState.presentation?.resultId, dismissedResultId]);
+    setApplyError(null);
+  }, [viewState.presentation?.resultId]);
 
   const refresh = () => {
     if (viewState.status === 'generating') return;
@@ -166,11 +166,7 @@ export function TradeDeskPanel({
         position={openPosition}
         underlyingLast={underlyingLast}
         onApply={applySuggestedPrice}
-        onRefresh={refresh}
         applyError={applyError}
-        onDismiss={() =>
-          viewState.presentation && setDismissedResultId(viewState.presentation.resultId)
-        }
       />
     </section>
   );
@@ -212,11 +208,15 @@ function TradeDeskHeader({
       <span className="trade-desk__status" role="status" aria-live="polite">
         {freshnessLabel}
       </span>
-      {viewState.status === 'failed' || viewState.status === 'unavailable' ? (
-        <button type="button" className="trade-desk__header-action" onClick={onRefresh}>
-          Retry
-        </button>
-      ) : null}
+      <button
+        type="button"
+        className="trade-desk__header-action"
+        onClick={onRefresh}
+        disabled={viewState.status === 'generating'}
+        aria-label="Refresh AI trade analysis"
+      >
+        <RefreshIcon size={12} />
+      </button>
     </div>
   );
 }
@@ -227,22 +227,41 @@ function TradeDeskBody({
   position,
   underlyingLast,
   onApply,
-  onRefresh,
   applyError,
-  onDismiss,
 }: {
   viewState: TradeDeskViewState;
   selectedContract: OptionContract | null;
   position: Position | null;
   underlyingLast: number | null;
   onApply: () => void;
-  onRefresh: () => void;
   applyError: string | null;
-  onDismiss: () => void;
 }) {
   const presentation = viewState.presentation;
 
   if (!presentation) {
+    // `unavailable` (whether from a rejected snapshot or no result yet)
+    // renders the same fixed 8-cell shape as every other state — never a
+    // bespoke empty div — so the panel's size and structure never shift
+    // based on which state it's in. Every other empty case (disabled,
+    // generating with nothing prior, failed) keeps the compact placeholder,
+    // since those are transient/administrative rather than a data verdict.
+    if (viewState.status === 'unavailable') {
+      const analysis = buildUnavailableTradeDeskAnalysis(viewState.unavailableReason);
+      return (
+        <div className="trade-desk__body">
+          <div className="trade-desk__grid">
+            <TradeDeskCell cell={analysis.setup} />
+            <TradeDeskCell cell={analysis.entry} />
+            <TradeDeskCell cell={analysis.invalidation} />
+            <TradeDeskCell cell={analysis.targets} />
+            <TradeDeskCell cell={analysis.contract} />
+            <TradeDeskCell cell={analysis.premiumLimit} />
+            <TradeDeskCell cell={analysis.execution} />
+            <TradeDeskCell cell={analysis.runner} />
+          </div>
+        </div>
+      );
+    }
     // staleReason carries curated copy for `stale` (from staleReason() in
     // tradeDeskPresenter.ts) but can carry a raw AnalysisStore/IPC error
     // message for `failed` — never surface that verbatim, only a bounded,
@@ -268,8 +287,6 @@ function TradeDeskBody({
         analysis={analysis}
         viewState={viewState}
         onApply={onApply}
-        onRefresh={onRefresh}
-        onDismiss={onDismiss}
         applyError={applyError}
       />
     );
@@ -281,28 +298,26 @@ function TradeDeskBody({
       analysis={analysis}
       viewState={viewState}
       onApply={onApply}
-      onRefresh={onRefresh}
-      onDismiss={onDismiss}
       applyError={applyError}
     />
   );
 }
 
+/** Apply-suggested-price action only — shown solely when the plan actually
+ * has one. No Refresh (moved to the header, TradeDeskHeader) and no Dismiss
+ * (a persistent decision board doesn't need dismissing, per the design
+ * brief). */
 function TradeDeskGridFooter({
   viewState,
   onApply,
-  onRefresh,
-  onDismiss,
   applyError,
 }: {
   viewState: TradeDeskViewState;
   onApply: () => void;
-  onRefresh: () => void;
-  onDismiss: () => void;
   applyError: string | null;
 }) {
   const presentation = viewState.presentation;
-  if (!presentation) return null;
+  if (!presentation?.applicablePriceSuggestion) return null;
   return (
     <div className="trade-desk__actions">
       <button
@@ -310,26 +325,9 @@ function TradeDeskGridFooter({
         className="trade-desk__apply"
         onClick={onApply}
         disabled={!viewState.canApplySuggestedPrice || viewState.status !== 'current'}
-        aria-label={
-          presentation.applicablePriceSuggestion
-            ? `Apply suggested contract price of ${presentation.entry?.preferredContractPrice?.value}`
-            : 'Apply suggested contract price'
-        }
+        aria-label={`Apply suggested contract price of ${presentation.entry?.preferredContractPrice?.value}`}
       >
-        {presentation.applicablePriceSuggestion
-          ? `USE ${presentation.entry?.preferredContractPrice?.value} ENTRY`
-          : 'NO ENTRY PRICE'}
-      </button>
-      <button type="button" onClick={onDismiss} aria-label="Dismiss this Trade Desk assessment">
-        Dismiss
-      </button>
-      <button
-        type="button"
-        onClick={onRefresh}
-        disabled={viewState.status === 'generating'}
-        aria-label="Refresh Trade Desk assessment"
-      >
-        Refresh
+        USE {presentation.entry?.preferredContractPrice?.value} ENTRY
       </button>
       {applyError ? (
         <span className="trade-desk__local-error" role="alert">
@@ -344,15 +342,11 @@ function FlatTradeDeskGrid({
   analysis,
   viewState,
   onApply,
-  onRefresh,
-  onDismiss,
   applyError,
 }: {
   analysis: FlatTradeDeskAnalysis;
   viewState: TradeDeskViewState;
   onApply: () => void;
-  onRefresh: () => void;
-  onDismiss: () => void;
   applyError: string | null;
 }) {
   return (
@@ -367,13 +361,7 @@ function FlatTradeDeskGrid({
         <TradeDeskCell cell={analysis.execution} />
         <TradeDeskCell cell={analysis.runner} />
       </div>
-      <TradeDeskGridFooter
-        viewState={viewState}
-        onApply={onApply}
-        onRefresh={onRefresh}
-        onDismiss={onDismiss}
-        applyError={applyError}
-      />
+      <TradeDeskGridFooter viewState={viewState} onApply={onApply} applyError={applyError} />
     </div>
   );
 }
@@ -382,15 +370,11 @@ function PositionTradeDeskGrid({
   analysis,
   viewState,
   onApply,
-  onRefresh,
-  onDismiss,
   applyError,
 }: {
   analysis: PositionTradeDeskAnalysis;
   viewState: TradeDeskViewState;
   onApply: () => void;
-  onRefresh: () => void;
-  onDismiss: () => void;
   applyError: string | null;
 }) {
   return (
@@ -405,13 +389,7 @@ function PositionTradeDeskGrid({
         <TradeDeskCell cell={analysis.underlying} />
         <TradeDeskCell cell={analysis.runner} />
       </div>
-      <TradeDeskGridFooter
-        viewState={viewState}
-        onApply={onApply}
-        onRefresh={onRefresh}
-        onDismiss={onDismiss}
-        applyError={applyError}
-      />
+      <TradeDeskGridFooter viewState={viewState} onApply={onApply} applyError={applyError} />
     </div>
   );
 }

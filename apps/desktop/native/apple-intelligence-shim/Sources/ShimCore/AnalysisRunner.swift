@@ -15,37 +15,65 @@ public enum AnalysisRunError: Error, Sendable, Equatable {
     case structuredOutputInvalid
     case guardrailRejection
     case runtimeFailure
+    /// Generation completed without throwing (FoundationModels'
+    /// `maximumResponseTokens` truncates silently — no error, per Apple's
+    /// documented behavior) but used up ~all of the configured output
+    /// budget, meaning the result is likely cut off mid-field (a syntactically
+    /// valid but semantically incomplete Generable, e.g. a String field
+    /// ending mid-sentence). Must not be decoded/promoted as if it were a
+    /// complete answer.
+    case responseLikelyTruncated
 }
 
 public enum AnalysisRunner {
     public static let systemInstructions = """
         You are a technical market analyst assisting an intraday 0DTE \
-        options trader. Analyze only the supplied evidence for the \
-        supplied symbol and timeframe — never invent market facts. \
-        Reference underlying levels by their candidate level id only; \
-        never write a numeric underlying price yourself, in a structured \
-        field or in free text. Contract premium prices must stay close to \
-        the supplied selected contract's own bid/ask/last. A level cross \
-        or touch requires price-action confirmation before it counts as \
-        significant — do not treat a single touch as confirmation. Use \
-        only the provided recommendation and setup categories. Be concise \
-        and conditional: state what confirms or invalidates the setup, \
-        not just a conclusion.
+        options trader. Use only the supplied evidence — never invent \
+        market facts or prices. Reference underlying levels by candidate \
+        level id only, never a raw number. Contract premiums must stay \
+        close to the selected contract's own bid/ask/last. A level cross \
+        needs price-action confirmation, not a single touch. Be concise: \
+        state what confirms or invalidates the setup, not just a conclusion. \
+        bias is "neutral" only for genuinely range-bound/choppy action, not \
+        low confidence — higher highs/lows is "bullish", the mirror is \
+        "bearish". Always attempt tradeDeskPlan; omitting it should be rare.
 
-        Every prompt states POSITION as either a held position or none —
-        use it to pick the action family. When POSITION is none: `hold`,
-        `scale`, and `exit` are invalid, since there is nothing held to
-        manage. Recommend `enter` (or `wait`/`avoid` if no valid setup
-        exists) and give concrete call and put entry levels: the
-        acceptance/rejection level that triggers each side, the
-        invalidation level that kills the thesis, and 2-3 targets for
-        each side. When POSITION holds a contract: `enter` is invalid,
-        since there is no new entry to make. Recommend `hold`, `scale`,
-        or `exit` and frame management around that specific held
-        contract — its current premium versus entry, the underlying
-        level that supports holding, and the level whose loss cuts the
-        trade.
+        setupLifecycle is independent of action: an extended setup that's \
+        run too far to enter is still "extended" with its real label and \
+        action "wait", not "none". Use "none" only when no setup ever \
+        formed — a clear directional trend with a pullback, reclaim, or \
+        consolidation near support/resistance is a setup (at least \
+        "developing"), even without a confirmed trigger yet. Any named \
+        setup ("developing" or beyond) must still give invalidation and \
+        targets grounded in supplied candidate levels — a trader needs to \
+        know where the thesis breaks and where it's headed before any \
+        trigger fires, not only after. Only the entry price/zone itself \
+        waits for "confirmed"/"triggered": never claim either with \
+        entry/invalidation empty; use "developing" instead if the trigger \
+        hasn't concretely fired yet, but still populate invalidation and \
+        targets. If PRIOR SETUP is supplied, continue it rather than \
+        resetting to "none". No contract-premium guidance without a \
+        supplied contract quote — use underlying prices otherwise.
+
+        POSITION is either held or none. None: hold/scale/exit are \
+        invalid; recommend enter (or wait/avoid) with call and put entry, \
+        invalidation, and 2-3 targets per side. Held: enter is invalid; \
+        recommend hold/scale/exit framed around that contract — premium \
+        vs. entry, the level that supports holding, the level that cuts it.
         """
+
+    /// FoundationModels' `maximumResponseTokens` truncates a response
+    /// silently — no thrown error — once hit (Apple's documented behavior:
+    /// "the response will be terminated early. No error will be thrown.").
+    /// Leaving it unset instead runs generation to the underlying context-
+    /// window ceiling, which is documented to throw on overflow but has
+    /// been observed (empirically, this session) to sometimes return a
+    /// syntactically-valid-but-truncated Generable value instead. An
+    /// explicit, generous-but-bounded cap turns an unpredictable runaway
+    /// generation into a bounded-cost one; `looksTruncated` (below) is the
+    /// actual detection mechanism, since this SDK's `Response` exposes no
+    /// token-count/usage signal to check against the cap directly.
+    static let maxResponseTokens = 1200
 
     /// Decodes the raw wire payload into a snapshot. `nil` means the
     /// payload didn't even parse — callers map that to `payload_invalid`.
@@ -105,16 +133,44 @@ public enum AnalysisRunner {
         let session = LanguageModelSession(instructions: systemInstructions)
         let response: LanguageModelSession.Response<GeneratedAnalysis>
         do {
-            response = try await session.respond(to: budgeted.text, generating: GeneratedAnalysis.self)
+            response = try await session.respond(
+                to: budgeted.text,
+                generating: GeneratedAnalysis.self,
+                options: GenerationOptions(
+                    sampling: .greedy,
+                    maximumResponseTokens: maxResponseTokens
+                )
+            )
         } catch is CancellationError {
             throw CancellationError()
         } catch {
+            // Never sent over the wire (security-boundary.md "Logging") —
+            // stderr only, for local diagnosis of which FoundationModels
+            // failure mode (e.g. exceededContextWindowSize, guardrail
+            // rejection) is actually behind a generic runtimeFailure.
+            FileHandle.standardError.write(Data("[apple-intelligence-shim] analysis_run_error requestId=\(analysisId) error=\(error)\n".utf8))
             throw AnalysisRunError.runtimeFailure
         }
 
         if isCancelled() { throw CancellationError() }
 
+        // maximumResponseTokens truncates silently — no thrown error, and
+        // (per this SDK's actual API — no `usage`/token-count surface
+        // exists on `Response` here despite some documentation describing
+        // one) no token-count signal either. The only observable evidence
+        // of a cut-off generation is the decoded content itself: a
+        // required prose field ending mid-word/mid-sentence with no
+        // terminal punctuation. This is a narrower net than a token-count
+        // check would be, but it directly matches the actual failure
+        // observed (setupLabel/summary/warnings entries ending in a
+        // trailing space with no closing punctuation) — see
+        // `looksTruncated` below.
         let generated = response.content
+        if let debugField = firstTruncatedField(generated) {
+            FileHandle.standardError.write(Data("[apple-intelligence-shim] analysis_run_truncation_suspected requestId=\(analysisId) field=\"\(debugField)\"\n".utf8))
+            throw AnalysisRunError.responseLikelyTruncated
+        }
+
         let candidatePrices = Dictionary(
             snapshot.levels.map { ($0.id, $0.price) },
             uniquingKeysWith: { first, _ in first }
@@ -146,7 +202,7 @@ public enum AnalysisRunner {
             "context": contextIdentity(from: snapshot.identity),
             "generatedAt": .string(ISO8601DateFormatter().string(from: Date())),
             "recommendation": .string(recommendation),
-            "setupState": .string(generated.setupState.rawValue),
+            "setupState": .string(legacySetupState(from: generated.tradeDeskPlan?.setupLifecycle)),
             "bias": .string(generated.bias.rawValue),
             "levels": .object(levelsObject),
             "confidence": .number(min(1, max(0, generated.confidence))),
@@ -177,6 +233,60 @@ public enum AnalysisRunner {
     }
 
     #if canImport(FoundationModels)
+    /// Derives the legacy top-level `setupState` field from `setupLifecycle`
+    /// instead of asking the model to generate both — the two were
+    /// redundant (the model filling out an entire extra enum, with its own
+    /// schema/token cost, every single call, for a value this mapping can
+    /// compute deterministically). `tradeDeskPlan` absent (the pre-existing
+    /// legacy-only path) maps to "none", matching prior behavior for
+    /// results that never populate a plan at all.
+    @available(macOS 26, *)
+    private static func legacySetupState(from lifecycle: GeneratedSetupLifecycle?) -> String {
+        guard let lifecycle else { return "none" }
+        switch lifecycle {
+        case .none, .developing: return "forming"
+        case .confirmed, .triggered: return "confirmed"
+        case .extended, .completed: return "extended"
+        case .invalidated: return "invalidated"
+        }
+    }
+
+    /// A cut-off generation tends to end a prose field mid-word or
+    /// mid-sentence: trailing whitespace, or a last character that's a
+    /// word character/comma rather than sentence-ending punctuation. Not a
+    /// proof of truncation (a short label like "Bullish pullback" or a
+    /// one-word `warnings` entry legitimately has no terminal punctuation
+    /// either) — scoped to the fields most likely to reveal a cut-off
+    /// (multi-word prose: `summary`, `tradeDeskPlan.summary`, and any
+    /// `warnings`/`assumptions`/`reasons` entry with more than a few words)
+    /// rather than short structured labels, to keep the false-positive
+    /// rate low.
+    @available(macOS 26, *)
+    private static func firstTruncatedField(_ generated: GeneratedAnalysis) -> String? {
+        var prose = [generated.summary]
+        prose.append(contentsOf: generated.warnings)
+        prose.append(contentsOf: generated.assumptions)
+        prose.append(contentsOf: generated.reasons)
+        if let plan = generated.tradeDeskPlan {
+            prose.append(plan.summary)
+        }
+        return prose.first { looksCutOff($0) }
+    }
+
+    /// Scoped deliberately narrow: complete model-generated phrases very
+    /// often lack terminal punctuation ("Trigger manual not yet confirmed",
+    /// "Smoke test setup") — that alone is not evidence of truncation and
+    /// produced a high false-positive rate when tried. A trailing space
+    /// before the field ends is a much rarer, stronger signal: it means
+    /// generation stopped mid-word, between two tokens that would
+    /// otherwise have been separated by that same space had a following
+    /// word actually been emitted — exactly the shape of the originally
+    /// observed truncated fields ("The setup label ", "The prior setup is
+    /// still ").
+    private static func looksCutOff(_ text: String) -> Bool {
+        text.hasSuffix(" ")
+    }
+
     /// Bid/ask/last of the snapshot's selected contract, if supplied — the
     /// only reference a generated contract-premium price can be grounded
     /// against, since `options` is opaque JSON with no typed model here
@@ -287,6 +397,7 @@ public enum AnalysisRunner {
 
         var planObject: [String: JSONValue] = [
             "action": .string(plan.action.rawValue),
+            "setupLifecycle": .string(plan.setupLifecycle.rawValue),
             "setupLabel": .string(plan.setupLabel),
             "summary": .string(plan.summary),
             "targets": .object(["contract": .array(contractTargets)]),

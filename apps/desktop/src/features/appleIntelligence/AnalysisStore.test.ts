@@ -1,10 +1,23 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AnalysisStore } from './AnalysisStore';
 import type {
   AppleIntelligenceBridge,
   NativeEventPayload,
 } from '../../core/desktop/appleIntelligence';
 import type { AnalysisSnapshot } from './types';
+
+// Fixed to a regular-hours weekday (Wed 11:00 ET) so market-session-derived
+// behavior — the fingerprint cache only short-circuits outside `live` mode —
+// doesn't flip on and off depending on the real wall-clock time the suite
+// happens to run at.
+beforeEach(() => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date('2026-07-29T15:00:00.000Z'));
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 function makeSnapshot(overrides: Partial<AnalysisSnapshot['identity']> = {}): AnalysisSnapshot {
   return {
@@ -19,8 +32,13 @@ function makeSnapshot(overrides: Partial<AnalysisSnapshot['identity']> = {}): An
       ...overrides,
     },
     trigger: { kind: 'manual', priority: 'manual', reason: 'user requested' },
-    market: {},
-    candles: {},
+    market: { last: 578.5, bid: 578.4, ask: 578.6 },
+    candles: {
+      recent: [
+        { time: 1, open: 578, high: 579, low: 577, close: 578.5, volume: 1000 },
+        { time: 2, open: 578.5, high: 579.2, low: 578.1, close: 578.9, volume: 900 },
+      ],
+    },
     indicators: {},
     levels: [
       {
@@ -205,7 +223,8 @@ describe('AnalysisStore', () => {
     });
 
     expect(store.getState().latestResult).toBeNull();
-    expect(store.getState().errorMessage).toContain('invalid result');
+    expect(store.getState().lastDiscard?.message).toContain('invalid result');
+    expect(store.getState().lastDiscard?.code).toBe('invalid-result');
   });
 
   it('ignores events for a request it did not originate', async () => {
@@ -252,7 +271,8 @@ describe('AnalysisStore', () => {
       error: { code: 'model_runtime_failure', message: 'boom' },
     });
 
-    expect(store.getState().errorMessage).toBe('boom');
+    expect(store.getState().lastDiscard?.message).toBe('boom');
+    expect(store.getState().lastDiscard?.code).toBe('runtime-failed');
     expect(store.getState().isAnalyzing).toBe(false);
   });
 
@@ -280,6 +300,37 @@ describe('AnalysisStore', () => {
     expect(cancelMock).not.toHaveBeenCalled();
   });
 
+  describe('eligibility gate', () => {
+    it('never calls the bridge for an ineligible snapshot, and records the rejection reason', async () => {
+      const { bridge, analyzeMock } = makeFakeBridge();
+      const store = new AnalysisStore(bridge);
+      const invalid = makeSnapshot();
+      (invalid as unknown as { market: unknown }).market = { last: null, bid: null, ask: null };
+
+      await store.analyze(invalid);
+
+      expect(analyzeMock).not.toHaveBeenCalled();
+      expect(store.getState().isAnalyzing).toBe(false);
+      expect(store.getState().lastIneligibility).toMatchObject({
+        reason: 'missing-underlying-quote',
+      });
+    });
+
+    it('clears lastIneligibility once a subsequent eligible snapshot is submitted', async () => {
+      const { bridge, analyzeMock } = makeFakeBridge();
+      const store = new AnalysisStore(bridge);
+      const invalid = makeSnapshot();
+      (invalid as unknown as { market: unknown }).market = { last: null, bid: null, ask: null };
+      await store.analyze(invalid);
+      expect(store.getState().lastIneligibility).not.toBeNull();
+
+      await store.analyze(makeSnapshot());
+
+      expect(analyzeMock).toHaveBeenCalledTimes(1);
+      expect(store.getState().lastIneligibility).toBeNull();
+    });
+  });
+
   describe('bridge error handling', () => {
     it('recovers from a rejected analyze() instead of leaving isAnalyzing stuck true', async () => {
       const bridge: AppleIntelligenceBridge = {
@@ -296,7 +347,8 @@ describe('AnalysisStore', () => {
 
       expect(store.getState().isAnalyzing).toBe(false);
       expect(store.getState().activeRequestId).toBeNull();
-      expect(store.getState().errorMessage).toBe('IPC channel closed');
+      expect(store.getState().lastDiscard?.message).toBe('IPC channel closed');
+      expect(store.getState().lastDiscard?.code).toBe('request-failed');
     });
 
     it('allows a subsequent analyze() to proceed after a prior one rejected', async () => {
@@ -436,7 +488,7 @@ describe('AnalysisStore', () => {
         price: 578.5,
       });
       expect(store.getState().latestResult?.context.snapshotSequence).toBe(1);
-      expect(store.getState().errorMessage).toBeNull();
+      expect(store.getState().lastDiscard).toBeNull();
     });
 
     it('position-critical work preempts an active candle-close request', async () => {
@@ -569,14 +621,19 @@ describe('AnalysisStore', () => {
   });
 
   describe('repeated analysis', () => {
-    /** No result cache: every analyze() call — including a Refresh whose
-     * snapshot content happens to be unchanged — always invokes the bridge
-     * again. A cache keyed on snapshot content was tried and reverted: live
-     * market/candle data ticks on nearly every capture, so "unchanged"
-     * essentially never occurred while markets were open, making the cache
-     * both ineffective (rarely hit) and confusing (a rare hit produced no
-     * visible feedback, reading as "Refresh does nothing"). */
-    it('calls the bridge again for a snapshot with identical content to the last one', async () => {
+    /** No result cache while the market is live: every analyze() call —
+     * including a Refresh whose snapshot content happens to be unchanged —
+     * always invokes the bridge again. An earlier, unconditional content-
+     * keyed cache was tried and reverted: live market/candle data ticks on
+     * nearly every capture, so "unchanged" essentially never occurred while
+     * markets were open, making the cache both ineffective (rarely hit) and
+     * confusing (a rare hit produced no visible feedback, reading as
+     * "Refresh does nothing"). The current fingerprint cache reintroduces
+     * caching but scoped to non-live mode only — see the closed-market case
+     * below — for exactly the scenario an unconditional cache couldn't
+     * usefully serve: a market-closed Refresh against genuinely unchanged
+     * data. */
+    it('calls the bridge again for a snapshot with identical content to the last one, while the market is live', async () => {
       const { bridge, emit, analyzeMock } = makeFakeBridge();
       const store = new AnalysisStore(bridge);
       store.start();
@@ -594,6 +651,56 @@ describe('AnalysisStore', () => {
 
       const second = makeSnapshot({ snapshotId: 'different-snapshot-id', snapshotSequence: 2 });
       await store.analyze(second);
+
+      expect(analyzeMock).toHaveBeenCalledTimes(2);
+    });
+
+    it('reuses the cached result instead of calling the bridge again for identical content while the market is closed', async () => {
+      vi.setSystemTime(new Date('2026-08-01T15:00:00.000Z')); // Saturday — market closed
+      const { bridge, emit, analyzeMock } = makeFakeBridge();
+      const store = new AnalysisStore(bridge);
+      store.start();
+
+      const first = makeSnapshot({ snapshotSequence: 1 });
+      await store.analyze(first);
+      const firstRequestId = store.getState().activeRequestId;
+      emit({
+        protocolVersion: 1,
+        requestId: firstRequestId!,
+        event: 'completed',
+        payload: validResultPayload({ analysisId: 'a1' }),
+      });
+      expect(analyzeMock).toHaveBeenCalledTimes(1);
+      expect(store.getState().latestResult?.analysisId).toBe('a1');
+
+      // Same content, different identity fields (as a manual Refresh would
+      // produce) — must reuse the cached result, not call the bridge again.
+      const second = makeSnapshot({ snapshotId: 'different-snapshot-id', snapshotSequence: 2 });
+      await store.analyze(second);
+
+      expect(analyzeMock).toHaveBeenCalledTimes(1);
+      expect(store.getState().latestResult?.analysisId).toBe('a1');
+    });
+
+    it('calls the bridge again when content actually changes, even while the market is closed', async () => {
+      vi.setSystemTime(new Date('2026-08-01T15:00:00.000Z')); // Saturday — market closed
+      const { bridge, emit, analyzeMock } = makeFakeBridge();
+      const store = new AnalysisStore(bridge);
+      store.start();
+
+      const first = makeSnapshot({ snapshotSequence: 1 });
+      await store.analyze(first);
+      emit({
+        protocolVersion: 1,
+        requestId: store.getState().activeRequestId!,
+        event: 'completed',
+        payload: validResultPayload({ analysisId: 'a1' }),
+      });
+      expect(analyzeMock).toHaveBeenCalledTimes(1);
+
+      const changed = makeSnapshot({ snapshotSequence: 2 });
+      (changed as unknown as { market: unknown }).market = { last: 999, bid: 998.9, ask: 999.1 };
+      await store.analyze(changed);
 
       expect(analyzeMock).toHaveBeenCalledTimes(2);
     });
@@ -697,6 +804,296 @@ describe('AnalysisStore', () => {
       // Two different contrary candidates in a row — neither confirmed.
       expect(afterThird.latestResult?.recommendation).toBe('hold');
       expect(afterThird.pendingActionChange).toEqual({ action: 'avoid' });
+    });
+  });
+
+  describe('setup lifecycle persistence', () => {
+    function setupPlanPayload(
+      resultOverrides: Record<string, unknown> = {},
+      planOverrides: Record<string, unknown> = {},
+    ) {
+      return validResultPayload({
+        bias: 'bullish',
+        ...resultOverrides,
+        tradeDeskPlan: {
+          action: 'wait',
+          setupLifecycle: 'developing',
+          setupLabel: 'Bullish reversal',
+          summary: 'Reclaim in progress.',
+          // developing (and beyond) requires invalidation + targets —
+          // only the entry itself legitimately waits for a real trigger.
+          invalidation: {
+            underlying: {
+              operator: 'below',
+              price: {
+                value: 578,
+                priceDomain: 'underlying',
+                evidenceId: 'swing-low',
+                snapshotId: 's1',
+              },
+            },
+          },
+          targets: {
+            contract: [],
+            underlying: [
+              {
+                role: 'first',
+                price: {
+                  value: 582,
+                  priceDomain: 'underlying',
+                  evidenceId: 'vwap',
+                  snapshotId: 's1',
+                },
+              },
+            ],
+          },
+          management: { holdConditions: [], scaleConditions: [], exitConditions: [] },
+          ...planOverrides,
+        },
+      });
+    }
+
+    it('omits priorSetup from the outgoing snapshot when nothing is tracked yet', async () => {
+      const { bridge, analyzeMock } = makeFakeBridge();
+      const store = new AnalysisStore(bridge);
+      await store.analyze(makeSnapshot());
+      const sentSnapshot = analyzeMock.mock.calls[0][0].payload;
+      expect(sentSnapshot.priorSetup).toBeUndefined();
+    });
+
+    it('attaches priorSetup on the next request once a setup has been promoted', async () => {
+      const { bridge, emit, analyzeMock } = makeFakeBridge();
+      const store = new AnalysisStore(bridge);
+      store.start();
+
+      await store.analyze(makeSnapshot({ snapshotSequence: 1 }));
+      const firstRequestId = store.getState().activeRequestId;
+      emit({
+        protocolVersion: 1,
+        requestId: firstRequestId!,
+        event: 'completed',
+        payload: setupPlanPayload({
+          context: { symbol: 'SPY', timeframe: '5m', snapshotSequence: 1, positionVersion: 0 },
+        }),
+      });
+
+      await store.analyze(makeSnapshot({ snapshotSequence: 2 }));
+      const secondSentSnapshot = analyzeMock.mock.calls[1][0].payload;
+      expect(secondSentSnapshot.priorSetup).toMatchObject({
+        direction: 'bullish',
+        label: 'Bullish reversal',
+        lifecycle: 'developing',
+      });
+    });
+
+    it('does not attach priorSetup for a different instrument (symbol changed)', async () => {
+      const { bridge, emit, analyzeMock } = makeFakeBridge();
+      const store = new AnalysisStore(bridge);
+      store.start();
+
+      await store.analyze(makeSnapshot({ snapshotSequence: 1 }));
+      const firstRequestId = store.getState().activeRequestId;
+      emit({
+        protocolVersion: 1,
+        requestId: firstRequestId!,
+        event: 'completed',
+        payload: setupPlanPayload({
+          context: { symbol: 'SPY', timeframe: '5m', snapshotSequence: 1, positionVersion: 0 },
+        }),
+      });
+
+      await store.analyze(makeSnapshot({ symbol: 'QQQ', snapshotSequence: 2 } as never));
+      const secondSentSnapshot = analyzeMock.mock.calls[1][0].payload;
+      expect(secondSentSnapshot.priorSetup).toBeUndefined();
+    });
+
+    it('keeps the real setupLabel in latestResult across an analysis where entry data is absent (extended setup)', async () => {
+      const { bridge, emit } = makeFakeBridge();
+      const store = new AnalysisStore(bridge);
+      store.start();
+
+      await store.analyze(makeSnapshot({ snapshotSequence: 1 }));
+      emit({
+        protocolVersion: 1,
+        requestId: store.getState().activeRequestId!,
+        event: 'completed',
+        payload: setupPlanPayload({
+          context: { symbol: 'SPY', timeframe: '5m', snapshotSequence: 1, positionVersion: 0 },
+        }),
+      });
+      expect(store.getState().latestResult?.tradeDeskPlan?.setupLabel).toBe('Bullish reversal');
+
+      await store.analyze(makeSnapshot({ snapshotSequence: 2 }));
+      emit({
+        protocolVersion: 1,
+        requestId: store.getState().activeRequestId!,
+        event: 'completed',
+        payload: setupPlanPayload(
+          {
+            analysisId: 'a2',
+            context: { symbol: 'SPY', timeframe: '5m', snapshotSequence: 2, positionVersion: 0 },
+          },
+          { setupLifecycle: 'extended', summary: 'Extended — do not chase.' },
+        ),
+      });
+
+      expect(store.getState().latestResult?.tradeDeskPlan?.setupLifecycle).toBe('extended');
+      expect(store.getState().latestResult?.tradeDeskPlan?.setupLabel).toBe('Bullish reversal');
+    });
+  });
+
+  describe('lastDiscard persistence (error-state clobber fix)', () => {
+    it('survives automatic next-run start instead of being cleared the instant a new request begins', async () => {
+      const { bridge, emit } = makeFakeBridge();
+      const store = new AnalysisStore(bridge);
+      store.start();
+
+      // First request fails (schema-invalid payload).
+      await store.analyze(makeSnapshot());
+      emit({
+        protocolVersion: 1,
+        requestId: store.getState().activeRequestId!,
+        event: 'completed',
+        payload: { garbage: true },
+      });
+      expect(store.getState().lastDiscard?.code).toBe('invalid-result');
+
+      // A second request starts for the SAME instrument (e.g. an automatic
+      // candle-close retry) — the old bug cleared errorMessage right here,
+      // before the trader ever saw the discard reason.
+      await store.analyze(makeSnapshot());
+      expect(store.getState().lastDiscard?.code).toBe('invalid-result');
+      expect(store.getState().isAnalyzing).toBe(true);
+    });
+
+    it('clears the discard once a matching successful result is promoted', async () => {
+      const { bridge, emit } = makeFakeBridge();
+      const store = new AnalysisStore(bridge);
+      store.start();
+
+      await store.analyze(makeSnapshot());
+      emit({
+        protocolVersion: 1,
+        requestId: store.getState().activeRequestId!,
+        event: 'completed',
+        payload: { garbage: true },
+      });
+      expect(store.getState().lastDiscard).not.toBeNull();
+
+      await store.analyze(makeSnapshot());
+      emit({
+        protocolVersion: 1,
+        requestId: store.getState().activeRequestId!,
+        event: 'completed',
+        payload: validResultPayload(),
+      });
+
+      expect(store.getState().latestResult?.analysisId).toBe('a1');
+      expect(store.getState().lastDiscard).toBeNull();
+    });
+
+    it('an unrelated (different-instrument) successful result does not clear the discard', async () => {
+      const { bridge, emit } = makeFakeBridge();
+      const store = new AnalysisStore(bridge);
+      store.start();
+
+      // Discard recorded for AAPL.
+      await store.analyze(makeSnapshot({ symbol: 'AAPL' }));
+      emit({
+        protocolVersion: 1,
+        requestId: store.getState().activeRequestId!,
+        event: 'completed',
+        payload: { garbage: true },
+      });
+      expect(store.getState().lastDiscard?.symbol).toBe('AAPL');
+
+      // A different instrument's request starts and succeeds — starting it
+      // clears the AAPL discard only because SPY is a materially different
+      // context (isDiscardStillRelevant), matching runNow's own gating, not
+      // because of the promotion itself.
+      await store.analyze(makeSnapshot({ symbol: 'SPY' }));
+      emit({
+        protocolVersion: 1,
+        requestId: store.getState().activeRequestId!,
+        event: 'completed',
+        payload: validResultPayload({
+          context: { symbol: 'SPY', timeframe: '5m', snapshotSequence: 1, positionVersion: 0 },
+        }),
+      });
+
+      expect(store.getState().latestResult?.context.symbol).toBe('SPY');
+      expect(store.getState().lastDiscard).toBeNull();
+    });
+
+    it('a stale-context result is recorded as a discard and does not overwrite newer state', async () => {
+      const { bridge, emit } = makeFakeBridge();
+      const store = new AnalysisStore(bridge);
+      store.start();
+
+      await store.analyze(makeSnapshot({ snapshotSequence: 1 }));
+      emit({
+        protocolVersion: 1,
+        requestId: store.getState().activeRequestId!,
+        event: 'completed',
+        payload: validResultPayload({
+          context: { symbol: 'SPY', timeframe: '5m', snapshotSequence: 1, positionVersion: 0 },
+        }),
+      });
+      expect(store.getState().latestResult?.analysisId).toBe('a1');
+
+      // A newer snapshot supersedes the one that was analyzed, without a new
+      // analyze() call completing yet.
+      await store.analyze(makeSnapshot({ snapshotSequence: 2 }));
+
+      // Completes with STALE context (still sequence 1) even though the
+      // snapshot actually analyzed was sequence 2 — must be recorded as a
+      // stale-context discard rather than silently vanishing, and must not
+      // overwrite the still-valid prior result.
+      emit({
+        protocolVersion: 1,
+        requestId: store.getState().activeRequestId!,
+        event: 'completed',
+        payload: validResultPayload({
+          analysisId: 'a2-stale',
+          context: { symbol: 'SPY', timeframe: '5m', snapshotSequence: 1, positionVersion: 0 },
+        }),
+      });
+
+      expect(store.getState().latestResult?.analysisId).toBe('a1');
+      expect(store.getState().lastDiscard?.code).toBe('stale-context');
+
+      // A subsequent request that completes WITH a matching context
+      // promotes normally and clears the discard.
+      await store.analyze(makeSnapshot({ snapshotSequence: 3 }));
+      emit({
+        protocolVersion: 1,
+        requestId: store.getState().activeRequestId!,
+        event: 'completed',
+        payload: validResultPayload({
+          analysisId: 'a3-current',
+          context: { symbol: 'SPY', timeframe: '5m', snapshotSequence: 3, positionVersion: 0 },
+        }),
+      });
+      expect(store.getState().latestResult?.analysisId).toBe('a3-current');
+      expect(store.getState().lastDiscard).toBeNull();
+    });
+
+    it('repeated automatic runs against a persistently invalid result do not oscillate the discard away', async () => {
+      const { bridge, emit } = makeFakeBridge();
+      const store = new AnalysisStore(bridge);
+      store.start();
+
+      for (let i = 0; i < 3; i++) {
+        await store.analyze(makeSnapshot());
+        emit({
+          protocolVersion: 1,
+          requestId: store.getState().activeRequestId!,
+          event: 'completed',
+          payload: { garbage: true },
+        });
+        expect(store.getState().lastDiscard?.code).toBe('invalid-result');
+      }
+      expect(store.getState().latestResult).toBeNull();
     });
   });
 });

@@ -6,8 +6,11 @@ import { isResultCurrent } from './stalenessGate';
 import type {
   AIAvailability,
   AnalysisContextIdentity,
+  AnalysisDiscard,
+  AnalysisIneligibilityReason,
   AnalysisResult,
   MarketAnalysisState,
+  SetupLifecycle,
   TradeDeskAction,
   TradeDeskPlan,
 } from './types';
@@ -57,6 +60,7 @@ export interface TradeDeskPresentation {
   contractIdentity: string;
   action: TradeDeskPresentationAction;
   actionLabel: string;
+  setupLifecycle: SetupLifecycle;
   setupLabel: string;
   summary: string;
   entry?: {
@@ -86,6 +90,20 @@ export interface TradeDeskPresentation {
  * layout on its own. See buildTradeDeskViewState's `hasOpenPosition` input. */
 export type TradeDeskPositionState = 'flat' | 'in-trade';
 
+/** Distinguishes why the Trade Desk has nothing to show — surfaced only
+ * when `status === 'unavailable'`. Populated from AnalysisStore's
+ * `lastIneligibility` (pre-model rejection, snapshotValidation.ts) or
+ * `lastDiscard` (a request was submitted but didn't produce current
+ * guidance — decode/schema/grounding/staleness/transport failure, see
+ * `mapDiscardReason`); otherwise left absent for the remaining
+ * generic-unavailable cases (availability not ready, no result yet at all). */
+export type TradeDeskUnavailableReason =
+  | 'invalid-underlying-quote'
+  | 'invalid-options-analytics'
+  | 'insufficient-data'
+  | 'model-unavailable'
+  | 'analysis-incomplete';
+
 export interface TradeDeskViewState {
   status: 'current' | 'generating' | 'stale' | 'unavailable' | 'failed' | 'disabled';
   presentation?: TradeDeskPresentation;
@@ -106,6 +124,9 @@ export interface TradeDeskViewState {
   /** Authoritative flat/in-trade state for choosing which 8-cell grid to
    * render. Always present so callers don't need a separate lookup. */
   positionState: TradeDeskPositionState;
+  /** Only meaningful when `status === 'unavailable'` — see
+   * TradeDeskUnavailableReason. */
+  unavailableReason?: TradeDeskUnavailableReason;
 }
 
 export interface TradeDeskPresentationLimits {
@@ -130,11 +151,16 @@ export interface BuildTradeDeskViewStateInput {
   availability: AIAvailability;
   isAnalyzing: boolean;
   latestResult: AnalysisResult | null;
-  errorMessage: string | null;
+  /** Most recent request that didn't produce current guidance — see
+   * AnalysisStore's `lastDiscard`. Replaces the old bare `errorMessage`
+   * string: unlike that field (which the store cleared the instant the next
+   * request started, discarding the reason before a trader ever saw it),
+   * this stays populated across a retry until a matching successful result
+   * supersedes it or the instrument/context materially changes. */
+  lastDiscard: AnalysisDiscard | null;
   currentContext: AnalysisContextIdentity | null;
   selectedContract: OptionContract | null;
   currentPositionVersion: number;
-  dismissedResultId?: string | null;
   disabled?: boolean;
   limits?: Partial<TradeDeskPresentationLimits>;
   marketSessionState?: MarketAnalysisState;
@@ -143,6 +169,49 @@ export interface BuildTradeDeskViewStateInput {
    * selected contract, not inferred from the AI's recommended action.
    * Defaults to false (flat) for callers that don't supply it. */
   hasOpenPosition?: boolean;
+  /** Set when the most recently submitted snapshot was rejected by the
+   * pre-model eligibility gate (AnalysisStore.lastIneligibility) — the
+   * model was never invoked. Takes priority over the generic-unavailable
+   * fallback below so the panel can show a specific reason, but never over
+   * a still-valid prior presentation (a stale-but-real result outranks "the
+   * latest refresh attempt was rejected"). */
+  ineligibility?: { reason: AnalysisIneligibilityReason; userMessage: string } | null;
+}
+
+function mapIneligibilityReason(reason: AnalysisIneligibilityReason): TradeDeskUnavailableReason {
+  switch (reason) {
+    case 'invalid-underlying-quote':
+    case 'missing-underlying-quote':
+      return 'invalid-underlying-quote';
+    case 'invalid-options-analytics':
+    case 'invalid-selected-contract-quote':
+      return 'invalid-options-analytics';
+    case 'missing-candles':
+    case 'stale-candles':
+    case 'invalid-candle-data':
+    case 'snapshot-mismatch':
+    case 'insufficient-data':
+      return 'insufficient-data';
+  }
+}
+
+/** Maps a post-submission discard (AnalysisStore.lastDiscard) to the same
+ * curated, bounded reason vocabulary `mapIneligibilityReason` uses for
+ * pre-model rejections — never the raw discard message, which may carry
+ * detail (e.g. a native error string) not meant for direct trader display. */
+function mapDiscardReason(discard: AnalysisDiscard): TradeDeskUnavailableReason {
+  switch (discard.code) {
+    case 'bridge-unavailable':
+    case 'request-failed':
+    case 'runtime-failed':
+      return 'model-unavailable';
+    case 'invalid-result':
+    case 'ungrounded-plan':
+      return 'analysis-incomplete';
+    case 'stale-context':
+    case 'superseded':
+      return 'insufficient-data';
+  }
 }
 
 export function buildTradeDeskViewState(input: BuildTradeDeskViewStateInput): TradeDeskViewState {
@@ -161,24 +230,42 @@ export function buildTradeDeskViewState(input: BuildTradeDeskViewStateInput): Tr
         limits,
       })
     : undefined;
-  const visiblePresentation =
-    presentation && presentation.resultId !== input.dismissedResultId ? presentation : undefined;
-
   if (input.isAnalyzing) {
     return {
       status: 'generating',
-      presentation: visiblePresentation,
-      generatedAt: visiblePresentation?.resultId ? input.latestResult?.generatedAt : undefined,
+      presentation,
+      generatedAt: presentation?.resultId ? input.latestResult?.generatedAt : undefined,
       canApplySuggestedPrice: false,
       marketSessionState,
       positionState,
     };
   }
 
-  if (input.errorMessage && !visiblePresentation) {
+  // An ineligible last request means the model was never invoked for it —
+  // more specific than the generic lastDiscard/unavailable fallbacks below,
+  // so it takes priority over them, but never over a still-valid
+  // presentation: a stale-but-real result is more useful than "the latest
+  // refresh attempt was rejected."
+  if (input.ineligibility && !presentation) {
     return {
-      status: 'failed',
-      staleReason: input.errorMessage,
+      status: 'unavailable',
+      unavailableReason: mapIneligibilityReason(input.ineligibility.reason),
+      staleReason: input.ineligibility.userMessage,
+      canApplySuggestedPrice: false,
+      marketSessionState,
+      positionState,
+    };
+  }
+
+  // No prior valid result exists for this instrument and the most recent
+  // request didn't produce one either — render the specific discard reason
+  // (never the bare, reason-less "unavailable" grid) so a trader always
+  // sees why, not just that nothing is there. See AnalysisDiscardCode.
+  if (input.lastDiscard && !presentation) {
+    return {
+      status: 'unavailable',
+      unavailableReason: mapDiscardReason(input.lastDiscard),
+      staleReason: input.lastDiscard.message,
       canApplySuggestedPrice: false,
       marketSessionState,
       positionState,
@@ -195,7 +282,7 @@ export function buildTradeDeskViewState(input: BuildTradeDeskViewStateInput): Tr
     };
   }
 
-  if (!visiblePresentation || !input.latestResult) {
+  if (!presentation || !input.latestResult) {
     return {
       status: 'unavailable',
       canApplySuggestedPrice: false,
@@ -211,7 +298,7 @@ export function buildTradeDeskViewState(input: BuildTradeDeskViewStateInput): Tr
   if (!isCurrent) {
     return {
       status: 'stale',
-      presentation: visiblePresentation,
+      presentation,
       generatedAt: input.latestResult.generatedAt,
       staleReason: staleReason(input.latestResult.context, input.currentContext),
       canApplySuggestedPrice: false,
@@ -220,12 +307,29 @@ export function buildTradeDeskViewState(input: BuildTradeDeskViewStateInput): Tr
     };
   }
 
-  if (input.errorMessage) {
+  // A discard for a DIFFERENT instrument/context than this current, valid
+  // result must never downgrade it to 'failed' — e.g. a symbol switch that
+  // failed shouldn't hide the still-good analysis for the symbol actually
+  // on screen (state priority #3: "a matching failed result preserves the
+  // prior valid result and exposes a compact warning" implies an
+  // UNMATCHING one shouldn't touch it at all). In practice a discard that
+  // matches this same context is normally already cleared by promoteResult
+  // the moment a current result is promoted; this only fires for the rare
+  // window where a matching discard was recorded after this presentation's
+  // own promotion (e.g. a fingerprint-replay race).
+  if (
+    input.lastDiscard &&
+    input.currentContext &&
+    input.lastDiscard.symbol === input.currentContext.symbol &&
+    input.lastDiscard.timeframe === input.currentContext.timeframe &&
+    input.lastDiscard.selectedContractSymbol === input.currentContext.selectedContractSymbol &&
+    input.lastDiscard.positionVersion === input.currentContext.positionVersion
+  ) {
     return {
       status: 'failed',
-      presentation: visiblePresentation,
+      presentation,
       generatedAt: input.latestResult.generatedAt,
-      staleReason: input.errorMessage,
+      staleReason: input.lastDiscard.message,
       canApplySuggestedPrice: false,
       marketSessionState,
       positionState,
@@ -236,7 +340,7 @@ export function buildTradeDeskViewState(input: BuildTradeDeskViewStateInput): Tr
   // (identity matches) but must never present as an actionable live entry —
   // downgrade the applicable-price suggestion rather than the result itself.
   const canApplySuggestedPrice =
-    marketSessionState === 'live' && Boolean(visiblePresentation.applicablePriceSuggestion);
+    marketSessionState === 'live' && Boolean(presentation.applicablePriceSuggestion);
   const pendingActionChange = input.pendingActionChange
     ? {
         action: input.pendingActionChange.action,
@@ -245,7 +349,7 @@ export function buildTradeDeskViewState(input: BuildTradeDeskViewStateInput): Tr
     : undefined;
   return {
     status: 'current',
-    presentation: visiblePresentation,
+    presentation,
     generatedAt: input.latestResult.generatedAt,
     canApplySuggestedPrice,
     marketSessionState,
@@ -340,6 +444,10 @@ function presentResult({
     contractIdentity,
     action,
     actionLabel: actionLabel(action),
+    // The legacy fallback path (no tradeDeskPlan) predates setupLifecycle
+    // entirely and has no way to express it — 'none' is the only honest
+    // default, matching its setupState-based label ("no setup" framing).
+    setupLifecycle: plan?.setupLifecycle ?? 'none',
     setupLabel,
     summary: clampText(plan?.summary ?? result.summary, limits.maxSummaryCharacters),
     entry,
@@ -624,31 +732,95 @@ function runnerTarget(presentation: TradeDeskPresentation): PresentedTarget | un
   return all.find((target) => target.role === 'runner') ?? all[all.length - 1];
 }
 
+/** `action: wait` alone doesn't say enough — a lifecycle-less wait (nothing
+ * ever formed) and an extended-setup wait (triggered, ran, too far to chase)
+ * both show action `wait` but need distinct execution guidance. Branches on
+ * `setupLifecycle` first for exactly this reason; falls back to the
+ * generic per-action copy for actions where lifecycle doesn't apply. */
 function executionLine(presentation: TradeDeskPresentation): string {
+  if (presentation.action === 'wait' || presentation.action === 'avoid') {
+    switch (presentation.setupLifecycle) {
+      case 'none':
+        return 'Wait';
+      case 'developing':
+        return 'Wait for setup';
+      case 'confirmed':
+      case 'triggered':
+        // By the time this renders, hasValidSetupLifecycleEvidence
+        // (validation.ts) has already guaranteed entry+invalidation data
+        // exists for these two states — but stay defensive rather than
+        // assume: never claim "confirm and enter" without a price to show.
+        return presentation.entry?.preferredContractPrice || presentation.entry?.underlying
+          ? 'Confirm and enter'
+          : 'Wait for setup';
+      case 'extended':
+        return 'Do not chase';
+      case 'completed':
+        return 'Setup complete';
+      case 'invalidated':
+        return 'Setup invalidated';
+    }
+  }
   switch (presentation.action) {
     case 'enter':
       return presentation.entry?.preferredContractPrice
         ? 'Confirm and enter'
         : 'Wait for confirmation';
-    case 'wait':
-      return 'Wait for setup';
-    case 'avoid':
-      return 'Avoid — no edge';
     default:
       return DASH;
   }
 }
 
+/** Short uppercase label for the SETUP cell's secondary line — 'none'
+ * renders nothing (a bare label with no lifecycle badge reads as "no setup"
+ * on its own, matching NO_CONFIRMED_SETUP_LABEL's own framing). */
+function lifecycleLabel(lifecycle: SetupLifecycle): string | undefined {
+  switch (lifecycle) {
+    case 'none':
+      return undefined;
+    case 'developing':
+      return 'DEVELOPING';
+    case 'confirmed':
+      return 'CONFIRMED';
+    case 'triggered':
+      return 'TRIGGERED';
+    case 'extended':
+      return 'EXTENDED';
+    case 'completed':
+      return 'COMPLETED';
+    case 'invalidated':
+      return 'INVALIDATED';
+  }
+}
+
+/** Whether the validated plan actually carries contract-premium guidance —
+ * the only condition under which the CONTRACT/PREMIUM LIMIT cells may show
+ * a contract, distinct from whether a contract merely happens to be
+ * selected in the chain. A contract highlighted in the UI is not AI
+ * guidance about that contract; see enforceTradeDeskInvariants, which
+ * strips these same fields whenever the options quote wasn't valid. */
+function hasContractGuidance(presentation: TradeDeskPresentation): boolean {
+  return Boolean(presentation.entry?.contract || presentation.entry?.preferredContractPrice);
+}
+
 /** Builds the flat-state 8-cell board. `contract` is the currently selected
- * chain contract (for the trader-friendly label), not the AI's own pick. */
+ * chain contract, used ONLY to render a trader-friendly label for guidance
+ * the validated plan already contains — never as a fallback source of
+ * guidance itself. When the plan carries no contract-premium data, the
+ * CONTRACT/PREMIUM LIMIT cells render `—` regardless of what's selected. */
 export function buildFlatTradeDeskAnalysis(
   presentation: TradeDeskPresentation,
   contract: OptionContract | null,
 ): FlatTradeDeskAnalysis {
   const target = firstTarget(presentation);
   const runner = runnerTarget(presentation);
+  const guided = hasContractGuidance(presentation);
   return {
-    setup: { label: 'SETUP', value: presentation.setupLabel || DASH },
+    setup: {
+      label: 'SETUP',
+      value: presentation.setupLabel || DASH,
+      secondary: lifecycleLabel(presentation.setupLifecycle),
+    },
     entry: {
       label: 'ENTRY',
       value: presentation.entry?.underlying?.value ?? presentation.entry?.contract?.value ?? DASH,
@@ -667,7 +839,7 @@ export function buildFlatTradeDeskAnalysis(
         ? `T2 ${presentation.underlyingTargets[1].value}`
         : undefined,
     },
-    contract: { label: 'CONTRACT', value: contractDisplayName(contract) },
+    contract: { label: 'CONTRACT', value: guided ? contractDisplayName(contract) : DASH },
     premiumLimit: {
       label: 'PREMIUM LIMIT',
       value: presentation.entry?.preferredContractPrice
@@ -733,5 +905,42 @@ export function buildPositionTradeDeskAnalysis(
           : DASH,
     },
     runner: { label: 'RUNNER', value: runner?.value ?? DASH },
+  };
+}
+
+function unavailableExecutionLine(reason: TradeDeskUnavailableReason | undefined): string {
+  switch (reason) {
+    case 'invalid-underlying-quote':
+      return 'Invalid underlying quote';
+    case 'invalid-options-analytics':
+      return 'Invalid option data';
+    case 'insufficient-data':
+      return 'Insufficient data';
+    case 'model-unavailable':
+      return 'Model unavailable';
+    case 'analysis-incomplete':
+      return 'Analysis incomplete';
+    default:
+      return 'Data unavailable';
+  }
+}
+
+/** Builds the eight-cell board for `status === 'unavailable'` — same fixed
+ * shape as the flat/position grids (never a bespoke empty state), every
+ * field bounded and dashed except EXECUTION, which carries a short, curated
+ * reason. Never renders raw diagnostic text (see AnalysisIneligibilityReason
+ * → TradeDeskUnavailableReason mapping in buildTradeDeskViewState). */
+export function buildUnavailableTradeDeskAnalysis(
+  reason: TradeDeskUnavailableReason | undefined,
+): FlatTradeDeskAnalysis {
+  return {
+    setup: { label: 'SETUP', value: 'Insufficient data' },
+    entry: { label: 'ENTRY', value: DASH },
+    invalidation: { label: 'INVALIDATION', value: DASH },
+    targets: { label: 'TARGETS', value: DASH },
+    contract: { label: 'CONTRACT', value: DASH },
+    premiumLimit: { label: 'PREMIUM LIMIT', value: DASH },
+    execution: { label: 'EXECUTION', value: unavailableExecutionLine(reason) },
+    runner: { label: 'RUNNER', value: DASH },
   };
 }

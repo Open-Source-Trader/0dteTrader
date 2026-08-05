@@ -7,6 +7,7 @@ final class ContextBudgeterTests: XCTestCase {
         includeOptions: Bool = true,
         includeStrategyPolicy: Bool = true,
         includePosition: Bool = true,
+        includePriorSetup: Bool = false,
         triggerKind: String = "manual"
     ) -> AnalysisSnapshotInput {
         let levels = (0..<levelCount).map { index in
@@ -42,6 +43,7 @@ final class ContextBudgeterTests: XCTestCase {
             options: includeOptions ? .object(["callWall": .number(410)]) : nil,
             position: includePosition ? .object(["quantity": .number(1)]) : nil,
             strategyPolicy: includeStrategyPolicy ? .object(["maxLoss": .number(100)]) : nil,
+            priorSetup: includePriorSetup ? .object(["label": .string("Bullish reversal"), "lifecycle": .string("extended")]) : nil,
             quality: .object(["stale": .bool(false)]),
             omissions: []
         )

@@ -25,14 +25,22 @@ public enum ContextBudgeter {
     // (roughly the whole 4096-token budget at ~4 chars/token, leaving
     // nothing for the rest) before GeneratedTradeDeskPlan's larger schema
     // pushed real requests over the limit (exceededContextWindowSize at
-    // ~4800 tokens for a ~6000-char prompt). Lowered to leave real margin;
-    // if the schema grows again, this needs to shrink further or the
-    // schema itself needs trimming — the two trade off against each other.
-    public static let maxPromptCharacters = 3500
+    // ~4800 tokens for a ~6000-char prompt), then lowered to 3500 — which
+    // itself proved insufficient once GeneratedTradeDeskPlan grew a
+    // setupLifecycle field: real requests hit exceededContextWindowSize at
+    // ~4090/4096 tokens with a prompt well under the 3500-char cap, because
+    // schema encoding + the generated response (which can run long —
+    // reasons/warnings/assumptions/a full trade desk plan) aren't bounded
+    // by this constant at all. Lowered again with a wider safety margin;
+    // if this schema grows further, prefer trimming @Guide strings and
+    // generated array sizes over shrinking this further, since prompt
+    // content is more valuable per character than instructions/schema text.
+    public static let maxPromptCharacters = 2600
 
     public static func build(from snapshot: AnalysisSnapshotInput) -> BudgetedPrompt {
         var includeOptions = snapshot.options != nil
         var includeStrategyPolicy = snapshot.strategyPolicy != nil
+        var includePriorSetup = snapshot.priorSetup != nil
         var includeExtendedIndicators = true
         var levelLimit = snapshot.levels.count
         var candleLimit = candleCount(in: snapshot.candles)
@@ -46,6 +54,7 @@ public enum ContextBudgeter {
                 snapshot: snapshot,
                 includeOptions: includeOptions,
                 includeStrategyPolicy: includeStrategyPolicy,
+                includePriorSetup: includePriorSetup,
                 includeExtendedIndicators: includeExtendedIndicators,
                 levelLimit: levelLimit,
                 candleLimit: candleLimit,
@@ -120,6 +129,25 @@ public enum ContextBudgeter {
                     OmissionInput(
                         code: "strategy-policy-trimmed",
                         category: "strategyPolicy",
+                        reason: "budget",
+                        originalCount: nil,
+                        retainedCount: nil,
+                        material: true
+                    )
+                )
+            } else if includePriorSetup {
+                // Trimmed last among the levers, not first: continuity
+                // context is more decision-relevant than a policy constraint
+                // (it's evidence the model needs to correctly progress or
+                // invalidate an active setup, not a static rule), but still
+                // less essential than position/market/candles — an
+                // unusually large snapshot degrades to a stateless analysis
+                // for this one request rather than losing core evidence.
+                includePriorSetup = false
+                omissions.append(
+                    OmissionInput(
+                        code: "prior-setup-trimmed",
+                        category: "priorSetup",
                         reason: "budget",
                         originalCount: nil,
                         retainedCount: nil,
@@ -241,6 +269,7 @@ public enum ContextBudgeter {
         snapshot: AnalysisSnapshotInput,
         includeOptions: Bool,
         includeStrategyPolicy: Bool,
+        includePriorSetup: Bool,
         includeExtendedIndicators: Bool,
         levelLimit: Int,
         candleLimit: Int?,
@@ -266,6 +295,9 @@ public enum ContextBudgeter {
             parts.append("POSITION: \(compactJSON(position))")
         } else {
             parts.append("POSITION: none — no open position in this contract.")
+        }
+        if includePriorSetup, let priorSetup = snapshot.priorSetup {
+            parts.append("PRIOR SETUP (from the previous analysis — confirm, advance, or invalidate; do not restart from a blank slate): \(compactJSON(priorSetup))")
         }
         if includeStrategyPolicy, let policy = snapshot.strategyPolicy {
             parts.append("STRATEGY POLICY (constraints, not suggestions): \(compactJSON(policy))")

@@ -75,7 +75,7 @@ export function AIAnalysisButton({
         availability: state.availability,
         isAnalyzing: state.isAnalyzing,
         latestResult: state.latestResult,
-        errorMessage: state.errorMessage,
+        lastDiscard: state.lastDiscard,
         pendingActionChange: state.pendingActionChange,
         currentContext,
         selectedContract,
@@ -130,9 +130,9 @@ export function AIAnalysisButton({
                   Cancel
                 </button>
               ) : null}
-              {state.errorMessage ? (
+              {state.lastDiscard ? (
                 <p className="text-secondary" role="alert">
-                  {state.errorMessage}
+                  {state.lastDiscard.message}
                 </p>
               ) : null}
               {presentation ? (

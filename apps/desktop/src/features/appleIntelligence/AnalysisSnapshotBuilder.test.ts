@@ -176,8 +176,12 @@ describe('buildAnalysisSnapshot', () => {
       positions: [],
       now: FIXED_NOW,
     });
-    expect(snapshot.levels).toHaveLength(1);
-    expect(snapshot.levels[0].id).toBe('vwap');
+    // VWAP always promotes with >=1 candle. EMA9 needs 9+ candles (absent
+    // here, only 2 supplied) so it doesn't promote. Swing high/low fall back
+    // to the plain window max/min below the 3-candle local-extrema
+    // threshold, so both still promote even with just 2 candles.
+    const ids = snapshot.levels.map((level) => level.id);
+    expect(ids).toEqual(['vwap', 'swing-high', 'swing-low']);
   });
 
   it('is deterministic for the same input other than the sequence counter', () => {

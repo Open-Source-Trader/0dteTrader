@@ -313,6 +313,18 @@ export function BellIcon({ size = 15, style }: IconProps) {
   );
 }
 
+export function RefreshIcon({ size = 15, style }: IconProps) {
+  // arrow.triangle.2.circlepath
+  return (
+    <svg {...svgProps(size, style)}>
+      <path d="M3 12a9 9 0 0 1 15.3-6.4L21 8" />
+      <polyline points="21 3 21 8 16 8" />
+      <path d="M21 12a9 9 0 0 1-15.3 6.4L3 16" />
+      <polyline points="3 21 3 16 8 16" />
+    </svg>
+  );
+}
+
 export function TrashIcon({ size = 15, style }: IconProps) {
   return (
     <svg {...svgProps(size, style)}>

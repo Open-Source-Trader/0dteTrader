@@ -44,6 +44,7 @@ function makeResult(overrides: Partial<AnalysisResult> = {}): AnalysisResult {
     summary: 'Momentum intact; wait for pullback.',
     tradeDeskPlan: {
       action: 'wait',
+      setupLifecycle: 'developing',
       setupLabel: 'Bullish pullback',
       summary: 'Momentum intact; wait for pullback.',
       entry: {
@@ -92,7 +93,10 @@ function makeResult(overrides: Partial<AnalysisResult> = {}): AnalysisResult {
   };
 }
 
-function makeStores(result: AnalysisResult | null = makeResult()) {
+function makeStores(
+  result: AnalysisResult | null = makeResult(),
+  ineligibility: { reason: string; userMessage: string } | null = null,
+) {
   const apiClient = {} as ApiClient;
   const analysisStore = new AnalysisStore(null);
   (analysisStore as unknown as { state: unknown }).state = {
@@ -106,6 +110,7 @@ function makeStores(result: AnalysisResult | null = makeResult()) {
     history: [],
     queueDepth: 0,
     lastAnalysisDurationMs: null,
+    lastIneligibility: ineligibility,
   };
   const chainStore = new ChainStore(apiClient);
   (chainStore as unknown as { state: unknown }).state = {
@@ -133,12 +138,14 @@ function markup({
   result = makeResult(),
   isQuoteStreamStale = false,
   hasPosition = false,
+  ineligibility = null,
 }: {
   result?: AnalysisResult | null;
   isQuoteStreamStale?: boolean;
   hasPosition?: boolean;
+  ineligibility?: { reason: string; userMessage: string } | null;
 } = {}) {
-  const stores = makeStores(result);
+  const stores = makeStores(result, ineligibility);
   if (hasPosition) {
     (stores.tradeStore as unknown as { state: unknown }).state = {
       ...stores.tradeStore.getState(),
@@ -203,13 +210,16 @@ describe('TradeDeskPanel', () => {
     expect(html).not.toContain('PREMIUM LIMIT');
   });
 
-  it('marks stale guidance and disables apply when selected contract changed', () => {
+  it('marks stale guidance and omits the apply button when selected contract changed', () => {
     const stale = makeResult({
       context: { ...makeResult().context, selectedContractSymbol: 'OTHER' },
     });
     const html = markup({ result: stale });
     expect(html).toContain('STALE');
-    expect(html).toContain('disabled=""');
+    // No applicable price suggestion for a mismatched contract — the apply
+    // button must not render at all (never a permanently-disabled control).
+    expect(html).not.toContain('trade-desk__apply');
+    expect(html).not.toContain('USE');
   });
 
   it('shows LIVE during regular trading hours with a fresh quote stream', () => {
@@ -256,12 +266,22 @@ describe('TradeDeskPanel', () => {
     expect(html).toContain('trade-desk__analyzing-dot');
   });
 
-  it('shows a bounded placeholder, not a raw error, when analysis fails with no prior result', () => {
+  it('shows the specific bounded unavailable grid, not a raw error, when analysis fails with no prior result', () => {
     const stores = makeStores(null);
     (stores.analysisStore as unknown as { state: unknown }).state = {
       ...stores.analysisStore.getState(),
       latestResult: null,
-      errorMessage: 'Options snapshot is missing required delta values at line 42 in module x.y.z',
+      lastDiscard: {
+        code: 'invalid-result',
+        message: 'Options snapshot is missing required delta values at line 42 in module x.y.z',
+        requestId: 'req-1',
+        fingerprint: null,
+        symbol: 'SPY',
+        timeframe: '1m',
+        selectedContractSymbol: contract.symbol,
+        positionVersion: 0,
+        occurredAt: '2026-07-31T14:30:00.000Z',
+      },
     };
     const html = renderToStaticMarkup(
       createElement(TradeDeskPanel, {
@@ -272,8 +292,48 @@ describe('TradeDeskPanel', () => {
         buildSnapshot: () => stores.snapshot,
       }),
     );
-    expect(html).toContain('FAILED');
-    expect(html).toContain('Retry');
+    // Discard reasons render as the specific 8-cell unavailable grid with a
+    // curated EXECUTION reason (mapDiscardReason), not the generic "Data
+    // unavailable" and not a raw diagnostic string.
+    expect(html).toContain('UNAVAILABLE');
+    expect(html).toContain('Analysis incomplete');
+    // Refresh is a single icon-only control in the header (no separate text
+    // "Retry" button), always present and reused across all states.
+    expect(html).toContain('Refresh AI trade analysis');
     expect(html).not.toContain('line 42');
+  });
+
+  it('renders the bounded 8-cell unavailable grid, not a bespoke empty div, when the last snapshot was rejected by the eligibility gate', () => {
+    const html = markup({
+      result: null,
+      ineligibility: { reason: 'invalid-options-analytics', userMessage: 'Bad contract quote.' },
+    });
+    expect(html).toContain('UNAVAILABLE');
+    expect(html).toContain('trade-desk__grid');
+    expect(html).toContain('SETUP');
+    expect(html).toContain('Invalid option data');
+    // Never the raw diagnostic string.
+    expect(html).not.toContain('Bad contract quote.');
+    // No apply/refresh footer controls in the unavailable grid.
+    expect(html).not.toContain('trade-desk__apply');
+  });
+
+  it('shows — for CONTRACT and PREMIUM LIMIT even with a selected contract when the plan has no contract guidance', () => {
+    const noContractPlan = makeResult({
+      tradeDeskPlan: {
+        action: 'wait',
+        setupLifecycle: 'none',
+        setupLabel: 'No confirmed setup',
+        summary: 'Waiting.',
+        targets: { contract: [] },
+        management: { holdConditions: [], scaleConditions: [], exitConditions: [] },
+      },
+    });
+    const html = markup({ result: noContractPlan });
+    expect(html).toContain('CONTRACT');
+    expect(html).toContain('PREMIUM LIMIT');
+    // The selected contract's own label (SPY 746C) must not appear as if
+    // it were AI guidance when the plan carries no contract-premium data.
+    expect(html).not.toContain('SPY 746C');
   });
 });

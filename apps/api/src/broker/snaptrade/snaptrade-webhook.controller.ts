@@ -1,18 +1,21 @@
-import { Controller, HttpCode, HttpStatus, Post, Req, Res } from '@nestjs/common';
+import { Controller, HttpCode, HttpStatus, Logger, Post, Req, Res } from '@nestjs/common';
 import { Request, Response } from 'express';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { TradingMode } from '@0dtetrader/shared-types';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CredentialsService } from '../../credentials/credentials.service';
 import { OrderEventsService } from '../order-events.service';
-import { compactOcc } from './snaptrade-mappers';
+import { compactOcc, mapOrderStatus } from './snaptrade-mappers';
 
-/** Freshness bound on a webhook's own `eventTimestamp`. Wide because
- *  SnapTrade retries a failed delivery on 30-minute exponential backoff for
- *  three tries: a window narrower than that ladder rejects the retries this
- *  endpoint exists to accept. It bounds how long a captured payload stays
- *  usable, nothing more. */
-const MAX_REPLAY_DRIFT_MS = 24 * 60 * 60 * 1_000;
+/** How OLD a signed `eventTimestamp` may be. Wide because SnapTrade retries
+ *  a failed delivery on 30-minute exponential backoff for three tries: a
+ *  window narrower than that ladder rejects the retries this endpoint exists
+ *  to accept. It bounds how long a captured payload stays usable, nothing
+ *  more. */
+const MAX_EVENT_AGE_MS = 24 * 60 * 60 * 1_000;
+/** How far in the FUTURE a timestamp may sit — ordinary clock skew only. A
+ *  future stamp has no retry ladder to clear, so the allowance is small. */
+const MAX_FUTURE_SKEW_MS = 5 * 60 * 1_000;
 
 /** JSON.stringify with sorted keys and no extra whitespace — matches
  *  SnapTrade's own canonicalization (`json.dumps(payload, separators=(",", ":"), sort_keys=True)`
@@ -59,6 +62,8 @@ function canonicalJson(value: unknown): string {
  */
 @Controller('webhooks/snaptrade')
 export class SnapTradeWebhookController {
+  private readonly logger = new Logger(SnapTradeWebhookController.name);
+
   constructor(
     private readonly credentials: CredentialsService,
     private readonly prisma: PrismaService,
@@ -77,19 +82,19 @@ export class SnapTradeWebhookController {
       return;
     }
 
-    // Freshness is read from the SIGNED payload. SnapTrade documents
-    // `eventTimestamp` as a body field and signs the body; it sends no
-    // timestamp header, so requiring one rejected every genuine delivery,
-    // and trusting one would have let a captured payload be replayed under a
-    // fresh unsigned stamp. The header is still accepted as a fallback so a
-    // deployment sending one does not regress.
-    const timestampHeader = req.headers['eventtimestamp'] as string | undefined;
-    const signedTimestamp =
-      typeof body['eventTimestamp'] === 'string' ? (body['eventTimestamp'] as string) : undefined;
-    const eventTimestamp = Date.parse(signedTimestamp ?? timestampHeader ?? '');
+    // Freshness comes ONLY from the SIGNED payload. SnapTrade documents
+    // `eventTimestamp` as a body field and signs the body; a header is not
+    // covered by the HMAC, so accepting one — even as a fallback — would let
+    // a captured payload be replayed under a fresh unsigned stamp. Missing
+    // or malformed is a hard 400: an unverifiable age is not an acceptable
+    // age.
+    const signedTimestamp = body['eventTimestamp'];
+    const eventTimestamp =
+      typeof signedTimestamp === 'string' ? Date.parse(signedTimestamp) : Number.NaN;
     if (
       Number.isNaN(eventTimestamp) ||
-      Math.abs(Date.now() - eventTimestamp) > MAX_REPLAY_DRIFT_MS
+      Date.now() - eventTimestamp > MAX_EVENT_AGE_MS ||
+      eventTimestamp - Date.now() > MAX_FUTURE_SKEW_MS
     ) {
       res.sendStatus(HttpStatus.BAD_REQUEST);
       return;
@@ -130,11 +135,22 @@ export class SnapTradeWebhookController {
     }
 
     const eventType = typeof body['eventType'] === 'string' ? (body['eventType'] as string) : '';
+    const webhookId = typeof body['webhookId'] === 'string' ? (body['webhookId'] as string) : '';
 
     try {
       await this.dispatch(eventType, owner.userId, owner.environment, body);
-    } catch {
-      // Log but still 2xx so SnapTrade stops retrying.
+    } catch (err) {
+      // A failure after signature verification means required database work
+      // did not finish. Answering 2xx here would tell SnapTrade the event
+      // was processed and cancel its documented retries — the acknowledgement
+      // must never outrun persistence, so this is a 5xx.
+      this.logger.error(
+        `webhook processing failed: webhookId=${webhookId || 'unknown'} ` +
+          `eventType=${eventType} userId=${owner.userId} ` +
+          `environment=${owner.environment} stage=dispatch: ${(err as Error).message}`,
+      );
+      res.sendStatus(HttpStatus.INTERNAL_SERVER_ERROR);
+      return;
     }
 
     res.sendStatus(HttpStatus.OK);
@@ -228,8 +244,17 @@ export class SnapTradeWebhookController {
         : '';
     const accountId = typeof event['accountId'] === 'string' ? (event['accountId'] as string) : '';
     if (!connectionId || !accountId) return;
+    // Guarded append: SnapTrade redelivers webhooks, and an unconditional
+    // push duplicated the account id on every redelivery. The NOT/has
+    // predicate makes append-if-absent one atomic statement.
     await this.prisma.brokerConnection.updateMany({
-      where: { userId, provider: 'snaptrade', environment, connectionId },
+      where: {
+        userId,
+        provider: 'snaptrade',
+        environment,
+        connectionId,
+        NOT: { accountIds: { has: accountId } },
+      },
       data: { accountIds: { push: accountId } },
     });
   }
@@ -255,7 +280,21 @@ export class SnapTradeWebhookController {
       // collide on the same row, and a later fill would mutate someone
       // else's order. There is nothing safe to do with it but drop it.
       if (!mapped.orderId) continue;
-      this.events.emit(userId, mapped, environment);
+      try {
+        // AWAITED: persistence (with its own bounded, backed-off retries)
+        // completes before this resolves, and fan-out to WebSocket/push
+        // happens only on success. A throw propagates to handle(), which
+        // answers 5xx so SnapTrade redelivers; orders already ingested from
+        // this payload are idempotent under that redelivery.
+        await this.events.ingest(userId, mapped, environment);
+      } catch (err) {
+        this.logger.error(
+          `webhook order ingest failed: userId=${userId} environment=${environment} ` +
+            `orderId=${mapped.orderId} status=${mapped.status} stage=ingest: ` +
+            `${(err as Error).message}`,
+        );
+        throw err;
+      }
     }
   }
 
@@ -272,7 +311,7 @@ export class SnapTradeWebhookController {
     filledAt?: string;
     timestamp: string;
   } {
-    const status = this.mapStatus(order['status'] as string | undefined);
+    const status = mapOrderStatus(order['status'] as string | undefined);
     const brokerageOrderId =
       typeof order['brokerage_order_id'] === 'string' ? order['brokerage_order_id'] : '';
     return {
@@ -289,25 +328,6 @@ export class SnapTradeWebhookController {
         typeof order['time_executed'] === 'string' ? (order['time_executed'] as string) : undefined,
       timestamp: (order['time_placed'] as string) ?? new Date().toISOString(),
     };
-  }
-
-  private mapStatus(
-    status: string | undefined,
-  ): 'submitted' | 'filled' | 'partially_filled' | 'cancelled' | 'rejected' {
-    const s = (status ?? '').toUpperCase();
-    if (['EXECUTED', 'FILLED'].includes(s)) return 'filled';
-    if (['PARTIAL', 'PARTIALLY_FILLED'].includes(s)) return 'partially_filled';
-    // PARTIAL_CANCELED is TERMINAL: the unfilled remainder was cancelled and
-    // nothing more will execute. Mapping it to partially_filled left the
-    // order sitting in the working list forever and suppressed its terminal
-    // push. The executed portion is still accounted — a cancelled row
-    // carrying a filled quantity is a real fill to the position book.
-    if (['CANCELED', 'CANCELLED', 'EXPIRED', 'PARTIAL_CANCELED'].includes(s)) return 'cancelled';
-    if (['FAILED', 'REJECTED'].includes(s)) return 'rejected';
-    // CANCEL_PENDING is a REQUEST, not an outcome: the order is still live
-    // and can still fill. Reporting it as cancelled announced an outcome the
-    // broker had not reached.
-    return 'submitted';
   }
 
   private mapSide(action: string | undefined): 'buy' | 'sell' {
@@ -331,7 +351,10 @@ export class SnapTradeWebhookController {
     }
     const optionSymbol = order['option_symbol'] as Record<string, unknown> | undefined;
     if (optionSymbol?.['ticker'] && typeof optionSymbol['ticker'] === 'string') {
-      return optionSymbol['ticker'] as string;
+      // Same padded-OCC normalization as the legs branch — SnapTrade pads
+      // this representation identically. Equity universal_symbol below is
+      // NOT an OCC symbol and stays untouched.
+      return compactOcc(optionSymbol['ticker'] as string);
     }
     const universalSymbol = order['universal_symbol'] as Record<string, unknown> | undefined;
     if (universalSymbol?.['symbol'] && typeof universalSymbol['symbol'] === 'string') {

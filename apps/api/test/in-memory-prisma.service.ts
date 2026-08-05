@@ -60,11 +60,14 @@ function matches(row: any, where: any): boolean {
       if (operator.gte !== undefined && !(actual >= operator.gte)) return false;
       if (operator.equals !== undefined && actual !== operator.equals) return false;
       if (operator.in !== undefined && !operator.in.includes(actual)) return false;
+      if (operator.has !== undefined && !(Array.isArray(actual) && actual.includes(operator.has))) {
+        return false;
+      }
       // Fail loudly on anything this double does not implement. Returning true
       // means an unsupported operator silently matches EVERY row, so a query
       // that should select one selects all — tests then pass on behaviour the
       // database would never produce.
-      const supported = ['lt', 'lte', 'gt', 'gte', 'equals', 'in'];
+      const supported = ['lt', 'lte', 'gt', 'gte', 'equals', 'in', 'has'];
       const unsupported = Object.keys(operator).filter((k) => !supported.includes(k));
       if (unsupported.length > 0) {
         throw new Error(

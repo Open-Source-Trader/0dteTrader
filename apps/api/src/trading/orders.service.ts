@@ -1,6 +1,5 @@
 import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import { Prisma, type TradeOrder, type TradeOrderExecution } from '@prisma/client';
-import { Subscription } from 'rxjs';
 import {
   OrderResult,
   TradeHistory,
@@ -419,19 +418,26 @@ function applyExecution(
 @Injectable()
 export class OrdersService implements OnModuleDestroy {
   private readonly logger = new Logger(OrdersService.name);
-  private readonly eventsSub: Subscription;
+  private readonly unregisterIngestor: () => void;
 
   constructor(
     private readonly prisma: PrismaService,
     orderEvents: OrderEventsService,
   ) {
-    this.eventsSub = orderEvents.events$.subscribe((event) => {
-      void this.recordWithRetry(event.userId, event.order, event.environment);
-    });
+    // Registered as an INGESTOR, not a subscriber: the webhook path must be
+    // able to await persistence before acknowledging the provider, and an
+    // RxJS subscription cannot be awaited. Fire-and-forget emitters (polls,
+    // placement) run the same function; its exhaustion throw is swallowed
+    // there after the logging below has said its piece.
+    this.unregisterIngestor = orderEvents.registerIngestor((event) =>
+      this.recordWithRetry(event.userId, event.order, event.environment),
+    );
   }
 
   /**
-   * Persist an order update, retrying a failed attempt before giving up.
+   * Persist an order update, retrying with bounded exponential backoff and
+   * jitter, and THROWING once the attempts are exhausted — the webhook
+   * caller turns that into a 5xx so the provider redelivers.
    *
    * record() writes in several statements — ensure-exists, the status
    * transition, the earliest-fill stamp, the watermark advance, the
@@ -444,35 +450,42 @@ export class OrdersService implements OnModuleDestroy {
    * reported rather than leaving a partial record the replay can still
    * account for and a later report can complete.
    *
-   * Retries are bounded and in-process. What survives a process death is the
-   * broker redelivering (a webhook retry, the next poll tick); a terminal
-   * poll event that fires exactly once and fails every attempt is lost, and
-   * that gap closes only with durable webhook ingestion.
+   * The backoff exists because immediate retries all land inside the same
+   * outage; it stays short because the webhook response is waiting on it.
+   * What survives a process death is the provider redelivering.
    */
   private async recordWithRetry(
     userId: string,
     order: OrderResult,
     environment?: TradingMode,
   ): Promise<void> {
-    for (let attempt = 1; attempt <= OrdersService.RECORD_ATTEMPTS; attempt += 1) {
+    for (let attempt = 1; ; attempt += 1) {
       try {
         await this.record(userId, order, environment);
         return;
       } catch (err) {
-        if (attempt === OrdersService.RECORD_ATTEMPTS) {
+        if (attempt >= OrdersService.RECORD_ATTEMPTS) {
           this.logger.warn(
             `failed to persist order update for ${order.orderId} after ` +
               `${attempt} attempts: ${(err as Error).message}`,
           );
+          throw err;
         }
+        const delay =
+          OrdersService.RETRY_BASE_MS * 2 ** (attempt - 1) +
+          Math.random() * OrdersService.RETRY_JITTER_MS;
+        await new Promise((resolve) => setTimeout(resolve, delay));
       }
     }
   }
 
+  private static readonly RETRY_BASE_MS = 150;
+  private static readonly RETRY_JITTER_MS = 100;
+
   private static readonly RECORD_ATTEMPTS = 3;
 
   onModuleDestroy(): void {
-    this.eventsSub.unsubscribe();
+    this.unregisterIngestor();
   }
 
   /** The full row for an order seen for the first time. */

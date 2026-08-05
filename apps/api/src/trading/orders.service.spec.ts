@@ -996,11 +996,12 @@ describe('OrdersService', () => {
       expect(cumulativesFor('JUNK')).toEqual([2]);
     });
 
-    it('retries a failed persist, since every write in it is idempotent', async () => {
+    it('recovers when two attempts fail and the third succeeds', async () => {
       // A transient database failure mid-sequence used to be logged once and
-      // dropped, leaving whichever writes had already landed.
+      // dropped, leaving whichever writes had already landed. Retries now
+      // back off between attempts, so this rides the awaited ingest path.
       const create = prisma.tradeOrderExecution.create;
-      let failuresLeft = 1;
+      let failuresLeft = 2;
       prisma.tradeOrderExecution.create = async (args: any) => {
         if (failuresLeft > 0) {
           failuresLeft -= 1;
@@ -1008,14 +1009,36 @@ describe('OrdersService', () => {
         }
         return create(args);
       };
-      events.emit(
+      await events.ingest(
         USER,
         fill({ orderId: 'RETRY', quantity: 2, filledPrice: 1.0, filledAt: t(10).toISOString() }),
       );
-      await new Promise((resolve) => setImmediate(resolve));
 
       expect(cumulativesFor('RETRY')).toEqual([2]);
       expect((await orders.positionAnchors(USER, [OCC])).get(OCC)?.quantity).toBe(2);
+    });
+
+    it('rejects an awaited ingest once every attempt fails, so the webhook can answer 5xx', async () => {
+      prisma.tradeOrderExecution.create = async () => {
+        throw new Error('database down');
+      };
+
+      await expect(
+        events.ingest(
+          USER,
+          fill({ orderId: 'DOWN', quantity: 2, filledPrice: 1.0, filledAt: t(10).toISOString() }),
+        ),
+      ).rejects.toThrow('database down');
+    });
+
+    it('still persists fire-and-forget bus emits (poll and placement paths)', async () => {
+      events.emit(
+        USER,
+        fill({ orderId: 'EMITTED', quantity: 1, filledPrice: 1.0, filledAt: t(10).toISOString() }),
+      );
+      await new Promise((resolve) => setImmediate(resolve));
+
+      expect(cumulativesFor('EMITTED')).toEqual([1]);
     });
 
     it('replays a row with no recorded executions from its cumulative state', async () => {

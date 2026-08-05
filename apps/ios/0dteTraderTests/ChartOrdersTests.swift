@@ -32,6 +32,40 @@ private func makeOrder(
     )
 }
 
+private func makeEntry(
+    optionType: OptionType = .call,
+    quantity: Int = 1,
+    entryPrice: Double = 100,
+    isEstimate: Bool
+) -> EntryLineModel {
+    let contract = OptionContract(
+        symbol: "SPY260727C00101000",
+        underlying: "SPY",
+        expiration: "2026-07-27",
+        strike: 101,
+        optionType: optionType,
+        bid: 1.0,
+        ask: 1.02,
+        last: 1.01
+    )
+    return EntryLineModel(
+        position: Position(
+            symbol: contract.symbol,
+            assetClass: .option,
+            quantity: quantity,
+            avgPrice: 1,
+            markPrice: 1.2,
+            unrealizedPnl: 20,
+            multiplier: 100,
+            underlyingEntryPrice: isEstimate ? nil : entryPrice,
+            underlyingEntryEstimate: isEstimate ? entryPrice : nil
+        ),
+        contract: contract,
+        price: entryPrice,
+        isEstimate: isEstimate
+    )
+}
+
 final class ChartOrderCrossingTests: XCTestCase {
     func testArmedAbove_firesOnlyOnTheWayDown() {
         let order = makeOrder(triggerPrice: 98, armPrice: 100)
@@ -100,6 +134,28 @@ final class BracketDirectionTests: XCTestCase {
     func testShortCallInvertsAgain() {
         XCTAssertEqual(bracketKind(optionType: .call, quantity: -1, entryPrice: 100, price: 95), .target)
         XCTAssertEqual(bracketKind(optionType: .call, quantity: -1, entryPrice: 100, price: 105), .stop)
+    }
+
+    /// The classification entry point for drags off an entry line. Nil for an
+    /// estimate — exactly as if there were no entry line — because an estimate
+    /// on the wrong side of the true fill would call a target a stop and move
+    /// the wrong OCO sibling.
+    func testEstimateEntry_classifiesNothing_sameAsNoEntryLine() {
+        let entry = makeEntry(entryPrice: 100, isEstimate: true)
+
+        XCTAssertNil(bracketKind(entry: entry, price: 105))
+        XCTAssertNil(bracketKind(entry: entry, price: 95))
+    }
+
+    /// An authoritative entry keeps the existing kind logic unchanged.
+    func testAuthoritativeEntry_keepsClassification() {
+        let call = makeEntry(entryPrice: 100, isEstimate: false)
+        XCTAssertEqual(bracketKind(entry: call, price: 105), .target)
+        XCTAssertEqual(bracketKind(entry: call, price: 95), .stop)
+
+        let put = makeEntry(optionType: .put, entryPrice: 100, isEstimate: false)
+        XCTAssertEqual(bracketKind(entry: put, price: 95), .target)
+        XCTAssertEqual(bracketKind(entry: put, price: 105), .stop)
     }
 }
 
@@ -282,11 +338,22 @@ final class ChartTradingCoordinatorCancelTests: XCTestCase {
         XCTAssertTrue(coordinator.entryLines(positions: [position], symbol: "SPY").isEmpty)
 
         position.underlyingEntryEstimate = 504.2
-        XCTAssertEqual(coordinator.entryLines(positions: [position], symbol: "SPY").first?.price, 504.2)
+        let estimated = coordinator.entryLines(positions: [position], symbol: "SPY").first
+        XCTAssertEqual(estimated?.price, 504.2)
+        XCTAssertEqual(estimated?.isEstimate, true)
 
         // The authoritative record wins whenever both are present.
         position.underlyingEntryPrice = 505.1
-        XCTAssertEqual(coordinator.entryLines(positions: [position], symbol: "SPY").first?.price, 505.1)
+        let recorded = coordinator.entryLines(positions: [position], symbol: "SPY").first
+        XCTAssertEqual(recorded?.price, 505.1)
+        XCTAssertEqual(recorded?.isEstimate, false)
+    }
+
+    /// The estimate's provenance is visible on the chart: the label pill wears
+    /// a "~" so the level never reads as a recorded fill.
+    func testEstimateEntryLine_labelCarriesTheApproximationMarker() {
+        XCTAssertTrue(EntryLineStyle.label(for: makeEntry(isEstimate: true)).hasPrefix("~"))
+        XCTAssertFalse(EntryLineStyle.label(for: makeEntry(isEstimate: false)).hasPrefix("~"))
     }
 }
 

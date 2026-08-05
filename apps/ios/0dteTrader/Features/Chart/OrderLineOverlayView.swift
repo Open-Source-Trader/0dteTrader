@@ -86,6 +86,12 @@ struct EntryLineModel: Equatable {
     let position: Position
     let contract: OptionContract
     let price: Double
+    /// True when `price` is the placement-time estimate rather than the
+    /// authoritative fill-time record. An estimate line is display only: it
+    /// wears a "~" marker, its line body takes no touches, and it classifies
+    /// no bracket — an estimate on the wrong side of the true fill would call
+    /// a target a stop and move the wrong OCO sibling.
+    let isEstimate: Bool
 }
 
 /// Actions the overlay raises; the SwiftUI layer owns the consequences.
@@ -292,11 +298,21 @@ final class OrderLineOverlayView: UIView {
                 return (row, layout.pill)
             }
             if abs(point.y - row.y) <= AppOrderLine.lineHitSlop,
-               point.x < row.left - AppOrderLine.pillGap {
+               point.x < row.left - AppOrderLine.pillGap,
+               lineBodyTakesTouches(row.target) {
                 return (row, nil)
             }
         }
         return nil
+    }
+
+    /// Whether a row's line body (as opposed to its pills) takes touches.
+    /// An estimate entry line is display only — it cannot start a bracket
+    /// drag, so claiming the touch would just eat the chart's pan underneath.
+    /// Its pills are unaffected: the ✕ still closes the position.
+    private func lineBodyTakesTouches(_ target: OrderLineRow.Target) -> Bool {
+        guard case .entry(let symbol) = target else { return true }
+        return entryLines.first { $0.position.symbol == symbol }?.isEstimate != true
     }
 
     // MARK: - Gestures
@@ -360,8 +376,11 @@ final class OrderLineOverlayView: UIView {
                 Haptics.selection()
                 drag = .move(orderId: id, price: order.triggerPrice)
             case .entry(let contractSymbol):
+                // An estimate line never arms a bracket: only the authoritative
+                // fill level may classify target vs stop.
                 guard settings.bracketDrag,
-                      let entry = entryLines.first(where: { $0.position.symbol == contractSymbol })
+                      let entry = entryLines.first(where: { $0.position.symbol == contractSymbol }),
+                      !entry.isEstimate
                 else { return }
                 drag = .bracket(entry: entry, startY: location.y, price: entry.price, engaged: false)
             }
@@ -447,7 +466,7 @@ final class OrderLineOverlayView: UIView {
                 target: .entry(entry.position.symbol),
                 y: y,
                 labels: [
-                    (.label, EntryLineStyle.label(for: entry.contract)),
+                    (.label, EntryLineStyle.label(for: entry)),
                     (.quantity, Format.signedQuantity(entry.position.quantity)),
                     (.pnl, "\(Format.signedPrice(entry.position.unrealizedPnl)) USD"),
                     (.close, "✕"),
@@ -529,15 +548,13 @@ final class OrderLineOverlayView: UIView {
     }
 
     private func renderDragPreview(in context: CGContext) {
+        // The same guarded classification the coordinator uses on drop; an
+        // estimate line cannot begin a drag, so nil is unreachable here, but
+        // routing through it keeps a single classification path.
         guard case .bracket(let entry, _, let price, let engaged) = drag, engaged,
-              let y = yPixel(for: price)
+              let y = yPixel(for: price),
+              let kind = bracketKind(entry: entry, price: price)
         else { return }
-        let kind = bracketKind(
-            optionType: entry.contract.optionType,
-            quantity: entry.position.quantity,
-            entryPrice: entry.price,
-            price: price
-        )
         let color = kind == .target ? positiveColor : negativeColor
         strokeLine(
             from: 0,
@@ -587,7 +604,11 @@ final class OrderLineOverlayView: UIView {
             let contractLabel = EntryLineStyle.label(for: entry.contract)
             switch pill {
             case .label:
-                return "\(contractLabel) entry line"
+                // Speech spells the "~" marker out instead of relying on the
+                // synthesizer to read a tilde.
+                return entry.isEstimate
+                    ? "\(contractLabel) approximate entry line"
+                    : "\(contractLabel) entry line"
             case .close:
                 return "Close \(contractLabel) position"
             case .pnl:

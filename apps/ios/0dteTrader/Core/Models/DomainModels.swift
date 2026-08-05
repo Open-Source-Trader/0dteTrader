@@ -182,9 +182,13 @@ struct OptionContract: Equatable, Sendable, Identifiable {
     /// a broken feed, not a market. False for the all-zero placeholder a
     /// CURR leg synthesizes before its expiration's contracts load, and for
     /// junk (negative/NaN) quotes; `last` deliberately does not count — a
-    /// stale print is not a market. Desktop applies this identical rule, so
+    /// stale print is not a market. Finiteness is checked explicitly: a feed
+    /// glitch can deliver ±inf, and an infinite book is not tradeable —
+    /// midpoints on it are garbage. Desktop applies this identical rule, so
     /// the two clients cannot disagree about whether an order can be sent.
-    var hasTradeableQuote: Bool { bid > 0 && ask > 0 && bid <= ask }
+    var hasTradeableQuote: Bool {
+        bid.isFinite && ask.isFinite && bid > 0 && ask > 0 && bid <= ask
+    }
 }
 
 extension OptionContract {

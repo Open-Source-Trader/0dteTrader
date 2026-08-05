@@ -147,6 +147,21 @@ func bracketKind(
     return profitable ? .target : .stop
 }
 
+/// `bracketKind` for a drag off an entry line, or nil when the line's level is
+/// an estimate. Nil means "behave exactly as if there were no entry line":
+/// only the authoritative fill-time record may decide target vs stop, because
+/// an estimate on the wrong side of the true fill classifies the drag
+/// backwards — and OCO would then move or retire the wrong sibling.
+func bracketKind(entry: EntryLineModel, price: Double) -> ChartOrderKind? {
+    guard !entry.isEstimate else { return nil }
+    return bracketKind(
+        optionType: entry.contract.optionType,
+        quantity: entry.position.quantity,
+        entryPrice: entry.price,
+        price: price
+    )
+}
+
 /// Chart order lines for the signed-in account. The server is the source of
 /// truth: every mutation is a request and the response replaces the local row.
 ///

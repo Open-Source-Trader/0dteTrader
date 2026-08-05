@@ -56,6 +56,14 @@ final class TradeReadinessTests: XCTestCase {
         XCTAssertFalse(contract(bid: .nan, ask: .nan).hasTradeableQuote)
     }
 
+    /// A feed glitch can deliver ±inf; an infinite book is not tradeable, and
+    /// midpoints computed on one are garbage.
+    func testInfiniteSides_areNotTradeable() {
+        XCTAssertFalse(contract(bid: 1, ask: .infinity).hasTradeableQuote)
+        XCTAssertFalse(contract(bid: .infinity, ask: .infinity).hasTradeableQuote)
+        XCTAssertFalse(contract(bid: -.infinity, ask: 1).hasTradeableQuote)
+    }
+
     func testStaleLastPrintAlone_isNotAMarket() {
         // The CURR placeholder can carry a last print copied from the
         // position's mark; with both live sides dead it stays untradeable.

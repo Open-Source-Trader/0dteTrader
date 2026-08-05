@@ -39,4 +39,13 @@ enum EntryLineStyle {
         }
         return "\(leg) \(expirationDayFormatter.string(from: day))"
     }
+
+    /// The overlay's label pill for an entry line: the contract label,
+    /// prefixed "~" when the level is the placement-time estimate rather than
+    /// the fill-time record — the difference between "you entered here" and
+    /// "you entered somewhere near here".
+    static func label(for entry: EntryLineModel, today: Date = Date()) -> String {
+        let base = label(for: entry.contract, today: today)
+        return entry.isEstimate ? "~\(base)" : base
+    }
 }

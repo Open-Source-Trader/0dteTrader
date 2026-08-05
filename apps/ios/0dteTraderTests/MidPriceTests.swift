@@ -40,6 +40,35 @@ final class MidPriceTests: XCTestCase {
         XCTAssertNil(PriceMath.midPrice(bid: 1.0, ask: .nan))
     }
 
+    /// A feed glitch can deliver ±inf; refused before arithmetic, since a
+    /// midpoint on an infinite book is garbage.
+    func testMidPrice_infiniteInputs_returnNil() {
+        XCTAssertNil(PriceMath.midPrice(bid: 1.0, ask: .infinity))
+        XCTAssertNil(PriceMath.midPrice(bid: .infinity, ask: .infinity))
+        XCTAssertNil(PriceMath.midPrice(bid: -.infinity, ask: 1.0))
+    }
+
+    /// The helper's contract: any midpoint it returns is finite. The junk
+    /// rows return nil and are skipped; the absurd-but-finite pair pins the
+    /// overflow guard on the scale-and-round step.
+    func testMidPrice_everySuccessfulMidpointIsFinite() {
+        let quotes: [(bid: Double, ask: Double)] = [
+            (0.01, 0.02),
+            (1.20, 1.28),
+            (5.0, 5.0),
+            (999_999.99, 1_000_000.01),
+            (.greatestFiniteMagnitude, .greatestFiniteMagnitude),
+            (1.0, .infinity),
+            (.infinity, .infinity),
+            (-.infinity, 1.0),
+            (.nan, 1.0),
+        ]
+        for quote in quotes {
+            guard let mid = PriceMath.midPrice(bid: quote.bid, ask: quote.ask) else { continue }
+            XCTAssertTrue(mid.isFinite, "midPrice(\(quote.bid), \(quote.ask)) returned non-finite \(mid)")
+        }
+    }
+
     /// The domain model exposes the same mid used by the trade panel.
     func testOptionContract_mid_matchesPriceMath() throws {
         let contract = OptionContract(

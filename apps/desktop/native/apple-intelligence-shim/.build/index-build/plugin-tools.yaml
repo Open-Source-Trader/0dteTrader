@@ -1,0 +1,622 @@
+client:
+  name: basic
+  file-system: device-agnostic
+tools: {}
+targets:
+  'AppleIntelligenceShim-arm64-apple-macosx-debug.module':
+    ['<AppleIntelligenceShim-arm64-apple-macosx-debug.module>']
+  'AppleIntelligenceShimPackageTests-arm64-apple-macosx-debug.module':
+    ['<AppleIntelligenceShimPackageTests-arm64-apple-macosx-debug.module>']
+  'CandleEncoding-arm64-apple-macosx-debug.module':
+    ['<CandleEncoding-arm64-apple-macosx-debug.module>']
+  'PackageStructure': ['<PackageStructure>']
+  'ShimCore-arm64-apple-macosx-debug.module': ['<ShimCore-arm64-apple-macosx-debug.module>']
+  'ShimCoreTests-arm64-apple-macosx-debug.module':
+    ['<ShimCoreTests-arm64-apple-macosx-debug.module>']
+  'main':
+    [
+      '<AppleIntelligenceShim-arm64-apple-macosx-debug.module>',
+      '<ShimCore-arm64-apple-macosx-debug.module>',
+    ]
+  'test':
+    [
+      '<AppleIntelligenceShim-arm64-apple-macosx-debug.module>',
+      '<ShimCore-arm64-apple-macosx-debug.module>',
+      '<ShimCoreTests-arm64-apple-macosx-debug.module>',
+    ]
+default: 'main'
+nodes:
+  '/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/Sources/AppleIntelligenceShim/':
+    is-directory-structure: true
+    content-exclusion-patterns: ['.git', '.build']
+  '/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/Sources/ShimCore/':
+    is-directory-structure: true
+    content-exclusion-patterns: ['.git', '.build']
+  '/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/Tests/ShimCoreTests/':
+    is-directory-structure: true
+    content-exclusion-patterns: ['.git', '.build']
+commands:
+  '/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/index-build/arm64-apple-macosx/debug/AppleIntelligenceShim.build/sources':
+    tool: write-auxiliary-file
+    inputs:
+      [
+        '<sources-file-list>',
+        '/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/Sources/AppleIntelligenceShim/main.swift',
+      ]
+    outputs:
+      [
+        '/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/index-build/arm64-apple-macosx/debug/AppleIntelligenceShim.build/sources',
+      ]
+    description: 'Write auxiliary file /Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/index-build/arm64-apple-macosx/debug/AppleIntelligenceShim.build/sources'
+
+  '/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/index-build/arm64-apple-macosx/debug/AppleIntelligenceShimPackageTests.build/sources':
+    tool: write-auxiliary-file
+    inputs:
+      [
+        '<sources-file-list>',
+        '/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/index-build/arm64-apple-macosx/debug/AppleIntelligenceShimPackageTests.derived/runner.swift',
+      ]
+    outputs:
+      [
+        '/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/index-build/arm64-apple-macosx/debug/AppleIntelligenceShimPackageTests.build/sources',
+      ]
+    description: 'Write auxiliary file /Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/index-build/arm64-apple-macosx/debug/AppleIntelligenceShimPackageTests.build/sources'
+
+  '/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/index-build/arm64-apple-macosx/debug/CandleEncoding.build/sources':
+    tool: write-auxiliary-file
+    inputs:
+      [
+        '<sources-file-list>',
+        '/Users/_m/src/0dteTrader/packages/swift-shared/Sources/CandleEncoding/CandleBar.swift',
+        '/Users/_m/src/0dteTrader/packages/swift-shared/Sources/CandleEncoding/CandleTableEncoder.swift',
+      ]
+    outputs:
+      [
+        '/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/index-build/arm64-apple-macosx/debug/CandleEncoding.build/sources',
+      ]
+    description: 'Write auxiliary file /Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/index-build/arm64-apple-macosx/debug/CandleEncoding.build/sources'
+
+  '/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/index-build/arm64-apple-macosx/debug/ShimCore.build/sources':
+    tool: write-auxiliary-file
+    inputs:
+      [
+        '<sources-file-list>',
+        '/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/Sources/ShimCore/AnalysisResultModel.swift',
+        '/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/Sources/ShimCore/AnalysisRunner.swift',
+        '/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/Sources/ShimCore/AnalysisSnapshotInput.swift',
+        '/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/Sources/ShimCore/AvailabilityService.swift',
+        '/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/Sources/ShimCore/ContextBudgeter.swift',
+        '/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/Sources/ShimCore/JSONValue.swift',
+        '/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/Sources/ShimCore/NDJSONTransport.swift',
+        '/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/Sources/ShimCore/Protocol.swift',
+        '/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/Sources/ShimCore/RequestHandler.swift',
+        '/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/Sources/ShimCore/ShimTelemetry.swift',
+      ]
+    outputs:
+      [
+        '/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/index-build/arm64-apple-macosx/debug/ShimCore.build/sources',
+      ]
+    description: 'Write auxiliary file /Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/index-build/arm64-apple-macosx/debug/ShimCore.build/sources'
+
+  '/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/index-build/arm64-apple-macosx/debug/ShimCoreTests.build/sources':
+    tool: write-auxiliary-file
+    inputs:
+      [
+        '<sources-file-list>',
+        '/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/Tests/ShimCoreTests/AnalysisRunnerTests.swift',
+        '/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/Tests/ShimCoreTests/ContextBudgeterTests.swift',
+        '/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/Tests/ShimCoreTests/GroundingValidatorTests.swift',
+        '/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/Tests/ShimCoreTests/ProtocolTests.swift',
+        '/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/Tests/ShimCoreTests/RequestHandlerTests.swift',
+        '/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/Tests/ShimCoreTests/ShimTelemetryTests.swift',
+      ]
+    outputs:
+      [
+        '/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/index-build/arm64-apple-macosx/debug/ShimCoreTests.build/sources',
+      ]
+    description: 'Write auxiliary file /Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/index-build/arm64-apple-macosx/debug/ShimCoreTests.build/sources'
+
+  '/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/index-build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt':
+    tool: write-auxiliary-file
+    inputs:
+      [
+        '<swift-get-version>',
+        '/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc',
+      ]
+    outputs:
+      [
+        '/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/index-build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt',
+      ]
+    always-out-of-date: 'true'
+    description: 'Write auxiliary file /Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/index-build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt'
+
+  '<AppleIntelligenceShim-arm64-apple-macosx-debug.module>':
+    tool: phony
+    inputs:
+      [
+        '/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/index-build/arm64-apple-macosx/debug/Modules/AppleIntelligenceShim.swiftmodule',
+      ]
+    outputs: ['<AppleIntelligenceShim-arm64-apple-macosx-debug.module>']
+
+  '<AppleIntelligenceShimPackageTests-arm64-apple-macosx-debug.module>':
+    tool: phony
+    inputs:
+      [
+        '/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/index-build/arm64-apple-macosx/debug/Modules/AppleIntelligenceShimPackageTests.swiftmodule',
+      ]
+    outputs: ['<AppleIntelligenceShimPackageTests-arm64-apple-macosx-debug.module>']
+
+  '<CandleEncoding-arm64-apple-macosx-debug.module>':
+    tool: phony
+    inputs:
+      [
+        '/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/index-build/arm64-apple-macosx/debug/Modules/CandleEncoding.swiftmodule',
+      ]
+    outputs: ['<CandleEncoding-arm64-apple-macosx-debug.module>']
+
+  '<ShimCore-arm64-apple-macosx-debug.module>':
+    tool: phony
+    inputs:
+      [
+        '/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/index-build/arm64-apple-macosx/debug/Modules/ShimCore.swiftmodule',
+      ]
+    outputs: ['<ShimCore-arm64-apple-macosx-debug.module>']
+
+  '<ShimCoreTests-arm64-apple-macosx-debug.module>':
+    tool: phony
+    inputs:
+      [
+        '/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/index-build/arm64-apple-macosx/debug/Modules/ShimCoreTests.swiftmodule',
+      ]
+    outputs: ['<ShimCoreTests-arm64-apple-macosx-debug.module>']
+
+  'C.AppleIntelligenceShim-arm64-apple-macosx-debug.module':
+    tool: shell
+    inputs:
+      [
+        '/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/Sources/AppleIntelligenceShim/main.swift',
+        '/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/index-build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt',
+        '/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/index-build/arm64-apple-macosx/debug/Modules/ShimCore.swiftmodule',
+        '/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/index-build/arm64-apple-macosx/debug/AppleIntelligenceShim.build/sources',
+      ]
+    outputs:
+      [
+        '/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/index-build/arm64-apple-macosx/debug/Modules/AppleIntelligenceShim.swiftmodule',
+      ]
+    description: "Compiling Swift Module 'AppleIntelligenceShim' (1 sources)"
+    args:
+      [
+        '/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc',
+        '-module-name',
+        'AppleIntelligenceShim',
+        '-emit-dependencies',
+        '-emit-module',
+        '-emit-module-path',
+        '/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/index-build/arm64-apple-macosx/debug/Modules/AppleIntelligenceShim.swiftmodule',
+        '-output-file-map',
+        '/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/index-build/arm64-apple-macosx/debug/AppleIntelligenceShim.build/output-file-map.json',
+        '-incremental',
+        '@/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/index-build/arm64-apple-macosx/debug/AppleIntelligenceShim.build/sources',
+        '-I',
+        '/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/index-build/arm64-apple-macosx/debug/Modules',
+        '-target',
+        'arm64-apple-macosx26.0',
+        '-incremental',
+        '-enable-batch-mode',
+        '-serialize-diagnostics',
+        '-Onone',
+        '-enable-testing',
+        '-j10',
+        '-DSWIFT_PACKAGE',
+        '-DDEBUG',
+        '-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE',
+        '-module-cache-path',
+        '/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/index-build/arm64-apple-macosx/debug/ModuleCache',
+        '-parseable-output',
+        '-Xfrontend',
+        '-entry-point-function-name',
+        '-Xfrontend',
+        'AppleIntelligenceShim_main',
+        '-swift-version',
+        '6',
+        '-Xfrontend',
+        '-experimental-lazy-typecheck',
+        '-Xfrontend',
+        '-experimental-skip-all-function-bodies',
+        '-Xfrontend',
+        '-experimental-allow-module-with-compiler-errors',
+        '-Xfrontend',
+        '-empty-abi-descriptor',
+        '-plugin-path',
+        '/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing',
+        '-sdk',
+        '/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk',
+        '-F',
+        '/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks',
+        '-I',
+        '/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib',
+        '-L',
+        '/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib',
+        '-g',
+        '-Xcc',
+        '-isysroot',
+        '-Xcc',
+        '/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk',
+        '-Xcc',
+        '-F',
+        '-Xcc',
+        '/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks',
+        '-Xcc',
+        '-fPIC',
+        '-Xcc',
+        '-g',
+        '-package-name',
+        'apple_intelligence_shim',
+      ]
+
+  'C.AppleIntelligenceShimPackageTests-arm64-apple-macosx-debug.module':
+    tool: shell
+    inputs:
+      [
+        '/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/index-build/arm64-apple-macosx/debug/AppleIntelligenceShimPackageTests.derived/runner.swift',
+        '/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/index-build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt',
+        '/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/index-build/arm64-apple-macosx/debug/Modules/ShimCoreTests.swiftmodule',
+        '/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/index-build/arm64-apple-macosx/debug/AppleIntelligenceShimPackageTests.build/sources',
+      ]
+    outputs:
+      [
+        '/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/index-build/arm64-apple-macosx/debug/Modules/AppleIntelligenceShimPackageTests.swiftmodule',
+      ]
+    description: "Compiling Swift Module 'AppleIntelligenceShimPackageTests' (1 sources)"
+    args:
+      [
+        '/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc',
+        '-module-name',
+        'AppleIntelligenceShimPackageTests',
+        '-emit-dependencies',
+        '-emit-module',
+        '-emit-module-path',
+        '/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/index-build/arm64-apple-macosx/debug/Modules/AppleIntelligenceShimPackageTests.swiftmodule',
+        '-output-file-map',
+        '/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/index-build/arm64-apple-macosx/debug/AppleIntelligenceShimPackageTests.build/output-file-map.json',
+        '-parse-as-library',
+        '-incremental',
+        '@/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/index-build/arm64-apple-macosx/debug/AppleIntelligenceShimPackageTests.build/sources',
+        '-I',
+        '/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/index-build/arm64-apple-macosx/debug/Modules',
+        '-target',
+        'arm64-apple-macosx26.0',
+        '-incremental',
+        '-enable-batch-mode',
+        '-serialize-diagnostics',
+        '-Onone',
+        '-enable-testing',
+        '-Xfrontend',
+        '-enable-cross-import-overlays',
+        '-j10',
+        '-DSWIFT_PACKAGE',
+        '-DDEBUG',
+        '-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE',
+        '-module-cache-path',
+        '/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/index-build/arm64-apple-macosx/debug/ModuleCache',
+        '-parseable-output',
+        '-parse-as-library',
+        '-emit-objc-header',
+        '-emit-objc-header-path',
+        '/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/index-build/arm64-apple-macosx/debug/AppleIntelligenceShimPackageTests.build/include/AppleIntelligenceShimPackageTests-Swift.h',
+        '-Xfrontend',
+        '-experimental-lazy-typecheck',
+        '-Xfrontend',
+        '-experimental-skip-all-function-bodies',
+        '-Xfrontend',
+        '-experimental-allow-module-with-compiler-errors',
+        '-Xfrontend',
+        '-empty-abi-descriptor',
+        '-plugin-path',
+        '/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing',
+        '-sdk',
+        '/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk',
+        '-F',
+        '/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks',
+        '-I',
+        '/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib',
+        '-L',
+        '/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib',
+        '-g',
+        '-Xcc',
+        '-isysroot',
+        '-Xcc',
+        '/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk',
+        '-Xcc',
+        '-F',
+        '-Xcc',
+        '/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks',
+        '-Xcc',
+        '-fPIC',
+        '-Xcc',
+        '-g',
+        '-package-name',
+        'apple_intelligence_shim',
+      ]
+
+  'C.CandleEncoding-arm64-apple-macosx-debug.module':
+    tool: shell
+    inputs:
+      [
+        '/Users/_m/src/0dteTrader/packages/swift-shared/Sources/CandleEncoding/CandleBar.swift',
+        '/Users/_m/src/0dteTrader/packages/swift-shared/Sources/CandleEncoding/CandleTableEncoder.swift',
+        '/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/index-build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt',
+        '/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/index-build/arm64-apple-macosx/debug/CandleEncoding.build/sources',
+      ]
+    outputs:
+      [
+        '/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/index-build/arm64-apple-macosx/debug/Modules/CandleEncoding.swiftmodule',
+      ]
+    description: "Compiling Swift Module 'CandleEncoding' (2 sources)"
+    args:
+      [
+        '/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc',
+        '-module-name',
+        'CandleEncoding',
+        '-emit-dependencies',
+        '-emit-module',
+        '-emit-module-path',
+        '/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/index-build/arm64-apple-macosx/debug/Modules/CandleEncoding.swiftmodule',
+        '-output-file-map',
+        '/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/index-build/arm64-apple-macosx/debug/CandleEncoding.build/output-file-map.json',
+        '-parse-as-library',
+        '-incremental',
+        '@/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/index-build/arm64-apple-macosx/debug/CandleEncoding.build/sources',
+        '-I',
+        '/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/index-build/arm64-apple-macosx/debug/Modules',
+        '-target',
+        'arm64-apple-macosx26.0',
+        '-incremental',
+        '-enable-batch-mode',
+        '-serialize-diagnostics',
+        '-Onone',
+        '-enable-testing',
+        '-j10',
+        '-DSWIFT_PACKAGE',
+        '-DDEBUG',
+        '-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE',
+        '-module-cache-path',
+        '/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/index-build/arm64-apple-macosx/debug/ModuleCache',
+        '-parseable-output',
+        '-parse-as-library',
+        '-emit-objc-header',
+        '-emit-objc-header-path',
+        '/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/index-build/arm64-apple-macosx/debug/CandleEncoding.build/include/CandleEncoding-Swift.h',
+        '-swift-version',
+        '6',
+        '-Xfrontend',
+        '-experimental-lazy-typecheck',
+        '-Xfrontend',
+        '-experimental-skip-all-function-bodies',
+        '-Xfrontend',
+        '-experimental-allow-module-with-compiler-errors',
+        '-Xfrontend',
+        '-empty-abi-descriptor',
+        '-plugin-path',
+        '/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing',
+        '-sdk',
+        '/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk',
+        '-F',
+        '/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks',
+        '-I',
+        '/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib',
+        '-L',
+        '/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib',
+        '-g',
+        '-Xcc',
+        '-isysroot',
+        '-Xcc',
+        '/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk',
+        '-Xcc',
+        '-F',
+        '-Xcc',
+        '/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks',
+        '-Xcc',
+        '-fPIC',
+        '-Xcc',
+        '-g',
+        '-package-name',
+        'swift_shared',
+      ]
+
+  'C.ShimCore-arm64-apple-macosx-debug.module':
+    tool: shell
+    inputs:
+      [
+        '/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/Sources/ShimCore/AnalysisResultModel.swift',
+        '/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/Sources/ShimCore/AnalysisRunner.swift',
+        '/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/Sources/ShimCore/AnalysisSnapshotInput.swift',
+        '/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/Sources/ShimCore/AvailabilityService.swift',
+        '/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/Sources/ShimCore/ContextBudgeter.swift',
+        '/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/Sources/ShimCore/JSONValue.swift',
+        '/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/Sources/ShimCore/NDJSONTransport.swift',
+        '/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/Sources/ShimCore/Protocol.swift',
+        '/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/Sources/ShimCore/RequestHandler.swift',
+        '/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/Sources/ShimCore/ShimTelemetry.swift',
+        '/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/index-build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt',
+        '/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/index-build/arm64-apple-macosx/debug/Modules/CandleEncoding.swiftmodule',
+        '/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/index-build/arm64-apple-macosx/debug/ShimCore.build/sources',
+      ]
+    outputs:
+      [
+        '/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/index-build/arm64-apple-macosx/debug/Modules/ShimCore.swiftmodule',
+      ]
+    description: "Compiling Swift Module 'ShimCore' (10 sources)"
+    args:
+      [
+        '/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc',
+        '-module-name',
+        'ShimCore',
+        '-emit-dependencies',
+        '-emit-module',
+        '-emit-module-path',
+        '/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/index-build/arm64-apple-macosx/debug/Modules/ShimCore.swiftmodule',
+        '-output-file-map',
+        '/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/index-build/arm64-apple-macosx/debug/ShimCore.build/output-file-map.json',
+        '-parse-as-library',
+        '-incremental',
+        '@/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/index-build/arm64-apple-macosx/debug/ShimCore.build/sources',
+        '-I',
+        '/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/index-build/arm64-apple-macosx/debug/Modules',
+        '-target',
+        'arm64-apple-macosx26.0',
+        '-incremental',
+        '-enable-batch-mode',
+        '-serialize-diagnostics',
+        '-Onone',
+        '-enable-testing',
+        '-j10',
+        '-DSWIFT_PACKAGE',
+        '-DDEBUG',
+        '-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE',
+        '-module-cache-path',
+        '/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/index-build/arm64-apple-macosx/debug/ModuleCache',
+        '-parseable-output',
+        '-parse-as-library',
+        '-emit-objc-header',
+        '-emit-objc-header-path',
+        '/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/index-build/arm64-apple-macosx/debug/ShimCore.build/include/ShimCore-Swift.h',
+        '-swift-version',
+        '6',
+        '-Xfrontend',
+        '-experimental-lazy-typecheck',
+        '-Xfrontend',
+        '-experimental-skip-all-function-bodies',
+        '-Xfrontend',
+        '-experimental-allow-module-with-compiler-errors',
+        '-Xfrontend',
+        '-empty-abi-descriptor',
+        '-plugin-path',
+        '/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing',
+        '-sdk',
+        '/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk',
+        '-F',
+        '/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks',
+        '-I',
+        '/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib',
+        '-L',
+        '/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib',
+        '-g',
+        '-Xcc',
+        '-isysroot',
+        '-Xcc',
+        '/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk',
+        '-Xcc',
+        '-F',
+        '-Xcc',
+        '/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks',
+        '-Xcc',
+        '-fPIC',
+        '-Xcc',
+        '-g',
+        '-package-name',
+        'apple_intelligence_shim',
+      ]
+
+  'C.ShimCoreTests-arm64-apple-macosx-debug.module':
+    tool: shell
+    inputs:
+      [
+        '/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/Tests/ShimCoreTests/AnalysisRunnerTests.swift',
+        '/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/Tests/ShimCoreTests/ContextBudgeterTests.swift',
+        '/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/Tests/ShimCoreTests/GroundingValidatorTests.swift',
+        '/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/Tests/ShimCoreTests/ProtocolTests.swift',
+        '/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/Tests/ShimCoreTests/RequestHandlerTests.swift',
+        '/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/Tests/ShimCoreTests/ShimTelemetryTests.swift',
+        '/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/index-build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt',
+        '/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/index-build/arm64-apple-macosx/debug/Modules/ShimCore.swiftmodule',
+        '/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/index-build/arm64-apple-macosx/debug/ShimCoreTests.build/sources',
+      ]
+    outputs:
+      [
+        '/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/index-build/arm64-apple-macosx/debug/Modules/ShimCoreTests.swiftmodule',
+      ]
+    description: "Compiling Swift Module 'ShimCoreTests' (6 sources)"
+    args:
+      [
+        '/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc',
+        '-module-name',
+        'ShimCoreTests',
+        '-emit-dependencies',
+        '-emit-module',
+        '-emit-module-path',
+        '/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/index-build/arm64-apple-macosx/debug/Modules/ShimCoreTests.swiftmodule',
+        '-output-file-map',
+        '/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/index-build/arm64-apple-macosx/debug/ShimCoreTests.build/output-file-map.json',
+        '-parse-as-library',
+        '-incremental',
+        '@/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/index-build/arm64-apple-macosx/debug/ShimCoreTests.build/sources',
+        '-I',
+        '/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/index-build/arm64-apple-macosx/debug/Modules',
+        '-target',
+        'arm64-apple-macosx26.0',
+        '-incremental',
+        '-enable-batch-mode',
+        '-serialize-diagnostics',
+        '-Onone',
+        '-enable-testing',
+        '-Xfrontend',
+        '-enable-cross-import-overlays',
+        '-j10',
+        '-DSWIFT_PACKAGE',
+        '-DDEBUG',
+        '-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE',
+        '-module-cache-path',
+        '/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/index-build/arm64-apple-macosx/debug/ModuleCache',
+        '-parseable-output',
+        '-parse-as-library',
+        '-swift-version',
+        '6',
+        '-Xfrontend',
+        '-experimental-lazy-typecheck',
+        '-Xfrontend',
+        '-experimental-skip-all-function-bodies',
+        '-Xfrontend',
+        '-experimental-allow-module-with-compiler-errors',
+        '-Xfrontend',
+        '-empty-abi-descriptor',
+        '-plugin-path',
+        '/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing',
+        '-sdk',
+        '/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk',
+        '-F',
+        '/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks',
+        '-I',
+        '/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib',
+        '-L',
+        '/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib',
+        '-g',
+        '-Xcc',
+        '-isysroot',
+        '-Xcc',
+        '/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk',
+        '-Xcc',
+        '-F',
+        '-Xcc',
+        '/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks',
+        '-Xcc',
+        '-fPIC',
+        '-Xcc',
+        '-g',
+        '-package-name',
+        'apple_intelligence_shim',
+      ]
+
+  'PackageStructure':
+    tool: package-structure-tool
+    inputs:
+      [
+        '/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/Sources/AppleIntelligenceShim/',
+        '/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/Sources/ShimCore/',
+        '/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/Tests/ShimCoreTests/',
+        '/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/Package.swift',
+        '/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/Package.resolved',
+      ]
+    outputs: ['<PackageStructure>']
+    description: 'Planning build'
+    allow-missing-inputs: true

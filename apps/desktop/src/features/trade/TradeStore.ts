@@ -9,6 +9,7 @@ import type {
   OrderType,
   Position,
   Quote,
+  TradeHistoryEntry,
 } from '@0dtetrader/shared-types';
 import type { ApiClient } from '../../core/api/ApiClient';
 import { errorMessage } from '../../core/api/ApiError';
@@ -56,6 +57,8 @@ interface TradeStoreState {
   positions: Position[];
   openOrders: OrderResult[];
   workingSymbols: string[];
+  /** Newest first; refreshed alongside positions/orders. */
+  history: TradeHistoryEntry[];
 
   armedTicket: ArmedOrderTicket | null;
   preview: OrderPreview | null;
@@ -120,6 +123,7 @@ export class TradeStore extends Store<TradeStoreState> {
       positions: [],
       openOrders: [],
       workingSymbols: [],
+      history: [],
       armedTicket: null,
       preview: null,
       isPreviewLoading: false,
@@ -550,9 +554,10 @@ export class TradeStore extends Store<TradeStoreState> {
   }
 
   private async runRefresh(): Promise<void> {
-    const [positions, openOrders] = await Promise.allSettled([
+    const [positions, openOrders, history] = await Promise.allSettled([
       this.apiClient.positions(),
       this.apiClient.openOrders(),
+      this.apiClient.orderHistory(),
     ]);
     if (positions.status === 'fulfilled') {
       this.set({ positions: positions.value });
@@ -564,6 +569,32 @@ export class TradeStore extends Store<TradeStoreState> {
     } else {
       this.showToast(errorMessage(openOrders.reason), 'error');
     }
+    if (history.status === 'fulfilled') {
+      this.set({ history: history.value.entries });
+    }
+    // History failures don't toast: it's supplementary (Recent Trades, Day
+    // P&L's realized component) and a broker hiccup already surfaced a toast
+    // from the positions/orders calls above.
+  }
+
+  // MARK: - Periodic broker polling
+
+  private pollTimer: ReturnType<typeof setInterval> | null = null;
+
+  /** Ping the broker on an interval so positions/orders/history don't go
+   *  stale between the pushes that trigger a refresh (order updates,
+   *  reconnects, user actions). Idempotent — a second call is a no-op. */
+  startPolling(intervalMs = 60_000): void {
+    if (this.pollTimer !== null) return;
+    this.pollTimer = setInterval(() => {
+      void this.refreshTradingData();
+    }, intervalMs);
+  }
+
+  stopPolling(): void {
+    if (this.pollTimer === null) return;
+    clearInterval(this.pollTimer);
+    this.pollTimer = null;
   }
 
   /** Tap-to-flatten: opposite-side market order for the full position size. */

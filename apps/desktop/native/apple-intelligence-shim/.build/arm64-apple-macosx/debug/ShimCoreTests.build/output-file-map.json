@@ -1,0 +1,47 @@
+{
+  "": {
+    "swift-dependencies": "/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/arm64-apple-macosx/debug/ShimCoreTests.build/primary.swiftdeps"
+  },
+  "/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/Tests/ShimCoreTests/AnalysisRunnerTests.swift": {
+    "dependencies": "/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/arm64-apple-macosx/debug/ShimCoreTests.build/AnalysisRunnerTests.d",
+    "object": "/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/arm64-apple-macosx/debug/ShimCoreTests.build/AnalysisRunnerTests.swift.o",
+    "swiftmodule": "/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/arm64-apple-macosx/debug/ShimCoreTests.build/AnalysisRunnerTests~partial.swiftmodule",
+    "swift-dependencies": "/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/arm64-apple-macosx/debug/ShimCoreTests.build/AnalysisRunnerTests.swiftdeps",
+    "diagnostics": "/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/arm64-apple-macosx/debug/ShimCoreTests.build/AnalysisRunnerTests.dia"
+  },
+  "/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/Tests/ShimCoreTests/ContextBudgeterTests.swift": {
+    "dependencies": "/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/arm64-apple-macosx/debug/ShimCoreTests.build/ContextBudgeterTests.d",
+    "object": "/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/arm64-apple-macosx/debug/ShimCoreTests.build/ContextBudgeterTests.swift.o",
+    "swiftmodule": "/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/arm64-apple-macosx/debug/ShimCoreTests.build/ContextBudgeterTests~partial.swiftmodule",
+    "swift-dependencies": "/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/arm64-apple-macosx/debug/ShimCoreTests.build/ContextBudgeterTests.swiftdeps",
+    "diagnostics": "/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/arm64-apple-macosx/debug/ShimCoreTests.build/ContextBudgeterTests.dia"
+  },
+  "/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/Tests/ShimCoreTests/GroundingValidatorTests.swift": {
+    "dependencies": "/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/arm64-apple-macosx/debug/ShimCoreTests.build/GroundingValidatorTests.d",
+    "object": "/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/arm64-apple-macosx/debug/ShimCoreTests.build/GroundingValidatorTests.swift.o",
+    "swiftmodule": "/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/arm64-apple-macosx/debug/ShimCoreTests.build/GroundingValidatorTests~partial.swiftmodule",
+    "swift-dependencies": "/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/arm64-apple-macosx/debug/ShimCoreTests.build/GroundingValidatorTests.swiftdeps",
+    "diagnostics": "/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/arm64-apple-macosx/debug/ShimCoreTests.build/GroundingValidatorTests.dia"
+  },
+  "/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/Tests/ShimCoreTests/ProtocolTests.swift": {
+    "dependencies": "/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/arm64-apple-macosx/debug/ShimCoreTests.build/ProtocolTests.d",
+    "object": "/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/arm64-apple-macosx/debug/ShimCoreTests.build/ProtocolTests.swift.o",
+    "swiftmodule": "/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/arm64-apple-macosx/debug/ShimCoreTests.build/ProtocolTests~partial.swiftmodule",
+    "swift-dependencies": "/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/arm64-apple-macosx/debug/ShimCoreTests.build/ProtocolTests.swiftdeps",
+    "diagnostics": "/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/arm64-apple-macosx/debug/ShimCoreTests.build/ProtocolTests.dia"
+  },
+  "/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/Tests/ShimCoreTests/RequestHandlerTests.swift": {
+    "dependencies": "/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/arm64-apple-macosx/debug/ShimCoreTests.build/RequestHandlerTests.d",
+    "object": "/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/arm64-apple-macosx/debug/ShimCoreTests.build/RequestHandlerTests.swift.o",
+    "swiftmodule": "/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/arm64-apple-macosx/debug/ShimCoreTests.build/RequestHandlerTests~partial.swiftmodule",
+    "swift-dependencies": "/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/arm64-apple-macosx/debug/ShimCoreTests.build/RequestHandlerTests.swiftdeps",
+    "diagnostics": "/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/arm64-apple-macosx/debug/ShimCoreTests.build/RequestHandlerTests.dia"
+  },
+  "/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/Tests/ShimCoreTests/ShimTelemetryTests.swift": {
+    "dependencies": "/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/arm64-apple-macosx/debug/ShimCoreTests.build/ShimTelemetryTests.d",
+    "object": "/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/arm64-apple-macosx/debug/ShimCoreTests.build/ShimTelemetryTests.swift.o",
+    "swiftmodule": "/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/arm64-apple-macosx/debug/ShimCoreTests.build/ShimTelemetryTests~partial.swiftmodule",
+    "swift-dependencies": "/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/arm64-apple-macosx/debug/ShimCoreTests.build/ShimTelemetryTests.swiftdeps",
+    "diagnostics": "/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/arm64-apple-macosx/debug/ShimCoreTests.build/ShimTelemetryTests.dia"
+  }
+}

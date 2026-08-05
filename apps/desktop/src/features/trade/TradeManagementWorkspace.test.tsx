@@ -1,7 +1,13 @@
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import type { ChartOrder, OptionContract, OrderResult, Position } from '@0dtetrader/shared-types';
+import type {
+  ChartOrder,
+  OptionContract,
+  OrderResult,
+  Position,
+  TradeHistoryEntry,
+} from '@0dtetrader/shared-types';
 import type { ApiClient } from '../../core/api/ApiClient';
 import { ChartOrdersStore } from '../chart/chartOrders';
 import { TradeManagementWorkspace } from './TradeManagementWorkspace';
@@ -108,6 +114,7 @@ function renderWorkspace(overrides: Partial<Parameters<typeof TradeManagementWor
       positions: [],
       openOrders: [],
       chartOrders: [],
+      history: [],
       workingSymbols: [],
       expanded: false,
       onExpandedChange: () => undefined,
@@ -183,9 +190,8 @@ describe('moveStopToEntryRequest', () => {
 
 describe('TradeManagementWorkspace helpers', () => {
   it('collapses while flat and expands to resize the chart area', () => {
-    expect(desktopTradeWorkspaceHeight({ expanded: false, hasActivity: false })).toBe(36);
-    expect(desktopTradeWorkspaceHeight({ expanded: false, hasActivity: true })).toBe(124);
-    expect(desktopTradeWorkspaceHeight({ expanded: true, hasActivity: false })).toBe(220);
+    expect(desktopTradeWorkspaceHeight({ expanded: false })).toBe(36);
+    expect(desktopTradeWorkspaceHeight({ expanded: true })).toBe(220);
   });
 
   it('budgets the docked editor row — the footer is fixed-pixel with nothing elastic', () => {
@@ -211,6 +217,34 @@ describe('TradeManagementWorkspace helpers', () => {
       dayPnl([position, { ...position, symbol: 'SPY260729P00729000', unrealizedPnl: -20 }]),
     ).toBe(64);
   });
+
+  it("adds today's realized P&L from closed fills to the unrealized total", () => {
+    const now = new Date();
+    const earlierToday = new Date(now);
+    earlierToday.setHours(9, 30, 0, 0);
+    const yesterday = new Date(now);
+    yesterday.setDate(yesterday.getDate() - 1);
+
+    const history: TradeHistoryEntry[] = [
+      { ...order, orderId: 'closed-today', realizedPnl: 40, timestamp: earlierToday.toISOString() },
+      {
+        ...order,
+        orderId: 'closed-yesterday',
+        realizedPnl: 500,
+        timestamp: yesterday.toISOString(),
+      },
+      {
+        ...order,
+        orderId: 'opening-fill',
+        realizedPnl: null,
+        timestamp: earlierToday.toISOString(),
+      },
+    ];
+
+    // 84 unrealized (from `position`) + 40 realized today; yesterday's 500 and
+    // the null (opening) fill must not bleed into today's figure.
+    expect(dayPnl([position], history)).toBe(124);
+  });
 });
 
 describe('TradeManagementWorkspace rendering', () => {
@@ -223,7 +257,7 @@ describe('TradeManagementWorkspace rendering', () => {
     expect(markup).not.toContain('active-position-strip');
   });
 
-  it('auto-shows the compact position strip without auto-expanding the full table', () => {
+  it('shows only the status bar while flat with a position, not an auto-expanded table', () => {
     const markup = renderWorkspace({
       positions: [position],
       chartOrders: [stop],
@@ -231,11 +265,8 @@ describe('TradeManagementWorkspace rendering', () => {
       expanded: false,
     });
 
-    expect(markup).toContain('active-position-strip');
-    expect(markup).toContain('SPY 729C · Qty 1');
-    expect(markup).toContain('+$84.00 · +56%');
-    expect(markup).toContain('Expiry B/E $730.50');
-    expect(markup).toContain('Stop $1.50');
+    expect(markup).toContain('Positions 1');
+    expect(markup).toContain('Day P&amp;L +$84.00');
     expect(markup).not.toContain('<th style="text-align:left">Expiration</th>');
   });
 
@@ -260,11 +291,12 @@ describe('TradeManagementWorkspace rendering', () => {
     const markup = renderWorkspace({
       positions: [position],
       resolveContract: () => contract,
-      expanded: false,
+      expanded: true,
     });
 
-    expect(markup).toContain('Stop —');
-    expect(markup).toContain('Target —');
+    // Stop and Target columns both fall back to an em dash when there's no
+    // working chart order of that kind for the position.
+    expect(markup.match(/—/g)?.length).toBeGreaterThanOrEqual(2);
   });
 
   it('enables stop/target actions once a stop line and entry anchor exist', () => {
@@ -369,6 +401,7 @@ describe('TradeManagementWorkspace rendering', () => {
       workingSymbols: [position.symbol],
       resolveContract: () => contract,
       onClosePosition: close,
+      expanded: true,
     });
 
     expect(markup).toContain('disabled=""');

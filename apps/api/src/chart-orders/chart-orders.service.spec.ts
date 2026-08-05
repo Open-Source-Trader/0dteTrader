@@ -49,6 +49,7 @@ describe('ChartOrdersService', () => {
     const orders = new OrdersService(
       prisma as unknown as ConstructorParameters<typeof OrdersService>[0],
       new OrderEventsService(),
+      gateway as BrokerGateway,
     );
     service = new ChartOrdersService(
       prisma as unknown as ConstructorParameters<typeof ChartOrdersService>[0],

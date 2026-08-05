@@ -1,0 +1,67 @@
+{
+  "": {
+    "dependencies": "/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/arm64-apple-macosx/release/ShimCore.build/ShimCore.d",
+    "object": "/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/arm64-apple-macosx/release/ShimCore.build/ShimCore.o",
+    "swift-dependencies": "/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/arm64-apple-macosx/release/ShimCore.build/primary.swiftdeps"
+  },
+  "/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/Sources/ShimCore/AnalysisResultModel.swift": {
+    "object": "/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/arm64-apple-macosx/release/ShimCore.build/AnalysisResultModel.swift.o",
+    "swiftmodule": "/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/arm64-apple-macosx/release/ShimCore.build/AnalysisResultModel~partial.swiftmodule",
+    "swift-dependencies": "/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/arm64-apple-macosx/release/ShimCore.build/AnalysisResultModel.swiftdeps",
+    "diagnostics": "/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/arm64-apple-macosx/release/ShimCore.build/AnalysisResultModel.dia"
+  },
+  "/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/Sources/ShimCore/AnalysisRunner.swift": {
+    "object": "/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/arm64-apple-macosx/release/ShimCore.build/AnalysisRunner.swift.o",
+    "swiftmodule": "/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/arm64-apple-macosx/release/ShimCore.build/AnalysisRunner~partial.swiftmodule",
+    "swift-dependencies": "/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/arm64-apple-macosx/release/ShimCore.build/AnalysisRunner.swiftdeps",
+    "diagnostics": "/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/arm64-apple-macosx/release/ShimCore.build/AnalysisRunner.dia"
+  },
+  "/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/Sources/ShimCore/AnalysisSnapshotInput.swift": {
+    "object": "/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/arm64-apple-macosx/release/ShimCore.build/AnalysisSnapshotInput.swift.o",
+    "swiftmodule": "/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/arm64-apple-macosx/release/ShimCore.build/AnalysisSnapshotInput~partial.swiftmodule",
+    "swift-dependencies": "/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/arm64-apple-macosx/release/ShimCore.build/AnalysisSnapshotInput.swiftdeps",
+    "diagnostics": "/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/arm64-apple-macosx/release/ShimCore.build/AnalysisSnapshotInput.dia"
+  },
+  "/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/Sources/ShimCore/AvailabilityService.swift": {
+    "object": "/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/arm64-apple-macosx/release/ShimCore.build/AvailabilityService.swift.o",
+    "swiftmodule": "/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/arm64-apple-macosx/release/ShimCore.build/AvailabilityService~partial.swiftmodule",
+    "swift-dependencies": "/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/arm64-apple-macosx/release/ShimCore.build/AvailabilityService.swiftdeps",
+    "diagnostics": "/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/arm64-apple-macosx/release/ShimCore.build/AvailabilityService.dia"
+  },
+  "/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/Sources/ShimCore/ContextBudgeter.swift": {
+    "object": "/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/arm64-apple-macosx/release/ShimCore.build/ContextBudgeter.swift.o",
+    "swiftmodule": "/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/arm64-apple-macosx/release/ShimCore.build/ContextBudgeter~partial.swiftmodule",
+    "swift-dependencies": "/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/arm64-apple-macosx/release/ShimCore.build/ContextBudgeter.swiftdeps",
+    "diagnostics": "/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/arm64-apple-macosx/release/ShimCore.build/ContextBudgeter.dia"
+  },
+  "/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/Sources/ShimCore/JSONValue.swift": {
+    "object": "/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/arm64-apple-macosx/release/ShimCore.build/JSONValue.swift.o",
+    "swiftmodule": "/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/arm64-apple-macosx/release/ShimCore.build/JSONValue~partial.swiftmodule",
+    "swift-dependencies": "/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/arm64-apple-macosx/release/ShimCore.build/JSONValue.swiftdeps",
+    "diagnostics": "/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/arm64-apple-macosx/release/ShimCore.build/JSONValue.dia"
+  },
+  "/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/Sources/ShimCore/NDJSONTransport.swift": {
+    "object": "/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/arm64-apple-macosx/release/ShimCore.build/NDJSONTransport.swift.o",
+    "swiftmodule": "/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/arm64-apple-macosx/release/ShimCore.build/NDJSONTransport~partial.swiftmodule",
+    "swift-dependencies": "/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/arm64-apple-macosx/release/ShimCore.build/NDJSONTransport.swiftdeps",
+    "diagnostics": "/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/arm64-apple-macosx/release/ShimCore.build/NDJSONTransport.dia"
+  },
+  "/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/Sources/ShimCore/Protocol.swift": {
+    "object": "/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/arm64-apple-macosx/release/ShimCore.build/Protocol.swift.o",
+    "swiftmodule": "/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/arm64-apple-macosx/release/ShimCore.build/Protocol~partial.swiftmodule",
+    "swift-dependencies": "/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/arm64-apple-macosx/release/ShimCore.build/Protocol.swiftdeps",
+    "diagnostics": "/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/arm64-apple-macosx/release/ShimCore.build/Protocol.dia"
+  },
+  "/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/Sources/ShimCore/RequestHandler.swift": {
+    "object": "/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/arm64-apple-macosx/release/ShimCore.build/RequestHandler.swift.o",
+    "swiftmodule": "/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/arm64-apple-macosx/release/ShimCore.build/RequestHandler~partial.swiftmodule",
+    "swift-dependencies": "/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/arm64-apple-macosx/release/ShimCore.build/RequestHandler.swiftdeps",
+    "diagnostics": "/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/arm64-apple-macosx/release/ShimCore.build/RequestHandler.dia"
+  },
+  "/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/Sources/ShimCore/ShimTelemetry.swift": {
+    "object": "/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/arm64-apple-macosx/release/ShimCore.build/ShimTelemetry.swift.o",
+    "swiftmodule": "/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/arm64-apple-macosx/release/ShimCore.build/ShimTelemetry~partial.swiftmodule",
+    "swift-dependencies": "/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/arm64-apple-macosx/release/ShimCore.build/ShimTelemetry.swiftdeps",
+    "diagnostics": "/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/arm64-apple-macosx/release/ShimCore.build/ShimTelemetry.dia"
+  }
+}

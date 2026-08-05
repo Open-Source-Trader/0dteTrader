@@ -185,6 +185,11 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
   useEffect(() => {
     void chartStore.start();
     void tradeStore.refreshTradingData();
+    // Positions/orders/history mostly stay current via pushes (order updates,
+    // reconnect) and post-action refreshes, but a 60s poll is the backstop
+    // against anything the broker changed out from under those — a fill from
+    // outside the app, a stale mark, a same-day close reflected in history.
+    tradeStore.startPolling();
     tradeStore.optionContractResolver = (symbol) =>
       chainStore
         .getState()
@@ -221,6 +226,7 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
       offOrders();
       offChartOrders();
       offReconnect();
+      tradeStore.stopPolling();
     };
   }, [chartStore, tradeStore, chainStore, chartOrdersStore, quoteSocket, settingsStore]);
 
@@ -453,6 +459,7 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
       positions={trade.positions}
       openOrders={trade.openOrders}
       chartOrders={chartOrders.orders}
+      history={trade.history}
       workingSymbols={trade.workingSymbols}
       expanded={desktopWorkspaceExpanded}
       onExpandedChange={setDesktopWorkspaceExpanded}

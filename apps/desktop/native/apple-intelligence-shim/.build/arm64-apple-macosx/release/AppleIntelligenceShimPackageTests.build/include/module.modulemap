@@ -1,0 +1,3 @@
+module AppleIntelligenceShimPackageTests {
+    header "/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/arm64-apple-macosx/release/AppleIntelligenceShimPackageTests.build/include/AppleIntelligenceShimPackageTests-Swift.h"
+}

@@ -334,6 +334,20 @@ export class AlpacaBrokerGateway implements BrokerGateway, MarketDataProvider {
       .filter((o) => o.status === 'submitted' || o.status === 'partially_filled');
   }
 
+  /** Every order on file (any status) — backs history reconciliation for
+   *  orders placed directly on Alpaca rather than through this app. */
+  async getRecentOrders(userId: string, since?: Date): Promise<OrderResult[]> {
+    const client = await this.clientFor(userId);
+    const raw = await this.guard(() =>
+      client.trading.orders.getAllOrders({
+        status: 'all',
+        limit: 200,
+        ...(since ? { after: since.toISOString() } : {}),
+      }),
+    );
+    return raw.map((o) => toOrderResult(o));
+  }
+
   async reauthenticate(userId: string): Promise<TradingMode> {
     // Alpaca credentials are static API keys; no OAuth refresh needed.
     return this.tradingModeFor(userId);

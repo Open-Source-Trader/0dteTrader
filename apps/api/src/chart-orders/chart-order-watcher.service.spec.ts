@@ -75,6 +75,7 @@ describe('ChartOrderWatcherService', () => {
     orders = new OrdersService(
       prisma as unknown as ConstructorParameters<typeof OrdersService>[0],
       new OrderEventsService(),
+      gateway as BrokerGateway,
     );
     trading = new TradingService(
       prisma as unknown as ConstructorParameters<typeof TradingService>[0],

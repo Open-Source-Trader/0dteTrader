@@ -112,6 +112,11 @@ export class DispatchingBrokerGateway implements BrokerGateway {
     return (await this.gatewayFor(userId)).getOpenOrders(userId);
   }
 
+  async getRecentOrders(userId: string, since?: Date): Promise<OrderResult[]> {
+    const gateway = await this.gatewayFor(userId);
+    return (await gateway.getRecentOrders?.(userId, since)) ?? [];
+  }
+
   async reauthenticate(userId: string): Promise<TradingMode> {
     return (await this.gatewayFor(userId)).reauthenticate(userId);
   }

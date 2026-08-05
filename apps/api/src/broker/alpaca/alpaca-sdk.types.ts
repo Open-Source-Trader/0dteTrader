@@ -110,7 +110,7 @@ export interface AlpacaMarketData {
 export interface AlpacaTrading {
   orders: {
     submit(input: SdkOrderInput): Promise<SdkOrder>;
-    getAllOrders(params: { status?: string; limit?: number }): Promise<SdkOrder[]>;
+    getAllOrders(params: { status?: string; limit?: number; after?: string }): Promise<SdkOrder[]>;
     getOrderByClientOrderId(params: { clientOrderId: string }): Promise<SdkOrder>;
     deleteOrderByOrderID(params: { orderId: string }): Promise<void>;
   };

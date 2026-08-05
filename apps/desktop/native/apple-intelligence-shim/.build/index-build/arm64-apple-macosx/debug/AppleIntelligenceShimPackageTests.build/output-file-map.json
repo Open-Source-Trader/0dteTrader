@@ -1,0 +1,12 @@
+{
+  "": {
+    "swift-dependencies": "/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/index-build/arm64-apple-macosx/debug/AppleIntelligenceShimPackageTests.build/primary.swiftdeps"
+  },
+  "/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/index-build/arm64-apple-macosx/debug/AppleIntelligenceShimPackageTests.derived/runner.swift": {
+    "dependencies": "/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/index-build/arm64-apple-macosx/debug/AppleIntelligenceShimPackageTests.build/runner.d",
+    "object": "/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/index-build/arm64-apple-macosx/debug/AppleIntelligenceShimPackageTests.build/runner.swift.o",
+    "swiftmodule": "/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/index-build/arm64-apple-macosx/debug/AppleIntelligenceShimPackageTests.build/runner~partial.swiftmodule",
+    "swift-dependencies": "/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/index-build/arm64-apple-macosx/debug/AppleIntelligenceShimPackageTests.build/runner.swiftdeps",
+    "diagnostics": "/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/index-build/arm64-apple-macosx/debug/AppleIntelligenceShimPackageTests.build/runner.dia"
+  }
+}

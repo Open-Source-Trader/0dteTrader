@@ -38,6 +38,8 @@ model User {
   brokerConnections BrokerConnection[]
   tradeOrders     TradeOrder[]
   chartOrders     ChartOrder[]
+  deviceTokens    DeviceToken[]
+  pushDeliveries  PushDelivery[]
 
   @@map("users")
 }
@@ -181,6 +183,16 @@ model TradeOrder {
   orderType      String
   limitPrice     Float?
   filledPrice    Float?
+  // When the order's FIRST execution happened: the broker's execution
+  // timestamp when reported, else when the fill was observed. Anchors
+  // Position.openedAt. Null for rows recorded before this column existed —
+  // readers fall back to placedAt.
+  filledAt       DateTime?
+  // Cumulative executed quantity RECORDED so far — the watermark concurrent
+  // recorders (webhook + poller, across API instances) claim fill increments
+  // against, advanced only by compare-and-set in OrdersService. Deliberately
+  // independent of `status`: a stale status regression must never reset it.
+  executedQuantity Float  @default(0)
   // Price of the UNDERLYING when the order was placed. Feeds the chart's entry
   // line, which is drawn on the underlying's scale, not the contract's. Null
   // for orders placed before this was recorded.
@@ -189,8 +201,47 @@ model TradeOrder {
   placedAt       DateTime
   updatedAt      DateTime @updatedAt
 
+  executions TradeOrderExecution[]
+
   @@index([userId, placedAt])
   @@map("trade_orders")
+}
+
+// One OBSERVATION of a TradeOrder's cumulative fill state. The order row keeps
+// only its latest cumulative state, which loses how partial fills interleave
+// across orders; the position replay works from these instead.
+//
+// Rows are snapshots, not increments, because at write time only the snapshot
+// is knowable-correct: a LOWER cumulative can still arrive afterwards (delayed
+// webhook, out-of-order poll), and an increment derived against the wrong
+// neighbour is wrong forever. Increments are the differences between
+// consecutive snapshots, derived when the replay reads them.
+//
+// Two older row shapes are still read: rows written as increments before this
+// table stored snapshots carry `quantity`/`price` and no `avgPrice`, and the
+// oldest carry no `cumulative` either. The replay reconstructs a snapshot from
+// either shape.
+model TradeOrderExecution {
+  id         String     @id @default(uuid()) @db.Uuid
+  orderId    String
+  order      TradeOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  // The order's cumulative executed quantity as of this observation.
+  // Null only on rows predating the column; Postgres treats unique-index
+  // NULLs as distinct, so those rows are unconstrained by the index below.
+  cumulative Float?
+  // The broker's cumulative AVERAGE price over `cumulative` — the other half
+  // of the observation, and what makes the increment derivable at read time.
+  avgPrice   Float?
+  // The pre-derived increment of the older shape: positive executed delta and
+  // its price. Never written for snapshot rows.
+  quantity   Float?
+  price      Float?
+  executedAt DateTime
+  createdAt  DateTime   @default(now())
+
+  @@unique([orderId, cumulative])
+  @@index([orderId])
+  @@map("trade_order_executions")
 }
 
 // A resting order line drawn on the chart. The broker never receives it: the
@@ -276,6 +327,41 @@ model OptionsAnalyticsSnapshotRecord {
   @@unique([symbol, expiration, bucket, calculationVersion, resolutionMinutes], map: "options_analytics_snapshot_identity_key")
   @@index([resolutionMinutes, bucket])
   @@map("options_analytics_snapshots")
+}
+
+// A device registered for push notifications. `token` is globally unique —
+// re-registering an existing token moves it to the registering account (the
+// device changed users, and only its current owner should be notified). Rows
+// are pruned when APNs reports the token dead.
+model DeviceToken {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @db.Uuid
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  platform  String
+  token     String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@map("device_tokens")
+}
+
+// One row per push already claimed for a (user, event). Written BEFORE the
+// APNs send: the insert IS the claim, and a unique violation means another
+// API instance — or an earlier delivery of the same broker event — already
+// pushed it. `key` is built only from fields every emitter reports
+// identically (the order's id and its terminal status), never from the
+// price, quantity or timestamps, which differ between a poller's
+// placement-derived view and a webhook's and would defeat the dedupe.
+model PushDelivery {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @db.Uuid
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  key       String
+  createdAt DateTime @default(now())
+
+  @@unique([userId, key])
+  @@map("push_deliveries")
 }
 
 model ScheduledJobLease {

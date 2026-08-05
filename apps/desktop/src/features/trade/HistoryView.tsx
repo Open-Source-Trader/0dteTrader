@@ -8,7 +8,7 @@ import { Sheet } from '../../design/components/Sheet';
 import { Spinner } from '../../design/components/Spinner';
 import { Format } from '../../design/format';
 import { ClockIcon } from '../../design/icons';
-import { orderStatusDisplayName, orderTypeDisplayName } from '../../core/models/domain';
+import { orderStatusHistoryLabel, orderTypeDisplayName } from '../../core/models/domain';
 
 function statusColor(status: TradeHistoryEntry['status']): string {
   switch (status) {
@@ -16,6 +16,10 @@ function statusColor(status: TradeHistoryEntry['status']): string {
       return 'var(--pnl-positive)';
     case 'rejected':
       return 'var(--pnl-negative)';
+    // Still waiting at the broker: attention-colored, not resolved either way.
+    case 'submitted':
+    case 'partially_filled':
+      return 'var(--app-warning)';
     default:
       return 'var(--label-secondary)';
   }
@@ -240,7 +244,7 @@ export function HistoryView({
                         color: statusColor(entry.status),
                       }}
                     >
-                      {orderStatusDisplayName(entry.status)}
+                      {orderStatusHistoryLabel(entry.status)}
                     </span>
                   </div>
                   <div

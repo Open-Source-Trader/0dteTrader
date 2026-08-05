@@ -31,6 +31,10 @@ final class SettingsStore: @unchecked Sendable {
         static let appLockEnabled = "settings.appLockEnabled"
         static let tradingLocked = "settings.tradingLocked"
         static let bypassOrderConfirmation = "settings.bypassOrderConfirmation"
+        static let autoOtmOffset = "settings.autoOtmOffset"
+        static let toastsEnabled = "settings.toastsEnabled"
+        static let pushNotificationsEnabled = "settings.pushNotificationsEnabled"
+        static let pushDeviceToken = "settings.pushDeviceToken"
     }
 
     /// Layout choice persists across launches (FR-12). Defaults to split view.
@@ -145,5 +149,50 @@ final class SettingsStore: @unchecked Sendable {
     var bypassOrderConfirmation: Bool {
         get { defaults.bool(forKey: Keys.bypassOrderConfirmation) }
         set { defaults.set(newValue, forKey: Keys.bypassOrderConfirmation) }
+    }
+
+    /// Success/info toast banners (default on). Gates those styles only —
+    /// error toasts always show.
+    var toastsEnabled: Bool {
+        get {
+            guard defaults.object(forKey: Keys.toastsEnabled) != nil else { return true }
+            return defaults.bool(forKey: Keys.toastsEnabled)
+        }
+        set { defaults.set(newValue, forKey: Keys.toastsEnabled) }
+    }
+
+    /// AUTO mode's OTM preference: strikes beyond the ATM anchor (0 = ATM,
+    /// default 1). Clamped on read so a stale or hand-edited value can never
+    /// walk AUTO off the strike ladder.
+    var autoOtmOffset: Int {
+        get {
+            guard defaults.object(forKey: Keys.autoOtmOffset) != nil else { return 1 }
+            return min(10, max(0, defaults.integer(forKey: Keys.autoOtmOffset)))
+        }
+        set { defaults.set(newValue, forKey: Keys.autoOtmOffset) }
+    }
+
+    /// Push notifications for order events. Off until the user opts in.
+    var pushNotificationsEnabled: Bool {
+        get { defaults.bool(forKey: Keys.pushNotificationsEnabled) }
+        set { defaults.set(newValue, forKey: Keys.pushNotificationsEnabled) }
+    }
+
+    /// The APNs token (lowercase hex) last uploaded to a given server, kept
+    /// so a later DELETE can retry even after a relaunch. Keyed PER SERVER:
+    /// the device token is device-scoped and may be registered with several
+    /// backends at once, and each registration needs its own retry handle —
+    /// a single shared slot loses the old server's handle on a server switch.
+    func pushDeviceToken(server: String) -> String? {
+        defaults.string(forKey: "\(Keys.pushDeviceToken).\(server)")
+    }
+
+    func setPushDeviceToken(_ token: String?, server: String) {
+        let key = "\(Keys.pushDeviceToken).\(server)"
+        if let token {
+            defaults.set(token, forKey: key)
+        } else {
+            defaults.removeObject(forKey: key)
+        }
     }
 }

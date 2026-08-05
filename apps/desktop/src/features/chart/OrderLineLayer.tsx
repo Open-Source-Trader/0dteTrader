@@ -8,12 +8,26 @@ import type {
 } from '@0dtetrader/shared-types';
 import { bracketKindFor } from '@0dtetrader/shared-types';
 import { useStore } from '../../core/observable';
+import { dayString } from '../../core/models/dates';
 import { Format } from '../../design/format';
 import { chartPalette } from './chartColors';
+import {
+  canBracketFromEntry,
+  entryLineLabel,
+  entryLineSource,
+  entryLineStroke,
+} from './entryLineStyle';
+import { positionsForUnderlying } from './positionsForUnderlying';
 import { isPointerClaimed } from './chartPointerClaim';
 import type { ChartCandle } from './ChartStore';
 import type { ChartOrdersStore } from './chartOrders';
-import { isWorking, kindLabel, orderTypeLabel } from './chartOrders';
+import {
+  bracketLegDraft,
+  isWorking,
+  kindLabel,
+  orderTypeLabel,
+  workingBracketSiblings,
+} from './chartOrders';
 import type { ChartTradingSettings } from './chartTradingSettings';
 import { OrderPlacementPopover } from './OrderPlacementPopover';
 import {
@@ -68,6 +82,9 @@ interface OrderLineLayerProps {
 }
 
 interface EntryLine {
+  /** False when the level is the placement-derived estimate — display and
+   *  close only, never bracket classification (see entryLineSource). */
+  authoritative: boolean;
   position: Position;
   contract: OptionContract;
   price: number;
@@ -163,12 +180,27 @@ export function OrderLineLayer({
   /** Open positions on this underlying that have an anchor to draw at. */
   const entryLines = (): EntryLine[] => {
     const { positions: current, resolveContract: resolve, symbol: sym } = latest.current;
+    // The shared underlying filter wants the contracts themselves; this layer
+    // holds a resolver, so materialise the resolvable ones first.
+    const contracts = current
+      .map((position) => resolve(position.symbol))
+      .filter((contract): contract is OptionContract => contract !== null);
     const lines: EntryLine[] = [];
-    for (const position of current) {
-      if (position.quantity === 0 || position.underlyingEntryPrice === undefined) continue;
+    for (const position of positionsForUnderlying(current, sym, contracts)) {
+      // Display falls back to the placement-derived ESTIMATE; the
+      // authoritative fill-time field (reserved, unset today) wins when it
+      // exists. Provenance rides the line: an estimate draws and closes but
+      // never classifies a bracket.
+      const source = entryLineSource(position);
+      if (position.quantity === 0 || source === null) continue;
       const contract = resolve(position.symbol);
-      if (!contract || contract.underlying !== sym) continue;
-      lines.push({ position, contract, price: position.underlyingEntryPrice });
+      if (!contract) continue;
+      lines.push({
+        position,
+        contract,
+        price: source.price,
+        authoritative: source.authoritative,
+      });
     }
     return lines;
   };
@@ -301,13 +333,22 @@ export function OrderLineLayer({
 
       // Entry lines first, so a target or stop sitting on top of one wins the
       // pointer — the bracket legs are what you actually adjust.
+      const todayIso = dayString();
       for (const entry of entryLines()) {
         const y = series.priceToCoordinate(entry.price);
         if (y === null) continue;
-        const profitable = entry.position.unrealizedPnl >= 0;
-        const color = profitable ? colors.pnlPositive : colors.pnlNegative;
+        // The line wears the contract's direction (calls blue, puts red);
+        // only the P/L pill keeps profit-sign coloring.
+        const typeColor = entryLineStroke(entry.contract, colors);
+        const pnlColor =
+          entry.position.unrealizedPnl >= 0 ? colors.pnlPositive : colors.pnlNegative;
         const pills = layoutRow(
           [
+            {
+              key: 'label',
+              // "~": approximate — the level is the placement estimate.
+              label: (entry.authoritative ? '' : '~') + entryLineLabel(entry.contract, todayIso),
+            },
             { key: 'quantity', label: Format.signedQuantity(entry.position.quantity) },
             {
               key: 'pnl',
@@ -321,21 +362,22 @@ export function OrderLineLayer({
         const row: LineRow = { id: `entry:${entry.position.symbol}`, y, pills, left: pills[0].x };
         rows.push(row);
 
-        ctx.strokeStyle = color;
+        ctx.strokeStyle = typeColor;
         ctx.lineWidth = 1.5;
         ctx.setLineDash([]);
         strokeRowLine(row);
 
         for (const p of pills) {
-          const isQuantity = p.key === 'quantity';
+          const filled = p.key === 'quantity' || p.key === 'close';
+          const color = p.key === 'pnl' ? pnlColor : typeColor;
           pill(
             ctx,
             p.x,
             y,
             p.width,
             p.label,
-            isQuantity || p.key === 'close' ? color : colors.tagText,
-            isQuantity || p.key === 'close' ? colors.tagText : color,
+            filled ? color : colors.tagText,
+            filled ? colors.tagText : color,
             hovered?.id === row.id && hovered.pill === p.key,
           );
         }
@@ -599,13 +641,17 @@ export function OrderLineLayer({
         void store.toggleOrderType(hit.row.id);
         return;
       }
-      if (hit.pill === 'quantity' || hit.pill === 'pnl') return; // labels, not controls
+      if (hit.pill === 'quantity' || hit.pill === 'pnl' || hit.pill === 'label') return; // labels, not controls
 
       // Line body: drag it.
       if (entryId) {
-        if (!latest.current.settings.bracketDrag) return;
         const entry = entryLines().find((e) => e.position.symbol === entryId);
         if (!entry) return;
+        // An estimated entry cannot begin a bracket drag: classifying
+        // target-vs-stop against a level that may sit on the wrong side of
+        // the true fill would move the wrong OCO sibling. The ✕ close pill
+        // above is untouched — flattening never consults the entry level.
+        if (!canBracketFromEntry(entry, latest.current.settings.bracketDrag)) return;
         dragRef.current = {
           kind: 'bracket',
           id: entryId,
@@ -847,47 +893,37 @@ export function OrderLineLayer({
 
   /** Commits a bracket leg dragged off an entry line into the position's OCO group. */
   const placeBracket = async (entry: EntryLine, price: number) => {
+    // Defensive twin of the drag-start gate: nothing may classify a bracket
+    // against an estimated entry, even if a future code path re-enters here.
+    if (!entry.authoritative) return;
     const kind = bracketKindFor(
       entry.contract.optionType,
       entry.position.quantity,
       entry.price,
       price,
     );
-    const siblings = store
-      .getState()
-      .orders.filter(
-        (order) =>
-          order.contractSymbol === entry.position.symbol &&
-          order.ocoGroupId !== null &&
-          order.status === 'working',
-      );
     // A leg of the same kind already exists (e.g. a second drag above entry on
     // a long call, both classified 'target'): move it to the new level rather
     // than creating a second one. The OCO group cancels siblings by
     // membership, not by kind, so two targets sharing a group would silently
     // retire one of them on fire — the user would lose whichever the market
     // did not reach first with no warning.
+    const siblings = workingBracketSiblings(store.getState().orders, entry.position.symbol);
     const sameKind = siblings.find((order) => order.kind === kind);
     if (sameKind) {
       await store.move(sameKind.id, round2(price));
       return;
     }
-    // Both legs of one position share a group, so filling either retires the
-    // other. Reuse the group an existing leg already established.
-    const existing = siblings[0];
-    await store.create({
-      underlying: entry.contract.underlying,
-      triggerPrice: round2(price),
-      // Closing an existing position: the opposite side, sized to it.
-      side: entry.position.quantity > 0 ? 'sell' : 'buy',
-      quantity: Math.abs(entry.position.quantity),
-      orderType: latest.current.defaultOrderType,
-      kind,
-      optionType: entry.contract.optionType,
-      expiration: entry.contract.expiration,
-      strike: entry.contract.strike,
-      ocoGroupId: existing?.ocoGroupId ?? crypto.randomUUID(),
-    });
+    await store.create(
+      bracketLegDraft({
+        contract: entry.contract,
+        position: entry.position,
+        triggerPrice: round2(price),
+        kind,
+        orderType: latest.current.defaultOrderType,
+        orders: store.getState().orders,
+      }),
+    );
   };
 
   return (

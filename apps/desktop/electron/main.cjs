@@ -503,6 +503,9 @@ app.on('open-url', (event, url) => {
 });
 
 app.whenReady().then(async () => {
+  // Windows ties renderer Notifications to the AppUserModelID; without it they
+  // attribute to a generic Electron identity or drop silently.
+  app.setAppUserModelId('com.odtetrader.desktop');
   app.setAsDefaultProtocolClient(APP_PROTOCOL);
   installApplicationMenu();
   installTray();

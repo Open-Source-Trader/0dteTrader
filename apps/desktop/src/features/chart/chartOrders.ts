@@ -3,6 +3,8 @@ import type {
   ChartOrderDraft,
   ChartOrderKind,
   ChartOrderType,
+  OptionContract,
+  Position,
 } from '@0dtetrader/shared-types';
 import { chartOrderCrossed } from '@0dtetrader/shared-types';
 import type { ApiClient } from '../../core/api/ApiClient';
@@ -127,11 +129,11 @@ export class ChartOrdersStore extends Store<ChartOrdersState> {
   /** Commits a drag. The server re-arms from the live quote, so the returned
    *  row (not the dragged-to price) is what gets stored. */
   async move(id: string, triggerPrice: number): Promise<void> {
-    await this.patch(id, { triggerPrice });
+    await this.update(id, { triggerPrice });
   }
 
   async setQuantity(id: string, quantity: number): Promise<void> {
-    await this.patch(id, { quantity });
+    await this.update(id, { quantity });
   }
 
   /** Flips MID ↔ MKT for one line, optimistically so the pill responds instantly. */
@@ -234,22 +236,75 @@ export class ChartOrdersStore extends Store<ChartOrdersState> {
     });
   }
 
-  private async patch(
+  /**
+   * Edits a working line's trigger price and/or quantity in one request —
+   * what `move`/`setQuantity` submit, and what the workspace's docked editor
+   * submits when both changed. Failure reloads (the server's view of the line
+   * wins) and lands on the store's error surface; the message is also
+   * returned (null on success) because that reload clears `error` when it
+   * completes, so a caller resuming after the await cannot read its own
+   * request's outcome off the shared state without racing it.
+   */
+  async update(
     id: string,
     body: { triggerPrice?: number; quantity?: number },
-  ): Promise<void> {
+  ): Promise<string | null> {
     try {
       this.upsert(await this.apiClient.updateChartOrder(id, body));
       this.set({ error: null });
+      return null;
     } catch (error) {
       void this.load(); // snap back to the server's view of the line
-      this.set({ error: messageOf(error) });
+      const message = messageOf(error);
+      this.set({ error: message });
+      return message;
     }
   }
 }
 
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/** Working lines already protecting `contractSymbol` inside an OCO group. */
+export function workingBracketSiblings(orders: ChartOrder[], contractSymbol: string): ChartOrder[] {
+  return orders.filter(
+    (order) =>
+      order.contractSymbol === contractSymbol && order.ocoGroupId !== null && isWorking(order),
+  );
+}
+
+/**
+ * Draft for a new bracket leg (target/stop) protecting an existing position:
+ * the opposite side, sized to the full position. Both legs of one position
+ * share an OCO group, so filling either retires the other — the draft reuses
+ * the group an existing working sibling already established, else mints a new
+ * one. Shared by the chart's bracket drag and the trade-management
+ * workspace's Set stop / Set target actions, so the group-reuse rule lives in
+ * exactly one place.
+ */
+export function bracketLegDraft(input: {
+  contract: OptionContract;
+  position: Position;
+  triggerPrice: number;
+  kind: ChartOrderKind;
+  orderType: ChartOrderType;
+  /** All known lines; the sibling scan filters them itself. */
+  orders: ChartOrder[];
+}): ChartOrderDraft {
+  const siblings = workingBracketSiblings(input.orders, input.position.symbol);
+  return {
+    underlying: input.contract.underlying,
+    triggerPrice: input.triggerPrice,
+    side: input.position.quantity > 0 ? 'sell' : 'buy',
+    quantity: Math.abs(input.position.quantity),
+    orderType: input.orderType,
+    kind: input.kind,
+    optionType: input.contract.optionType,
+    expiration: input.contract.expiration,
+    strike: input.contract.strike,
+    ocoGroupId: siblings[0]?.ocoGroupId ?? crypto.randomUUID(),
+  };
 }
 
 /** Short label for the kind pill: the line's colour already carries most of this. */

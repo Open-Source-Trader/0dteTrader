@@ -1,3 +1,5 @@
+import { MAX_OPTION_PRICE } from '@0dtetrader/shared-types';
+
 /**
  * Shared rules for a free-text price field.
  *
@@ -23,7 +25,9 @@ export const PRICE_STEP = 0.01;
  * by `MIN_LIMIT_PRICE`/`MAX_LIMIT_PRICE` on the server.
  */
 export const PRICE_MIN = 0.01;
-export const PRICE_MAX = 100000;
+// The shared option-price ceiling — typed input must refuse exactly what
+// readiness and resolution refuse.
+export const PRICE_MAX = MAX_OPTION_PRICE;
 
 /**
  * Digits, optionally one decimal point. Deliberately matches the part-typed

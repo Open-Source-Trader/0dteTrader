@@ -38,6 +38,9 @@ struct OrderLineStroke {
 
 /// Which control within a row a touch landed on.
 enum OrderLinePill: Equatable {
+    /// Entry rows only: "500C 0DTE" — names the contract. Not a control, so
+    /// hit-testing skips it and the chart keeps pan/zoom underneath.
+    case label
     case quantity
     case kind
     case orderType
@@ -83,6 +86,12 @@ struct EntryLineModel: Equatable {
     let position: Position
     let contract: OptionContract
     let price: Double
+    /// True when `price` is the placement-time estimate rather than the
+    /// authoritative fill-time record. An estimate line is display only: it
+    /// wears a "~" marker, its line body takes no touches, and it classifies
+    /// no bracket — an estimate on the wrong side of the true fill would call
+    /// a target a stop and move the wrong OCO sibling.
+    let isEstimate: Bool
 }
 
 /// Actions the overlay raises; the SwiftUI layer owns the consequences.
@@ -139,13 +148,15 @@ final class OrderLineOverlayView: UIView {
         }
     }
 
-    /// Whether there is a contract for a new line to trade. Without one
-    /// `ChartTradingCoordinator` drops the placement request on the floor, so
-    /// the guide is suppressed rather than drawn as an affordance that does
-    /// nothing. Desktop gates its guide on the same condition.
-    var hasSelectedContract: Bool = false {
+    /// Whether a new line may be placed: a QUOTED contract is selected and
+    /// trading is unlocked (`TradeReadiness.canPlaceChartOrder`). Without
+    /// that, `ChartTradingCoordinator` would drop the placement request on
+    /// the floor, so the guide is suppressed rather than drawn as an
+    /// affordance that does nothing. Selection alone is not enough — a CURR
+    /// leg awaiting its expiration's quotes must not take placement taps.
+    var canPlaceChartOrder: Bool = false {
         didSet {
-            guard hasSelectedContract != oldValue else { return }
+            guard canPlaceChartOrder != oldValue else { return }
             setNeedsDisplay()
         }
     }
@@ -281,15 +292,27 @@ final class OrderLineOverlayView: UIView {
     private func hitTest(at point: CGPoint) -> (row: OrderLineRow, pill: OrderLinePill?)? {
         // Nearest row first, so stacked lines resolve to the one under the finger.
         for row in rows.sorted(by: { abs($0.y - point.y) < abs($1.y - point.y) }) {
-            for layout in row.pills where layout.touchFrame.contains(point) {
+            // The label pill is a readout, not a control — skipped here so a
+            // touch on it falls through to the chart's own pan and zoom.
+            for layout in row.pills where layout.pill != .label && layout.touchFrame.contains(point) {
                 return (row, layout.pill)
             }
             if abs(point.y - row.y) <= AppOrderLine.lineHitSlop,
-               point.x < row.left - AppOrderLine.pillGap {
+               point.x < row.left - AppOrderLine.pillGap,
+               lineBodyTakesTouches(row.target) {
                 return (row, nil)
             }
         }
         return nil
+    }
+
+    /// Whether a row's line body (as opposed to its pills) takes touches.
+    /// An estimate entry line is display only — it cannot start a bracket
+    /// drag, so claiming the touch would just eat the chart's pan underneath.
+    /// Its pills are unaffected: the ✕ still closes the position.
+    private func lineBodyTakesTouches(_ target: OrderLineRow.Target) -> Bool {
+        guard case .entry(let symbol) = target else { return true }
+        return entryLines.first { $0.position.symbol == symbol }?.isEstimate != true
     }
 
     // MARK: - Gestures
@@ -353,8 +376,11 @@ final class OrderLineOverlayView: UIView {
                 Haptics.selection()
                 drag = .move(orderId: id, price: order.triggerPrice)
             case .entry(let contractSymbol):
+                // An estimate line never arms a bracket: only the authoritative
+                // fill level may classify target vs stop.
                 guard settings.bracketDrag,
-                      let entry = entryLines.first(where: { $0.position.symbol == contractSymbol })
+                      let entry = entryLines.first(where: { $0.position.symbol == contractSymbol }),
+                      !entry.isEstimate
                 else { return }
                 drag = .bracket(entry: entry, startY: location.y, price: entry.price, engaged: false)
             }
@@ -432,11 +458,15 @@ final class OrderLineOverlayView: UIView {
         // the bracket legs are what actually get adjusted.
         for entry in entryLines {
             guard let y = yPixel(for: entry.price) else { continue }
-            let color = entry.position.unrealizedPnl >= 0 ? positiveColor : negativeColor
+            // The stroke wears the contract's type colour (call blue, put
+            // red); only the P/L pill keeps profit-sign colouring.
+            let stroke = EntryLineStyle.strokeColor(for: entry.contract.optionType)
+            let pnlColor = entry.position.unrealizedPnl >= 0 ? positiveColor : negativeColor
             let row = layoutRow(
                 target: .entry(entry.position.symbol),
                 y: y,
                 labels: [
+                    (.label, EntryLineStyle.label(for: entry)),
                     (.quantity, Format.signedQuantity(entry.position.quantity)),
                     (.pnl, "\(Format.signedPrice(entry.position.unrealizedPnl)) USD"),
                     (.close, "✕"),
@@ -446,13 +476,21 @@ final class OrderLineOverlayView: UIView {
 
             strokeRowLine(
                 row,
-                style: OrderLineStroke(color: color, width: AppOrderLine.strokeEntry, dash: []),
+                style: OrderLineStroke(color: stroke, width: AppOrderLine.strokeEntry, dash: []),
                 in: context
             )
             for layout in row.pills {
-                // The P/L reads as a value, not a control, so it is outlined.
-                let filled = layout.pill != .pnl
-                renderPill(layout, fill: filled ? color : nil, accent: color, in: context)
+                switch layout.pill {
+                case .pnl:
+                    // P/L reads as a value, not a control — outlined, and the
+                    // one pill still coloured by profit sign.
+                    renderPill(layout, fill: nil, accent: pnlColor, in: context)
+                case .label:
+                    // A readout too: outlined in the type colour.
+                    renderPill(layout, fill: nil, accent: stroke, in: context)
+                default:
+                    renderPill(layout, fill: stroke, accent: stroke, in: context)
+                }
             }
         }
 
@@ -510,15 +548,13 @@ final class OrderLineOverlayView: UIView {
     }
 
     private func renderDragPreview(in context: CGContext) {
+        // The same guarded classification the coordinator uses on drop; an
+        // estimate line cannot begin a drag, so nil is unreachable here, but
+        // routing through it keeps a single classification path.
         guard case .bracket(let entry, _, let price, let engaged) = drag, engaged,
-              let y = yPixel(for: price)
+              let y = yPixel(for: price),
+              let kind = bracketKind(entry: entry, price: price)
         else { return }
-        let kind = bracketKind(
-            optionType: entry.contract.optionType,
-            quantity: entry.position.quantity,
-            entryPrice: entry.price,
-            price: price
-        )
         let color = kind == .target ? positiveColor : negativeColor
         strokeLine(
             from: 0,
@@ -548,7 +584,9 @@ final class OrderLineOverlayView: UIView {
             for layout in row.pills {
                 let element = UIAccessibilityElement(accessibilityContainer: self)
                 element.accessibilityLabel = accessibilityLabel(for: row.target, pill: layout.pill)
-                element.accessibilityTraits = .button
+                // The label pill is a readout, not a control (hit-testing
+                // skips it too).
+                element.accessibilityTraits = layout.pill == .label ? .staticText : .button
                 element.accessibilityFrameInContainerSpace = layout.touchFrame
                 elements.append(element)
             }
@@ -563,13 +601,20 @@ final class OrderLineOverlayView: UIView {
             guard let entry = entryLines.first(where: { $0.position.symbol == symbol }) else {
                 return "Position"
             }
+            let contractLabel = EntryLineStyle.label(for: entry.contract)
             switch pill {
+            case .label:
+                // Speech spells the "~" marker out instead of relying on the
+                // synthesizer to read a tilde.
+                return entry.isEstimate
+                    ? "\(contractLabel) approximate entry line"
+                    : "\(contractLabel) entry line"
             case .close:
-                return "Close \(symbol) position"
+                return "Close \(contractLabel) position"
             case .pnl:
-                return "\(symbol) profit and loss \(Format.signedPrice(entry.position.unrealizedPnl))"
+                return "\(contractLabel) profit and loss \(Format.signedPrice(entry.position.unrealizedPnl))"
             default:
-                return "\(symbol) quantity \(entry.position.quantity)"
+                return "\(contractLabel) quantity \(entry.position.quantity)"
             }
         case .order(let id):
             guard let order = model?.order(id: id) else { return "Order line" }

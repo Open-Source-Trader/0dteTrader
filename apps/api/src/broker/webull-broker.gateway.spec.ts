@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { ConfigService } from '@nestjs/config';
-import { OrderRequest } from '@0dtetrader/shared-types';
+import { OrderRequest, OrderResult } from '@0dtetrader/shared-types';
 import { CredentialsService } from '../credentials/credentials.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { OrderEventsService } from './order-events.service';
@@ -613,6 +613,38 @@ describe('WebullBrokerGateway', () => {
         const detailCalls = callsTo('/openapi/trade/order/detail').length;
         await jest.advanceTimersByTimeAsync(3_000);
         expect(callsTo('/openapi/trade/order/detail').length).toBe(detailCalls);
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it('carries the executed quantity when a partially filled order is cancelled', async () => {
+      // A 3-lot order that filled 1 before being cancelled. The placement
+      // result predates the fill, so the poll's parse is the only source of
+      // the executed quantity — dropping it makes fill accounting discard
+      // the event entirely and the lot the user holds goes unrecorded.
+      jest.useFakeTimers();
+      try {
+        const emitted: { order: OrderResult }[] = [];
+        events.events$.subscribe((e) => emitted.push(e as { order: OrderResult }));
+        const result = await gateway.placeOrder('u1', { ...order, quantity: 3 }, 'idem-key-5');
+        handlers['GET /openapi/trade/order/detail'] = () => ({
+          status: 200,
+          body: {
+            client_order_id: result.orderId,
+            status: 'CANCELLED',
+            filled_price: '1.10',
+            filled_quantity: '1',
+            quantity: '3',
+          },
+        });
+        await jest.advanceTimersByTimeAsync(1_100);
+
+        expect(emitted[1].order).toMatchObject({
+          status: 'cancelled',
+          filledPrice: 1.1,
+          filledQuantity: 1,
+        });
       } finally {
         jest.useRealTimers();
       }

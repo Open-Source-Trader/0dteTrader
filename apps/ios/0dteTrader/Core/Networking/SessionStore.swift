@@ -2,12 +2,20 @@ import Foundation
 
 extension Notification.Name {
     /// Posted (from any actor) when the refresh token is rejected and the user must log in again.
+    /// `object` is the posting `SessionStore` (so a container can filter to its
+    /// own) and `userInfo[SessionStore.serverKeyUserInfoKey]` names the server:
+    /// a departed container's in-flight refresh can fail AFTER a server switch,
+    /// and unfiltered observers would log the CURRENT server's session out.
     static let sessionDidBecomeUnauthenticated = Notification.Name("com.0dtetrader.sessionDidBecomeUnauthenticated")
 }
 
 /// Owns the token lifecycle: access token in memory, refresh token in the Keychain.
 /// Refresh calls are de-duplicated — concurrent callers share one in-flight request.
 actor SessionStore {
+    /// userInfo key carrying the failed server's identity (its API base URL
+    /// string — the same value the push stack uses as `serverKey`).
+    static let serverKeyUserInfoKey = "com.0dtetrader.sessionServerKey"
+
     private let keychainStore: KeychainStore
     private let baseURL: URL
     private let urlSession: URLSession
@@ -77,7 +85,11 @@ actor SessionStore {
         } catch {
             if let apiError = error as? APIError, apiError == .unauthorized {
                 clearLocalSession()
-                NotificationCenter.default.post(name: .sessionDidBecomeUnauthenticated, object: nil)
+                NotificationCenter.default.post(
+                    name: .sessionDidBecomeUnauthenticated,
+                    object: self,
+                    userInfo: [Self.serverKeyUserInfoKey: baseURL.absoluteString]
+                )
             }
             throw error
         }

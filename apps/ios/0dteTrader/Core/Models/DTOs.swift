@@ -233,6 +233,10 @@ struct OrderSelectionDTO: Encodable, Equatable, Sendable {
     let optionType: String?
     let expiration: String?
     let strike: Double?
+    /// auto_otm only: strikes OTM from the ATM strike; 0 = ATM; nil (omitted)
+    /// means 1. Encoded as absent rather than null when nil, so servers
+    /// predating the field see the request shape they always did.
+    var otmOffset: Int? = nil
 }
 
 struct OrderRequestDTO: Encodable, Equatable, Sendable {
@@ -287,9 +291,25 @@ struct PositionDTO: Decodable, Equatable, Sendable {
     /// Contract multiplier (options: 100) for client-side live P/L.
     let multiplier: Double
     /// Quantity-weighted price of the UNDERLYING across the opening fills —
-    /// where the chart draws this position's entry line. Absent for positions
-    /// opened before it was recorded, or outside the app.
+    /// the authoritative fill-time record. Absent for positions opened before
+    /// it was recorded, or outside the app — and absent from servers that
+    /// cannot yet observe the underlying at fill time.
     let underlyingEntryPrice: Double?
+    /// Placement-time-quote-derived estimate of the same level, sent while
+    /// `underlyingEntryPrice` is absent. Display fallback only.
+    let underlyingEntryEstimate: Double?
+    /// ISO-8601 time of the fill that opened the current position run. Absent
+    /// for positions opened before it was recorded, or outside the app.
+    let openedAt: String?
+}
+
+// MARK: - Push notifications
+
+/// Device push registration (POST /v1/notifications/devices).
+struct DeviceRegistrationDTO: Encodable, Equatable, Sendable {
+    /// Lowercase-hex APNs device token.
+    let token: String
+    let platform: String
 }
 
 // MARK: - Chart trading

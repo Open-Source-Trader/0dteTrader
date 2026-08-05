@@ -32,6 +32,40 @@ private func makeOrder(
     )
 }
 
+private func makeEntry(
+    optionType: OptionType = .call,
+    quantity: Int = 1,
+    entryPrice: Double = 100,
+    isEstimate: Bool
+) -> EntryLineModel {
+    let contract = OptionContract(
+        symbol: "SPY260727C00101000",
+        underlying: "SPY",
+        expiration: "2026-07-27",
+        strike: 101,
+        optionType: optionType,
+        bid: 1.0,
+        ask: 1.02,
+        last: 1.01
+    )
+    return EntryLineModel(
+        position: Position(
+            symbol: contract.symbol,
+            assetClass: .option,
+            quantity: quantity,
+            avgPrice: 1,
+            markPrice: 1.2,
+            unrealizedPnl: 20,
+            multiplier: 100,
+            underlyingEntryPrice: isEstimate ? nil : entryPrice,
+            underlyingEntryEstimate: isEstimate ? entryPrice : nil
+        ),
+        contract: contract,
+        price: entryPrice,
+        isEstimate: isEstimate
+    )
+}
+
 final class ChartOrderCrossingTests: XCTestCase {
     func testArmedAbove_firesOnlyOnTheWayDown() {
         let order = makeOrder(triggerPrice: 98, armPrice: 100)
@@ -100,6 +134,28 @@ final class BracketDirectionTests: XCTestCase {
     func testShortCallInvertsAgain() {
         XCTAssertEqual(bracketKind(optionType: .call, quantity: -1, entryPrice: 100, price: 95), .target)
         XCTAssertEqual(bracketKind(optionType: .call, quantity: -1, entryPrice: 100, price: 105), .stop)
+    }
+
+    /// The classification entry point for drags off an entry line. Nil for an
+    /// estimate — exactly as if there were no entry line — because an estimate
+    /// on the wrong side of the true fill would call a target a stop and move
+    /// the wrong OCO sibling.
+    func testEstimateEntry_classifiesNothing_sameAsNoEntryLine() {
+        let entry = makeEntry(entryPrice: 100, isEstimate: true)
+
+        XCTAssertNil(bracketKind(entry: entry, price: 105))
+        XCTAssertNil(bracketKind(entry: entry, price: 95))
+    }
+
+    /// An authoritative entry keeps the existing kind logic unchanged.
+    func testAuthoritativeEntry_keepsClassification() {
+        let call = makeEntry(entryPrice: 100, isEstimate: false)
+        XCTAssertEqual(bracketKind(entry: call, price: 105), .target)
+        XCTAssertEqual(bracketKind(entry: call, price: 95), .stop)
+
+        let put = makeEntry(optionType: .put, entryPrice: 100, isEstimate: false)
+        XCTAssertEqual(bracketKind(entry: put, price: 95), .target)
+        XCTAssertEqual(bracketKind(entry: put, price: 105), .stop)
     }
 }
 
@@ -205,6 +261,99 @@ final class ChartTradingCoordinatorCancelTests: XCTestCase {
 
         XCTAssertNil(coordinator.orderPendingCancel)
         XCTAssertNil(orders.order(id: "co-1"))
+    }
+
+    /// The coordinator is the backstop behind the overlay's placement gate: a
+    /// zero-quote contract (the CURR placeholder) must not open a card even
+    /// if a tap slips through.
+    func testRequestPlacement_zeroQuoteContract_opensNoCard() {
+        let (coordinator, _) = makeCoordinator()
+        coordinator.selectedContract = {
+            OptionContract(
+                symbol: "SPY260727C00505000",
+                underlying: "SPY",
+                expiration: "2026-07-27",
+                strike: 505,
+                optionType: .call,
+                bid: 0,
+                ask: 0,
+                last: 0
+            )
+        }
+
+        coordinator.orderLineOverlayDidRequestPlacement(at: 504.5)
+
+        XCTAssertNil(coordinator.placementRequest)
+    }
+
+    func testRequestPlacement_quotedContract_opensTheCard() {
+        let (coordinator, _) = makeCoordinator()
+        coordinator.selectedContract = {
+            OptionContract(
+                symbol: "SPY260727C00505000",
+                underlying: "SPY",
+                expiration: "2026-07-27",
+                strike: 505,
+                optionType: .call,
+                bid: 1.0,
+                ask: 1.02,
+                last: 1.01
+            )
+        }
+
+        coordinator.orderLineOverlayDidRequestPlacement(at: 504.5)
+
+        XCTAssertEqual(coordinator.placementRequest?.price, 504.5)
+    }
+
+    /// The entry line prefers the authoritative fill-time record and falls
+    /// back to the placement-time estimate; with neither there is no line.
+    /// Display only — the estimate never prices or arms an order.
+    func testEntryLines_fallBackToTheEstimateForDisplay() {
+        let (coordinator, _) = makeCoordinator()
+        let contract = OptionContract(
+            symbol: "SPY260727C00505000",
+            underlying: "SPY",
+            expiration: "2026-07-27",
+            strike: 505,
+            optionType: .call,
+            bid: 1.0,
+            ask: 1.02,
+            last: 1.01
+        )
+        coordinator.contractResolver = { symbol in
+            symbol == contract.symbol ? contract : nil
+        }
+        var position = Position(
+            symbol: contract.symbol,
+            assetClass: .option,
+            quantity: 1,
+            avgPrice: 1,
+            markPrice: 1.2,
+            unrealizedPnl: 20,
+            multiplier: 100,
+            underlyingEntryPrice: nil
+        )
+
+        XCTAssertTrue(coordinator.entryLines(positions: [position], symbol: "SPY").isEmpty)
+
+        position.underlyingEntryEstimate = 504.2
+        let estimated = coordinator.entryLines(positions: [position], symbol: "SPY").first
+        XCTAssertEqual(estimated?.price, 504.2)
+        XCTAssertEqual(estimated?.isEstimate, true)
+
+        // The authoritative record wins whenever both are present.
+        position.underlyingEntryPrice = 505.1
+        let recorded = coordinator.entryLines(positions: [position], symbol: "SPY").first
+        XCTAssertEqual(recorded?.price, 505.1)
+        XCTAssertEqual(recorded?.isEstimate, false)
+    }
+
+    /// The estimate's provenance is visible on the chart: the label pill wears
+    /// a "~" so the level never reads as a recorded fill.
+    func testEstimateEntryLine_labelCarriesTheApproximationMarker() {
+        XCTAssertTrue(EntryLineStyle.label(for: makeEntry(isEstimate: true)).hasPrefix("~"))
+        XCTAssertFalse(EntryLineStyle.label(for: makeEntry(isEstimate: false)).hasPrefix("~"))
     }
 }
 

@@ -1,5 +1,13 @@
-import { useMemo, useState } from 'react';
-import type { ChartOrder, OptionContract, OrderResult, Position } from '@0dtetrader/shared-types';
+import { useEffect, useMemo, useState } from 'react';
+import type {
+  ChartOrder,
+  ChartOrderDraft,
+  ChartOrderType,
+  OptionContract,
+  OptionType,
+  OrderResult,
+  Position,
+} from '@0dtetrader/shared-types';
 import { AlertDialog } from '../../design/components/AlertDialog';
 import { Spinner } from '../../design/components/Spinner';
 import { Format } from '../../design/format';
@@ -10,9 +18,20 @@ import {
   orderTypeDisplayName,
   sideDisplayName,
 } from '../../core/models/domain';
-import { isWorking } from '../chart/chartOrders';
+import { isPriceInputShape, parsePriceInput } from '../../core/models/priceInput';
+import { useStore } from '../../core/observable';
+import { bracketLegDraft, isWorking, orderTypeLabel } from '../chart/chartOrders';
+import { defaultBracketLevel } from './bracketDefaults';
 import { selectPositionExpiryBreakEven } from './expiryBreakEven';
-import { dayPnl, pnlPercent, signedCurrency } from './TradeManagementWorkspaceModel';
+import {
+  dayPnl,
+  moveStopToEntryRequest,
+  pnlPercent,
+  signedCurrency,
+  timeInTrade,
+  type StopTargetDraft,
+  type StopTargetEditorStore,
+} from './TradeManagementWorkspaceModel';
 
 export type TradeWorkspaceTab = 'positions' | 'orders' | 'recent';
 
@@ -27,7 +46,31 @@ interface TradeManagementWorkspaceProps {
   onTrimPosition: (position: Position) => void;
   onCancelOrder: (order: OrderResult) => void;
   onCancelChartOrder: (order: ChartOrder) => void;
+  /** Moves a working chart line to a new level (Move stop to entry). */
+  onMoveChartOrder: (order: ChartOrder, triggerPrice: number) => void;
+  /** Selects a line on the chart — Edit stop/target hands off to the
+   *  existing selection/drag UX rather than growing its own editor. */
+  onSelectChartOrder: (order: ChartOrder) => void;
+  /** Creates a new bracket leg (Set stop / Set target). */
+  onCreateChartOrder: (draft: ChartOrderDraft) => void;
+  /** Execution type a new leg inherits — the ticket's, already narrowed. */
+  defaultOrderType: ChartOrderType;
+  /** Settings › Chart Trading. Off unmounts the chart's order-line layer, so
+   *  the stop/target actions — which hand off to that layer or create lines
+   *  it would draw — disable rather than acting on an invisible surface. */
+  chartTradingEnabled?: boolean;
+  /** Live last price of the chart underlying. New stop/target legs default to
+   *  a level relative to it — anchoring on the entry would arm on the wrong
+   *  side of a market that has moved. Null (no live quote) blocks Set. */
+  underlyingPrice?: number | null;
   resolveContract: (symbol: string) => OptionContract | null;
+  /** Workspace-owned stop/target editing session (the docked editor). */
+  editor: StopTargetEditorStore;
+  /** Chart's current symbol and visible price domain, for "Show on chart". */
+  chartSymbol: string;
+  visiblePriceRange: { min: number; max: number } | null;
+  /** Asks the chart to keep `price` in view; null clears the reveal. */
+  onRevealPrice: (price: number | null) => void;
   locked?: boolean;
 }
 
@@ -42,8 +85,21 @@ interface PositionMeta {
   relatedChartOrders: ChartOrder[];
 }
 
-function timeInTrade(): string {
-  return '—';
+/** Tooltip for a disabled "Move stop to entry"; undefined while it is usable. */
+function moveStopBlockedReason(
+  stop: ChartOrder | null,
+  position: Position,
+  optionType: OptionType | null,
+  underlyingPrice: number | null,
+): string | undefined {
+  if (!stop) return 'Set a stop line on the chart first';
+  if (position.underlyingEntryPrice === undefined) return 'Entry price unknown';
+  if (underlyingPrice === null) return 'Live price unavailable';
+  if (optionType === null) return "Open this contract's chart to manage its lines";
+  if (moveStopToEntryRequest(position, stop, underlyingPrice, optionType) === null) {
+    return 'Entry is on the profit side of the market — that would arm a recovery exit, not a stop';
+  }
+  return undefined;
 }
 
 function positionLabel(position: Position, contract: OptionContract | null): string {
@@ -95,10 +151,25 @@ export function TradeManagementWorkspace({
   onTrimPosition,
   onCancelOrder,
   onCancelChartOrder,
+  onMoveChartOrder,
+  onSelectChartOrder,
+  onCreateChartOrder,
+  defaultOrderType,
+  chartTradingEnabled = true,
+  underlyingPrice = null,
   resolveContract,
+  editor,
+  chartSymbol,
+  visiblePriceRange,
+  onRevealPrice,
   locked = false,
 }: TradeManagementWorkspaceProps) {
   const [tab, setTab] = useState<TradeWorkspaceTab>('positions');
+  const editorState = useStore(editor);
+  // A reveal belongs to one editing session: closing the editor (or switching
+  // legs) hands the viewport back.
+  const editingId = editorState.draft?.id ?? null;
+  useEffect(() => () => onRevealPrice(null), [editingId, onRevealPrice]);
   const [positionPendingClose, setPositionPendingClose] = useState<Position | null>(null);
   const [positionPendingTrim, setPositionPendingTrim] = useState<Position | null>(null);
   const [orderPendingCancel, setOrderPendingCancel] = useState<OrderResult | null>(null);
@@ -119,6 +190,48 @@ export function TradeManagementWorkspace({
   const activeMeta = activePosition ? metas.get(activePosition.symbol) : null;
   const totalDayPnl = dayPnl(positions);
   const activeWorking = activePosition ? workingSymbols.includes(activePosition.symbol) : false;
+  // Why a Set stop/target could not create a leg right now; null means it can.
+  let legActionBlockedReason: string | null = null;
+  if (!chartTradingEnabled) {
+    legActionBlockedReason = 'Enable Chart Trading in chart settings first';
+  } else if (!activeMeta?.contract) {
+    legActionBlockedReason = "Open this contract's chart to manage its lines";
+  } else if (underlyingPrice === null) {
+    legActionBlockedReason = 'Live price unavailable';
+  }
+
+  /** Edit opens the workspace's docked editor — the chart line can sit
+   *  outside the visible price domain, or the whole order-line layer can be
+   *  off, and the leg must stay editable either way — while still selecting
+   *  the line when the layer is up, so the drag UX keeps working alongside
+   *  the typed one. Set creates the missing OCO leg at its default level,
+   *  anchored on the live price so it lands on the correct side of it. */
+  const setOrEditLeg = (kind: 'stop' | 'target') => {
+    if (!activePosition || !activeMeta) return;
+    const existing = kind === 'stop' ? activeMeta.stop : activeMeta.target;
+    if (existing) {
+      editor.begin(existing.id);
+      if (chartTradingEnabled) onSelectChartOrder(existing);
+      return;
+    }
+    const { contract } = activeMeta;
+    if (!contract || underlyingPrice === null) return;
+    onCreateChartOrder(
+      bracketLegDraft({
+        contract,
+        position: activePosition,
+        triggerPrice: defaultBracketLevel(
+          kind,
+          contract.optionType,
+          activePosition.quantity,
+          underlyingPrice,
+        ),
+        kind,
+        orderType: defaultOrderType,
+        orders: chartOrders,
+      }),
+    );
+  };
 
   let expandedBody: React.ReactNode;
   if (tab === 'positions') {
@@ -175,7 +288,7 @@ export function TradeManagementWorkspace({
             <span>Expiry B/E {priceOrDash(activeMeta.expiryBreakEven)}</span>
             <span>Stop {priceOrDash(activeMeta.stop?.triggerPrice)}</span>
             <span>Target {priceOrDash(activeMeta.target?.triggerPrice)}</span>
-            <span>Time in trade {timeInTrade()}</span>
+            <span>Time in trade {timeInTrade(activePosition)}</span>
           </div>
           <div className="trade-position-strip__actions">
             <button
@@ -194,22 +307,55 @@ export function TradeManagementWorkspace({
             </button>
             <button
               className="desktop-positions-action"
-              disabled
-              title="Set a stop line on the chart first"
+              disabled={
+                locked ||
+                !chartTradingEnabled ||
+                moveStopToEntryRequest(
+                  activePosition,
+                  activeMeta.stop,
+                  underlyingPrice,
+                  activeMeta.contract?.optionType ?? null,
+                ) === null
+              }
+              title={
+                chartTradingEnabled
+                  ? moveStopBlockedReason(
+                      activeMeta.stop,
+                      activePosition,
+                      activeMeta.contract?.optionType ?? null,
+                      underlyingPrice,
+                    )
+                  : 'Enable Chart Trading in chart settings first'
+              }
+              onClick={() => {
+                const request = moveStopToEntryRequest(
+                  activePosition,
+                  activeMeta.stop,
+                  underlyingPrice,
+                  activeMeta.contract?.optionType ?? null,
+                );
+                if (request) onMoveChartOrder(request.order, request.triggerPrice);
+              }}
             >
               Move stop to entry
             </button>
             <button
               className="desktop-positions-action"
-              disabled
-              title="Use chart order lines to set or edit stops"
+              // Editing an EXISTING leg no longer depends on the chart: the
+              // docked editor works with the line off-domain or the whole
+              // layer disabled. Only creating a new line keeps the
+              // chart-side preconditions.
+              disabled={activeMeta.stop ? locked : locked || legActionBlockedReason !== null}
+              title={activeMeta.stop ? undefined : (legActionBlockedReason ?? undefined)}
+              onClick={() => setOrEditLeg('stop')}
             >
               {activeMeta.stop ? 'Edit stop' : 'Set stop'}
             </button>
             <button
               className="desktop-positions-action"
-              disabled
-              title="Use chart order lines to set or edit targets"
+              disabled={activeMeta.target ? locked : locked || legActionBlockedReason !== null}
+              title={activeMeta.target ? undefined : (legActionBlockedReason ?? undefined)}
+              onClick={() => setOrEditLeg('target')}
             >
               {activeMeta.target ? 'Edit target' : 'Set target'}
             </button>
@@ -221,6 +367,33 @@ export function TradeManagementWorkspace({
               Cancel related orders
             </button>
           </div>
+        </div>
+      ) : null}
+
+      {editorState.draft ? (
+        <StopTargetEditorPanel
+          editor={editor}
+          draft={editorState.draft}
+          priceText={editorState.priceText}
+          quantity={editorState.quantity}
+          saving={editorState.saving}
+          saveError={editorState.saveError}
+          chartOrders={chartOrders}
+          chartSymbol={chartSymbol}
+          visiblePriceRange={visiblePriceRange}
+          onRevealPrice={onRevealPrice}
+          resolveContract={resolveContract}
+          locked={locked}
+        />
+      ) : null}
+      {editorState.staleNotice ? (
+        <div className="trade-leg-editor trade-leg-editor--stale" role="status">
+          <span className="trade-leg-editor__notice" title={editorState.staleNotice}>
+            {editorState.staleNotice}
+          </span>
+          <button className="desktop-positions-action" onClick={() => editor.dismissStaleNotice()}>
+            Dismiss
+          </button>
         </div>
       ) : null}
 
@@ -359,6 +532,117 @@ export function TradeManagementWorkspace({
   );
 }
 
+/**
+ * Docked stop/target editor. Opened from the strip's Edit buttons and owned by
+ * the workspace, so a leg whose line sits outside the chart's visible price
+ * domain is still editable; the line itself stays the drag surface. Values are
+ * resolved from `chartOrders` by the draft's id, so a store refresh replacing
+ * row instances changes nothing here.
+ */
+function StopTargetEditorPanel({
+  editor,
+  draft,
+  priceText,
+  quantity,
+  saving,
+  saveError,
+  chartOrders,
+  chartSymbol,
+  visiblePriceRange,
+  onRevealPrice,
+  resolveContract,
+  locked,
+}: {
+  editor: StopTargetEditorStore;
+  draft: StopTargetDraft;
+  priceText: string;
+  quantity: number;
+  saving: boolean;
+  saveError: string | null;
+  chartOrders: ChartOrder[];
+  chartSymbol: string;
+  visiblePriceRange: { min: number; max: number } | null;
+  onRevealPrice: (price: number | null) => void;
+  resolveContract: (symbol: string) => OptionContract | null;
+  locked: boolean;
+}) {
+  const contract = resolveContract(draft.contractSymbol);
+  const label = contract
+    ? `${contract.underlying} ${Format.strike(contract.strike)}${optionTypeShortName(contract.optionType)}`
+    : draft.contractSymbol;
+  const priceValid = parsePriceInput(priceText) !== null;
+  // The line sits at the live trigger price, not the draft's text — that is
+  // the level "Show on chart" has to bring into view.
+  const livePrice =
+    chartOrders.find((order) => order.id === draft.id)?.triggerPrice ?? draft.triggerPrice;
+  const offChart =
+    draft.underlying === chartSymbol &&
+    visiblePriceRange !== null &&
+    (livePrice < visiblePriceRange.min || livePrice > visiblePriceRange.max);
+  return (
+    <div
+      className="trade-leg-editor"
+      data-testid="stop-target-editor"
+      aria-label={`Edit ${draft.kind === 'target' ? 'target' : 'stop'} order`}
+    >
+      <span className="trade-leg-editor__title">
+        Edit {draft.kind === 'target' ? 'target' : 'stop'} · {label}
+      </span>
+      <span className="trade-leg-editor__meta numeric">
+        {sideDisplayName(draft.side)} · {orderTypeLabel(draft.orderType)}
+      </span>
+      <label className="trade-leg-editor__field">
+        Trigger
+        <input
+          type="text"
+          inputMode="decimal"
+          value={priceText}
+          aria-label="Trigger price"
+          aria-invalid={!priceValid}
+          onChange={(event) => {
+            // Same shape gate as the placement window's level field — see
+            // priceInput.ts for why the raw text is held.
+            if (isPriceInputShape(event.target.value)) editor.setPriceText(event.target.value);
+          }}
+        />
+      </label>
+      <label className="trade-leg-editor__field">
+        Qty
+        <input
+          type="number"
+          min={1}
+          max={1000}
+          value={quantity}
+          aria-label="Quantity"
+          onChange={(event) =>
+            editor.setQuantity(Math.max(1, Math.min(1000, Number(event.target.value) || 1)))
+          }
+        />
+      </label>
+      {offChart ? (
+        <button className="desktop-positions-action" onClick={() => onRevealPrice(livePrice)}>
+          Show on chart
+        </button>
+      ) : null}
+      <button
+        className="desktop-positions-action"
+        disabled={locked || saving || !priceValid}
+        onClick={() => void editor.save()}
+      >
+        {saving ? 'Saving…' : 'Save'}
+      </button>
+      <button className="desktop-positions-action" onClick={() => editor.cancel()}>
+        Cancel
+      </button>
+      {saveError ? (
+        <span className="trade-leg-editor__error" role="alert" title={saveError}>
+          {saveError}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
 function PositionsTable({
   positions,
   metas,
@@ -433,7 +717,7 @@ function PositionsTable({
                 {priceOrDash(meta?.target?.triggerPrice)}
               </td>
               <td className="numeric" style={{ textAlign: 'right' }}>
-                {timeInTrade()}
+                {timeInTrade(position)}
               </td>
               <td style={{ textAlign: 'right' }}>
                 <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>

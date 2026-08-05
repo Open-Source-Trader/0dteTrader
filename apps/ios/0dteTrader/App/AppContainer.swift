@@ -12,9 +12,10 @@ final class AppContainer: ObservableObject {
     let apiClient: APIClient
     let quoteSocket: QuoteSocketClient
     let appLockManager: AppLockManager
+    let pushNotifications: PushNotificationsManager
     private let urlSession: URLSession
 
-    init(baseURL: URL) {
+    init(baseURL: URL, pushCoordinator: PushRegistrationCoordinator) {
         let settings = SettingsStore()
         // Scoped per server origin so a refresh token issued by one server is
         // never sent to another after a runtime server change.
@@ -25,16 +26,24 @@ final class AppContainer: ObservableObject {
         let urlSession = URLSession(configuration: .default, delegate: pinningDelegate, delegateQueue: nil)
         let sessionStore = SessionStore(keychainStore: keychain, baseURL: baseURL, urlSession: urlSession)
 
+        let apiClient = APIClient(baseURL: baseURL, sessionStore: sessionStore, urlSession: urlSession)
+
         self.urlSession = urlSession
         self.baseURL = baseURL
         self.settingsStore = settings
         self.keychainStore = keychain
         self.sessionStore = sessionStore
-        self.apiClient = APIClient(baseURL: baseURL, sessionStore: sessionStore, urlSession: urlSession)
+        self.apiClient = apiClient
         self.quoteSocket = QuoteSocketClient(streamURL: ServerConfigStore.streamURL(for: baseURL), urlSession: urlSession) {
             try await sessionStore.accessTokenOrRefresh()
         }
         self.appLockManager = AppLockManager(settingsStore: settings)
+        self.pushNotifications = PushNotificationsManager(
+            apiClient: apiClient,
+            settingsStore: settings,
+            coordinator: pushCoordinator,
+            serverKey: baseURL.absoluteString
+        )
     }
 
     deinit {
@@ -60,7 +69,8 @@ final class AppContainer: ObservableObject {
     }
 
     func makeOptionsChainViewModel() -> OptionsChainViewModel {
-        OptionsChainViewModel(apiClient: apiClient)
+        let settings = settingsStore
+        return OptionsChainViewModel(apiClient: apiClient, autoOtmOffset: { settings.autoOtmOffset })
     }
 
     func makeTradeViewModel() -> TradeViewModel {
@@ -80,6 +90,7 @@ final class AppContainer: ObservableObject {
             apiClient: apiClient,
             settingsStore: settingsStore,
             quoteSocket: quoteSocket,
+            pushNotifications: pushNotifications,
             onLogout: onLogout
         )
     }

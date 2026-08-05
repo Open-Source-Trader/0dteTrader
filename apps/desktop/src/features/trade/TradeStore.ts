@@ -1,5 +1,6 @@
 import type {
   OptionContract,
+  OptionType,
   OrderPreview,
   OrderRequest,
   OrderResult,
@@ -11,7 +12,8 @@ import type {
 } from '@0dtetrader/shared-types';
 import type { ApiClient } from '../../core/api/ApiClient';
 import { errorMessage } from '../../core/api/ApiError';
-import { orderStatusDisplayName, sideDisplayName } from '../../core/models/domain';
+import { quotesPending, orderStatusDisplayName, sideDisplayName } from '../../core/models/domain';
+import { parseOccSymbol } from '../../core/models/occSymbol';
 import { roundToTick } from '../../core/models/priceInput';
 import { Store } from '../../core/observable';
 import { Format } from '../../design/format';
@@ -103,6 +105,13 @@ export class TradeStore extends Store<TradeStoreState> {
    */
   isSocketConnected: (() => boolean) | null = null;
 
+  /**
+   * Governs success/info toasts (Profile › In-app toasts); error toasts always
+   * show — a swallowed failure is one the user acts on without knowing it
+   * failed. Wired from the container; null (treated as enabled) in tests.
+   */
+  toastPolicy: (() => boolean) | null = null;
+
   constructor(private readonly apiClient: ApiClient) {
     super({
       quantity: 1,
@@ -191,6 +200,35 @@ export class TradeStore extends Store<TradeStoreState> {
   // MARK: - Arm (step 1)
 
   /**
+   * Held long legs the panel's current selection could close: same underlying
+   * + expiration + right, any strike. Matching on strike would miss a held
+   * position whenever AUTO's live OTM pick has drifted off the strike actually
+   * held. Legs are resolved through `optionContractResolver` rather than
+   * trusted from `chainStore.selectedContract`, since that is exactly the
+   * drifted AUTO pick we cannot use for the close's strike. Shared by arm()
+   * and the SELL buttons' disabled predicate, so gate and action agree.
+   */
+  sellableHeldLegs(
+    underlying: string,
+    expiration: string | null,
+    optionType: OptionType,
+  ): { position: Position; contract: OptionContract }[] {
+    if (!expiration) return [];
+    return this.getState()
+      .positions.map((position) => {
+        const contract = this.optionContractResolver?.(position.symbol);
+        return contract &&
+          contract.underlying === underlying &&
+          contract.expiration === expiration &&
+          contract.optionType === optionType &&
+          position.quantity > 0
+          ? { position, contract }
+          : null;
+      })
+      .filter((leg): leg is { position: Position; contract: OptionContract } => leg !== null);
+  }
+
+  /**
    * Builds the OrderRequest + idempotency key. Normally opens the confirm
    * sheet; when `bypassConfirmation` is set (Profile → Skip order confirmation)
    * it submits the order immediately, skipping the sheet.
@@ -215,31 +253,85 @@ export class TradeStore extends Store<TradeStoreState> {
     const chainState = chainStore.getState();
     const optionType = chainState.optionType;
 
-    // Selling closes (part of) a held position rather than opening a short
-    // when the panel's selected right (put/call) and expiration match a held
-    // position — regardless of which strike AUTO mode currently points at.
-    // Matching on strike would miss a held position whenever AUTO's live OTM
-    // pick has drifted off the strike actually held, silently falling through
-    // to the open-order branch below and stacking a naked position on top of
-    // the one the user meant to close. Legs are resolved through
-    // `optionContractResolver` rather than trusted from `chainStore.selectedContract`,
-    // since that is exactly the drifted AUTO pick we cannot use for the close's strike.
     const expiration = chainState.selectedExpiration;
+
+    // CURR mode: the user named the exact owned leg (on the side the CALL/PUT
+    // toggle selects), so the sell-to-close leg-matching heuristic below is
+    // bypassed — buys add to that contract, sells close part of it clamped to
+    // what is actually held. Both sides insist the leg really is held: CURR
+    // must never quietly trade a contract the account does not own.
+    if (chainState.isCurrMode) {
+      const strike = chainState.selectedStrike;
+      if (strike === null || expiration === null) {
+        this.showToast('Pick an owned contract first.', 'error');
+        return;
+      }
+      // A leg resolved from its OCC symbol has no quotes until its
+      // expiration's contracts load — never trade off a 0.00 display. The
+      // ONE canonical readiness predicate, not a re-implementation of it.
+      const selected = chainStore.selectedContract;
+      if (selected && quotesPending(selected)) {
+        this.showToast('Quotes are still loading for that expiration.', 'error');
+        return;
+      }
+      const heldQuantity = this.getState().positions.reduce((sum, position) => {
+        if (position.quantity <= 0) return sum;
+        // The OCC symbol itself names the leg — the chain resolver only knows
+        // the loaded expiration, and CURR must close holdings on any of them.
+        const contract =
+          parseOccSymbol(position.symbol) ?? this.optionContractResolver?.(position.symbol);
+        return contract &&
+          contract.underlying === underlying &&
+          contract.expiration === expiration &&
+          contract.optionType === optionType &&
+          contract.strike === strike
+          ? sum + position.quantity
+          : sum;
+      }, 0);
+      if (heldQuantity <= 0) {
+        this.showToast(
+          side === 'sell' ? 'No open position to sell' : 'Pick an owned contract first.',
+          'error',
+        );
+        return;
+      }
+      const shortName = optionType === 'call' ? 'C' : 'P';
+      const orderQuantity = side === 'sell' ? Math.min(quantity, heldQuantity) : quantity;
+      const sizeLabel =
+        orderQuantity < heldQuantity ? `${orderQuantity} of ${heldQuantity}` : `${orderQuantity}`;
+      const summaryLabel =
+        side === 'sell'
+          ? `CLOSE ${sizeLabel} · ${underlying} ${Format.strike(strike)}${shortName}`
+          : `${underlying} ${expiration} ${Format.strike(strike)}${shortName}`;
+      this.finish(
+        {
+          underlying,
+          assetClass: 'option',
+          side,
+          quantity: orderQuantity,
+          orderType,
+          limitPrice,
+          selection: { mode: 'explicit', optionType, expiration, strike },
+        },
+        side,
+        summaryLabel,
+        bypassConfirmation,
+      );
+      return;
+    }
+
+    // Selling closes (part of) a held position when the panel's selected
+    // right (put/call) and expiration match one — regardless of which strike
+    // AUTO mode currently points at (see sellableHeldLegs). With no matching
+    // leg the sell is refused outright below: this app only sells to close,
+    // never into a naked short.
     const heldLegs =
-      side === 'sell' && expiration
-        ? this.getState()
-            .positions.map((position) => {
-              const contract = this.optionContractResolver?.(position.symbol);
-              return contract &&
-                contract.underlying === underlying &&
-                contract.expiration === expiration &&
-                contract.optionType === optionType &&
-                position.quantity > 0
-                ? { position, contract }
-                : null;
-            })
-            .filter((leg): leg is { position: Position; contract: OptionContract } => leg !== null)
-        : [];
+      side === 'sell' ? this.sellableHeldLegs(underlying, expiration, optionType) : [];
+
+    if (side === 'sell' && heldLegs.length === 0) {
+      this.showToast('No open position to sell', 'error');
+      return;
+    }
 
     if (heldLegs.length > 0) {
       // Highest unrealized P/L first: scale out of the most profitable leg
@@ -254,43 +346,42 @@ export class TradeStore extends Store<TradeStoreState> {
       const shortName = firstClose.contract.optionType === 'call' ? 'C' : 'P';
       const sizeLabel =
         closeQuantity < totalHeld ? `${closeQuantity} of ${totalHeld}` : `${closeQuantity}`;
-      this.set({
-        armedTicket: {
-          id: nextId++,
-          request: {
-            underlying,
-            assetClass: 'option',
-            side,
-            quantity: closeQuantity,
-            orderType,
-            limitPrice,
-            selection: {
-              mode: 'explicit',
-              optionType: firstClose.contract.optionType,
-              expiration: firstClose.contract.expiration,
-              strike: firstClose.contract.strike,
-            },
-          },
-          idempotencyKey: newIdempotencyKey(),
+      this.finish(
+        {
+          underlying,
+          assetClass: 'option',
           side,
-          summary: `CLOSE ${sizeLabel} · ${underlying} ${Format.strike(firstClose.contract.strike)}${shortName}`,
+          quantity: closeQuantity,
+          orderType,
+          limitPrice,
+          selection: {
+            mode: 'explicit',
+            optionType: firstClose.contract.optionType,
+            expiration: firstClose.contract.expiration,
+            strike: firstClose.contract.strike,
+          },
         },
-        preview: null,
-        previewError: null,
-      });
-      void this.loadPreview();
+        side,
+        `CLOSE ${sizeLabel} · ${underlying} ${Format.strike(firstClose.contract.strike)}${shortName}`,
+        bypassConfirmation,
+      );
       return;
     }
 
     if (chainState.isAutoMode) {
+      // Sending the offset pins the server to the exact contract the panel
+      // shows, rather than whatever its own default would resolve to.
+      const otmOffset = chainStore.autoOtmOffset;
       selection = {
         mode: 'auto_otm',
         optionType,
         expiration: chainState.selectedExpiration ?? undefined,
+        otmOffset,
       };
       const expirationLabel = chainState.selectedExpiration ?? 'nearest';
       const typeName = optionType === 'call' ? 'Call' : 'Put';
-      summary = `${underlying} AUTO +1 OTM ${typeName} · exp ${expirationLabel}`;
+      const offsetLabel = otmOffset === 0 ? 'ATM' : `+${otmOffset} OTM`;
+      summary = `${underlying} AUTO ${offsetLabel} ${typeName} · exp ${expirationLabel}`;
     } else {
       const strike = chainState.selectedStrike;
       const expiration = chainState.selectedExpiration;
@@ -312,25 +403,33 @@ export class TradeStore extends Store<TradeStoreState> {
       limitPrice,
       selection,
     };
+    this.finish(request, side, summary, bypassConfirmation);
+  }
+
+  /**
+   * The one place an armed order leaves `arm()`: either straight to the
+   * broker, or onto the confirm sheet with a preview loading.
+   *
+   * Every branch of arm() ends here. They used to each build their own
+   * ticket and return, so the CURR and held-close paths silently ignored
+   * "Skip order confirmation" — the setting was only consulted on the tail
+   * the general branch happened to reach.
+   */
+  private finish(
+    request: OrderRequest,
+    side: OrderSide,
+    summary: string,
+    bypassConfirmation: boolean,
+  ): void {
     const idempotencyKey = newIdempotencyKey();
     if (bypassConfirmation) {
       // Clear any stale ticket/preview state before bypassing
-      this.set({
-        armedTicket: null,
-        preview: null,
-        previewError: null,
-      });
+      this.set({ armedTicket: null, preview: null, previewError: null });
       void this.placeDirect(request, idempotencyKey, side);
       return;
     }
     this.set({
-      armedTicket: {
-        id: nextId++,
-        request,
-        idempotencyKey,
-        side,
-        summary,
-      },
+      armedTicket: { id: nextId++, request, idempotencyKey, side, summary },
       preview: null,
       previewError: null,
     });
@@ -486,9 +585,13 @@ export class TradeStore extends Store<TradeStoreState> {
 
     try {
       const side: OrderSide = position.quantity > 0 ? 'sell' : 'buy';
-      const contract = this.optionContractResolver?.(position.symbol) ?? null;
+      // The chain resolver only knows the loaded expiration; the position's
+      // own OCC symbol names the leg exactly, so any broker option position
+      // stays closable from the workspace.
+      const contract =
+        this.optionContractResolver?.(position.symbol) ?? parseOccSymbol(position.symbol);
       if (!contract) {
-        this.showToast(`Open ${position.symbol}'s chart to manage this option.`, 'error');
+        this.showToast(`Cannot resolve ${position.symbol} to close it.`, 'error');
         return;
       }
       const selection: OrderSelection = {
@@ -551,6 +654,8 @@ export class TradeStore extends Store<TradeStoreState> {
 
   /** FIFO queue: a new toast never clobbers one that's on screen. */
   showToast(message: string, style: ToastStyle): void {
+    // The toggle governs success/info only — errors always surface.
+    if (style !== 'error' && this.toastPolicy?.() === false) return;
     this.toastQueue.push({ id: nextId++, message, style });
     if (this.getState().toast !== null) return; // one is already showing
     this.advanceToastQueue();

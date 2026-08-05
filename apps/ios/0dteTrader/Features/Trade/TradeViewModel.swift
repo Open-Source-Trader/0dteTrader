@@ -75,6 +75,10 @@ final class TradeViewModel: ObservableObject {
     /// nil (treated as disconnected) only in previews/tests.
     var isSocketConnected: (() -> Bool)?
 
+    /// Gates success/info toasts (Profile → in-app toasts). Error toasts
+    /// always show regardless. Nil (previews/tests) means show everything.
+    var toastPolicy: (() -> Bool)?
+
     /// Coalesces concurrent refreshes: an order placement's submitted and
     /// terminal-status pushes can each trigger one in quick succession, so a
     /// call already running is awaited rather than duplicated, with at most
@@ -181,7 +185,9 @@ final class TradeViewModel: ObservableObject {
         // guards against). Legs are resolved through `optionContractResolver`
         // rather than trusted from the chain's `selectedContract`, since that
         // is exactly the drifted AUTO pick we cannot use for the close's strike.
-        if side == .sell,
+        // CURR mode skips this entirely: its selection IS a held contract, so
+        // the drift this rescues cannot happen and the explicit pick must win.
+        if side == .sell, !chainViewModel.isCurrMode,
            let expiration = chainViewModel.selectedExpiration,
            case let heldLegs = positions.compactMap({ position -> (Position, OptionContract)? in
                guard position.quantity > 0,
@@ -212,6 +218,12 @@ final class TradeViewModel: ObservableObject {
             // tap SELL again to work through the rest, rather than the ticket
             // silently closing only part of the intended size.
             guard let firstClose = closes.first else { return }
+            // Validated against the leg actually being closed, not the
+            // chain's selection: this path deliberately ignores AUTO's
+            // drifted pick, so gating on that pick could refuse a perfectly
+            // quoted exit — the one refusal a position holder must never hit
+            // by accident.
+            guard refuseQuotelessContract(firstClose.contract) == false else { return }
             let closeQuantity = firstClose.quantity
             let sizeLabel = closeQuantity < totalHeld
                 ? "\(closeQuantity) of \(totalHeld)"
@@ -230,30 +242,75 @@ final class TradeViewModel: ObservableObject {
                     strike: firstClose.contract.strike
                 )
             )
-            armedTicket = ArmedOrderTicket(
-                id: UUID(),
+            finish(
                 request: request,
-                idempotencyKey: UUID().uuidString,
                 side: side,
                 summary: "CLOSE \(sizeLabel) · \(underlying) "
-                    + "\(Format.strike(firstClose.contract.strike))\(firstClose.contract.optionType.shortName)"
+                    + "\(Format.strike(firstClose.contract.strike))\(firstClose.contract.optionType.shortName)",
+                bypass: bypass
             )
-            preview = nil
-            previewError = nil
-            submitError = nil
-            Task { await loadPreview() }
             return
         }
 
-        if chainViewModel.isAutoMode {
+        // A sell that matched nothing above has nothing to close. Refuse it:
+        // falling through would open a short nobody asked for.
+        if side == .sell, !chainViewModel.isCurrMode {
+            showToast("No open position to sell", style: .error)
+            return
+        }
+
+        // Every remaining path prices off the chain's selection, so that is
+        // the contract to validate. Backstop behind the UI gates
+        // (`TradeReadiness` disables the buttons first): the all-zero
+        // placeholder a CURR leg synthesizes before its expiration's
+        // contracts load is refused before a ticket, premium, preview, or
+        // request exists. A typed custom price does not bypass it — that
+        // changes the requested price, not whether the contract is a
+        // validated, quoted option.
+        if refuseQuotelessContract(chainViewModel.selectedContract) { return }
+
+        var orderQuantity = quantity
+        if chainViewModel.isCurrMode {
+            // CURR: the ticket names a held contract explicitly. Buys add to
+            // it; sells close part of it, clamped so a sell can never pass
+            // through zero into a short.
+            guard let contract = chainViewModel.selectedContract else {
+                showToast("Pick a held contract first.", style: .error)
+                return
+            }
+            selection = OrderSelectionDTO(
+                mode: "explicit",
+                optionType: contract.optionType.rawValue,
+                expiration: contract.expiration,
+                strike: contract.strike
+            )
+            let leg = "\(Format.strike(contract.strike))\(contract.optionType.shortName)"
+            if side == .sell {
+                let held = positions.first { $0.symbol == contract.symbol && $0.quantity > 0 }?.quantity ?? 0
+                guard held > 0 else {
+                    showToast("No open position to sell", style: .error)
+                    return
+                }
+                orderQuantity = min(quantity, held)
+                let sizeLabel = orderQuantity < held ? "\(orderQuantity) of \(held)" : "\(orderQuantity)"
+                summary = "CLOSE \(sizeLabel) · \(underlying) \(leg)"
+            } else {
+                summary = "\(underlying) \(contract.expiration) \(leg)"
+            }
+        } else if chainViewModel.isAutoMode {
+            let offset = chainViewModel.autoOtmOffset
             selection = OrderSelectionDTO(
                 mode: "auto_otm",
                 optionType: optionType.rawValue,
                 expiration: chainViewModel.selectedExpiration,
-                strike: nil
+                strike: nil,
+                // Omitted at the default so servers predating the field see
+                // the request shape they always did (they resolve +1 anyway).
+                otmOffset: offset == 1 ? nil : offset
             )
             let expirationLabel = chainViewModel.selectedExpiration ?? "nearest"
-            summary = "\(underlying) AUTO +1 OTM \(optionType.displayName) · exp \(expirationLabel)"
+            let offsetLabel = offset == 0 ? "ATM" : "+\(offset) OTM"
+            summary = "\(underlying) AUTO \(offsetLabel) \(optionType.displayName) · exp \(expirationLabel)"
         } else {
             guard let strike = chainViewModel.selectedStrike,
                   let expiration = chainViewModel.selectedExpiration
@@ -274,11 +331,22 @@ final class TradeViewModel: ObservableObject {
             underlying: underlying,
             assetClass: "option",
             side: side.rawValue,
-            quantity: quantity,
+            quantity: orderQuantity,
             orderType: orderType.rawValue,
             limitPrice: limitPrice,
             selection: selection
         )
+        finish(request: request, side: side, summary: summary, bypass: bypass)
+    }
+
+    /// The one place an order leaves `arm()`: either straight to the broker
+    /// (bypass), or onto the confirm sheet with a preview loading.
+    ///
+    /// Every branch of `arm()` ends here. The held-leg close path used to
+    /// build its own ticket and return, so it silently ignored "Skip order
+    /// confirmation" — the setting was only consulted on the tail the other
+    /// branches reached. Mirrors the desktop store's `finish`.
+    private func finish(request: OrderRequestDTO, side: OrderSide, summary: String, bypass: Bool) {
         let idempotencyKey = UUID().uuidString
         if bypass {
             // Clear any stale ticket/preview state before bypassing
@@ -300,6 +368,17 @@ final class TradeViewModel: ObservableObject {
         previewError = nil
         submitError = nil
         Task { await loadPreview() }
+    }
+
+    /// True (and toasts) when `contract` exists but carries no tradeable
+    /// quote — both sides live and not crossed (`hasTradeableQuote`). Nil
+    /// passes: the chain has not resolved a contract yet and the server does
+    /// the resolving (AUTO, or an explicit strike whose contracts are still
+    /// loading).
+    private func refuseQuotelessContract(_ contract: OptionContract?) -> Bool {
+        guard let contract, !contract.hasTradeableQuote else { return false }
+        showToast("Quotes are unavailable for this contract.", style: .error)
+        return true
     }
 
     /// Submits without the confirm sheet (bypass path). Failures surface as a
@@ -439,11 +518,42 @@ final class TradeViewModel: ObservableObject {
 
     /// Tap-to-flatten: opposite-side market order for the full position size.
     func flatten(_ position: Position) async {
-        guard position.quantity != 0 else { return }
+        await exit(position, quantity: abs(position.quantity), action: "Flatten")
+    }
+
+    /// Partial scale-out: opposite-side market order for half the position.
+    /// Rounds down, like the desktop's `TradeStore.trimHalf` — a 1-lot has
+    /// nothing to trim, so it no-ops.
+    func trimHalf(_ position: Position) async {
+        await exit(position, quantity: Self.trimQuantity(position.quantity), action: "Trim")
+    }
+
+    /// Half the position, rounded down — the quantity `trimHalf` sends.
+    nonisolated static func trimQuantity(_ positionQuantity: Int) -> Int {
+        abs(positionQuantity) / 2
+    }
+
+    /// Opposite-side market order reducing `position` by `quantity`
+    /// (clamped to the position size). Shared by flatten and trimHalf.
+    private func exit(_ position: Position, quantity: Int, action: String) async {
+        guard position.quantity != 0, quantity > 0 else { return }
         guard !workingSymbols.contains(position.symbol) else { return }
 
-        guard let contract = optionContractResolver?(position.symbol) else {
-            showToast("Open \(position.symbol)'s chart to flatten this option.", style: .error)
+        // The chain resolver only knows the loaded expiration; the position's
+        // own OCC symbol names the leg exactly, so any broker option position
+        // stays closable from the account-wide drawer.
+        let leg: OccSymbol.Parsed
+        if let contract = optionContractResolver?(position.symbol) {
+            leg = OccSymbol.Parsed(
+                underlying: contract.underlying,
+                expiration: contract.expiration,
+                optionType: contract.optionType,
+                strike: contract.strike
+            )
+        } else if let parsed = OccSymbol.parse(position.symbol) {
+            leg = parsed
+        } else {
+            showToast("Cannot resolve \(position.symbol) to close it.", style: .error)
             return
         }
         workingSymbols.insert(position.symbol)
@@ -451,17 +561,17 @@ final class TradeViewModel: ObservableObject {
 
         let side: OrderSide = position.quantity > 0 ? .sell : .buy
         let request = OrderRequestDTO(
-            underlying: contract.underlying,
+            underlying: leg.underlying,
             assetClass: "option",
             side: side.rawValue,
-            quantity: abs(position.quantity),
+            quantity: min(quantity, abs(position.quantity)),
             orderType: OrderType.market.rawValue,
             limitPrice: nil,
             selection: OrderSelectionDTO(
                 mode: "explicit",
-                optionType: contract.optionType.rawValue,
-                expiration: contract.expiration,
-                strike: contract.strike
+                optionType: leg.optionType.rawValue,
+                expiration: leg.expiration,
+                strike: leg.strike
             )
         )
         do {
@@ -470,7 +580,7 @@ final class TradeViewModel: ObservableObject {
                 idempotencyKey: UUID().uuidString
             ))
             showToast(
-                "Flatten \(position.symbol) — \(result.status.displayName)",
+                "\(action) \(position.symbol) — \(result.status.displayName)",
                 style: result.status == .rejected ? .error : .success
             )
             // See submitOrder: the placement's own orderUpdate push refreshes
@@ -518,6 +628,8 @@ final class TradeViewModel: ObservableObject {
     private var toastQueue: [Toast] = []
 
     func showToast(_ message: String, style: Toast.Style) {
+        // Errors always surface; only the routine chatter is gated.
+        if style != .error, toastPolicy?() == false { return }
         let toast = Toast(message: message, style: style)
         if style == .success {
             Haptics.success()

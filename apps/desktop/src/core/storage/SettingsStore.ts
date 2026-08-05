@@ -29,6 +29,9 @@ export class SettingsStore {
     tradingLocked: 'settings.tradingLocked',
     bypassOrderConfirmation: 'settings.bypassOrderConfirmation',
     keyboardShortcutsEnabled: 'settings.keyboardShortcutsEnabled',
+    autoOtmOffset: 'settings.autoOtmOffset',
+    toastsEnabled: 'settings.toastsEnabled',
+    systemNotificationsEnabled: 'settings.systemNotificationsEnabled',
   };
 
   get layoutMode(): TradeLayout {
@@ -149,6 +152,41 @@ export class SettingsStore {
 
   set keyboardShortcutsEnabled(value: boolean) {
     localStorage.setItem(SettingsStore.keys.keyboardShortcutsEnabled, String(value));
+  }
+
+  /** In-app success/info toasts. Error toasts always show regardless. */
+  get toastsEnabled(): boolean {
+    const stored = localStorage.getItem(SettingsStore.keys.toastsEnabled);
+    return stored === null ? true : stored === 'true';
+  }
+
+  set toastsEnabled(value: boolean) {
+    localStorage.setItem(SettingsStore.keys.toastsEnabled, String(value));
+  }
+
+  /** OS notifications for terminal order statuses and chart-order fires,
+   *  shown only while the window is unfocused. */
+  get systemNotificationsEnabled(): boolean {
+    const stored = localStorage.getItem(SettingsStore.keys.systemNotificationsEnabled);
+    return stored === null ? true : stored === 'true';
+  }
+
+  set systemNotificationsEnabled(value: boolean) {
+    localStorage.setItem(SettingsStore.keys.systemNotificationsEnabled, String(value));
+  }
+
+  /** AUTO selection: strikes out of the money from the ATM anchor (0 = ATM
+   *  itself; the ticket's default is +1). Clamped to 0–10 on read so a stale
+   *  or hand-edited value cannot arm an order the server rejects. */
+  get autoOtmOffset(): number {
+    const raw = localStorage.getItem(SettingsStore.keys.autoOtmOffset);
+    const parsed = raw === null ? Number.NaN : Number(raw);
+    if (!Number.isInteger(parsed)) return 1;
+    return Math.min(10, Math.max(0, parsed));
+  }
+
+  set autoOtmOffset(value: number) {
+    localStorage.setItem(SettingsStore.keys.autoOtmOffset, String(value));
   }
 
   get lastSymbol(): string | null {

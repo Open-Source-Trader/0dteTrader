@@ -183,4 +183,44 @@ describe('SettingsStore boolean device preferences', () => {
     new SettingsStore().keyboardShortcutsEnabled = true;
     expect(new SettingsStore().keyboardShortcutsEnabled).toBe(true);
   });
+
+  it('defaults toasts and system notifications to on, and round-trips both', () => {
+    expect(new SettingsStore().toastsEnabled).toBe(true);
+    expect(new SettingsStore().systemNotificationsEnabled).toBe(true);
+    new SettingsStore().toastsEnabled = false;
+    expect(new SettingsStore().toastsEnabled).toBe(false);
+    new SettingsStore().systemNotificationsEnabled = false;
+    expect(new SettingsStore().systemNotificationsEnabled).toBe(false);
+  });
+});
+
+describe('SettingsStore AUTO OTM offset', () => {
+  beforeEach(() => {
+    Object.defineProperty(globalThis, 'localStorage', {
+      configurable: true,
+      value: new MemoryStorage(),
+    });
+  });
+
+  it('defaults to +1 OTM', () => {
+    expect(new SettingsStore().autoOtmOffset).toBe(1);
+  });
+
+  it('round-trips through localStorage, including 0 (ATM)', () => {
+    new SettingsStore().autoOtmOffset = 3;
+    expect(new SettingsStore().autoOtmOffset).toBe(3);
+    new SettingsStore().autoOtmOffset = 0;
+    expect(new SettingsStore().autoOtmOffset).toBe(0);
+  });
+
+  it('clamps out-of-range values and rejects garbage on read', () => {
+    localStorage.setItem('settings.autoOtmOffset', '99');
+    expect(new SettingsStore().autoOtmOffset).toBe(10);
+    localStorage.setItem('settings.autoOtmOffset', '-2');
+    expect(new SettingsStore().autoOtmOffset).toBe(0);
+    localStorage.setItem('settings.autoOtmOffset', '1.5');
+    expect(new SettingsStore().autoOtmOffset).toBe(1);
+    localStorage.setItem('settings.autoOtmOffset', 'wide');
+    expect(new SettingsStore().autoOtmOffset).toBe(1);
+  });
 });

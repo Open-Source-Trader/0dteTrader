@@ -7,10 +7,14 @@ import { randomUUID } from 'node:crypto';
  *   - @default(uuid()) / @default(now()) / @updatedAt
  *   - unique constraints on user.email, refreshToken.tokenHash,
  *     webullCredential.(userId, environment),
- *     brokerCredential.(userId, provider, environment) and
- *     orderAudit.(userId, idempotencyKey)
+ *     brokerCredential.(userId, provider, environment),
+ *     orderAudit.(userId, idempotencyKey),
+ *     tradeOrderExecution.(orderId, cumulative) and
+ *     pushDelivery.(userId, key) — the one whose columns are both NOT NULL,
+ *     so it has no nullable-unique semantics to emulate
  *     (violations throw a P2002-coded error like the real client)
- *   - nullable unique column semantics for orderAudit.idempotencyKey
+ *   - nullable unique column semantics for orderAudit.idempotencyKey and
+ *     tradeOrderExecution.cumulative
  *     (multiple NULL keys never conflict, as in Postgres)
  *
  * It is injected via `overrideProvider(PrismaService).useValue(fake)`, so it
@@ -56,11 +60,14 @@ function matches(row: any, where: any): boolean {
       if (operator.gte !== undefined && !(actual >= operator.gte)) return false;
       if (operator.equals !== undefined && actual !== operator.equals) return false;
       if (operator.in !== undefined && !operator.in.includes(actual)) return false;
+      if (operator.has !== undefined && !(Array.isArray(actual) && actual.includes(operator.has))) {
+        return false;
+      }
       // Fail loudly on anything this double does not implement. Returning true
       // means an unsupported operator silently matches EVERY row, so a query
       // that should select one selects all — tests then pass on behaviour the
       // database would never produce.
-      const supported = ['lt', 'lte', 'gt', 'gte', 'equals', 'in'];
+      const supported = ['lt', 'lte', 'gt', 'gte', 'equals', 'in', 'has'];
       const unsupported = Object.keys(operator).filter((k) => !supported.includes(k));
       if (unsupported.length > 0) {
         throw new Error(
@@ -79,12 +86,15 @@ export class InMemoryPrismaService {
   readonly refreshTokens: any[] = [];
   readonly orderAudits: any[] = [];
   readonly tradeOrders: any[] = [];
+  readonly tradeOrderExecutions: any[] = [];
   readonly chartOrders: any[] = [];
   readonly optionsAnalyticsSnapshots: any[] = [];
   readonly scheduledJobLeases: any[] = [];
   readonly brokerCredentials: any[] = [];
   readonly brokerApiTokens: any[] = [];
   readonly brokerConnections: any[] = [];
+  readonly deviceTokens: any[] = [];
+  readonly pushDeliveries: any[] = [];
 
   readonly user = {
     findUnique: async ({ where }: any) => {
@@ -245,6 +255,8 @@ export class InMemoryPrismaService {
   };
 
   readonly tradeOrder = {
+    findUnique: async ({ where }: any) => this.tradeOrders.find((o) => o.id === where.id) ?? null,
+    findFirst: async ({ where }: any) => this.tradeOrders.find((o) => matches(o, where)) ?? null,
     upsert: async ({ where, create, update }: any) => {
       const existing = this.tradeOrders.find((o) => o.id === where.id);
       if (existing) {
@@ -264,6 +276,47 @@ export class InMemoryPrismaService {
       }
       return rows;
     },
+    updateMany: async ({ where, data }: any) => {
+      let count = 0;
+      for (const row of this.tradeOrders) {
+        if (matches(row, where)) {
+          Object.assign(row, definedOnly(data), { updatedAt: new Date() });
+          count += 1;
+        }
+      }
+      return { count };
+    },
+  };
+
+  readonly tradeOrderExecution = {
+    create: async ({ data }: any) => {
+      if (
+        data.cumulative != null &&
+        this.tradeOrderExecutions.some(
+          (e) => e.orderId === data.orderId && e.cumulative === data.cumulative,
+        )
+      ) {
+        throw p2002('orderId, cumulative');
+      }
+      // Every nullable column defaults to null, not undefined: Prisma returns
+      // null for an unwritten column, and a reader distinguishing the row
+      // shapes on `x === null` would otherwise pass here and misfire live.
+      const row = {
+        id: randomUUID(),
+        createdAt: new Date(),
+        cumulative: null,
+        avgPrice: null,
+        quantity: null,
+        price: null,
+        ...data,
+      };
+      this.tradeOrderExecutions.push(row);
+      return row;
+    },
+    // No orderBy: the replay sorts executions itself, so callers must not
+    // depend on database ordering here (and the real schema promises none).
+    findMany: async ({ where }: any = {}) =>
+      this.tradeOrderExecutions.filter((e) => matches(e, where)),
   };
 
   readonly optionsAnalyticsSnapshotRecord = {
@@ -558,6 +611,48 @@ export class InMemoryPrismaService {
     },
   };
 
+  readonly deviceToken = {
+    findMany: async ({ where }: any = {}) => this.deviceTokens.filter((t) => matches(t, where)),
+    upsert: async ({ where, create, update }: any) => {
+      const existing = this.deviceTokens.find((t) => t.token === where.token);
+      if (existing) {
+        Object.assign(existing, definedOnly(update), { updatedAt: new Date() });
+        return existing;
+      }
+      const now = new Date();
+      const row = { id: randomUUID(), createdAt: now, updatedAt: now, ...create };
+      this.deviceTokens.push(row);
+      return row;
+    },
+    deleteMany: async ({ where }: any = {}) => {
+      const keep = this.deviceTokens.filter((t) => !matches(t, where));
+      const count = this.deviceTokens.length - keep.length;
+      this.deviceTokens.length = 0;
+      this.deviceTokens.push(...keep);
+      return { count };
+    },
+  };
+
+  readonly pushDelivery = {
+    create: async ({ data }: any) => {
+      // `key` is NOT NULL in the schema, so — unlike orderAudit.idempotencyKey
+      // and tradeOrderExecution.cumulative — there is no null-skip here.
+      if (this.pushDeliveries.some((d) => d.userId === data.userId && d.key === data.key)) {
+        throw p2002('userId, key');
+      }
+      const row = { id: randomUUID(), createdAt: new Date(), ...data };
+      this.pushDeliveries.push(row);
+      return row;
+    },
+    deleteMany: async ({ where }: any = {}) => {
+      const keep = this.pushDeliveries.filter((d) => !matches(d, where));
+      const count = this.pushDeliveries.length - keep.length;
+      this.pushDeliveries.length = 0;
+      this.pushDeliveries.push(...keep);
+      return { count };
+    },
+  };
+
   // Prisma lifecycle no-ops.
   async $connect(): Promise<void> {}
   async $disconnect(): Promise<void> {}
@@ -571,12 +666,15 @@ export class InMemoryPrismaService {
     this.refreshTokens.length = 0;
     this.orderAudits.length = 0;
     this.tradeOrders.length = 0;
+    this.tradeOrderExecutions.length = 0;
     this.chartOrders.length = 0;
     this.optionsAnalyticsSnapshots.length = 0;
     this.scheduledJobLeases.length = 0;
     this.brokerCredentials.length = 0;
     this.brokerApiTokens.length = 0;
     this.brokerConnections.length = 0;
+    this.deviceTokens.length = 0;
+    this.pushDeliveries.length = 0;
   }
 
   /** Test helper: flip the kill switch for a user. */

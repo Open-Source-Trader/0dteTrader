@@ -1,4 +1,11 @@
-import type { OptionType, OrderSide, OrderStatus, OrderType } from '@0dtetrader/shared-types';
+import type {
+  OptionContract,
+  OptionType,
+  OrderSide,
+  OrderStatus,
+  OrderType,
+} from '@0dtetrader/shared-types';
+import { MAX_OPTION_PRICE } from '@0dtetrader/shared-types';
 
 /**
  * `(bid + ask) / 2` rounded to pennies (PriceMath.swift). Advisory only.
@@ -6,9 +13,48 @@ import type { OptionType, OrderSide, OrderStatus, OrderType } from '@0dtetrader/
  * mirroring the server's computeMid validation; a locked market is allowed.
  */
 export function midPrice(bid: number, ask: number, precision = 2): number | null {
-  if (!(bid > 0) || !(ask > 0) || bid > ask) return null;
+  // The shared ceiling, not just finiteness: two FINITE sides can still
+  // overflow the sum (1e308 + 1e308 is Infinity). Bounded inputs make the
+  // result finite by construction; the final check is the belt.
+  if (!Number.isFinite(bid) || !Number.isFinite(ask)) return null;
+  if (!(bid > 0) || !(ask > 0) || bid > ask || ask > MAX_OPTION_PRICE) return null;
   const factor = Math.pow(10, precision);
-  return Math.round(((bid + ask) / 2) * factor) / factor;
+  const mid = Math.round(((bid + ask) / 2) * factor) / factor;
+  return Number.isFinite(mid) && mid <= MAX_OPTION_PRICE ? mid : null;
+}
+
+/**
+ * No usable book: anything but a two-sided, non-crossed quote. Every trading
+ * gate (split panel, desktop rail, fullscreen buttons/shortcuts) disables on
+ * it so a broken display is never tradeable; TradeStore.arm keeps a matching
+ * guard as the backstop.
+ *
+ * One matrix for every order type, deliberately:
+ * - mid, bid, ask: the server prices these from the live book, so both sides
+ *   must be positive and bid ≤ ask (a crossed book is a broken feed; a
+ *   LOCKED book, bid == ask, is legal and tradeable).
+ * - market, custom: the price does not come from the book, but sending an
+ *   order into a one-sided or crossed 0DTE book is how a market order fills
+ *   at garbage — the same gate applies as the safety rule.
+ * `last` never counts: it is a print from whenever the contract last traded,
+ * hours old on an illiquid strike. iOS applies the identical rule
+ * (`hasTradeableQuote`), so the two clients cannot disagree about whether an
+ * order can be sent. NaN fails every comparison and stays untradeable.
+ */
+export function quotesPending(contract: OptionContract | null): boolean {
+  return (
+    contract !== null &&
+    !(
+      Number.isFinite(contract.bid) &&
+      Number.isFinite(contract.ask) &&
+      contract.bid > 0 &&
+      contract.ask > 0 &&
+      contract.bid <= contract.ask &&
+      // The shared ceiling keeps readiness agreeing with price resolution:
+      // a book the midpoint helpers would refuse must not read as ready.
+      contract.ask <= MAX_OPTION_PRICE
+    )
+  );
 }
 
 export function oppositeSide(side: OrderSide): OrderSide {
@@ -82,4 +128,15 @@ export function orderStatusDisplayName(status: OrderStatus | string): string {
     default:
       return 'Unknown';
   }
+}
+
+/**
+ * History-row label: an order still resting at the broker reads as "Waiting"
+ * rather than its wire status name. Display only — the wire values are
+ * unchanged and toasts keep the status names.
+ */
+export function orderStatusHistoryLabel(status: OrderStatus | string): string {
+  if (status === 'submitted') return 'Waiting';
+  if (status === 'partially_filled') return 'Waiting · partial fill';
+  return orderStatusDisplayName(status);
 }

@@ -422,6 +422,13 @@ export interface OrderSelection {
   expiration?: string;
   /** Explicit option orders only. */
   strike?: number;
+  /**
+   * auto_otm only: how many strikes out of the money to step from the ATM
+   * strike (the one closest to the live underlying price). 0 selects the ATM
+   * strike itself; omitted means 1. Servers predating this field strip it in
+   * validation, silently degrading to the default rather than erroring.
+   */
+  otmOffset?: number;
 }
 
 export interface OrderRequest {
@@ -457,6 +464,24 @@ export interface OrderPreview {
   warnings: string[];
 }
 
+/**
+ * Hard cap on contracts per order, shared by request validation and broker
+ * ingestion: a broker-reported quantity above what the app could ever have
+ * placed is feed garbage, not a position.
+ */
+export const MAX_ORDER_QUANTITY = 1000;
+
+/**
+ * Ceiling on any option price this app will quote, resolve or book, in
+ * dollars per share — two orders of magnitude above any listed premium.
+ * Finiteness checks alone are not enough: two FINITE sides can still
+ * overflow the midpoint arithmetic (1e308 + 1e308 is Infinity), so
+ * readiness predicates, midpoint helpers and fill accounting all bound
+ * their inputs here, which makes every derived price finite by
+ * construction. Mirrored in iOS PriceMath.maxOptionPrice.
+ */
+export const MAX_OPTION_PRICE = 100_000;
+
 export interface OrderResult {
   orderId: string;
   status: OrderStatus;
@@ -469,7 +494,10 @@ export interface OrderResult {
   /** Executed quantity when the broker reports it (partial fills). Absent
    *  when the broker gives only the order quantity. */
   filledQuantity?: number;
-  /** ISO-8601 date-time. */
+  /** Broker-reported execution time (ISO-8601), when the broker provides one.
+   *  Absent when the broker reports no execution timestamp. */
+  filledAt?: string;
+  /** ISO-8601 date-time of order placement. */
   timestamp: string;
 }
 
@@ -483,11 +511,30 @@ export interface Position {
   /** Contract multiplier (options: 100). Lets clients recompute P/L from live quotes. */
   multiplier: number;
   /**
-   * Quantity-weighted price of the UNDERLYING across the fills that opened this
-   * position — the level the chart's entry line is drawn at. Absent for
-   * positions opened before this was recorded, or outside the app.
+   * AUTHORITATIVE quantity-weighted price of the UNDERLYING at the fills that
+   * opened this position — an observation taken at execution time. The only
+   * value automated actions ("Move stop to entry") may consume. Currently
+   * never populated: the backend has no fill-time underlying observation yet,
+   * so the field is reserved and the actions it gates stay disabled.
    */
   underlyingEntryPrice?: number;
+  /**
+   * ESTIMATED entry level: quantity-weighted over the underlying quotes
+   * captured when the opening orders were PLACED, and only over fills that
+   * executed promptly after placement. Display-only — draw the entry line,
+   * label it as approximate — never an input to moving or arming an order:
+   * even a prompt 0DTE fill can sit meaningfully away from the placement
+   * quote. Absent when no prompt-fill estimate exists.
+   */
+  underlyingEntryEstimate?: number;
+  /**
+   * ISO-8601 UTC time of the first fill of the current position lifecycle (the
+   * fill where quantity last left zero) — execution time, never order
+   * placement/submission time. Legacy rows recorded before fill timestamps
+   * were stored fall back to the opening order's placement time. Absent for
+   * positions opened before this was recorded, or outside the app.
+   */
+  openedAt?: string;
 }
 
 /** A historical order with the realized P/L its fill produced (closing fills only). */
@@ -629,6 +676,21 @@ export function bracketKindFor(
 ): 'target' | 'stop' {
   const profitable = (price - entryPrice) * positionProfitDirection(optionType, quantity) > 0;
   return profitable ? 'target' : 'stop';
+}
+
+// ---------------------------------------------------------------------------
+// Notifications
+// ---------------------------------------------------------------------------
+
+/**
+ * A device registered for push notifications. Registration is an idempotent
+ * upsert keyed on `token`; re-registering an existing token moves it to the
+ * calling account. The server prunes tokens APNs reports as dead.
+ */
+export interface DeviceRegistration {
+  /** Hex-encoded APNs device token. */
+  token: string;
+  platform: 'ios';
 }
 
 // ---------------------------------------------------------------------------

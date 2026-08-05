@@ -241,7 +241,22 @@ struct TradePanelView: View {
                         isOn: $chainViewModel.isAutoMode,
                         accent: .appAccent
                     )
-                    .accessibilityLabel("Auto +1 OTM selection")
+                    .accessibilityLabel("Auto OTM selection")
+
+                    // CURR trades only what is already held; with nothing held
+                    // for this underlying there is nothing for it to offer.
+                    // Only disabled while OFF — flattening the last position
+                    // with CURR active must not trap the chip in the on state.
+                    HudToggleChip(
+                        title: "CURR",
+                        isOn: $chainViewModel.isCurrMode,
+                        accent: .appAccent
+                    )
+                    .disabled(!chainViewModel.isCurrMode && !chainViewModel.hasHeldContracts)
+                    .opacity(
+                        chainViewModel.isCurrMode || chainViewModel.hasHeldContracts ? 1 : 0.55
+                    )
+                    .accessibilityLabel("Trade current position")
                 }
                 .disabled(tradingLocked)
                 .opacity(tradingLocked ? 0.55 : 1)
@@ -459,18 +474,19 @@ struct TradePanelView: View {
     }
 
     private var canTrade: Bool {
-        // Custom with nothing typed in it has no price to send, and the server
-        // would refuse the request anyway.
-        //
-        // Also off while the price field holds the keyboard. The panel lifts
-        // just far enough to clear the keys, which leaves SELL/BUY behind them
-        // — except for the strip the keyboard's floating `Done` sits in, where
-        // a thumb reaching for `Done` and missing would land on BUY. Nothing is
-        // lost by making the order wait for the price the user is still typing.
-        chainViewModel.selectedContract != nil
-            && !tradingLocked
-            && tradeViewModel.canArm
-            && editingRowBottomInPanel == nil
+        // The shared gate (quoted contract, lock, pricing completeness);
+        // `pricingFieldBlocking` is this panel's own wrinkle: while the price
+        // field holds the keyboard the panel lifts just far enough to clear
+        // the keys, which leaves SELL/BUY behind them — except for the strip
+        // the keyboard's floating `Done` sits in, where a thumb reaching for
+        // `Done` and missing would land on BUY. Nothing is lost by making the
+        // order wait for the price the user is still typing.
+        TradeReadiness.canTrade(
+            contract: chainViewModel.selectedContract,
+            locked: tradingLocked,
+            canArm: tradeViewModel.canArm,
+            pricingFieldBlocking: editingRowBottomInPanel != nil
+        )
     }
 
     // MARK: - Shared chrome

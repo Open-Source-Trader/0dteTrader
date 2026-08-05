@@ -1388,6 +1388,19 @@
   background: rgba(46, 143, 255, 0.1);
 }
 
+.desktop-mode-button--curr.selected {
+  color: var(--app-accent-text);
+  border-color: color-mix(in srgb, var(--app-accent) 55%, transparent);
+  background: rgba(46, 143, 255, 0.1);
+}
+
+/* CURR without an open long on the underlying: nothing to pick from. */
+.desktop-mode-button:disabled {
+  color: var(--label-secondary);
+  opacity: 0.45;
+  cursor: default;
+}
+
 .desktop-mode-button--call.selected {
   color: var(--buy-green);
   border-color: color-mix(in srgb, var(--buy-green) 55%, transparent);
@@ -2694,6 +2707,83 @@
 .trade-position-strip__actions .desktop-positions-action,
 .trade-management-table .desktop-positions-action {
   min-height: 28px;
+}
+
+/* Docked stop/target editor: one row under the position strip. The chart
+   line stays the drag surface; this is the type-a-number one, so it must
+   work with the line outside the chart's visible price domain. */
+.trade-leg-editor {
+  flex: none;
+  display: flex;
+  align-items: center;
+  /* One line, always: the workspace footer budgets this row at a fixed
+     EDITOR_ROW_HEIGHT (TradeManagementWorkspaceModel.ts), so the budget is
+     a hard cap, not a minimum — nowrap alone stops flex-line wrapping, but
+     long error/notice TEXT still wraps and would push the status bar below
+     the viewport. Every variable-length span ellipsizes instead, and
+     overflow: hidden backstops anything that slips past. */
+  flex-wrap: nowrap;
+  height: 44px;
+  overflow: hidden;
+  box-sizing: border-box;
+  gap: 8px;
+  padding: 6px 10px;
+  border-bottom: var(--border-hairline) solid var(--hud-stroke-dim);
+  background: var(--app-surface);
+  font-size: var(--fs-caption-desktop);
+}
+
+.trade-leg-editor__title {
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.trade-leg-editor__meta {
+  color: var(--label-secondary);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.trade-leg-editor__field {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--label-secondary);
+}
+
+.trade-leg-editor__field input {
+  width: 72px;
+  padding: 3px 6px;
+  border: var(--border-hairline) solid var(--hud-stroke-dim);
+  background: var(--app-background);
+  color: var(--label-primary);
+  font-family: var(--font-mono);
+}
+
+.trade-leg-editor__field input[aria-invalid='true'] {
+  border-color: var(--sell-red);
+}
+
+/* Variable-length text (save errors, the stale notice) truncates on its one
+   line — the full message survives in the title attribute. flex: 1 lets it
+   take the free space before the row's buttons, never a second line. */
+.trade-leg-editor__error,
+.trade-leg-editor__notice {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.trade-leg-editor__error {
+  color: var(--sell-red);
+}
+
+.trade-leg-editor--stale {
+  color: var(--label-secondary);
 }
 
 .trade-management-expanded {

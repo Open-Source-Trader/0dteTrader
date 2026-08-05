@@ -174,6 +174,26 @@ struct OptionContract: Equatable, Sendable, Identifiable {
 
     /// Indicative mid price from the current quote pair; nil when the quote is unusable.
     var mid: Double? { PriceMath.midPrice(bid: bid, ask: ask) }
+
+    /// Whether this contract carries a quote an order could be priced from:
+    /// both sides live and not crossed (a locked book, bid == ask, passes).
+    /// Every order type this app sends is priced from the live book — mid,
+    /// bid and ask all need both sides — and a one-sided or crossed book is
+    /// a broken feed, not a market. False for the all-zero placeholder a
+    /// CURR leg synthesizes before its expiration's contracts load, and for
+    /// junk (negative/NaN) quotes; `last` deliberately does not count — a
+    /// stale print is not a market. Finiteness is checked explicitly: a feed
+    /// glitch can deliver ±inf, and an infinite book is not tradeable —
+    /// midpoints on it are garbage. Desktop applies this identical rule, so
+    /// the two clients cannot disagree about whether an order can be sent.
+    var hasTradeableQuote: Bool {
+        // The PriceMath.maxOptionPrice ceiling keeps readiness agreeing with
+        // price resolution: a book whose midpoint the helper would refuse
+        // (two huge-but-finite sides overflow the sum) must not read as
+        // tradeable.
+        bid.isFinite && ask.isFinite && bid > 0 && ask > 0 && bid <= ask
+            && ask <= PriceMath.maxOptionPrice
+    }
 }
 
 extension OptionContract {
@@ -275,9 +295,19 @@ struct Position: Equatable, Sendable, Identifiable {
     var unrealizedPnl: Double
     /// Contract multiplier (options: 100) for live P/L math.
     let multiplier: Double
-    /// Underlying price the position was opened at — the level the chart's
-    /// entry line sits at. Nil when the server has no record of it.
+    /// Underlying price the position was opened at — the authoritative
+    /// fill-time record, and the level the chart's entry line sits at. Nil
+    /// when the server has no record of it (including while the backend
+    /// cannot observe the underlying at fill time).
     var underlyingEntryPrice: Double?
+    /// Placement-time-quote-derived estimate of the same level, sent while
+    /// `underlyingEntryPrice` is absent. Display fallback only — anything
+    /// that moves or arms an order must use the authoritative record, never
+    /// this.
+    var underlyingEntryEstimate: Double? = nil
+    /// When the fill that opened the current position run happened. Nil when
+    /// the server has no record of it.
+    var openedAt: Date? = nil
 }
 
 extension Position {
@@ -293,7 +323,9 @@ extension Position {
             markPrice: dto.markPrice,
             unrealizedPnl: dto.unrealizedPnl,
             multiplier: dto.multiplier,
-            underlyingEntryPrice: dto.underlyingEntryPrice
+            underlyingEntryPrice: dto.underlyingEntryPrice,
+            underlyingEntryEstimate: dto.underlyingEntryEstimate,
+            openedAt: dto.openedAt.flatMap(DateParsing.dateTime)
         )
     }
 }

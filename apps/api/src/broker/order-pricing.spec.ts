@@ -9,6 +9,15 @@ import {
 /** A normal, penny-wide 0DTE quote. */
 const quote = { bid: 2.45, ask: 2.47, last: 2.46 };
 
+describe('price ceiling parity', () => {
+  it('pins the shared ceiling at 100,000 — the value the iOS mirror hard-codes', () => {
+    // iOS cannot import the TypeScript constant, so PriceMath.maxOptionPrice
+    // mirrors it (its own test pins the same number). Changing the ceiling
+    // means updating BOTH languages; this failing is the reminder.
+    expect(MAX_LIMIT_PRICE).toBe(100_000);
+  });
+});
+
 describe('resolveLimitPrice', () => {
   it('prices each limit variant off the server quote, not the client', () => {
     expect(resolveLimitPrice('bid', quote)).toBe(2.45);
@@ -36,6 +45,29 @@ describe('resolveLimitPrice', () => {
 
   it('falls back to the mid for a custom order with no price', () => {
     expect(resolveLimitPrice('custom', quote)).toBe(2.46);
+  });
+
+  it('never returns a non-finite or above-cap price for any mode', () => {
+    // A malformed-but-FINITE broker quote (1e308 sides) used to flow through
+    // the operand checks and out of the mid as Infinity — a non-finite
+    // broker limit. The ceiling inside computeMid now refuses the book for
+    // every server-priced mode, and the custom fallback rides the same gate.
+    const absurd = { bid: 1e308, ask: 1e308, last: 1e308 };
+    for (const mode of ['bid', 'mid', 'ask'] as const) {
+      expect(() => resolveLimitPrice(mode, absurd)).toThrow(/crossed|invalid/);
+    }
+    expect(() => resolveLimitPrice('custom', absurd)).toThrow(/crossed|invalid/);
+
+    // The invariant on the accepting side: every quote the resolver accepts
+    // yields a finite, in-range price for each non-market mode.
+    const accepted = [quote, { bid: 99_999.98, ask: 100_000, last: 99_999.99 }];
+    for (const q of accepted) {
+      for (const mode of ['bid', 'mid', 'ask'] as const) {
+        const price = resolveLimitPrice(mode, q) as number;
+        expect(Number.isFinite(price)).toBe(true);
+        expect(price).toBeLessThanOrEqual(100_000);
+      }
+    }
   });
 
   it('refuses to price any limit variant against a crossed book', () => {

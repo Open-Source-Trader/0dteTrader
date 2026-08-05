@@ -2,6 +2,8 @@ import { useMemo, useState } from 'react';
 import { NumberField } from '../../design/components/NumberField';
 import { Toggle } from '../../design/components/Toggle';
 import { ChevronDownIcon, MagnifierIcon } from '../../design/icons';
+import type { ChartTradingSettings } from './chartTradingSettings';
+import { CHART_TRADING_QUANTITY_MAX, CHART_TRADING_QUANTITY_MIN } from './chartTradingSettings';
 import type { IndicatorSettings } from './indicatorSettings';
 import { DEFAULT_INDICATOR_SETTINGS, enabledSubPanes, MAX_SUB_PANES } from './indicatorSettings';
 import type { OptionsAnalyticsSettings } from './optionsAnalytics/optionsAnalyticsSettings';
@@ -19,6 +21,8 @@ interface IndicatorSettingsDesktopProps {
   onChangeTwcSettings: (settings: TwcHeatmapSettings) => void;
   optionsAnalytics: OptionsAnalyticsSettings;
   onChangeOptionsAnalytics: (settings: OptionsAnalyticsSettings) => void;
+  chartTrading: ChartTradingSettings;
+  onChangeChartTrading: (settings: ChartTradingSettings) => void;
 }
 
 /** A single form row: label above the control (VS Code / macOS System
@@ -80,10 +84,14 @@ export function IndicatorSettingsDesktop({
   onChangeTwcSettings,
   optionsAnalytics,
   onChangeOptionsAnalytics,
+  chartTrading,
+  onChangeChartTrading,
 }: IndicatorSettingsDesktopProps) {
   const patch = (partial: Partial<IndicatorSettings>) => onChange({ ...settings, ...partial });
   const patchOptionsAnalytics = (partial: Partial<OptionsAnalyticsSettings>) =>
     onChangeOptionsAnalytics({ ...optionsAnalytics, ...partial });
+  const patchChartTrading = (partial: Partial<ChartTradingSettings>) =>
+    onChangeChartTrading({ ...chartTrading, ...partial });
 
   const paneCapReached = enabledSubPanes(settings).length >= MAX_SUB_PANES;
   const paneToggleDisabled = (enabled: boolean) => !enabled && paneCapReached;
@@ -357,6 +365,43 @@ export function IndicatorSettingsDesktop({
           ]),
       },
       {
+        id: 'chart-trading',
+        label: 'Chart Trading',
+        searchTerms: ['Order Lines', 'Bracket from Entry Line', 'Default Quantity'],
+        render: () => (
+          <div className="settings-fieldset">
+            <div className="settings-fieldset-legend">
+              <span>Chart Trading</span>
+              <Toggle
+                on={chartTrading.enabled}
+                onChange={(on) => patchChartTrading({ enabled: on })}
+              />
+            </div>
+            {chartTrading.enabled ? (
+              <>
+                <ToggleField
+                  label="Bracket from Entry Line"
+                  on={chartTrading.bracketDrag}
+                  onChange={(on) => patchChartTrading({ bracketDrag: on })}
+                />
+                <Field label="Default Quantity">
+                  <NumberField
+                    value={chartTrading.defaultQuantity}
+                    min={CHART_TRADING_QUANTITY_MIN}
+                    max={CHART_TRADING_QUANTITY_MAX}
+                    onChange={(value) => patchChartTrading({ defaultQuantity: value })}
+                  />
+                </Field>
+              </>
+            ) : null}
+            <p className="settings-fieldset-hint">
+              Order lines are watched by 0dteTrader, not resting at the broker. A crossed level
+              fires a mid or market order — flip MID/MKT on the line itself.
+            </p>
+          </div>
+        ),
+      },
+      {
         id: 'options-structure',
         label: 'Options Structure',
         searchTerms: [
@@ -443,7 +488,7 @@ export function IndicatorSettingsDesktop({
       },
     ],
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [settings, optionsAnalytics, twcEnabled, twcSections, paneCapReached],
+    [settings, optionsAnalytics, twcEnabled, twcSections, paneCapReached, chartTrading],
   );
 
   const [query, setQuery] = useState('');

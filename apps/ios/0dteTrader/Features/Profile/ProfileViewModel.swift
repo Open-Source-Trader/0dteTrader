@@ -69,23 +69,59 @@ final class ProfileViewModel: ObservableObject {
         didSet { settingsStore.bypassOrderConfirmation = bypassOrderConfirmation }
     }
 
+    /// AUTO mode's strikes-OTM preference (0 = ATM). The stepper caps at 5;
+    /// the store clamps 0...10 on read for stale values.
+    @Published var autoOtmOffset: Int {
+        didSet { settingsStore.autoOtmOffset = autoOtmOffset }
+    }
+
+    /// Success/info toast banners on the trade screen. Errors always show.
+    @Published var toastsEnabled: Bool {
+        didSet { settingsStore.toastsEnabled = toastsEnabled }
+    }
+
+    /// Push notifications toggle, reflecting the persisted setting. Driven
+    /// through `setPushNotificationsEnabled`, not bound directly: enabling
+    /// runs the authorization flow and a denial has to revert the switch.
+    @Published var pushNotificationsEnabled: Bool
+
     private let apiClient: APIClient
     private let settingsStore: SettingsStore
     private let quoteSocket: QuoteSocketClient
+    private let pushNotifications: PushNotificationsManager?
     private let onLogout: () async -> Void
 
     init(
         apiClient: APIClient,
         settingsStore: SettingsStore,
         quoteSocket: QuoteSocketClient,
+        pushNotifications: PushNotificationsManager? = nil,
         onLogout: @escaping () async -> Void
     ) {
         self.apiClient = apiClient
         self.settingsStore = settingsStore
         self.quoteSocket = quoteSocket
+        self.pushNotifications = pushNotifications
         self.onLogout = onLogout
         self.appLockEnabled = settingsStore.appLockEnabled
         self.bypassOrderConfirmation = settingsStore.bypassOrderConfirmation
+        self.autoOtmOffset = settingsStore.autoOtmOffset
+        self.toastsEnabled = settingsStore.toastsEnabled
+        self.pushNotificationsEnabled = settingsStore.pushNotificationsEnabled
+    }
+
+    /// Profile toggle: drives the manager, then re-reads the setting it
+    /// landed on — an authorization denial reverts the switch.
+    func setPushNotificationsEnabled(_ enabled: Bool) {
+        pushNotificationsEnabled = enabled
+        guard let pushNotifications else {
+            settingsStore.pushNotificationsEnabled = enabled
+            return
+        }
+        Task {
+            await pushNotifications.setEnabled(enabled)
+            pushNotificationsEnabled = settingsStore.pushNotificationsEnabled
+        }
     }
 
     /// True when the last `load()` failed. Kept separate from `errorMessage`
@@ -237,6 +273,8 @@ final class ProfileViewModel: ObservableObject {
     }
 
     func logout() async {
+        // Push teardown lives in RootView's signOut(), which every sign-out
+        // route — this one included — funnels through.
         await onLogout()
     }
 

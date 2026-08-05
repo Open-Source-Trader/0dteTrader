@@ -4,11 +4,12 @@ import type { ApiClient } from '../../core/api/ApiClient';
 import type { ChainStore } from './ChainStore';
 import { TradeStore } from './TradeStore';
 
-function makeStore(): TradeStore {
+function makeStore(overrides: Partial<Record<string, unknown>> = {}): TradeStore {
   const apiClient = {
     previewOrder: async () => {
       throw new Error('preview unavailable in test');
     },
+    ...overrides,
   } as unknown as ApiClient;
   return new TradeStore(apiClient);
 }
@@ -31,6 +32,7 @@ function chainStub(overrides: Partial<Record<string, unknown>> = {}): ChainStore
     getState: () => ({
       optionType: 'call',
       isAutoMode: false,
+      isCurrMode: false,
       selectedExpiration: CONTRACT.expiration,
       selectedStrike: CONTRACT.strike,
       ...overrides,
@@ -49,10 +51,11 @@ function withResolver(store: TradeStore, contracts: OptionContract[]): TradeStor
   return store;
 }
 
-/** Minimal ChainStore double: arm() only reads getState(). Auto mode avoids
- *  the explicit strike/expiration guard. */
-function autoModeChainStore(): ChainStore {
+/** Minimal ChainStore double: arm() only reads getState() and the AUTO
+ *  offset. Auto mode avoids the explicit strike/expiration guard. */
+function autoModeChainStore(autoOtmOffset = 1): ChainStore {
   return {
+    autoOtmOffset,
     getState: () => ({
       optionType: 'call' as const,
       isAutoMode: true,
@@ -147,25 +150,28 @@ describe('TradeStore.arm — selling into an open position', () => {
     expect(store.getState().armedTicket?.summary).not.toContain('CLOSE');
   });
 
-  it('opens a short when the held position is unresolvable (different/unknown contract)', () => {
+  it('refuses the sell when the held position is unresolvable (different/unknown contract)', () => {
     const store = withResolver(makeStore(), [CONTRACT]);
     seedPositions(store, [{ ...position(3), symbol: 'SPY260727P00500000' }]);
     store.setQuantity(1);
 
     store.arm('sell', 'SPY', chainStub());
 
-    expect(store.getState().armedTicket?.request.quantity).toBe(1);
-    expect(store.getState().armedTicket?.summary).not.toContain('CLOSE');
+    // No matching held leg no longer opens a short — the sell is refused.
+    expect(store.getState().armedTicket).toBeNull();
+    expect(store.getState().toast?.message).toBe('No open position to sell');
+    expect(store.getState().toast?.style).toBe('error');
   });
 
-  it('does not treat an existing short as something to close', () => {
+  it('refuses to sell against an existing short rather than stacking onto it', () => {
     const store = withResolver(makeStore(), [CONTRACT]);
     seedPositions(store, [position(-3)]);
     store.setQuantity(1);
 
     store.arm('sell', 'SPY', chainStub());
 
-    expect(store.getState().armedTicket?.request.quantity).toBe(1);
+    expect(store.getState().armedTicket).toBeNull();
+    expect(store.getState().toast?.message).toBe('No open position to sell');
   });
 
   // Reproduces the reported incident: AUTO mode's live strike has drifted off
@@ -266,6 +272,130 @@ describe('TradeStore.arm — selling into an open position', () => {
   });
 });
 
+describe('TradeStore.arm — CURR mode (explicit owned leg)', () => {
+  it('sells the named leg clamped to the held quantity', () => {
+    const store = withResolver(makeStore(), [CONTRACT]);
+    seedPositions(store, [position(2)]);
+    store.setQuantity(10);
+
+    store.arm('sell', 'SPY', chainStub({ isCurrMode: true }));
+
+    const ticket = store.getState().armedTicket;
+    expect(ticket?.request.quantity).toBe(2);
+    expect(ticket?.request.selection).toMatchObject({ mode: 'explicit', strike: 505 });
+    expect(ticket?.summary).toContain('CLOSE 2');
+  });
+
+  it('bypasses the leg-matching heuristic: sells the named strike, not the highest-P/L leg', () => {
+    const otherLeg: OptionContract = {
+      ...CONTRACT,
+      symbol: 'SPY260727C00500000',
+      strike: 500,
+    };
+    const store = withResolver(makeStore(), [CONTRACT, otherLeg]);
+    seedPositions(store, [
+      { ...position(2), unrealizedPnl: 5 },
+      { ...position(3), symbol: otherLeg.symbol, unrealizedPnl: 50 },
+    ]);
+    store.setQuantity(1);
+
+    // CURR names the 505 leg even though the 500 leg has the higher P/L.
+    store.arm('sell', 'SPY', chainStub({ isCurrMode: true }));
+
+    expect(store.getState().armedTicket?.request.selection).toMatchObject({ strike: 505 });
+  });
+
+  it('refuses a CURR sell when the named leg is not actually held', () => {
+    const store = withResolver(makeStore(), [CONTRACT]);
+    seedPositions(store, []);
+    store.setQuantity(1);
+
+    store.arm('sell', 'SPY', chainStub({ isCurrMode: true }));
+
+    expect(store.getState().armedTicket).toBeNull();
+    expect(store.getState().toast?.message).toBe('No open position to sell');
+  });
+
+  it('CURR buy arms an explicit add of the selected owned contract', () => {
+    const store = withResolver(makeStore(), [CONTRACT]);
+    seedPositions(store, [position(2)]);
+    store.setQuantity(3);
+
+    store.arm('buy', 'SPY', chainStub({ isCurrMode: true }));
+
+    const ticket = store.getState().armedTicket;
+    expect(ticket?.request).toMatchObject({
+      side: 'buy',
+      quantity: 3,
+      selection: { mode: 'explicit', optionType: 'call', strike: 505 },
+    });
+    expect(ticket?.summary).not.toContain('CLOSE');
+  });
+
+  it('CURR sells a holding on an expiration the chain resolver does not know (OCC parse)', () => {
+    // The resolver only covers the loaded expiration; the position's OCC
+    // symbol still names the leg exactly.
+    const store = withResolver(makeStore(), []);
+    seedPositions(store, [{ ...position(2), symbol: 'SPY260727C00505000' }]);
+    store.setQuantity(1);
+
+    store.arm('sell', 'SPY', chainStub({ isCurrMode: true }));
+
+    const ticket = store.getState().armedTicket;
+    expect(ticket?.request.quantity).toBe(1);
+    expect(ticket?.request.selection).toMatchObject({ mode: 'explicit', strike: 505 });
+  });
+
+  it('refuses to arm while the CURR leg has no quotes yet (freshly OCC-resolved)', () => {
+    const store = withResolver(makeStore(), []);
+    seedPositions(store, [{ ...position(2), symbol: 'SPY260727C00505000' }]);
+    store.setQuantity(1);
+    const stub = chainStub({ isCurrMode: true });
+    (stub as unknown as { selectedContract: OptionContract }).selectedContract = {
+      ...CONTRACT,
+      bid: 0,
+      ask: 0,
+      last: 0,
+    };
+
+    store.arm('sell', 'SPY', stub);
+
+    expect(store.getState().armedTicket).toBeNull();
+    expect(store.getState().toast?.message).toBe('Quotes are still loading for that expiration.');
+  });
+
+  it('refuses a CURR buy when the named leg is not actually held', () => {
+    const store = withResolver(makeStore(), [CONTRACT]);
+    seedPositions(store, []);
+    store.setQuantity(1);
+
+    store.arm('buy', 'SPY', chainStub({ isCurrMode: true }));
+
+    expect(store.getState().armedTicket).toBeNull();
+    expect(store.getState().toast?.message).toBe('Pick an owned contract first.');
+  });
+});
+
+describe('TradeStore.arm — AUTO selection offset', () => {
+  it('sends the configured otmOffset so the server resolves what the panel shows', () => {
+    const store = makeStore();
+    store.arm('buy', 'SPY', autoModeChainStore(2));
+
+    const ticket = store.getState().armedTicket;
+    expect(ticket?.request.selection).toMatchObject({ mode: 'auto_otm', otmOffset: 2 });
+    expect(ticket?.summary).toContain('AUTO +2 OTM');
+  });
+
+  it('labels offset 0 as ATM', () => {
+    const store = makeStore();
+    store.arm('buy', 'SPY', autoModeChainStore(0));
+
+    const ticket = store.getState().armedTicket;
+    expect(ticket?.request.selection).toMatchObject({ mode: 'auto_otm', otmOffset: 0 });
+    expect(ticket?.summary).toContain('AUTO ATM');
+  });
+});
+
 describe('TradeStore.arm confirmation bypass', () => {
   it('submits directly without arming a ticket when bypass is on', async () => {
     const placeOrder = vi.fn(async () => placedOrder);
@@ -281,6 +411,36 @@ describe('TradeStore.arm confirmation bypass', () => {
     expect(placeOrder).toHaveBeenCalledTimes(1);
     // Bypass never opens the confirm sheet.
     await vi.waitFor(() => expect(store.getState().armedTicket).toBeNull());
+  });
+
+  it('honours the bypass on a CURR close, not just the general path', () => {
+    // Every branch of arm() used to build its own ticket and return, so the
+    // CURR and held-close paths silently ignored "Skip order confirmation".
+    const placeOrder = vi.fn(async () => placedOrder);
+    const store = withResolver(
+      makeStore({ placeOrder, positions: async () => [], openOrders: async () => [] }),
+      [CONTRACT],
+    );
+    seedPositions(store, [position(2)]);
+
+    store.arm('sell', 'SPY', chainStub({ isCurrMode: true }), true);
+
+    expect(placeOrder).toHaveBeenCalledTimes(1);
+    expect(store.getState().armedTicket).toBeNull();
+  });
+
+  it('honours the bypass when closing a held leg by the matching heuristic', () => {
+    const placeOrder = vi.fn(async () => placedOrder);
+    const store = withResolver(
+      makeStore({ placeOrder, positions: async () => [], openOrders: async () => [] }),
+      [CONTRACT],
+    );
+    seedPositions(store, [position(2)]);
+
+    store.arm('sell', 'SPY', chainStub({ isCurrMode: false }), true);
+
+    expect(placeOrder).toHaveBeenCalledTimes(1);
+    expect(store.getState().armedTicket).toBeNull();
   });
 
   it('arms a ticket and does not submit when bypass is off', () => {
@@ -470,6 +630,26 @@ describe('TradeStore.cancelArmedOrder — the confirm popup dismissed', () => {
 
     expect(store.getState().armedTicket).toBeNull();
     expect(placeOrder).not.toHaveBeenCalled();
+  });
+});
+
+describe('TradeStore.showToast — the toast toggle', () => {
+  it('suppresses success/info when the policy is off, but errors always show', () => {
+    const store = makeStore();
+    store.toastPolicy = () => false;
+
+    store.showToast('order filled', 'success');
+    store.showToast('order cancelled', 'info');
+    expect(store.getState().toast).toBeNull();
+
+    store.showToast('order rejected', 'error');
+    expect(store.getState().toast?.message).toBe('order rejected');
+  });
+
+  it('shows everything while the policy is on (or unwired)', () => {
+    const store = makeStore();
+    store.showToast('order filled', 'success');
+    expect(store.getState().toast?.message).toBe('order filled');
   });
 });
 

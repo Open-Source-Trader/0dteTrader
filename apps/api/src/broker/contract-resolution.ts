@@ -1,4 +1,4 @@
-import { OptionContract, OptionType } from '@0dtetrader/shared-types';
+import { MAX_OPTION_PRICE, OptionContract, OptionType } from '@0dtetrader/shared-types';
 import { errors } from '../common/api-exception';
 
 /**
@@ -31,35 +31,43 @@ export function pickExpiration(expirations: string[], requested?: string): strin
 }
 
 // ---------------------------------------------------------------------------
-// Auto-OTM strike resolution (+1 strike out of the money)
+// Auto-OTM strike resolution (ATM anchor + N strikes out of the money)
 // ---------------------------------------------------------------------------
 
 /**
- * Resolves the +1 OTM contract from the live quote and chain:
- * - calls: the lowest strike STRICTLY above the underlying's last price
- * - puts:  the highest strike STRICTLY below the underlying's last price
- *
- * Strictly above/below: when the last price sits exactly on a strike, that
- * strike is ATM and is excluded in both directions.
+ * Resolves the auto-selected contract from the live quote and chain: anchor on
+ * the ATM strike — the one closest to the underlying's last price, ties
+ * resolving toward the OTM side — then step `otmOffset` rungs out of the money
+ * (calls up the ladder, puts down). Offset 0 trades the ATM strike itself;
+ * omitted means 1.
  */
 export function resolveAutoOtm(
   contracts: OptionContract[],
   optionType: OptionType,
   last: number,
+  otmOffset = 1,
 ): OptionContract {
-  const candidates = contracts.filter((c) => c.optionType === optionType).map((c) => c.strike);
+  const ladder = [
+    ...new Set(contracts.filter((c) => c.optionType === optionType).map((c) => c.strike)),
+  ].sort((a, b) => a - b);
 
-  let target: number | undefined;
-  if (optionType === 'call') {
-    target = candidates.filter((s) => s > last).sort((a, b) => a - b)[0];
-  } else {
-    target = candidates.filter((s) => s < last).sort((a, b) => b - a)[0];
+  // Ties prefer the later (higher) rung for calls and the earlier (lower) one
+  // for puts — both are the OTM side of an equidistant pair.
+  let atm = 0;
+  for (let i = 1; i < ladder.length; i++) {
+    const distance = Math.abs(ladder[i] - last);
+    const best = Math.abs(ladder[atm] - last);
+    if (distance < best || (distance === best && optionType === 'call')) atm = i;
   }
+
+  // Out-of-range indexes (including the empty ladder) fall out as undefined.
+  const target: number | undefined =
+    ladder[optionType === 'call' ? atm + otmOffset : atm - otmOffset];
 
   if (target === undefined) {
     throw errors.validation(
-      `No ${optionType} contract ${optionType === 'call' ? 'above' : 'below'} ` +
-        `the underlying price ${last} in this chain`,
+      `No ${optionType} contract ${otmOffset} strike${otmOffset === 1 ? '' : 's'} out from ` +
+        `the at-the-money strike for underlying price ${last} in this chain`,
     );
   }
   return contracts.find((c) => c.optionType === optionType && c.strike === target)!;
@@ -84,12 +92,30 @@ export function findExplicitOption(
  * per docs/API-SPEC.md.
  */
 export function computeMid(bid: number, ask: number): number {
-  if (!(bid > 0) || !(ask > 0) || bid > ask) {
+  // Finiteness AND the shared ceiling: a feed glitch can deliver ±Infinity,
+  // and two FINITE sides can still overflow the sum below (1e308 + 1e308 is
+  // Infinity). Bounding the inputs to MAX_OPTION_PRICE makes the result
+  // finite and in range by construction; the final check is the belt for
+  // any arithmetic surprise.
+  if (
+    !Number.isFinite(bid) ||
+    !Number.isFinite(ask) ||
+    !(bid > 0) ||
+    !(ask > 0) ||
+    bid > ask ||
+    ask > MAX_OPTION_PRICE
+  ) {
     throw errors.validation(
       `Cannot compute mid price: spread is crossed or invalid (bid=${bid}, ask=${ask})`,
     );
   }
-  return Math.round(((bid + ask) / 2) * 100) / 100;
+  const mid = Math.round(((bid + ask) / 2) * 100) / 100;
+  if (!Number.isFinite(mid) || mid > MAX_OPTION_PRICE) {
+    throw errors.validation(
+      `Cannot compute mid price: result out of range (bid=${bid}, ask=${ask})`,
+    );
+  }
+  return mid;
 }
 
 // ---------------------------------------------------------------------------

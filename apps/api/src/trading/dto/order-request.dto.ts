@@ -15,6 +15,7 @@ import {
   type ValidationOptions,
 } from 'class-validator';
 import {
+  MAX_ORDER_QUANTITY,
   AssetClass,
   OptionType,
   OrderSide,
@@ -72,6 +73,13 @@ export class OrderSelectionDto {
   @IsOptional()
   @IsNumber()
   strike?: number;
+
+  /** auto_otm only: strikes OTM from the ATM strike; 0 = ATM; omitted = 1. */
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(10)
+  otmOffset?: number;
 }
 
 export class OrderRequestDto {
@@ -87,7 +95,7 @@ export class OrderRequestDto {
 
   @IsInt()
   @Min(1)
-  @Max(1000)
+  @Max(MAX_ORDER_QUANTITY)
   quantity!: number;
 
   @IsIn(['custom', 'bid', 'mid', 'ask', 'market'])

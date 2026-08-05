@@ -10,7 +10,10 @@ import type {
 import { narrowToChartOrderType } from '@0dtetrader/shared-types';
 import { useContainer } from '../../app/container';
 import { useLayoutBreakpoint } from '../../app/useLayoutBreakpoint';
+import { quotesPending } from '../../core/models/domain';
 import { shallowEqual, useStore } from '../../core/observable';
+import type { NotifierDeps } from '../../core/notifications';
+import { notifyChartOrder, notifyOrderUpdate } from '../../core/notifications';
 import { AlertDialog } from '../../design/components/AlertDialog';
 import { NavBar } from '../../design/components/NavBar';
 import { Format } from '../../design/format';
@@ -38,7 +41,10 @@ import { ProfileView } from '../profile/ProfileView';
 import { DesktopTradeTicket } from './DesktopTradeTicket';
 import { FloatingTradeButtons } from './FloatingTradeButtons';
 import { TradeManagementWorkspace } from './TradeManagementWorkspace';
-import { desktopTradeWorkspaceHeight } from './TradeManagementWorkspaceModel';
+import {
+  desktopTradeWorkspaceHeight,
+  StopTargetEditorStore,
+} from './TradeManagementWorkspaceModel';
 import { HistoryView } from './HistoryView';
 import { OrderConfirmPopup } from './OrderConfirmPopup';
 import { PositionsStrip } from './PositionsStrip';
@@ -118,6 +124,17 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
   const [orderPendingCancel, setOrderPendingCancel] = useState<ChartOrder | null>(null);
   const [me, setMe] = useState<Me | null>(null);
   const [desktopWorkspaceExpanded, setDesktopWorkspaceExpanded] = useState(false);
+  // Workspace-owned stop/target editing session; created here so it survives
+  // the workspace collapsing and expanding.
+  const [stopTargetEditor] = useState(() => new StopTargetEditorStore(chartOrdersStore));
+  // The workspace's fixed height must budget the docked editor row, so this
+  // screen re-renders when the row opens or closes — a derived-boolean slice
+  // keeps price-field keystrokes from re-rendering the whole screen.
+  const editorChrome = useStore(
+    stopTargetEditor,
+    (s) => ({ rowOpen: s.draft !== null || s.staleNotice !== null }),
+    shallowEqual,
+  );
   const nextMode: TradingMode = tradingMode === 'live' ? 'practice' : 'live';
 
   // Active trading provider (from /v1/me) and whether it has credentials
@@ -174,11 +191,22 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
         .chain?.contracts.find((contract: OptionContract) => contract.symbol === symbol);
     tradeStore.isSocketConnected = () => quoteSocket.getState().connectionState === 'connected';
     void chartOrdersStore.load();
-    const offOrders = quoteSocket.onOrderUpdate((update) => tradeStore.handleOrderUpdate(update));
+    // OS notifications while the window is unfocused (the toast covers the
+    // focused case); the preference is read at fire time.
+    const notifier: NotifierDeps = {
+      enabled: () => settingsStore.systemNotificationsEnabled,
+      hasFocus: () => document.hasFocus(),
+      notification: typeof Notification === 'undefined' ? null : Notification,
+    };
+    const offOrders = quoteSocket.onOrderUpdate((update) => {
+      tradeStore.handleOrderUpdate(update);
+      notifyOrderUpdate(notifier, update);
+    });
     // The server-side watcher fires lines with the app closed or backgrounded;
     // these pushes are how the chart learns about it.
     const offChartOrders = quoteSocket.onChartOrder((order) => {
       chartOrdersStore.applyServerUpdate(order);
+      notifyChartOrder(notifier, order);
       // A fired line means a real order went out — refresh positions so the
       // entry line appears without waiting for the next poll.
       void tradeStore.refreshTradingData();
@@ -194,7 +222,7 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
       offChartOrders();
       offReconnect();
     };
-  }, [chartStore, tradeStore, chainStore, chartOrdersStore, quoteSocket]);
+  }, [chartStore, tradeStore, chainStore, chartOrdersStore, quoteSocket, settingsStore]);
 
   useEffect(() => {
     void chainStore.load(chart.symbol);
@@ -316,7 +344,14 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
 
   // Same gate as the split-layout TradePanel's Buy/Sell buttons; the lock
   // disables every order-placing control while leaving the chart untouched.
-  const canTrade = chainStore.selectedContract !== null && !locked;
+  // canArm covers Custom-with-no-price (selectable in split, persists across
+  // a layout toggle); quotesPending covers a CURR leg synthesized before its
+  // expiration's contracts load.
+  const canTrade =
+    chainStore.selectedContract !== null &&
+    !locked &&
+    tradeStore.canArm &&
+    !quotesPending(chainStore.selectedContract);
 
   // Desktop-grid-only keyboard layer: Cmd/Ctrl+K always opens the symbol
   // command palette; B/S arm an order and L toggles the lock, gated by the
@@ -343,6 +378,10 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
     disabledReason = 'Market data unavailable — check credentials in Profile';
   } else if (!chainStore.selectedContract) {
     disabledReason = 'Select an option contract to trade';
+  } else if (quotesPending(chainStore.selectedContract)) {
+    disabledReason = 'Quotes are still loading for this contract';
+  } else if (!tradeStore.canArm) {
+    disabledReason = 'Enter a custom limit price';
   }
 
   // Fixed split sized by sub-pane count (0/1/2): each pane takes chart
@@ -396,10 +435,16 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
       chainStore.getState().chain?.contracts.find((contract) => contract.symbol === symbol) ?? null,
     [chainStore],
   );
+  // Stable: the workspace clears the reveal from an effect keyed on this.
+  const revealChartPrice = useCallback(
+    (price: number | null) => chartStore.setRevealPrice(price),
+    [chartStore],
+  );
   const hasDesktopActivity = trade.positions.length > 0 || trade.openOrders.length > 0;
   const desktopWorkspaceHeight = desktopTradeWorkspaceHeight({
     expanded: desktopWorkspaceExpanded,
     hasActivity: hasDesktopActivity,
+    editorOpen: editorChrome.rowOpen,
   });
 
   // Desktop grid: state-aware trade-management workspace instead of a fixed empty table.
@@ -415,7 +460,17 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
       onTrimPosition={(position) => void tradeStore.trimHalf(position)}
       onCancelOrder={(order) => void tradeStore.cancel(order)}
       onCancelChartOrder={(order) => void chartOrdersStore.cancel(order.id)}
+      onMoveChartOrder={(order, price) => void chartOrdersStore.move(order.id, price)}
+      onSelectChartOrder={(order) => chartOrdersStore.select(order.id)}
+      onCreateChartOrder={(draft) => void chartOrdersStore.create(draft)}
+      defaultOrderType={narrowToChartOrderType(trade.orderType)}
+      chartTradingEnabled={chartTradingSettings.enabled}
+      underlyingPrice={chain.underlyingLast}
       resolveContract={resolveOptionContract}
+      editor={stopTargetEditor}
+      chartSymbol={chart.symbol}
+      visiblePriceRange={chart.visiblePriceRange}
+      onRevealPrice={revealChartPrice}
       locked={locked}
     />
   );
@@ -742,6 +797,11 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
                   onChangeTwcSettings={(settings) => chartStore.setTwcSettings(settings)}
                   optionsAnalytics={chart.optionsAnalytics}
                   onChangeOptionsAnalytics={(settings) => chartStore.setOptionsAnalytics(settings)}
+                  chartTrading={chartTradingSettings}
+                  onChangeChartTrading={(settings) => {
+                    settingsStore.chartTrading = settings;
+                    setChartTradingSettings(settings);
+                  }}
                 />
               ),
             },

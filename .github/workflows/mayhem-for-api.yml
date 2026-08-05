@@ -56,7 +56,7 @@ jobs:
       CRED_ENCRYPTION_KEY: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
       MAYHEM_TOKEN: ${{ secrets.MAYHEM_TOKEN }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
 
       - uses: actions/setup-node@v7
         with:

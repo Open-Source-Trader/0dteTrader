@@ -1,5 +1,0 @@
----
-triple: 'arm64-apple-darwin'
-binary-path: '/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/arm64-apple-macosx/debug/AppleIntelligenceShimPackageTests.xctest/Contents/MacOS/AppleIntelligenceShimPackageTests'
-relocations: []
-...

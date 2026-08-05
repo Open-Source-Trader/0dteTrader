@@ -1,3 +1,0 @@
-module ShimCore {
-    header "/Users/_m/src/0dteTrader/apps/desktop/native/apple-intelligence-shim/.build/arm64-apple-macosx/release/ShimCore.build/include/ShimCore-Swift.h"
-}

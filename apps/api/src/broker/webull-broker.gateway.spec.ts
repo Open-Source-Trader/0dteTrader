@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import { ConfigService } from '@nestjs/config';
 import { OrderRequest, OrderResult } from '@0dtetrader/shared-types';
 import { CredentialsService } from '../credentials/credentials.service';
@@ -453,10 +452,11 @@ describe('WebullBrokerGateway', () => {
       selection: { mode: 'auto_otm', optionType: 'call' },
     };
 
-    it('derives a deterministic user-scoped MD5 client_order_id and maps the option body', async () => {
+    it('derives a deterministic user-scoped SHA-256 client_order_id and maps the option body', async () => {
       const result = await gateway.placeOrder('u1', order, 'idem-key-1');
-      const expectedId = createHash('md5').update('u1:idem-key-1').digest('hex');
+      const expectedId = 'e384bca87ee5f6733bb952fe3067ded6';
       expect(result.orderId).toBe(expectedId);
+      expect(result.orderId).toHaveLength(32);
       expect(result.status).toBe('submitted');
 
       const place = callsTo('/openapi/trade/order/place')[0];

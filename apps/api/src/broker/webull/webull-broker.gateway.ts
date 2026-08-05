@@ -816,6 +816,15 @@ export class WebullBrokerGateway implements BrokerGateway, OnModuleDestroy {
             ...result,
             status: detail.status,
             filledPrice: detail.filledPrice ?? result.filledPrice,
+            // The placement-time result predates every fill, so the poll's
+            // own parse is the only source of how much executed. Without it
+            // a cancel that followed a partial fill reports no executed
+            // quantity, fill accounting rightly ignores the whole event, and
+            // the row keeps neither the quantity nor the price — the lot the
+            // user actually holds becomes invisible to the position book.
+            // (No filledAt: Webull reports no execution timestamp at all —
+            // see webull-mappers.ts — so fills are stamped when observed.)
+            filledQuantity: detail.filledQuantity ?? result.filledQuantity,
           });
           return;
         }

@@ -127,9 +127,18 @@ export class OrderNotificationsService implements OnModuleDestroy {
   ): Promise<void> {
     const tokens = await this.devices.listForUser(userId);
     if (tokens.length === 0) return;
-    // Claimed after the no-devices check, so a fill that arrives before the
-    // user has registered anything does not claim a key it never delivered
-    // and then suppress the redelivery that could have.
+    let environment = await recordedEnvironment();
+    if (environment === null) {
+      // The row may not be written yet (this subscriber and the persister ride
+      // the same bus); the user's current mode is the closest answer left.
+      const user = await this.prisma.user.findUnique({ where: { id: userId } });
+      environment = user?.tradingMode === 'practice' ? 'practice' : 'live';
+    }
+    // Claimed as late as possible: after the no-devices check, so a fill
+    // arriving before the user registers anything does not claim a key it
+    // never delivered; and after the environment lookup, so a database error
+    // there cannot leave a claim standing for a push that was never sent.
+    // Everything past this point is the send itself, which never throws.
     let claimId: string | null = null;
     if (key !== null) {
       try {
@@ -139,36 +148,43 @@ export class OrderNotificationsService implements OnModuleDestroy {
         throw err;
       }
     }
-    let environment = await recordedEnvironment();
-    if (environment === null) {
-      // The row may not be written yet (this subscriber and the persister ride
-      // the same bus); the user's current mode is the closest answer left.
-      const user = await this.prisma.user.findUnique({ where: { id: userId } });
-      environment = user?.tradingMode === 'practice' ? 'practice' : 'live';
-    }
     const fullTitle = environment === 'practice' ? `PRACTICE · ${title}` : title;
     let delivered = false;
-    let retryable = false;
-    for (const device of tokens) {
-      const result = await this.apns.send(device.token, { title: fullTitle, body });
-      if (result.status === 200) {
-        delivered = true;
-      } else if (isDeadToken(result)) {
-        await this.devices.prune(device.token);
-      } else {
-        retryable = true;
-        this.logger.warn(
-          `APNs send failed (${result.status}${result.reason ? ` ${result.reason}` : ''})`,
-        );
+    try {
+      // Concurrently: the loop body shares no state across devices, and a
+      // sequential walk made the worst case one request timeout PER device.
+      const results = await Promise.all(
+        tokens.map(async (device) => ({
+          device,
+          result: await this.apns.send(device.token, { title: fullTitle, body }),
+        })),
+      );
+      for (const { device, result } of results) {
+        if (result.status === 200) {
+          delivered = true;
+        } else if (isDeadToken(result)) {
+          await this.devices.prune(device.token);
+        } else {
+          this.logger.warn(
+            `APNs send failed (${result.status}${result.reason ? ` ${result.reason}` : ''})`,
+          );
+        }
       }
-    }
-    // Nothing reached a device and the failure was not "this token is dead":
-    // release the claim so the other emitter's next report — or the webhook
-    // retry — is allowed to try again. Without this the dedupe would turn the
-    // very race it exists to fix into a missed alert. Deliberately kept on
-    // PARTIAL success: a device that already showed it must not show it twice.
-    if (claimId !== null && !delivered && retryable) {
-      await this.prisma.pushDelivery.deleteMany({ where: { id: claimId } });
+    } finally {
+      // Nothing reached a device: release the claim so the other emitter's
+      // next report — or the webhook retry — can try again. Without this the
+      // dedupe would turn the very race it exists to fix into a missed
+      // alert. In a `finally` because a throw on the way out (a prune
+      // failing, say) must not leave a claim standing for a push nobody
+      // received. Deliberately kept on PARTIAL success: a device that
+      // already showed the alert must not show it twice.
+      //
+      // A process death between the claim and the send still suppresses that
+      // alert permanently; closing that needs per-device delivery state
+      // rather than a boolean claim.
+      if (claimId !== null && !delivered) {
+        await this.prisma.pushDelivery.deleteMany({ where: { id: claimId } });
+      }
     }
   }
 }

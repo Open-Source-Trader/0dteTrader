@@ -67,8 +67,15 @@ describe('ApnsClient provider token', () => {
 describe('isDeadToken', () => {
   it('prunes on 410 and the dead-token reasons', () => {
     expect(isDeadToken({ status: 410, reason: 'Unregistered' })).toBe(true);
-    expect(isDeadToken({ status: 400, reason: 'BadDeviceToken' })).toBe(true);
     expect(isDeadToken({ status: 400, reason: 'ExpiredToken' })).toBe(true);
+  });
+
+  it('keeps a BadDeviceToken, which is routing-ambiguous rather than dead', () => {
+    // Apple returns it for a malformed token, a token from the OTHER APNs
+    // environment, or the wrong topic. A debug build's sandbox token sent to
+    // the production host produces exactly this, and deleting on it silently
+    // unregisters a device that was working.
+    expect(isDeadToken({ status: 400, reason: 'BadDeviceToken' })).toBe(false);
   });
 
   it('keeps the token on success and transient failures', () => {

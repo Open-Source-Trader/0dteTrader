@@ -297,6 +297,26 @@ describe('OrderNotificationsService', () => {
       expect(prisma.pushDeliveries).toHaveLength(0);
     });
 
+    it('releases the claim when the send loop throws on its way out', async () => {
+      // A prune failing mid-loop used to leave a claim standing for a push
+      // no device received.
+      await new DevicesService(prisma as never).register(userId, 'd'.repeat(64), 'ios');
+      apns.queued = [
+        { status: 410, reason: 'Unregistered' },
+        { status: 410, reason: 'Unregistered' },
+      ];
+      const deleteMany = prisma.deviceToken.deleteMany;
+      prisma.deviceToken.deleteMany = async () => {
+        throw new Error('connection reset');
+      };
+
+      await expect(service.handleOrderUpdate(userId, orderResult())).rejects.toThrow(
+        'connection reset',
+      );
+      expect(prisma.pushDeliveries).toHaveLength(0);
+      prisma.deviceToken.deleteMany = deleteMany;
+    });
+
     it('claims nothing when the user has no device, so registering later still delivers', async () => {
       prisma.deviceTokens.length = 0;
       await service.handleOrderUpdate(userId, orderResult());

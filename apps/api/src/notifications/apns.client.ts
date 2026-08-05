@@ -17,8 +17,19 @@ export interface ApnsAlert {
   body: string;
 }
 
-/** Reasons (and the 410) that mean the device token is dead — prune it. */
-const DEAD_TOKEN_REASONS = new Set(['Unregistered', 'BadDeviceToken', 'ExpiredToken']);
+/**
+ * Reasons (and the 410) that mean the device token is dead — prune it.
+ *
+ * `BadDeviceToken` is deliberately NOT here. Apple returns it for a token
+ * that is malformed, registered against the other APNs environment, or sent
+ * with the wrong topic — and a debug build's sandbox token sent to the
+ * production host produces exactly that. Deleting on it throws away
+ * registrations that are perfectly valid on the other endpoint, and the user
+ * silently stops getting fill alerts. `Unregistered` and `ExpiredToken` are
+ * Apple's unambiguous "the app is gone from this device" signals; a bad
+ * token costs one wasted round trip per push until one of those arrives.
+ */
+const DEAD_TOKEN_REASONS = new Set(['Unregistered', 'ExpiredToken']);
 
 export function isDeadToken(result: ApnsSendResult): boolean {
   return (

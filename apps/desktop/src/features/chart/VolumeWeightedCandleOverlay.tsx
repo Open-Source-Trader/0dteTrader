@@ -14,8 +14,15 @@ interface VolumeWeightedCandleOverlayProps {
   candleColors?: (string | null)[] | null;
 }
 
-const MINIMUM_WIDTH_RATIO = 0.2;
-const MAXIMUM_WIDTH_RATIO = 0.95;
+// A 0.2/0.95 floor read as "no volume" indistinguishably from a retraced
+// (small-body) candle at normal zoom. Raised to keep the thinnest candle
+// clearly a candle, not a hairline — proportioned after TradingView's own
+// Volume Candles (min/max ~0.75x/3x of its default body width), rescaled
+// into our width model where normalCandleWidth is full bar-to-bar spacing
+// rather than a narrower default body, so max stays at 1x to avoid
+// neighbor overlap instead of following that 3x literally.
+const MINIMUM_WIDTH_RATIO = 0.5;
+const MAXIMUM_WIDTH_RATIO = 1.0;
 
 /**
  * Read-only canvas overlay that paints volume-weighted candle bodies on top
@@ -53,9 +60,18 @@ export function VolumeWeightedCandleOverlay({
       canvas.style.left = `${axisWidth}px`;
       canvas.style.width = `${pane.width}px`;
       canvas.style.height = `${pane.height}px`;
-      if (canvas.width !== pane.width * dpr || canvas.height !== pane.height * dpr) {
-        canvas.width = pane.width * dpr;
-        canvas.height = pane.height * dpr;
+      // The canvas backing store must be an integer pixel count — the
+      // browser truncates a fractional `canvas.width` assignment silently,
+      // while `ctx.setTransform` below still scales by the exact `dpr`. Left
+      // un-floored, that mismatch is a few tenths of a physical pixel between
+      // this overlay's coordinate space and the candle series' own internal
+      // canvas (which sizes itself the same, floored, way) — enough to read
+      // as every body being consistently offset from its wick.
+      const backingWidth = Math.floor(pane.width * dpr);
+      const backingHeight = Math.floor(pane.height * dpr);
+      if (canvas.width !== backingWidth || canvas.height !== backingHeight) {
+        canvas.width = backingWidth;
+        canvas.height = backingHeight;
       }
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
@@ -110,11 +126,21 @@ export function VolumeWeightedCandleOverlay({
         // Snap to whole device pixels: lightweight-charts' own candles render
         // crisp because they align to the pixel grid, while unsnapped
         // fractional rects blur under anti-aliasing (the "muddy" look at
-        // narrow, volume-weighted widths). Snapping the edges rather than the
-        // center keeps width as close to the computed value as a whole pixel
-        // count allows while staying visually centered.
-        const left = Math.round(centerX - width / 2);
-        const right = Math.max(left + 1, Math.round(centerX + width / 2));
+        // narrow, volume-weighted widths).
+        //
+        // The center must be snapped FIRST, then the two edges built
+        // symmetrically from that snapped value — rounding `left` and
+        // `right` independently (the previous approach) only stays centered
+        // on `centerX` when its fractional part happens to be small; at
+        // other zoom levels the two independent roundings drift apart by up
+        // to ~1px, which reads as the body sliding off the wick (the wick
+        // itself is a 1px line necessarily drawn on one integer pixel
+        // column, so the body has to be built around that same column, not
+        // around whichever pixel each edge rounds to on its own).
+        const snappedCenterX = Math.round(centerX);
+        const halfWidth = Math.max(1, Math.round(width)) / 2;
+        const left = Math.round(snappedCenterX - halfWidth);
+        const right = Math.max(left + 1, Math.round(snappedCenterX + halfWidth));
         const snappedTop = Math.round(top);
         const snappedHeight = Math.max(1, Math.round(top + height) - snappedTop);
 

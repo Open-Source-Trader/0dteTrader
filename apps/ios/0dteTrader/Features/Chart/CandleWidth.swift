@@ -35,12 +35,21 @@ enum CandleWidth {
     /// also what keeps a single extreme spike from collapsing every other
     /// candle: that candle clamps to `maximumWidthRatio` instead of
     /// stretching the scale.
+    // A 0.2/0.95 floor read as "no volume" indistinguishably from a
+    // retraced (small-body) candle at normal zoom. Raised to keep the
+    // thinnest candle clearly a candle, not a hairline — proportioned
+    // after TradingView's own Volume Candles (min/max ~0.75x/3x of its
+    // default body width), rescaled into our width model where
+    // normalCandleWidth is full bar-to-bar spacing rather than a narrower
+    // default body, so max stays at 1x to avoid neighbor overlap instead
+    // of following that 3x literally. Mirrors
+    // apps/desktop/src/features/chart/VolumeWeightedCandleOverlay.tsx.
     static func calculate(
         volume: Double,
         referenceVolume: Double,
         normalCandleWidth: CGFloat,
-        minimumWidthRatio: CGFloat = 0.20,
-        maximumWidthRatio: CGFloat = 0.95
+        minimumWidthRatio: CGFloat = 0.5,
+        maximumWidthRatio: CGFloat = 1.0
     ) -> CGFloat {
         guard referenceVolume.isFinite, referenceVolume > 0 else { return normalCandleWidth }
         let safeVolume = volume.isFinite && volume > 0 ? volume : 0

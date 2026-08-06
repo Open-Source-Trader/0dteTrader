@@ -129,14 +129,75 @@ describe('VolumeWeightedCandleOverlay lifecycle', () => {
     expect(calls).toHaveLength(3);
     const [lowVolRect, highVolRect, lowVolRect2] = calls;
 
-    // Centers unchanged regardless of width: centerX - width/2 + width/2 == centerX.
-    expect(lowVolRect[0] + lowVolRect[2] / 2).toBeCloseTo(0);
-    expect(highVolRect[0] + highVolRect[2] / 2).toBeCloseTo(10);
-    expect(lowVolRect2[0] + lowVolRect2[2] / 2).toBeCloseTo(20);
+    // Centers unchanged regardless of width, within the ±0.5px that whole-
+    // pixel-width rects centered on a whole-pixel column inherently allow
+    // (an odd integer width has no exact-integer center; see the "snap
+    // center first" comment in the component for why this is bounded and
+    // zoom-independent rather than the drift the previous approach had).
+    expect(Math.abs(lowVolRect[0] + lowVolRect[2] / 2 - 0)).toBeLessThanOrEqual(0.5);
+    expect(Math.abs(highVolRect[0] + highVolRect[2] / 2 - 10)).toBeLessThanOrEqual(0.5);
+    expect(Math.abs(lowVolRect2[0] + lowVolRect2[2] / 2 - 20)).toBeLessThanOrEqual(0.5);
 
     // The 1000-volume candle (>= p95 reference) is wider than the 10-volume candles.
     expect(highVolRect[2]).toBeGreaterThan(lowVolRect[2]);
     expect(highVolRect[2]).toBeGreaterThan(lowVolRect2[2]);
+  });
+
+  it('stays centered on fractional-pixel bar positions at any zoom level', async () => {
+    const { chart, series } = buildChart();
+    // A zoom level where logicalToCoordinate lands on a fractional pixel for
+    // every bar (7.3px/bar spacing) — the case that used to drift, since
+    // rounding `left` and `right` independently only stayed centered when
+    // the fractional part happened to be small.
+    chart.timeScale().logicalToCoordinate = vi.fn((index: number) => index * 7.3 + 0.6);
+    const candles = [candle(0, 10), candle(1, 1000), candle(2, 10)];
+
+    await act(async () => {
+      root.render(
+        createElement(VolumeWeightedCandleOverlay, {
+          chart: chart as never,
+          series: series as never,
+          candles,
+        }),
+      );
+    });
+    frames.shift()?.(0);
+
+    const calls = context.fillRect.mock.calls as [number, number, number, number][];
+    expect(calls).toHaveLength(3);
+    for (const [index, [left, , width]] of calls.entries()) {
+      const expectedCenter = Math.round(index * 7.3 + 0.6);
+      expect(Math.abs(left + width / 2 - expectedCenter)).toBeLessThanOrEqual(0.5);
+    }
+  });
+
+  it('floors the canvas backing store to whole device pixels', async () => {
+    const { chart, series } = buildChart();
+    chart.paneSize = vi.fn(() => ({ width: 483.333333, height: 100.666666 }));
+    vi.stubGlobal('devicePixelRatio', 2);
+    const candles = [candle(0, 10)];
+
+    await act(async () => {
+      root.render(
+        createElement(VolumeWeightedCandleOverlay, {
+          chart: chart as never,
+          series: series as never,
+          candles,
+        }),
+      );
+    });
+    frames.shift()?.(0);
+
+    const canvas = container.querySelector('canvas') as HTMLCanvasElement;
+    // A fractional pane.width * dpr (966.666...) must be floored before
+    // assignment: canvas.width truncates fractional values silently, while
+    // ctx.setTransform still scales by the exact dpr, so an un-floored
+    // backing store drifts a fraction of a pixel out of step with the
+    // candle series' own canvas — the reported "body shifted off the wick".
+    expect(canvas.width).toBe(Math.floor(483.333333 * 2));
+    expect(canvas.height).toBe(Math.floor(100.666666 * 2));
+    expect(Number.isInteger(canvas.width)).toBe(true);
+    expect(Number.isInteger(canvas.height)).toBe(true);
   });
 
   it('draws nothing when there are no candles', async () => {

@@ -149,4 +149,19 @@ final class GexHeatmapAdaptersTests: XCTestCase {
         XCTAssertEqual(GexHeatmapAdapters.bucketMinutes(for: .tick(.t10)), 1)
         XCTAssertEqual(GexHeatmapAdapters.bucketMinutes(for: .tick(.t250)), 1)
     }
+
+    func testStrikeWindow_scalesWithSpotPriceRatherThanBeingFixed() {
+        // A fixed dollar window would be wildly wrong at either extreme: too
+        // wide for a cheap stock with $1 strikes, too narrow (or empty) for
+        // an expensive one with $50 strikes. Scaling by price keeps both
+        // sane without hardcoding a strike-spacing table per symbol.
+        XCTAssertEqual(GexHeatmapAdapters.strikeWindow(forSpotPrice: 50), 5)
+        XCTAssertEqual(GexHeatmapAdapters.strikeWindow(forSpotPrice: 500), 40)
+        XCTAssertEqual(GexHeatmapAdapters.strikeWindow(forSpotPrice: 1500), 120)
+    }
+
+    func testStrikeWindow_hasAFloorForVeryLowPricedSymbols() {
+        XCTAssertEqual(GexHeatmapAdapters.strikeWindow(forSpotPrice: 1), 5)
+        XCTAssertEqual(GexHeatmapAdapters.strikeWindow(forSpotPrice: 0), 5)
+    }
 }

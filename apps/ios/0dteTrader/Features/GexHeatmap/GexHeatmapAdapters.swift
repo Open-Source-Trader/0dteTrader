@@ -29,6 +29,18 @@ enum GexHeatmapAdapters {
         }
     }
 
+    /// Fraction of spot price to request above/below spot when querying the
+    /// GEX endpoints. An unbounded chain can be 400+ strikes wide, and
+    /// rendering that many rows — times up to 60 time-series columns — made
+    /// the grid unusably slow. strikeRangeAboveSpot/BelowSpot are dollar
+    /// distances, not strike counts, so this scales with price rather than
+    /// being a fixed constant (a fixed $10 window is way too wide for a $50
+    /// stock with $1 strikes and returns nothing for a $1500 stock with $50
+    /// strikes). Desktop parity: GexHeatmapModal.tsx's strikeWindow.
+    static func strikeWindow(forSpotPrice spotPrice: Double) -> Int {
+        Int(max(5, spotPrice * 0.08).rounded(.up))
+    }
+
     /// Term structure: strike x expiration, columns labeled with the expiration date.
     static func columnsAndEntries(
         fromTermStructure snapshot: GexTermStructureSnapshotDTO

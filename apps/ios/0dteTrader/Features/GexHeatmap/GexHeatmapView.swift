@@ -146,17 +146,22 @@ struct GexHeatmapView: View {
         committedOffset = .zero
         defer { isLoading = false }
         do {
+            let window = GexHeatmapAdapters.strikeWindow(forSpotPrice: spotPrice)
             switch viewMode {
             case .termStructure:
                 let snapshot = try await apiClient.gexTermStructure(
                     symbol: symbol,
-                    expiration: selectedExpiration
+                    expiration: selectedExpiration,
+                    strikeRangeAboveSpot: window,
+                    strikeRangeBelowSpot: window
                 )
                 (columns, entries) = GexHeatmapAdapters.columnsAndEntries(fromTermStructure: snapshot)
             case .timeSeries:
                 let snapshot = try await apiClient.gexHeatmap(
                     symbol: symbol,
                     expiration: timeSeriesExpiration,
+                    strikeRangeAboveSpot: window,
+                    strikeRangeBelowSpot: window,
                     bucketMinutes: GexHeatmapAdapters.bucketMinutes(for: chartInterval)
                 )
                 (columns, entries) = GexHeatmapAdapters.columnsAndEntries(fromHeatmap: snapshot)

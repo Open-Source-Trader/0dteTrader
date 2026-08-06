@@ -15,7 +15,11 @@ describe('OptionsAnalyticsController', () => {
       releasePersistence = () => resolve(false);
     });
     const capture = { persist: jest.fn().mockReturnValue(pendingPersistence) };
-    const controller = new OptionsAnalyticsController(analytics as never, capture as never);
+    const controller = new OptionsAnalyticsController(
+      analytics as never,
+      capture as never,
+      {} as never,
+    );
 
     let responseSettled = false;
     const response = controller
@@ -41,7 +45,11 @@ describe('OptionsAnalyticsController', () => {
     };
     const analytics = { getSnapshotResult: jest.fn().mockResolvedValue(result) };
     const capture = { persist: jest.fn() };
-    const controller = new OptionsAnalyticsController(analytics as never, capture as never);
+    const controller = new OptionsAnalyticsController(
+      analytics as never,
+      capture as never,
+      {} as never,
+    );
 
     await expect(
       controller.getSnapshot({ userId: 'user-1' } as never, {
@@ -49,6 +57,78 @@ describe('OptionsAnalyticsController', () => {
         expiration: '2026-07-20',
       }),
     ).resolves.toBe(result.snapshot);
+    expect(capture.persist).not.toHaveBeenCalled();
+  });
+
+  it('gex-heatmap reuses getSnapshotResult (no duplicate ingestion) and awaits the viewed capture before querying history', async () => {
+    const result = {
+      snapshot: { scope: { symbol: 'SPY', expiration: '2026-07-20' } },
+      input: {},
+      scope: 'shared',
+    };
+    const analytics = { getSnapshotResult: jest.fn().mockResolvedValue(result) };
+    const events: string[] = [];
+    const capture = {
+      persist: jest.fn().mockImplementation(async () => {
+        events.push('persist');
+        return true;
+      }),
+    };
+    const heatmapSnapshot = {
+      underlyingSymbol: 'SPY',
+      expiration: '2026-07-20',
+      spotSeries: [],
+      timestamps: [],
+      strikes: [],
+      cells: [],
+    };
+    const gexHeatmap = {
+      getHeatmap: jest.fn().mockImplementation(async () => {
+        events.push('getHeatmap');
+        return heatmapSnapshot;
+      }),
+    };
+    const controller = new OptionsAnalyticsController(
+      analytics as never,
+      capture as never,
+      gexHeatmap as never,
+    );
+
+    const response = await controller.getGexHeatmap(
+      { userId: 'user-1' } as never,
+      {
+        symbol: 'spy',
+      } as never,
+    );
+
+    expect(analytics.getSnapshotResult).toHaveBeenCalledTimes(1);
+    expect(analytics.getSnapshotResult).toHaveBeenCalledWith('spy', undefined, 'user-1');
+    // The viewed capture write must complete before history is queried, or a
+    // fresh symbol's first request would read back a window missing the
+    // point it just triggered.
+    expect(events).toEqual(['persist', 'getHeatmap']);
+    expect(gexHeatmap.getHeatmap).toHaveBeenCalledWith(
+      expect.objectContaining({ symbol: 'SPY', expiration: '2026-07-20' }),
+    );
+    expect(response).toBe(heatmapSnapshot);
+  });
+
+  it('gex-heatmap never persists a user-scoped snapshot into the shared capture history', async () => {
+    const result = {
+      snapshot: { scope: { symbol: 'SPY', expiration: '2026-07-20' } },
+      input: {},
+      scope: 'u-someone',
+    };
+    const analytics = { getSnapshotResult: jest.fn().mockResolvedValue(result) };
+    const capture = { persist: jest.fn() };
+    const gexHeatmap = { getHeatmap: jest.fn().mockResolvedValue({}) };
+    const controller = new OptionsAnalyticsController(
+      analytics as never,
+      capture as never,
+      gexHeatmap as never,
+    );
+
+    await controller.getGexHeatmap({ userId: 'user-1' } as never, { symbol: 'SPY' } as never);
     expect(capture.persist).not.toHaveBeenCalled();
   });
 });

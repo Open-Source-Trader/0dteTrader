@@ -1,0 +1,324 @@
+import { Logger } from '@nestjs/common';
+import type { ConfigService } from '@nestjs/config';
+import type {
+  OptionsAnalyticsSnapshot,
+  OptionsAnalyticsStrike,
+  OptionsAnalyticsStrikeLeg,
+} from '@0dtetrader/shared-types';
+import { InMemoryPrismaService } from '../../test/in-memory-prisma.service';
+import type { OptionsAnalyticsSnapshotResult } from './options-analytics.service';
+import { OptionsAnalyticsCaptureService } from './options-analytics.capture';
+import { GexHeatmapQueryService } from './gex-heatmap.query';
+
+const NOW = new Date('2026-07-20T15:00:30.000Z');
+
+function leg(overrides: Partial<OptionsAnalyticsStrikeLeg> = {}): OptionsAnalyticsStrikeLeg {
+  return {
+    openInterest: 100,
+    volume: 10,
+    impliedVolatility: 0.2,
+    delta: 0.5,
+    gamma: 0.01,
+    gammaExposure: 5_000,
+    deltaNotional: 1_000,
+    markedOiValue: 2_000,
+    relativeSpread: 0.01,
+    roundTripCost: 1,
+    bidSize: 5,
+    askSize: 5,
+    multiplier: 100,
+    ...overrides,
+  };
+}
+
+function strikeRow(
+  strike: number,
+  call: OptionsAnalyticsStrikeLeg | null,
+  put: OptionsAnalyticsStrikeLeg | null,
+): OptionsAnalyticsStrike {
+  const legs = [call?.gammaExposure, put?.gammaExposure].filter(
+    (value): value is number => value !== null && value !== undefined,
+  );
+  return {
+    strike,
+    call,
+    put,
+    grossGammaExposure: legs.length === 0 ? null : legs.reduce((sum, v) => sum + v, 0),
+    totalOpenInterest: (call?.openInterest ?? 0) + (put?.openInterest ?? 0),
+  };
+}
+
+function snapshot(
+  symbol: string,
+  expiration: string,
+  observedAt: Date,
+  spot: number,
+  strikes: OptionsAnalyticsStrike[],
+): OptionsAnalyticsSnapshot {
+  return {
+    scope: {
+      symbol,
+      rootSymbol: symbol,
+      settlementStyle: 'pm',
+      expiration,
+      observedAt: observedAt.toISOString(),
+      settlementAt: '2026-07-20T20:00:00.000Z',
+      spot,
+      forward: spot,
+    },
+    exposureUnit: '$ delta change per 1% underlying move',
+    quality: {
+      quoteAsOf: observedAt.toISOString(),
+      greeksAsOf: observedAt.toISOString(),
+      oiEffectiveDate: '2026-07-17',
+      feedMode: 'realtime',
+      coverage: {
+        contractsTotal: strikes.length * 2,
+        contractsIncluded: strikes.length * 2,
+        ratio: 1,
+      },
+      status: 'complete',
+      warnings: [],
+      calculationVersion: 'options-analytics-v1',
+      cacheStatus: 'fresh',
+    },
+    structure: {
+      callGammaExposure: null,
+      putGammaExposure: null,
+      grossGammaExposure: null,
+      callDeltaNotional: null,
+      putDeltaNotional: null,
+      callWall: null,
+      putWall: null,
+      grossGammaConcentration: null,
+      maxOpenInterestStrike: null,
+    },
+    scenarios: { callPutDealerProxy: null },
+    impliedRange: null,
+    strikes,
+  };
+}
+
+function result(
+  symbol: string,
+  observedAt: Date,
+  spot: number,
+  strikes: OptionsAnalyticsStrike[],
+  expiration = '2026-07-20',
+): OptionsAnalyticsSnapshotResult {
+  const output = snapshot(symbol, expiration, observedAt, spot, strikes);
+  return {
+    snapshot: output,
+    scope: 'shared',
+    input: {
+      symbol,
+      rootSymbol: symbol,
+      settlementStyle: 'pm',
+      expiration,
+      observedAt: output.scope.observedAt,
+      settlementAt: output.scope.settlementAt,
+      riskFreeRate: 0.04,
+      quote: {
+        symbol,
+        spot,
+        quoteAsOf: output.scope.observedAt,
+        feedMode: 'realtime',
+        completedSessionDate: null,
+        warnings: [],
+      },
+      contractsTotal: 0,
+      contracts: [],
+      warnings: [],
+    },
+  };
+}
+
+function config(): ConfigService {
+  return { get: () => undefined } as unknown as ConfigService;
+}
+
+describe('GexHeatmapQueryService', () => {
+  let prisma: InMemoryPrismaService;
+  let capture: OptionsAnalyticsCaptureService;
+  let query: GexHeatmapQueryService;
+
+  beforeEach(() => {
+    prisma = new InMemoryPrismaService();
+    capture = new OptionsAnalyticsCaptureService(prisma as never, {} as never, config());
+    query = new GexHeatmapQueryService(prisma as never);
+    jest.spyOn(Logger.prototype, 'log').mockImplementation();
+    jest.spyOn(Logger.prototype, 'warn').mockImplementation();
+    jest.spyOn(Logger.prototype, 'error').mockImplementation();
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it('produces positive callGex and negative putGex, netting to their sum', async () => {
+    const row = result('SPY', NOW, 100, [
+      strikeRow(100, leg({ gammaExposure: 5_000 }), leg({ gammaExposure: 3_000 })),
+    ]);
+    await capture.persist(row, 'viewed', NOW);
+
+    const heatmap = await query.getHeatmap(
+      {
+        symbol: 'SPY',
+        expiration: '2026-07-20',
+        from: new Date(NOW.getTime() - 60_000),
+        to: new Date(NOW.getTime() + 1),
+      },
+      NOW,
+    );
+
+    expect(heatmap.cells).toHaveLength(1);
+    expect(heatmap.cells[0].callGex).toBe(5_000);
+    expect(heatmap.cells[0].putGex).toBe(-3_000);
+    expect(heatmap.cells[0].netGex).toBe(2_000);
+  });
+
+  it('aggregates multiple strikes independently and sorts them ascending', async () => {
+    const row = result('SPY', NOW, 100, [
+      strikeRow(105, leg({ gammaExposure: 1_000 }), null),
+      strikeRow(95, null, leg({ gammaExposure: 2_000 })),
+      strikeRow(100, leg({ gammaExposure: 500 }), leg({ gammaExposure: 500 })),
+    ]);
+    await capture.persist(row, 'viewed', NOW);
+
+    const heatmap = await query.getHeatmap(
+      {
+        symbol: 'SPY',
+        expiration: '2026-07-20',
+        from: new Date(NOW.getTime() - 60_000),
+        to: new Date(NOW.getTime() + 1),
+      },
+      NOW,
+    );
+
+    expect(heatmap.strikes).toEqual([95, 100, 105]);
+    const byStrike = new Map(heatmap.cells.map((cell) => [cell.strike, cell]));
+    expect(byStrike.get(95)).toMatchObject({ callGex: null, putGex: -2_000, netGex: -2_000 });
+    expect(byStrike.get(100)).toMatchObject({ callGex: 500, putGex: -500, netGex: 0 });
+    expect(byStrike.get(105)).toMatchObject({ callGex: 1_000, putGex: null, netGex: 1_000 });
+  });
+
+  it('does not convert missing gamma into zero and flags the cell missingGamma', async () => {
+    const row = result('SPY', NOW, 100, [
+      strikeRow(100, leg({ gamma: null, gammaExposure: null }), leg({ gammaExposure: 1_000 })),
+    ]);
+    await capture.persist(row, 'viewed', NOW);
+
+    const heatmap = await query.getHeatmap(
+      {
+        symbol: 'SPY',
+        expiration: '2026-07-20',
+        from: new Date(NOW.getTime() - 60_000),
+        to: new Date(NOW.getTime() + 1),
+      },
+      NOW,
+    );
+
+    expect(heatmap.cells[0].callGex).toBeNull();
+    expect(heatmap.cells[0].netGex).toBe(-1_000);
+    expect(heatmap.cells[0].dataQuality).toBe('missingGamma');
+  });
+
+  it('flags an absent leg (missing open interest / no contract) rather than treating it as zero', async () => {
+    const row = result('SPY', NOW, 100, [strikeRow(100, leg({ gammaExposure: 2_000 }), null)]);
+    await capture.persist(row, 'viewed', NOW);
+
+    const heatmap = await query.getHeatmap(
+      {
+        symbol: 'SPY',
+        expiration: '2026-07-20',
+        from: new Date(NOW.getTime() - 60_000),
+        to: new Date(NOW.getTime() + 1),
+      },
+      NOW,
+    );
+
+    expect(heatmap.cells[0].putGex).toBeNull();
+    expect(heatmap.cells[0].netGex).toBe(2_000);
+    expect(heatmap.cells[0].dataQuality).toBe('missingOpenInterest');
+  });
+
+  it('marks the most recent snapshot stale when it exceeds the freshness threshold, but not older ones', async () => {
+    const stale = new Date(NOW.getTime() - 5 * 60_000);
+    const row = result('SPY', stale, 100, [strikeRow(100, leg(), leg())]);
+    await capture.persist(row, 'viewed', stale);
+
+    const heatmap = await query.getHeatmap(
+      {
+        symbol: 'SPY',
+        expiration: '2026-07-20',
+        from: new Date(stale.getTime() - 60_000),
+        to: new Date(NOW.getTime() + 1),
+      },
+      NOW,
+    );
+
+    expect(heatmap.cells[0].dataQuality).toBe('stale');
+  });
+
+  it('is deterministic: repeated calls with identical stored inputs produce identical output', async () => {
+    const row = result('SPY', NOW, 100, [
+      strikeRow(100, leg({ gammaExposure: 1_000 }), leg({ gammaExposure: 500 })),
+    ]);
+    await capture.persist(row, 'viewed', NOW);
+
+    const params = {
+      symbol: 'SPY',
+      expiration: '2026-07-20',
+      from: new Date(NOW.getTime() - 60_000),
+      to: new Date(NOW.getTime() + 1),
+    };
+    const first = await query.getHeatmap(params, NOW);
+    const second = await query.getHeatmap(params, NOW);
+    expect(first).toEqual(second);
+  });
+
+  it('respects the requested time range, excluding snapshots outside the window', async () => {
+    const inWindow = result('SPY', NOW, 100, [strikeRow(100, leg(), leg())]);
+    const outOfWindow = result('SPY', new Date(NOW.getTime() - 10 * 60_000), 100, [
+      strikeRow(100, leg(), leg()),
+    ]);
+    await capture.persist(inWindow, 'viewed', NOW);
+    await capture.persist(outOfWindow, 'viewed', new Date(NOW.getTime() - 10 * 60_000));
+
+    const heatmap = await query.getHeatmap(
+      {
+        symbol: 'SPY',
+        expiration: '2026-07-20',
+        from: new Date(NOW.getTime() - 60_000),
+        to: new Date(NOW.getTime() + 1),
+      },
+      NOW,
+    );
+
+    expect(heatmap.timestamps).toHaveLength(1);
+    expect(heatmap.timestamps[0]).toBe(NOW.toISOString());
+  });
+
+  it('excludes strikes outside the configured window around spot', async () => {
+    const row = result('SPY', NOW, 100, [
+      strikeRow(80, leg(), leg()),
+      strikeRow(100, leg(), leg()),
+      strikeRow(120, leg(), leg()),
+    ]);
+    await capture.persist(row, 'viewed', NOW);
+
+    const heatmap = await query.getHeatmap(
+      {
+        symbol: 'SPY',
+        expiration: '2026-07-20',
+        from: new Date(NOW.getTime() - 60_000),
+        to: new Date(NOW.getTime() + 1),
+        strikeRangeAboveSpot: 10,
+        strikeRangeBelowSpot: 10,
+      },
+      NOW,
+    );
+
+    expect(heatmap.strikes).toEqual([100]);
+  });
+});

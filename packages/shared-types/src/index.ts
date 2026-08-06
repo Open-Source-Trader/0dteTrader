@@ -406,6 +406,39 @@ export interface OptionsAnalyticsSnapshot {
   strikes: OptionsAnalyticsStrike[];
 }
 
+/**
+ * Heatmap-ready GEX time series for one symbol/expiration: X-axis
+ * `timestamps`, Y-axis `strikes`, and one cell per (timestamp, strike) pair.
+ * Derived entirely from already-persisted `OptionsAnalyticsSnapshot` history
+ * — no separate GEX data source. `callGex`/`putGex` follow the conventional
+ * signed dealer-positioning model (call positive, put negative); this is an
+ * estimate, not known dealer inventory.
+ */
+export interface GexHeatmapCell {
+  /** ISO-8601 date-time; matches one entry in the parent's `timestamps`. */
+  timestamp: string;
+  strike: number;
+  callGex: number | null;
+  putGex: number | null;
+  netGex: number | null;
+  dataQuality: GexDataQuality;
+}
+
+export type GexDataQuality =
+  'complete' | 'missingGamma' | 'missingOpenInterest' | 'missingSpot' | 'stale' | 'partial';
+
+export interface GexHeatmapSnapshot {
+  underlyingSymbol: string;
+  expiration: string;
+  /** Spot price observed at each timestamp, same order as `timestamps`. */
+  spotSeries: number[];
+  /** ISO-8601 date-times, ascending. */
+  timestamps: string[];
+  /** Strikes present anywhere in the window, ascending. */
+  strikes: number[];
+  cells: GexHeatmapCell[];
+}
+
 export type IVAlertSymbol = 'SPX' | 'NDX' | 'RUT';
 export type IVAlertDirection = 'expansion' | 'crush';
 

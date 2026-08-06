@@ -13,6 +13,8 @@ struct CandleChartRepresentable: UIViewRepresentable {
     let indicatorProfileRows: [PriceProfileRow]
     var visibleCount: Double = ChartMetrics.visibleCandles
     var showVolume: Bool = false
+    /// TradingView-style volume-weighted candle body width; wick stays fixed.
+    var volumeWeightedCandleWidth: Bool = false
     var intervalSeconds: TimeInterval = 60
     var drawingsModel: ChartDrawingsModel?
     /// TWC Heatmap render model: candle repaints, extra line series, and the
@@ -565,6 +567,24 @@ extension CandleChartRepresentable {
         chart.xAxis.axisMinimum = -0.5
         chart.xAxis.axisMaximum = Double(candles.count - 1) + 12
         chart.notifyDataSetChanged()
+
+        // `chart.data = data` above rebuilds `subRenderers` from scratch with
+        // a fresh stock CandleStickChartRenderer (CombinedChartView.data's
+        // setter calls createRenderers() on every assignment), so the swap
+        // has to be reinstalled after every update rather than once at
+        // makeUIView — a renderer installed there would be silently replaced
+        // on the very next SwiftUI update.
+        if let combinedRenderer = chart.renderer as? CombinedChartRenderer, volumeWeightedCandleWidth {
+            if let index = combinedRenderer.subRenderers.firstIndex(where: { $0 is CandleStickChartRenderer }) {
+                let custom = VolumeWeightedCandleStickChartRenderer(
+                    dataProvider: chart,
+                    animator: chart.chartAnimator,
+                    viewPortHandler: chart.viewPortHandler
+                )
+                custom.volumes = candles.map { Double($0.volume) }
+                combinedRenderer.subRenderers[index] = custom
+            }
+        }
         container.indicatorFillOverlay.setNeedsDisplay()
         container.overlay.setNeedsDisplay()
         container.indicatorProfileOverlay.setNeedsDisplay()

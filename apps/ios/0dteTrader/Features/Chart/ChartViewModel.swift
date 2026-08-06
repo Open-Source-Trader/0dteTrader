@@ -660,7 +660,19 @@ final class ChartViewModel: ObservableObject {
     }
 
     func setVolumeEnabled(_ enabled: Bool) {
-        let candidate = ChartDisplayPreferences(volumeEnabled: enabled)
+        var candidate = chartDisplayPreferences
+        candidate.volumeEnabled = enabled
+        do {
+            try settingsStore.updateChartDisplayPreferences(candidate)
+            chartDisplayPreferences = candidate
+        } catch {
+            indicatorErrorMessage = error.localizedDescription
+        }
+    }
+
+    func setVolumeWeightedCandleWidth(_ enabled: Bool) {
+        var candidate = chartDisplayPreferences
+        candidate.volumeWeightedCandleWidth = enabled
         do {
             try settingsStore.updateChartDisplayPreferences(candidate)
             chartDisplayPreferences = candidate

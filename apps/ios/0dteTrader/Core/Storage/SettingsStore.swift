@@ -84,7 +84,8 @@ final class SettingsStore: @unchecked Sendable {
         try IndicatorSettingsValidator.validate(state, registry: registry)
 
         let display = ChartDisplayPreferences(
-            volumeEnabled: legacy.volumeEnabled ?? ChartDisplayPreferences.default.volumeEnabled
+            volumeEnabled: legacy.volumeEnabled ?? ChartDisplayPreferences.default.volumeEnabled,
+            volumeWeightedCandleWidth: ChartDisplayPreferences.default.volumeWeightedCandleWidth
         )
         let previousSettingsData = defaults.data(forKey: Keys.indicatorSettingsV1)
         let previousDisplayData = defaults.data(forKey: Keys.chartDisplayV1)
@@ -180,7 +181,8 @@ final class SettingsStore: @unchecked Sendable {
         } else {
             let legacy = try? decoder.decode(LegacyIndicatorSettings.self, from: legacyData)
             display = ChartDisplayPreferences(
-                volumeEnabled: legacy?.volumeEnabled ?? ChartDisplayPreferences.default.volumeEnabled
+                volumeEnabled: legacy?.volumeEnabled ?? ChartDisplayPreferences.default.volumeEnabled,
+                volumeWeightedCandleWidth: ChartDisplayPreferences.default.volumeWeightedCandleWidth
             )
             do {
                 try persistChartDisplayPreferences(display)

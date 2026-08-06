@@ -101,7 +101,17 @@ export function IndicatorRegistrySettings({
           <Toggle
             on={chartDisplay.volumeEnabled}
             ariaLabel="Volume"
-            onChange={(volumeEnabled) => onChangeChartDisplay({ volumeEnabled })}
+            onChange={(volumeEnabled) => onChangeChartDisplay({ ...chartDisplay, volumeEnabled })}
+          />
+        </div>
+        <div className="settings-field settings-field--row">
+          <span className="settings-field-label">Volume-Weighted Width</span>
+          <Toggle
+            on={chartDisplay.volumeWeightedCandleWidth}
+            ariaLabel="Volume-Weighted Width"
+            onChange={(volumeWeightedCandleWidth) =>
+              onChangeChartDisplay({ ...chartDisplay, volumeWeightedCandleWidth })
+            }
           />
         </div>
       </section>

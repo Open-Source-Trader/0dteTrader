@@ -31,6 +31,7 @@ const renderer = vi.hoisted(() => {
     update: vi.fn(),
     createPriceLine: vi.fn(),
     removePriceLine: vi.fn(),
+    applyOptions: vi.fn(),
   };
   const chart = {
     addSeries: vi.fn(() => candleSeries),
@@ -67,6 +68,7 @@ vi.mock('./FloatingAxes', () => ({ FloatingAxes: () => null }));
 vi.mock('./DrawingLayer', () => ({ DrawingLayer: () => null }));
 vi.mock('./OrderLineLayer', () => ({ OrderLineLayer: () => null }));
 vi.mock('./TwcOverlay', () => ({ TwcOverlay: () => null }));
+vi.mock('./VolumeWeightedCandleOverlay', () => ({ VolumeWeightedCandleOverlay: () => null }));
 vi.mock('./IndicatorDecorationLayer', () => ({ IndicatorDecorationLayer: () => null }));
 vi.mock('./optionsAnalytics/OptionsAnalyticsOverlay', () => ({
   OptionsAnalyticsOverlay: () => null,
@@ -115,6 +117,7 @@ describe('CandleChart viewport reporting lifecycle', () => {
       symbol: 'SPY',
       interval: '1m' as const,
       showVolume: false,
+      volumeWeightedCandleWidth: false,
       drawingsStore,
       onVisibleCandleViewport,
     };
@@ -134,5 +137,64 @@ describe('CandleChart viewport reporting lifecycle', () => {
     frames.splice(0).forEach((callback) => callback(0));
     expect(onVisibleCandleViewport).toHaveBeenLastCalledWith({ kind: 'range', from: 0, to: 1 });
     expect(onVisibleCandleViewport).not.toHaveBeenCalledWith({ kind: 'uninitialized' });
+  });
+
+  it('keeps the series body opaque when volume-weighted width is off, and hides it when on', async () => {
+    const props = {
+      overlays: [],
+      symbol: 'SPY',
+      interval: '1m' as const,
+      showVolume: false,
+      drawingsStore,
+      onVisibleCandleViewport,
+    };
+
+    await act(async () => {
+      root.render(
+        createElement(CandleChart, {
+          ...props,
+          candles: candles(2),
+          volumeWeightedCandleWidth: false,
+        }),
+      );
+    });
+    expect(renderer.chart.addSeries).toHaveBeenCalled();
+    const candleSeries = renderer.chart.addSeries.mock.results[0]?.value as {
+      applyOptions: ReturnType<typeof vi.fn>;
+    };
+    // The setting starts off: no transparency override has been applied yet.
+    expect(candleSeries.applyOptions).not.toHaveBeenCalledWith(
+      expect.objectContaining({ upColor: 'rgba(0, 0, 0, 0)' }),
+    );
+
+    await act(async () => {
+      root.render(
+        createElement(CandleChart, {
+          ...props,
+          candles: candles(2),
+          volumeWeightedCandleWidth: true,
+        }),
+      );
+    });
+    expect(candleSeries.applyOptions).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        upColor: 'rgba(0, 0, 0, 0)',
+        downColor: 'rgba(0, 0, 0, 0)',
+        borderVisible: false,
+      }),
+    );
+
+    await act(async () => {
+      root.render(
+        createElement(CandleChart, {
+          ...props,
+          candles: candles(2),
+          volumeWeightedCandleWidth: false,
+        }),
+      );
+    });
+    expect(candleSeries.applyOptions).toHaveBeenLastCalledWith(
+      expect.objectContaining({ upColor: '#0f0', downColor: '#f00', borderVisible: true }),
+    );
   });
 });

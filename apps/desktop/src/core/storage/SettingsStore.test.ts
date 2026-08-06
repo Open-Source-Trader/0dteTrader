@@ -82,7 +82,7 @@ describe('SettingsStore indicator registry migration', () => {
       enabled: true,
       parameters: { period: 5 },
     });
-    expect(store.chartDisplay).toEqual({ volumeEnabled: false });
+    expect(store.chartDisplay).toEqual({ volumeEnabled: false, volumeWeightedCandleWidth: false });
     expect(localStorage.getItem('settings.indicatorSettings')).toBeNull();
     expect(localStorage.getItem('settings.indicatorSettings.v1')).not.toContain(
       'discardedDesktopField',
@@ -92,12 +92,36 @@ describe('SettingsStore indicator registry migration', () => {
   it('is idempotent and removes legacy residue after re-reading valid new records', () => {
     const store = new SettingsStore();
     store.indicatorSettings = DEFAULT_INDICATOR_SETTINGS_STATE;
-    store.chartDisplay = { volumeEnabled: false };
+    store.chartDisplay = { volumeEnabled: false, volumeWeightedCandleWidth: false };
     localStorage.setItem('settings.indicatorSettings', JSON.stringify({ emaEnabled: false }));
 
     expect(new SettingsStore().indicatorSettings).toEqual(DEFAULT_INDICATOR_SETTINGS_STATE);
-    expect(new SettingsStore().chartDisplay).toEqual({ volumeEnabled: false });
+    expect(new SettingsStore().chartDisplay).toEqual({
+      volumeEnabled: false,
+      volumeWeightedCandleWidth: false,
+    });
     expect(localStorage.getItem('settings.indicatorSettings')).toBeNull();
+  });
+
+  it('round-trips volumeWeightedCandleWidth through get/set chartDisplay', () => {
+    const store = new SettingsStore();
+    store.chartDisplay = { volumeEnabled: true, volumeWeightedCandleWidth: true };
+    expect(store.chartDisplay).toEqual({ volumeEnabled: true, volumeWeightedCandleWidth: true });
+    expect(new SettingsStore().chartDisplay).toEqual({
+      volumeEnabled: true,
+      volumeWeightedCandleWidth: true,
+    });
+  });
+
+  it('backfills volumeWeightedCandleWidth to the default when reading an old-shape stored record', () => {
+    localStorage.setItem(
+      'settings.indicatorSettings.v1',
+      JSON.stringify(DEFAULT_INDICATOR_SETTINGS_STATE),
+    );
+    localStorage.setItem('settings.chartDisplay.v1', JSON.stringify({ volumeEnabled: false }));
+
+    const store = new SettingsStore();
+    expect(store.chartDisplay).toEqual({ volumeEnabled: false, volumeWeightedCandleWidth: false });
   });
 
   it.each([

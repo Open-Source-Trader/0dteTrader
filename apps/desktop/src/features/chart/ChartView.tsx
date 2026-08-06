@@ -399,6 +399,7 @@ export function ChartView({
               symbol={symbol}
               interval={interval}
               showVolume={chartDisplay.volumeEnabled}
+              volumeWeightedCandleWidth={chartDisplay.volumeWeightedCandleWidth}
               drawingsStore={drawingsStore}
               candleColors={twcModel?.candleColors ?? null}
               twcModel={twcModel}

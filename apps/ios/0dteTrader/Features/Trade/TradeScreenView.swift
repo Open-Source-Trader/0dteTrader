@@ -15,6 +15,7 @@ struct TradeScreenView: View {
     @StateObject private var profileViewModel: ProfileViewModel
     @StateObject private var chartOrdersModel: ChartOrdersModel
     @StateObject private var chartTrading: ChartTradingCoordinator
+    @ObservedObject private var quoteSocket: QuoteSocketClient
 
     /// The screen's one anchored-popup slot. Owned here because every chip
     /// that opens one — the ticker and interval on the chart, the expiration
@@ -50,6 +51,7 @@ struct TradeScreenView: View {
     init(container: AppContainer, onLogout: @escaping () async -> Void) {
         self.container = container
         self.onLogout = onLogout
+        _quoteSocket = ObservedObject(wrappedValue: container.quoteSocket)
         _chartViewModel = StateObject(wrappedValue: container.makeChartViewModel())
         _chainViewModel = StateObject(wrappedValue: container.makeOptionsChainViewModel())
         _tradeViewModel = StateObject(wrappedValue: container.makeTradeViewModel())
@@ -73,6 +75,14 @@ struct TradeScreenView: View {
                         if needsProviderConfig {
                             providerConfigBanner
                         }
+                        if let alert = quoteSocket.latestIVAlert {
+                            IVAlertBanner(
+                                alert: alert,
+                                onDismiss: { quoteSocket.dismissLatestIVAlert() }
+                            )
+                            .transition(reduceMotion ? .opacity : .move(edge: .top).combined(with: .opacity))
+                            .zIndex(1)
+                        }
                         if let toast = tradeViewModel.toast {
                             ToastView(toast: toast, onDismiss: { tradeViewModel.dismissCurrentToast() })
                                                 .transition(reduceMotion ? .opacity : .move(edge: .top).combined(with: .opacity))
@@ -82,6 +92,7 @@ struct TradeScreenView: View {
                     .padding(.top, AppSpacing.sm)
                 }
                 .animation(AppMotion.standard, value: tradeViewModel.toast)
+                .animation(AppMotion.standard, value: quoteSocket.latestIVAlert)
                 // The wordmark, the profile button and the history button all
                 // live in the chart header now, so there is nothing left for a
                 // navigation bar to carry — hidden rather than emptied, or it
@@ -346,7 +357,7 @@ struct TradeScreenView: View {
     private static let chartMinHeight: CGFloat = 180
 
     private var paneCount: Int {
-        chartViewModel.indicatorSettings.enabledSubPaneCount
+        chartViewModel.subPanePresentations.count
     }
 
     @ViewBuilder

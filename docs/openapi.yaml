@@ -569,17 +569,54 @@ components:
           type: object
           required: [mode]
           properties:
-            mode: { type: string, enum: [auto_otm, explicit] }
+            mode: { type: string, enum: [auto_otm, auto_scored, explicit] }
             optionType: { type: string, enum: [call, put] }
             expiration: { type: string, format: date }
             strike: { type: number }
-            otmOffset:
-              {
-                type: integer,
-                minimum: 0,
-                maximum: 10,
-                description: 'auto_otm only: strikes out of the money from the ATM strike (closest to the live price); 0 = ATM; omitted means 1',
-              }
+            classicFallbackAcknowledged:
+              type: boolean
+              description: Required true only when Classic +1 is used after a scored no-pass result.
+            autoScoring:
+              $ref: '#/components/schemas/AutoScoringSelection'
+    AutoScoringSelection:
+      type: object
+      required: [selectedSymbol, preferences, scoredConfirmationAccepted, rankedAt]
+      properties:
+        selectedSymbol: { type: string }
+        preferences:
+          $ref: '#/components/schemas/AutoScoringPreferences'
+        scoredConfirmationAccepted: { type: boolean, enum: [true] }
+        rankedAt: { type: string, format: date-time }
+    AutoScoringPreferences:
+      type: object
+      required:
+        - schemaVersion
+        - preset
+        - targetAbsDelta
+        - strikeRungs
+        - maxSpreadBps
+        - maxPremiumDollars
+        - minOpenInterest
+        - gammaMode
+        - weights
+      properties:
+        schemaVersion: { type: integer, enum: [1] }
+        preset: { type: string, enum: [conservative, aggressive, custom] }
+        targetAbsDelta: { type: number, minimum: 0.01, maximum: 0.99 }
+        strikeRungs: { type: integer, minimum: 0, maximum: 20 }
+        maxSpreadBps: { type: number, minimum: 0, maximum: 10000 }
+        maxPremiumDollars: { type: number, exclusiveMinimum: 0, maximum: 1000000 }
+        minOpenInterest: { type: integer, minimum: 0, maximum: 1000000000 }
+        gammaMode: { type: string, enum: [seek, avoid] }
+        weights:
+          type: object
+          required: [delta, spread, openInterest, gamma, iv]
+          properties:
+            delta: { type: number, minimum: 0, maximum: 1 }
+            spread: { type: number, minimum: 0, maximum: 1 }
+            openInterest: { type: number, minimum: 0, maximum: 1 }
+            gamma: { type: number, minimum: 0, maximum: 1 }
+            iv: { type: number, minimum: 0, maximum: 1 }
     OrderPreview:
       type: object
       properties:

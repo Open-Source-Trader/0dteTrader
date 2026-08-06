@@ -32,8 +32,10 @@ export class AppContainer {
     this.settingsStore = new SettingsStore();
     this.sessionStore = new SessionStore(baseUrl);
     this.apiClient = new ApiClient(baseUrl, this.sessionStore);
-    this.quoteSocket = new QuoteSocket(deriveStreamUrl(baseUrl), () =>
-      this.sessionStore.accessTokenOrRefresh(),
+    this.quoteSocket = new QuoteSocket(
+      deriveStreamUrl(baseUrl),
+      () => this.sessionStore.accessTokenOrRefresh(),
+      { l2CapabilityEnabled: import.meta.env.VITE_L2_CAPABILITY_ENABLED === 'true' },
     );
     this.authStore = new AuthStore(
       this.apiClient,
@@ -42,7 +44,7 @@ export class AppContainer {
       this.quoteSocket,
     );
     this.chartStore = new ChartStore(this.apiClient, this.quoteSocket, this.settingsStore);
-    this.chainStore = new ChainStore(this.apiClient, this.settingsStore);
+    this.chainStore = new ChainStore(this.apiClient);
     this.tradeStore = new TradeStore(this.apiClient);
     // CURR mode reads the open positions TradeStore owns.
     this.chainStore.positionsProvider = () => this.tradeStore.getState().positions;

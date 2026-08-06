@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
-import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, OnModuleDestroy, OnModuleInit, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import type { IVAlertSymbol } from '@0dtetrader/shared-types';
 import { Prisma, type OptionsAnalyticsSnapshotRecord } from '@prisma/client';
 import { isRegularMarketSessionOpen } from '../broker/expiration-calendar';
 import { PrismaService } from '../prisma/prisma.service';
@@ -8,6 +9,7 @@ import {
   OptionsAnalyticsService,
   type OptionsAnalyticsSnapshotResult,
 } from './options-analytics.service';
+import { IvAlertService } from './iv-alert.service';
 
 type CaptureReason = 'core' | 'viewed';
 
@@ -26,6 +28,8 @@ export interface OptionsAnalyticsCaptureMetrics {
   coreFailure: number;
   maintenanceSuccess: number;
   maintenanceFailure: number;
+  detectorPendingRecovered: number;
+  detectorPendingDeferred: number;
 }
 
 function isUniqueViolation(error: unknown): boolean {
@@ -76,12 +80,15 @@ export class OptionsAnalyticsCaptureService implements OnModuleInit, OnModuleDes
     coreFailure: 0,
     maintenanceSuccess: 0,
     maintenanceFailure: 0,
+    detectorPendingRecovered: 0,
+    detectorPendingDeferred: 0,
   };
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly analytics: OptionsAnalyticsService,
     private readonly config: ConfigService,
+    @Optional() private readonly ivAlerts?: IvAlertService,
   ) {}
 
   get schedulerActive(): boolean {
@@ -137,11 +144,127 @@ export class OptionsAnalyticsCaptureService implements OnModuleInit, OnModuleDes
       captureReason,
       resolutionMinutes: 1,
       calculationVersion: result.snapshot.quality.calculationVersion,
+      atmIv: result.snapshot.impliedRange?.atmIv ?? null,
       input: inputJson(result.input),
       output: inputJson(result.snapshot),
       quality: inputJson(result.snapshot.quality),
     };
-    return (await this.createRecord(data, true)) !== 'failed';
+    const status = await this.createRecord(data, true);
+    if (status === 'failed') return false;
+    if (captureReason === 'viewed') return true;
+
+    try {
+      if (status === 'duplicate') {
+        // A shared interactive snapshot may have claimed this minute first.
+        // Promote it to a core row without marking detector work complete.
+        await this.delegate.updateMany({
+          where: { ...this.minuteRecordWhere(data), captureReason: 'viewed' },
+          data: { captureReason: 'core', detectorProcessedAt: null },
+        });
+      }
+      const stored = await this.delegate.findFirst({ where: this.minuteRecordWhere(data) });
+      if (!stored) throw new Error('Stored core snapshot could not be reloaded.');
+      if (stored.captureReason !== 'core') {
+        throw new Error('Core snapshot could not claim the stored minute.');
+      }
+      return await this.processPendingDetectorRecord(stored);
+    } catch (error) {
+      this.metrics.failures += 1;
+      this.logger.error(
+        JSON.stringify({
+          event: 'iv_alert_capture_processing_failed',
+          symbol: result.snapshot.scope.symbol,
+          message: error instanceof Error ? error.message : String(error),
+        }),
+      );
+      return false;
+    }
+  }
+
+  private minuteRecordWhere(data: Prisma.OptionsAnalyticsSnapshotRecordCreateInput) {
+    return {
+      symbol: data.symbol,
+      expiration: data.expiration,
+      bucket: data.bucket,
+      calculationVersion: data.calculationVersion,
+      resolutionMinutes: data.resolutionMinutes,
+    };
+  }
+
+  private async drainPendingDetectorRecords(): Promise<boolean> {
+    try {
+      const pending = await this.delegate.findMany({
+        where: {
+          captureReason: 'core',
+          resolutionMinutes: 1,
+          detectorProcessedAt: null,
+        },
+        orderBy: { bucket: 'asc' },
+        take: 1_001,
+      });
+      for (const row of pending.slice(0, 1_000)) {
+        if (!(await this.processPendingDetectorRecord(row))) return false;
+        this.metrics.detectorPendingRecovered += 1;
+      }
+      if (pending.length > 1_000) {
+        this.metrics.detectorPendingDeferred += 1;
+        this.logger.warn(
+          JSON.stringify({
+            event: 'iv_alert_pending_backlog_deferred',
+            processed: 1_000,
+            reason: 'bounded_batch',
+          }),
+        );
+        return false;
+      }
+      return true;
+    } catch (error) {
+      this.metrics.failures += 1;
+      this.logger.error(
+        JSON.stringify({
+          event: 'iv_alert_pending_drain_failed',
+          message: error instanceof Error ? error.message : String(error),
+        }),
+      );
+      return false;
+    }
+  }
+
+  private async processPendingDetectorRecord(
+    row: OptionsAnalyticsSnapshotRecord,
+  ): Promise<boolean> {
+    if (row.detectorProcessedAt !== null) return true;
+    try {
+      if (this.ivAlerts && isIvAlertSymbol(row.symbol)) {
+        await this.ivAlerts.processCapture({
+          symbol: row.symbol,
+          timestamp: row.observedAt,
+          atmIv: row.atmIv,
+        });
+      }
+      const completed = await this.delegate.updateMany({
+        where: { id: row.id, detectorProcessedAt: null },
+        data: { detectorProcessedAt: new Date() },
+      });
+      if (completed.count !== 1) {
+        const existing = await this.delegate.findFirst({ where: { id: row.id } });
+        if (existing?.detectorProcessedAt === null) {
+          throw new Error('Core snapshot detector marker could not be finalized.');
+        }
+      }
+      return true;
+    } catch (error) {
+      this.metrics.failures += 1;
+      this.logger.error(
+        JSON.stringify({
+          event: 'iv_alert_capture_processing_failed',
+          symbol: row.symbol,
+          bucket: row.bucket.toISOString(),
+          message: error instanceof Error ? error.message : String(error),
+        }),
+      );
+      return false;
+    }
   }
 
   async runScheduledTick(now: Date): Promise<void> {
@@ -163,13 +286,17 @@ export class OptionsAnalyticsCaptureService implements OnModuleInit, OnModuleDes
         'options_analytics_scheduler_lease_failed',
       );
       if (!ownsLease) return;
+      if (!(await this.drainPendingDetectorRecords())) {
+        this.metrics.coreFailure += 1;
+        return;
+      }
       if (isRegularMarketSessionOpen(now)) {
         const configured = this.config.get<unknown>('optionsAnalytics.coreSymbols');
         const coreSymbols = Array.isArray(configured)
           ? configured.filter(
               (symbol): symbol is string => typeof symbol === 'string' && symbol !== '',
             )
-          : ['SPY', 'QQQ', 'IWM', 'SPX'];
+          : ['SPY', 'QQQ', 'IWM', 'SPX', 'NDX', 'RUT'];
         await Promise.all(
           [...new Set(coreSymbols)].map(async (symbol) => {
             try {
@@ -273,6 +400,7 @@ export class OptionsAnalyticsCaptureService implements OnModuleInit, OnModuleDes
               captureReason: row.captureReason,
               resolutionMinutes: 5,
               calculationVersion: row.calculationVersion,
+              atmIv: row.atmIv,
               input: inputJson(row.input),
               output: inputJson(row.output),
               quality: inputJson(row.quality),
@@ -468,4 +596,8 @@ export class OptionsAnalyticsCaptureService implements OnModuleInit, OnModuleDes
   private get delegate() {
     return this.prisma.optionsAnalyticsSnapshotRecord;
   }
+}
+
+function isIvAlertSymbol(symbol: string): symbol is IVAlertSymbol {
+  return symbol === 'SPX' || symbol === 'NDX' || symbol === 'RUT';
 }

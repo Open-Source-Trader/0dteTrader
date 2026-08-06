@@ -1,5 +1,8 @@
+import Combine
 import Foundation
 import LocalAuthentication
+// Profile owns the coordinated credential and persisted-preference workflows.
+// swiftlint:disable file_length
 
 /// Backs the profile sheet: account info from GET /v1/me and the write-only
 /// Webull credential lifecycle (PUT to save/update, DELETE to remove).
@@ -69,16 +72,17 @@ final class ProfileViewModel: ObservableObject {
         didSet { settingsStore.bypassOrderConfirmation = bypassOrderConfirmation }
     }
 
-    /// AUTO mode's strikes-OTM preference (0 = ATM). The stepper caps at 5;
-    /// the store clamps 0...10 on read for stale values.
-    @Published var autoOtmOffset: Int {
-        didSet { settingsStore.autoOtmOffset = autoOtmOffset }
-    }
-
     /// Success/info toast banners on the trade screen. Errors always show.
     @Published var toastsEnabled: Bool {
         didSet { settingsStore.toastsEnabled = toastsEnabled }
     }
+
+    @Published private(set) var autoScoringPreference: AutoScoringPreferenceRecord?
+    @Published private(set) var isAutoScoringPreferenceBusy = false
+    @Published private(set) var autoScoringPreferenceMessage: String?
+    @Published private(set) var ivAlertConfiguration: IVAlertConfigurationStateDTO?
+    @Published private(set) var isIVAlertConfigurationBusy = false
+    @Published private(set) var ivAlertConfigurationMessage: String?
 
     /// Push notifications toggle, reflecting the persisted setting. Driven
     /// through `setPushNotificationsEnabled`, not bound directly: enabling
@@ -96,25 +100,58 @@ final class ProfileViewModel: ObservableObject {
     private let settingsStore: SettingsStore
     private let quoteSocket: QuoteSocketClient
     private let pushNotifications: PushNotificationsManager?
+    private let ivAlertSaveTimeout: Duration
     private let onLogout: () async -> Void
+    private var cancellables: Set<AnyCancellable> = []
+    private var ivAlertSaveTimeoutTask: Task<Void, Never>?
+    private var pendingIVAlertConfiguration: IVAlertConfigurationDTO?
 
     init(
         apiClient: APIClient,
         settingsStore: SettingsStore,
         quoteSocket: QuoteSocketClient,
         pushNotifications: PushNotificationsManager? = nil,
+        ivAlertSaveTimeout: Duration = .seconds(15),
         onLogout: @escaping () async -> Void
     ) {
         self.apiClient = apiClient
         self.settingsStore = settingsStore
         self.quoteSocket = quoteSocket
         self.pushNotifications = pushNotifications
+        self.ivAlertSaveTimeout = ivAlertSaveTimeout
         self.onLogout = onLogout
         self.appLockEnabled = settingsStore.appLockEnabled
         self.bypassOrderConfirmation = settingsStore.bypassOrderConfirmation
-        self.autoOtmOffset = settingsStore.autoOtmOffset
         self.toastsEnabled = settingsStore.toastsEnabled
         self.pushNotificationsEnabled = settingsStore.pushNotificationsEnabled
+        quoteSocket.$ivAlertConfiguration
+            .compactMap { $0 }
+            .sink { [weak self] configuration in
+                guard let self else { return }
+                self.ivAlertConfiguration = configuration
+                if let pending = self.pendingIVAlertConfiguration,
+                   Self.matches(configuration, pending) {
+                    self.finishIVAlertConfigurationSave(message: "IV alert settings saved.")
+                }
+            }
+            .store(in: &cancellables)
+        quoteSocket.$lastError
+            .compactMap { $0 }
+            .filter { $0.code == "IV_ALERT_CONFIGURATION_INVALID" }
+            .sink { [weak self] error in
+                guard self?.isIVAlertConfigurationBusy == true else { return }
+                self?.finishIVAlertConfigurationSave(message: error.message)
+            }
+            .store(in: &cancellables)
+        quoteSocket.$connectionState
+            .filter { $0 == .disconnected }
+            .sink { [weak self] _ in
+                guard self?.isIVAlertConfigurationBusy == true else { return }
+                self?.finishIVAlertConfigurationSave(
+                    message: "Connection lost before IV alert settings were saved. Try again."
+                )
+            }
+            .store(in: &cancellables)
     }
 
     /// Profile toggle: drives the manager, then re-reads the setting it
@@ -169,6 +206,198 @@ final class ProfileViewModel: ObservableObject {
             // a Webull credential error.
             loadFailed = true
         }
+    }
+
+    func loadAutoScoringPreference() async {
+        guard !isAutoScoringPreferenceBusy else { return }
+        isAutoScoringPreferenceBusy = true
+        defer { isAutoScoringPreferenceBusy = false }
+        do {
+            autoScoringPreference = try await apiClient.autoScoringPreferences()
+            autoScoringPreferenceMessage = nil
+        } catch let error as APIError {
+            autoScoringPreferenceMessage = error.userMessage
+        } catch {
+            autoScoringPreferenceMessage = error.localizedDescription
+        }
+    }
+
+    func selectAutoScoringPreset(_ preset: AutoScoringPreset) async {
+        guard preset != .custom,
+              let current = autoScoringPreference,
+              !isAutoScoringPreferenceBusy
+        else { return }
+        let preferences: AutoScoringPreferences = preset == .aggressive ? .aggressive : .conservative
+        isAutoScoringPreferenceBusy = true
+        autoScoringPreferenceMessage = nil
+        defer { isAutoScoringPreferenceBusy = false }
+        do {
+            autoScoringPreference = try await apiClient.updateAutoScoringPreferences(
+                AutoScoringPreferenceUpdate(
+                    preferences: preferences,
+                    expectedUpdatedAt: current.updatedAt
+                )
+            )
+            autoScoringPreferenceMessage = "Scored Auto preset saved."
+        } catch let error as APIError {
+            autoScoringPreferenceMessage = error.userMessage
+        } catch {
+            autoScoringPreferenceMessage = error.localizedDescription
+        }
+    }
+
+    func saveCustomAutoScoring(_ preferences: AutoScoringPreferences) async {
+        guard let current = autoScoringPreference,
+              !isAutoScoringPreferenceBusy,
+              preferences.preset == .custom,
+              Self.validAutoScoringPreferences(preferences)
+        else {
+            autoScoringPreferenceMessage = "Enter valid custom settings; at least one weight must be positive."
+            return
+        }
+        isAutoScoringPreferenceBusy = true
+        autoScoringPreferenceMessage = nil
+        defer { isAutoScoringPreferenceBusy = false }
+        do {
+            autoScoringPreference = try await apiClient.updateAutoScoringPreferences(
+                AutoScoringPreferenceUpdate(
+                    preferences: preferences,
+                    expectedUpdatedAt: current.updatedAt
+                )
+            )
+            autoScoringPreferenceMessage = "Custom Scored Auto settings saved."
+        } catch let error as APIError {
+            autoScoringPreferenceMessage = error.userMessage
+        } catch {
+            autoScoringPreferenceMessage = error.localizedDescription
+        }
+    }
+
+    func setIVAlertsEnabled(_ enabled: Bool) {
+        guard let current = ivAlertConfiguration else { return }
+        sendIVAlertConfiguration(IVAlertConfigurationDTO(
+            enabled: enabled,
+            symbols: current.symbols,
+            lookbackMinutes: current.lookbackMinutes,
+            thresholdK: current.thresholdK,
+            consecutiveBreaches: current.consecutiveBreaches,
+            warmupMinutes: current.warmupMinutes,
+            warmupSamples: current.warmupSamples,
+            cooldownMinutes: current.cooldownMinutes
+        ))
+    }
+
+    func setIVAlertSymbol(_ symbol: IVAlertSymbolDTO, enabled: Bool) {
+        guard let current = ivAlertConfiguration else { return }
+        var symbols = current.symbols
+        if enabled {
+            if !symbols.contains(symbol) { symbols.append(symbol) }
+        } else {
+            symbols.removeAll { $0 == symbol }
+        }
+        guard !symbols.isEmpty else {
+            ivAlertConfigurationMessage = "Select at least one alert symbol."
+            return
+        }
+        sendIVAlertConfiguration(IVAlertConfigurationDTO(
+            enabled: current.enabled,
+            symbols: symbols,
+            lookbackMinutes: current.lookbackMinutes,
+            thresholdK: current.thresholdK,
+            consecutiveBreaches: current.consecutiveBreaches,
+            warmupMinutes: current.warmupMinutes,
+            warmupSamples: current.warmupSamples,
+            cooldownMinutes: current.cooldownMinutes
+        ))
+    }
+
+    func updateIVAlertConfiguration(_ configuration: IVAlertConfigurationDTO) {
+        guard Self.validIVAlertConfiguration(configuration) else {
+            ivAlertConfigurationMessage = "Enter IV alert settings within the shown limits."
+            return
+        }
+        sendIVAlertConfiguration(configuration)
+    }
+
+    private func sendIVAlertConfiguration(_ configuration: IVAlertConfigurationDTO) {
+        guard ivAlertConfiguration != nil, !isIVAlertConfigurationBusy else { return }
+        guard quoteSocket.connectionState == .connected else {
+            ivAlertConfigurationMessage = "Connect to save IV alert settings."
+            return
+        }
+        isIVAlertConfigurationBusy = true
+        ivAlertConfigurationMessage = "Saving IV alert settings…"
+        pendingIVAlertConfiguration = configuration
+        startIVAlertConfigurationSaveTimeout()
+        quoteSocket.configureIVAlerts(configuration)
+    }
+
+    private func startIVAlertConfigurationSaveTimeout() {
+        ivAlertSaveTimeoutTask?.cancel()
+        let timeout = ivAlertSaveTimeout
+        ivAlertSaveTimeoutTask = Task { [weak self] in
+            do {
+                try await Task.sleep(for: timeout)
+            } catch {
+                return
+            }
+            guard !Task.isCancelled, self?.isIVAlertConfigurationBusy == true else { return }
+            self?.finishIVAlertConfigurationSave(
+                message: "IV alert settings save timed out. Check your connection and try again."
+            )
+        }
+    }
+
+    private func finishIVAlertConfigurationSave(message: String) {
+        ivAlertSaveTimeoutTask?.cancel()
+        ivAlertSaveTimeoutTask = nil
+        pendingIVAlertConfiguration = nil
+        isIVAlertConfigurationBusy = false
+        ivAlertConfigurationMessage = message
+    }
+
+    private static func matches(
+        _ state: IVAlertConfigurationStateDTO,
+        _ requested: IVAlertConfigurationDTO
+    ) -> Bool {
+        state.enabled == requested.enabled
+            && Set(state.symbols.map(\.rawValue)) == Set(requested.symbols.map(\.rawValue))
+            && state.lookbackMinutes == requested.lookbackMinutes
+            && state.thresholdK == requested.thresholdK
+            && state.consecutiveBreaches == requested.consecutiveBreaches
+            && state.warmupMinutes == requested.warmupMinutes
+            && state.warmupSamples == requested.warmupSamples
+            && state.cooldownMinutes == requested.cooldownMinutes
+    }
+
+    private static func validIVAlertConfiguration(_ value: IVAlertConfigurationDTO) -> Bool {
+        (1...3).contains(Set(value.symbols.map(\.rawValue)).count)
+            && value.symbols.count == Set(value.symbols.map(\.rawValue)).count
+            && (5...240).contains(value.lookbackMinutes)
+            && value.thresholdK.isFinite
+            && (0.1...20).contains(value.thresholdK)
+            && (1...10).contains(value.consecutiveBreaches)
+            && (0...60).contains(value.warmupMinutes)
+            && (1...240).contains(value.warmupSamples)
+            && (0...1_440).contains(value.cooldownMinutes)
+    }
+
+    private static func validAutoScoringPreferences(_ value: AutoScoringPreferences) -> Bool {
+        let weights = [
+            value.weights.delta,
+            value.weights.spread,
+            value.weights.openInterest,
+            value.weights.gamma,
+            value.weights.iv,
+        ]
+        return (0.01...0.99).contains(value.targetAbsDelta)
+            && (0...20).contains(value.strikeRungs)
+            && (0...10_000).contains(value.maxSpreadBps)
+            && value.maxPremiumDollars > 0
+            && value.maxPremiumDollars <= 1_000_000
+            && (0...1_000_000_000).contains(value.minOpenInterest)
+            && weights.allSatisfy { $0.isFinite && (0...1).contains($0) }
+            && weights.reduce(0, +) > 0
     }
 
     /// Persists the Face ID gate, but only when biometrics are actually

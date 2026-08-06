@@ -2,9 +2,8 @@ import Foundation
 
 /// AUTO contract selection (PRD FR-15/FR-16): anchor on the ATM strike — the
 /// one nearest the underlying's last price, an exact tie resolving toward the
-/// OTM side — then walk `otmOffset` strikes OTM (up for calls, down for puts).
-/// Offset 0 trades the ATM strike itself; the default 1 keeps the classic
-/// one-strike-out behaviour. Walking off the end of the ladder yields nil.
+/// OTM side — then walk exactly one strike OTM (up for calls, down for puts).
+/// Walking off the end of the ladder yields nil.
 /// Expiration defaults to the nearest one (0DTE when available).
 /// The server re-validates this selection at submission time (FR-20) with the
 /// same ATM-anchored walk (`resolveAutoOtm`).
@@ -14,7 +13,6 @@ enum AutoContractSelector {
         optionType: OptionType,
         expiration: String? = nil,
         last: Double? = nil,
-        otmOffset: Int = 1,
         today: Date = Date()
     ) -> OptionContract? {
         let referencePrice = last ?? chain.underlyingPrice
@@ -28,7 +26,7 @@ enum AutoContractSelector {
 
         let ladder = Array(Set(candidates.map(\.strike))).sorted()
         let anchor = atmIndex(in: ladder, reference: referencePrice, optionType: optionType)
-        let target = optionType == .call ? anchor + otmOffset : anchor - otmOffset
+        let target = optionType == .call ? anchor + 1 : anchor - 1
         guard ladder.indices.contains(target) else { return nil }
         let strike = ladder[target]
         return candidates.first { $0.strike == strike }

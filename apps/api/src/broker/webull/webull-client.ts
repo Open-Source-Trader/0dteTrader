@@ -18,6 +18,7 @@ export type FetchImpl = (
     method: string;
     headers: Record<string, string>;
     body?: string;
+    signal?: AbortSignal;
   },
 ) => Promise<{
   status: number;
@@ -173,6 +174,10 @@ export class WebullClient {
       body?: Record<string, unknown>;
       headers?: Record<string, string>;
       skipAuth?: boolean;
+      /** Disable business-request retries when an external distributed limiter owns every attempt. */
+      automaticRetries?: boolean;
+      /** Cancels this business request; shared token acquisition remains reusable by other callers. */
+      signal?: AbortSignal;
     } = {},
   ): Promise<unknown> {
     const ep = EP[endpoint];
@@ -186,15 +191,21 @@ export class WebullClient {
     let serverRetried = false;
     for (;;) {
       const token = opts.skipAuth ? undefined : await this.ensureToken();
+      if (opts.signal?.aborted) throw abortedRequest();
       const { status, payload, retryAfter } = await this.send(
         ep.method,
         url,
         opts.body,
         token,
         opts.headers,
+        opts.signal,
       );
 
-      if (status === 429 && rateLimitAttempt < MAX_RATE_LIMIT_RETRIES) {
+      if (
+        opts.automaticRetries !== false &&
+        status === 429 &&
+        rateLimitAttempt < MAX_RATE_LIMIT_RETRIES
+      ) {
         const delay = retryAfter ?? this.backoffDelay(rateLimitAttempt);
         rateLimitAttempt += 1;
         this.logger.warn(
@@ -203,7 +214,7 @@ export class WebullClient {
         await this.sleep(delay);
         continue;
       }
-      if (status >= 500 && !serverRetried) {
+      if (opts.automaticRetries !== false && status >= 500 && !serverRetried) {
         serverRetried = true;
         await this.sleep(BACKOFF_BASE_MS);
         continue;
@@ -219,6 +230,7 @@ export class WebullClient {
     body: Record<string, unknown> | undefined,
     accessToken: string | undefined,
     extraHeaders?: Record<string, string>,
+    signal?: AbortSignal,
   ): Promise<{
     status: number;
     payload: unknown;
@@ -253,8 +265,13 @@ export class WebullClient {
         headers,
         // compactJson matches the bytes hashed into the signature.
         body: body !== undefined ? compactJson(body) : undefined,
+        signal,
       });
     } catch (err) {
+      if (isTimeoutError(err)) {
+        throw new BrokerError('BROKER_REQUEST_TIMEOUT', 'Webull request timed out.', 503);
+      }
+      if (signal?.aborted || isAbortError(err)) throw abortedRequest();
       throw brokerErrors.unavailable(`Webull request failed: ${(err as Error).message}`);
     }
     const payload = await res.json().catch(() => undefined);
@@ -583,10 +600,17 @@ function sanitize(message: string | undefined): string {
 /** Node 18 global fetch with a timeout. */
 async function defaultFetch(
   url: string,
-  init: { method: string; headers: Record<string, string>; body?: string },
+  init: { method: string; headers: Record<string, string>; body?: string; signal?: AbortSignal },
 ): Promise<{ status: number; headers: Headers; json(): Promise<unknown> }> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  let timedOut = false;
+  const onExternalAbort = () => controller.abort(init.signal?.reason);
+  if (init.signal?.aborted) onExternalAbort();
+  else init.signal?.addEventListener('abort', onExternalAbort, { once: true });
+  const timer = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, REQUEST_TIMEOUT_MS);
   timer.unref?.();
   try {
     const res = await fetch(url, {
@@ -595,12 +619,44 @@ async function defaultFetch(
       body: init.body,
       signal: controller.signal,
     });
+    let payload: unknown;
+    try {
+      payload = await res.json();
+    } catch (error) {
+      if (timedOut || init.signal?.aborted || isAbortError(error)) throw error;
+      payload = undefined;
+    }
     return {
       status: res.status,
       headers: res.headers,
-      json: () => res.json() as Promise<unknown>,
+      json: async () => payload,
     };
+  } catch (error) {
+    if (timedOut)
+      throw Object.assign(new Error('Webull request timed out.'), { code: 'ETIMEDOUT' });
+    if (init.signal?.aborted) throw abortedRequest();
+    throw error;
   } finally {
     clearTimeout(timer);
+    init.signal?.removeEventListener('abort', onExternalAbort);
   }
+}
+
+function isTimeoutError(error: unknown): boolean {
+  return Boolean(
+    error && typeof error === 'object' && (error as { code?: unknown }).code === 'ETIMEDOUT',
+  );
+}
+
+function isAbortError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const candidate = error as { name?: unknown; code?: unknown };
+  return candidate.name === 'AbortError' || candidate.code === 'ABORT_ERR';
+}
+
+function abortedRequest(): Error {
+  return Object.assign(new Error('Webull request was cancelled.'), {
+    name: 'AbortError',
+    code: 'ABORT_ERR',
+  });
 }

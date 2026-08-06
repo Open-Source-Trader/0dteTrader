@@ -1,0 +1,908 @@
+schema_version: 1
+template_id: codex_plan_template.v1
+title: issues-44-45-47-48
+issue: 'GitHub #44, #45, #47, #48; #46 withdrawn'
+author: Codex
+date: '2026-08-05'
+status: approved
+plan_mode: codex-plan
+plan_scope_type: new_or_modify
+paired_checking_plan: docs/plans/checking_plan_2026-08-05-issues-44-48.yaml
+runtime:
+  required_execution_skill: executing-plans
+  implementation_method: test-driven-development with sequential implementer, spec-review, and quality-review gates
+
+required_context_files_read_first:
+  purpose: Ground the coordinated shared contract, server, desktop, iOS, persistence, trading, provider, and operational changes in repository truth.
+  core_required:
+    - { path: AGENTS.md, why: Mandatory planning, delegation, quality, and cleanup rules. }
+    - { path: docs/plans/plan-template.yaml, why: Required plan schema. }
+    - { path: docs/plans/checking_plan_plan-template.yaml, why: Required live checking schema. }
+    - { path: docs/specs/2026-08-05-issues-44-48-spec.md, why: Testable source of truth. }
+    - {
+        path: docs/flow-charts/2026-08-05-issues-44-48-flow-chart.yaml,
+        why: Current and target event paths.,
+      }
+    - {
+        path: docs/logic-maps/2026-08-05-issues-44-48-logic-map.yaml,
+        why: Guarded states,
+        failures,
+        teardown,
+        and persistence.,
+      }
+  conditional_required:
+    - when: changing shared and indicator contracts
+      paths:
+        [
+          packages/shared-types/src/index.ts,
+          apps/desktop/src/features/chart,
+          apps/ios/0dteTrader/Features/Chart,
+          apps/ios/project.yml,
+        ]
+      why: Existing duplicated settings, engines, renderers, and iOS resource packaging.
+    - when: changing L2
+      paths:
+        [
+          apps/api/src/market-data,
+          apps/api/src/broker/webull,
+          apps/desktop/src/core/api/QuoteSocket.ts,
+          apps/ios/0dteTrader/Core/Networking/QuoteSocketClient.swift,
+        ]
+      why: Provider boundaries, socket lifecycle, and paired decoders.
+    - when: changing ATM IV alerts
+      paths:
+        [
+          apps/api/src/options-analytics,
+          apps/api/prisma/schema.prisma,
+          apps/desktop/src,
+          apps/ios/0dteTrader,
+        ]
+      why: Calculation, capture, persistence, websocket, and banners.
+    - when: changing scored Auto
+      paths:
+        [
+          apps/api/src/trading,
+          apps/api/src/broker/contract-resolution.ts,
+          apps/desktop/src/features/trade,
+          apps/ios/0dteTrader/Features/Trade,
+        ]
+      why: Existing Classic selector, active-broker resolution, client UI, and order validation.
+  read_order: [core_required, conditional_required]
+
+objective:
+  restated:
+    - Build one canonical indicator registry and generic cross-platform engine/rendering path with the approved indicators, unchanged TWC, two-subpane enforcement, and shared numeric parity.
+    - Add entitlement-aware, rate-safe, bounded Webull stock/ETF Level 2 with truthful unavailable states, derived microstructure indicators, complete lifecycle teardown, and operational evidence.
+    - Correct and persist exact/interpolated ATM IV, then add restart-safe per-user SPX/NDX/RUT RTH expansion/crush alerts using a pure median/MAD detector.
+    - Add explainable deterministic scored Auto selection with persisted presets, hard filters, fresh server reranking, explicit fallback acknowledgment, and mandatory confirmation.
+    - Remove obsolete flat settings, duplicated dispatch/render paths, and old Auto offset storage/UI without leaving compatibility shims or dead code.
+    - Pass strict types, lint, format, builds, migrations, complete automated tests, payload/decoder measurements, physical-iPhone Energy Log, and the GitHub #45 capability-comment gate.
+    - Treat deleted issue #46 as withdrawn and do not infer or implement missing requirements.
+
+plan_intake:
+  user_messages:
+    - {
+        timestamp_utc: '2026-08-05',
+        message: Get the most recent updates from main from Open Source Trader / 0dteTrader,
+      }
+    - { timestamp_utc: '2026-08-05', message: Approved }
+    - { timestamp_utc: '2026-08-05', message: Implement the proposed plan. }
+  agent_questions_and_user_answers:
+    - q_id: Q1
+      agent_question: Approve the proposed coordinated design and external completion gates?
+      provided_options: [approve, revise]
+      user_answer: Approved
+      impact_on_plan: Locks the canonical-registry, dedicated-L2, median-MAD, and scored-Auto architecture described in the source spec.
+  locked_assumptions_and_constraints:
+    - Issue 46 is deleted and withdrawn because GitHub returns 410 and no authoritative acceptance contract is recoverable.
+    - Webull depth is stock/ETF only, requires TotalView non-display OpenAPI entitlement, and is limited to one HTTP request per second per app key.
+    - Tradier remains Level 1.
+    - TWC is untouched.
+    - Physical-iPhone Energy Log and authenticated GitHub #45 comment are mandatory completion gates and cannot be replaced by claims or simulator evidence.
+    - Implementation occurs in the isolated worktree and preserves the user's dirty original checkout.
+
+required_skill_usage:
+  must_use:
+    [
+      using-superpowers,
+      brainstorming,
+      writing-plans,
+      executing-plans,
+      using-git-worktrees,
+      test-driven-development,
+      subagent-driven-development,
+      requesting-code-review,
+      verification-before-completion,
+      finishing-a-development-branch,
+    ]
+  skills_used:
+    - { skill: using-superpowers, why: Routes mandatory skills and workflow controls. }
+    - { skill: brainstorming, why: Produced and approved the concrete cross-platform design. }
+    - { skill: writing-plans, why: Produces linked spec flow logic plan and checking artifacts. }
+    - { skill: using-git-worktrees, why: Protects the dirty original checkout. }
+    - { skill: executing-plans, why: Executes this plan in checkpoints. }
+    - {
+        skill: test-driven-development,
+        why: Requires RED then minimal GREEN and refactor for every behavior change.,
+      }
+    - {
+        skill: subagent-driven-development,
+        why: Uses fresh implementation and review contexts without conflicting writers.,
+      }
+    - {
+        skill: verification-before-completion,
+        why: Requires fresh evidence before completion claims.,
+      }
+
+plan_and_checking_file_creation_order:
+  required: true
+  required_directory: docs/plans
+  sequence:
+    - {
+        step: 1,
+        action: create required spec flow and logic artifacts before task authoring,
+        required: true,
+      }
+    - {
+        step: 2,
+        action: create this plan,
+        path: docs/plans/2026-08-05-issues-44-48.yaml,
+        required: true,
+      }
+    - {
+        step: 3,
+        action: immediately create paired checking plan,
+        path: docs/plans/checking_plan_2026-08-05-issues-44-48.yaml,
+        required: true,
+      }
+    - {
+        step: 4,
+        action: update plan and checking plan continuously during implementation review and remediation,
+        required: true,
+      }
+
+pre_plan_artifact_requirements:
+  mandatory_before_plan_authoring: true
+  discovery:
+    scanned: [docs/specs, docs/flow-charts, docs/logic-maps]
+    existing_scope_specific_artifact_found: false
+    current_state_brief: Only prior options-analytics snapshot-suite artifacts existed; none covered issues 44, 45, 47, or 48.
+    target_state_detailed: Net-new artifacts define one coordinated registry/L2/IV-alert/Auto contract with explicit current and target flows, state transitions, failures, teardown, persistence, and validation gates.
+  artifacts:
+    - {
+        type: spec_sheet,
+        path: docs/specs/2026-08-05-issues-44-48-spec.md,
+        template: docs/specs/templates/spec-template.md,
+      }
+    - {
+        type: event_driven_flow_chart,
+        path: docs/flow-charts/2026-08-05-issues-44-48-flow-chart.yaml,
+        template: docs/flow-charts/templates/event-driven-flow-chart-template.yaml,
+      }
+    - {
+        type: event_driven_logic_map,
+        path: docs/logic-maps/2026-08-05-issues-44-48-logic-map.yaml,
+        template: docs/logic-maps/templates/event-driven-logic-map-template.yaml,
+      }
+
+request_breakdown:
+  requests:
+    - {
+        request: Implement issue 44 shared indicators end to end.,
+        purpose: This exists to eliminate client drift so that chart behavior is deterministic and extensible.,
+      }
+    - {
+        request: Implement issue 45 Level 2 end to end.,
+        purpose: This exists to expose truthful depth and microstructure so that traders never confuse unavailable data with zero.,
+      }
+    - {
+        request: Implement issue 47 ATM IV anomaly alerts end to end.,
+        purpose: This exists to detect meaningful index volatility changes so that alerts survive restarts without stale bursts.,
+      }
+    - {
+        request: Implement issue 48 scored Auto selection end to end.,
+        purpose: This exists to make automated contract choice explainable and freshly validated so that unsafe stale choices never reach a broker.,
+      }
+    - {
+        request: Document issue 46 as withdrawn.,
+        purpose: This exists to avoid inventing deleted requirements so that delivered scope stays auditable.,
+      }
+
+self_questioning_and_solution_selection:
+  required: true
+  guiding_questions:
+    - What public contracts must be identical across API, desktop, and iOS?
+    - Which calculations can be pure and fixture-driven before UI or persistence work?
+    - Where can missing or stale market data cause fabricated confidence?
+    - Which resources need hard bounds and teardown under rapid user behavior?
+    - Which server validation must remain authoritative immediately before an order?
+  brainstorm_candidate_solutions:
+    min_options: 3
+    options:
+      - option_id: O1
+        summary: Patch each client and current service independently.
+        tradeoffs:
+          {
+            pros: [small local diffs],
+            cons: [preserves drift, duplicates formulas, weak lifecycle authority],
+          }
+      - option_id: O2
+        summary: Build a new monolithic analytics and trading subsystem.
+        tradeoffs:
+          {
+            pros: [single server package],
+            cons: [high rewrite risk, mixes unrelated lifecycle domains, difficult rollback],
+          }
+      - option_id: O3
+        summary: Use shared versioned contracts and fixtures, pure domain engines, focused provider/persistence services, and thin paired-client adapters.
+        tradeoffs:
+          {
+            pros: [deterministic parity, bounded ownership, testable seams, coordinated cleanup],
+            cons: [requires coordinated breaking migration across multiple packages],
+          }
+  selected_solution:
+    option_id: O3
+    why_best: It makes the server authoritative where state and execution matter, keeps calculations pure and portable, provides honest unavailable states, and removes duplicated runtime paths without an unnecessary rewrite.
+  ambiguity_protocol:
+    if_still_ambiguous: true
+    question_strategy:
+      [
+        Stop only for a choice that changes an approved contract or needs new external authority; otherwise use repository evidence and the locked spec.,
+      ]
+
+spec_sheet:
+  source: docs/specs/2026-08-05-issues-44-48-spec.md
+  current_state: Flat drifting indicator settings, quote-only websocket transport, nearest-strike ATM IV without detector persistence, and offset-only Auto selection.
+  target_state: Shared registry and fixtures, dedicated truthful L2 lifecycle, exact/interpolated persisted ATM IV with scoped alerts, and explainable scored Auto with fresh server authority.
+  current_logic_flow: docs/flow-charts/2026-08-05-issues-44-48-flow-chart.yaml#current_flow
+  target_logic_flow: docs/flow-charts/2026-08-05-issues-44-48-flow-chart.yaml#target_flow
+  current_logic_map: docs/logic-maps/2026-08-05-issues-44-48-logic-map.yaml#artifact_discovery
+  target_logic_map: docs/logic-maps/2026-08-05-issues-44-48-logic-map.yaml#transitions
+  cleanup_and_removals: Remove replaced flat settings, manual dispatch/render branches, duplicated contract shapes, old Auto-offset stores and profile rows, obsolete comments/tests/docs, and temporary migration code only after its persisted-version contract is satisfied.
+  no_backwards_compatibility_confirmation: No runtime compatibility shim will remain; only an idempotent one-time persisted-data migration is allowed.
+
+flow_description:
+  required_format: inputs -> transformations -> outputs -> side effects
+  inputs:
+    [
+      registry and persisted settings,
+      candles and volume,
+      L1 quotes and Webull books,
+      option chains and captures,
+      user preferences,
+      active-broker quotes,
+      websocket/order events,
+    ]
+  transformations:
+    [
+      validate/migrate,
+      pure indicator geometry,
+      rate-limit/coalesce/normalize,
+      paired-strike interpolation,
+      median-MAD state machine,
+      hard-filter/normalize/rank,
+      fresh rerank,
+    ]
+  outputs:
+    [
+      paired chart geometry,
+      L2 snapshot or No L2 data,
+      scoped IV alert,
+      explained ranking,
+      accepted or rejected order,
+    ]
+  side_effects:
+    [
+      atomic settings and Prisma writes,
+      bounded timers/history,
+      provider calls,
+      websocket messages,
+      metrics/logs,
+      broker send only after fresh confirmation,
+    ]
+
+invariants:
+  preconditions:
+    [
+      schema-validated input,
+      authenticated ownership for user paths,
+      explicit NY session clock,
+      finite fresh values for calculations,
+    ]
+  postconditions:
+    [
+      desktop/iOS parity,
+      bounded lifecycle state,
+      monotonic detector state,
+      deterministic rankings,
+      explicit unavailable states,
+    ]
+  must_never_happen:
+    [
+      third subpane,
+      TWC drift,
+      L2 attributed to Tradier,
+      provider over one request per second per app key,
+      missing data rendered as zero,
+      ATM IV extrapolation,
+      cross-user alert,
+      silent fallback,
+      scored confirmation bypass,
+      stale broker order,
+    ]
+
+locked_domain_decisions:
+  indicators:
+    settings_precedence: valid current keyed record, else atomic recognized-legacy migration, else registry defaults
+    invalid_behavior: Unknown out-of-range or non-finite inputs/outputs reject the mutation and preserve the last valid state.
+  l2:
+    distributed_rate_limit: Redis atomic lease/token-bucket keyed by Webull app key; grants are at least one second apart across API replicas.
+    history_bounds: At most 23400 valid one-second prior samples in the current NY RTH session; reset on NY session change.
+    formulas: Use the exact spread percentile imbalance tick-pressure cumulative-pressure and depletion formulas/ties in the source spec.
+    lifecycle: Every active state supports last-unsubscribe disconnect terminal-failure shutdown and NY-reset cancellation; fresh state loops through the distributed limiter for each refresh.
+  iv_detector:
+    baseline: Prior samples only; current sample excluded; raw MAD without multiplier.
+    score: Signed current-minus-median over MAD clamped to [-20,20]; zero MAD maps equal to 0 and non-equal to signed 20.
+    boundaries: Expansion is score >= k, crush is score <= -k, direction changes restart streak, and timestamp exactly at cooldownUntil is eligible.
+  auto_scored:
+    conservative:
+      {
+        target_abs_delta: 0.25,
+        strike_rungs: 5,
+        max_spread_bps: 500,
+        max_premium_dollars: 250,
+        min_open_interest: 100,
+        gamma_mode: avoid,
+        weights: { delta: 0.30, spread: 0.25, open_interest: 0.20, gamma: 0.10, iv: 0.15 },
+      }
+    aggressive:
+      {
+        target_abs_delta: 0.40,
+        strike_rungs: 8,
+        max_spread_bps: 1000,
+        max_premium_dollars: 500,
+        min_open_interest: 25,
+        gamma_mode: seek,
+        weights: { delta: 0.25, spread: 0.15, open_interest: 0.15, gamma: 0.30, iv: 0.15 },
+      }
+    normalization: Higher-desirability min-max per dimension; every candidate gets 1 for a constant domain; validated weights are normalized to sum 1.
+    freshness: Broker quote age at most 5 seconds, future skew at most 2 seconds, analytics age at most 60 seconds.
+    path_split: Scored submissions rerank and require scored confirmation; acknowledged Classic fallback uses existing auto_otm plus-one validation and never enters scored reranking.
+    prisma_model: AutoScoringPreference has UUID id/user relation, schemaVersion 1, preset and all numeric/gamma/weight fields, timestamps, unique userId, cascade delete, and transactional migration; first read materializes Conservative v1.
+
+focused_brainstorming_pass_before_finalize:
+  required: true
+  scoped_code_paths:
+    [
+      packages/shared-types,
+      apps/api/src/market-data,
+      apps/api/src/options-analytics,
+      apps/api/src/trading,
+      apps/api/prisma,
+      apps/desktop/src/features/chart,
+      apps/desktop/src/features/trade,
+      apps/ios/0dteTrader/Features/Chart,
+      apps/ios/0dteTrader/Features/Trade,
+    ]
+  prompts:
+    - 'what would user behavior break?'
+    - 'what would production traffic break?'
+    - 'what would weird data break?'
+    - 'what would concurrency/time/order break?'
+  identify_and_record:
+    logical_flaws:
+      - Current ATM IV nearest-strike choice is not ATM interpolation.
+      - Client-selected Auto cannot remain authoritative at order time.
+    logical_gaps:
+      - Missing entitlement and stale books need explicit non-zero unavailable states.
+      - Restart/backfill and gap behavior need persisted detector state.
+    contract_violations:
+      - Desktop and iOS indicator settings/formulas drift and current public selection mode lacks auto_scored.
+      - Websocket contract currently has no L2 or IV configuration/alert messages.
+    risk_hotspots:
+      [
+        provider global rate and teardown,
+        cross-language numeric parity,
+        New York clock boundaries,
+        Prisma uniqueness/atomicity,
+        active-broker freshness,
+        confirmation bypass,
+      ]
+  risk_conversion:
+    - {
+        risk: provider overload or leak,
+        change: global limiter coalescing bounds lifecycle metrics and fake-clock tests,
+      }
+    - {
+        risk: calculation drift,
+        change: pure engines and shared golden fixtures across TypeScript and Swift,
+      }
+    - {
+        risk: stale/duplicate alert,
+        change: monotonic persisted state gap reset cooldown and restart tests,
+      }
+    - {
+        risk: unsafe contract,
+        change: hard filters explanation explicit confirmation and server fresh rerank e2e,
+      }
+
+engineering_standards:
+  principles: [DRY, SOLID, KISS, YAGNI, modular_architecture]
+  strict_typing: true
+  mandates:
+    [
+      Use RED-GREEN-refactor for every behavior change.,
+      Keep formatting consistent.,
+      Check warnings logical flaws gaps and cleanup after every task.,
+      Do not leave backwards compatibility layers.,
+      Do not leave dead code.,
+      Use fresh spec and quality review after each implementation task.,
+    ]
+
+ui_ux_requirements:
+  idiot_proof: true
+  requirements:
+    [
+      Use the same third-pane error on both clients.,
+      Say No L2 data and why instead of showing zero.,
+      Make alert banners dismissible and nonblocking.,
+      Show ranking rationale runners-up and no-pass warnings.,
+      Require visible fallback acknowledgment and scored-Auto confirmation.,
+    ]
+
+implementation_tasks:
+  - id: T0
+    title: Planning artifacts and baseline
+    files:
+      [
+        docs/specs/2026-08-05-issues-44-48-spec.md,
+        docs/flow-charts/2026-08-05-issues-44-48-flow-chart.yaml,
+        docs/logic-maps/2026-08-05-issues-44-48-logic-map.yaml,
+        docs/plans/2026-08-05-issues-44-48.yaml,
+        docs/plans/checking_plan_2026-08-05-issues-44-48.yaml,
+      ]
+    tdd_steps:
+      [
+        Build shared-types before root tests.,
+        Record baseline results and warnings.,
+        Parse YAML and cross-link artifacts.,
+      ]
+    commands:
+      - npm run build --workspace packages/shared-types
+      - npm test
+      - >-
+        ruby -e "require 'yaml'; ARGV.each { |p| YAML.load_file(p) }"
+        docs/flow-charts/2026-08-05-issues-44-48-flow-chart.yaml
+        docs/logic-maps/2026-08-05-issues-44-48-logic-map.yaml
+        docs/plans/2026-08-05-issues-44-48.yaml
+        docs/plans/checking_plan_2026-08-05-issues-44-48.yaml
+    acceptance: Artifacts cross-link and parse; baseline evidence is in the checking plan.
+  - id: T1
+    title: Shared contracts registry and golden fixtures
+    files:
+      [
+        packages/shared-types/src/index.ts,
+        packages/shared-types/indicator-registry.json,
+        packages/shared-types/fixtures/indicator-parity-v1.json,
+        packages/shared-types/fixtures/auto-scoring-v1.json,
+        packages/shared-types/package.json,
+      ]
+    tests:
+      [
+        packages/shared-types/test/contracts.test.mjs using the Node built-in test runner,
+        shared fixture schema tests,
+      ]
+    tdd_steps:
+      [
+        Write failing schema/public-contract/fixture tests.,
+        Verify RED.,
+        Add discriminated indicator/order-book/IV/Auto contracts and registry.,
+        Verify GREEN and refactor.,
+      ]
+    commands:
+      [
+        npm run build --workspace packages/shared-types,
+        npm run test --workspace packages/shared-types,
+      ]
+    acceptance: Registry and fixtures validate; public types compile without obsolete-only shapes.
+  - id: T2
+    title: Desktop and iOS generic indicator engines settings migration and renderers
+    files:
+      [
+        apps/desktop/src/features/chart/indicatorSettings.ts,
+        apps/desktop/src/features/chart/indicatorEngine.ts,
+        apps/desktop/src/features/chart/IndicatorSettingsView.tsx,
+        apps/desktop/src/features/chart/IndicatorSettingsDesktop.tsx,
+        apps/desktop/src/features/chart/IndicatorPane.tsx,
+        apps/desktop/src/features/chart/ChartStore.ts,
+        apps/desktop/src/features/chart/ChartView.tsx,
+        apps/ios/project.yml,
+        apps/ios/0dteTrader/Features/Chart/IndicatorSettings.swift,
+        apps/ios/0dteTrader/Features/Chart/IndicatorEngine.swift,
+        apps/ios/0dteTrader/Features/Chart/IndicatorSettingsView.swift,
+        apps/ios/0dteTrader/Features/Chart/IndicatorPaneRepresentable.swift,
+        apps/ios/0dteTrader/Features/Chart/ChartViewModel.swift,
+        apps/ios/0dteTrader/Features/Chart/ChartView.swift,
+      ]
+    tests:
+      [
+        apps/desktop/src/features/chart/indicatorEngine.test.ts,
+        apps/desktop/src/features/chart/IndicatorSettingsView.test.tsx,
+        apps/desktop/src/features/chart/ChartStore.test.ts,
+        apps/ios/0dteTraderTests/IndicatorEngineTests.swift,
+        new iOS registry/settings/render tests,
+      ]
+    tdd_steps:
+      [
+        Add RED vectors for every new indicator geometry migration and pane-limit parity.,
+        Implement generic descriptor dispatch/control/rendering and resource decode.,
+        Verify fixture tolerance at 1e-6 and TWC regression.,
+        Delete flat/manual/per-indicator paths and verify residues.,
+      ]
+    commands:
+      [
+        npm run test --workspace apps/desktop -- indicatorEngine IndicatorSettingsView ChartStore,
+        npm run build --workspace apps/desktop,
+        bash apps/ios/scripts/generate-env.sh,
+        xcodegen --spec apps/ios/project.yml,
+        xcodebuild test -project apps/ios/0dteTrader.xcodeproj -scheme 0dteTrader -destination "platform=iOS Simulator,
+        id=2E528611-E27C-4D08-B483-8E1872A850E8" CODE_SIGNING_ALLOWED=NO,
+      ]
+    acceptance: All approved indicators render through generic geometry, both clients enforce two panes, TWC tests are unchanged, fixture parity is at most 1e-6.
+  - id: T3
+    title: L2 provider contract gateway lifecycle and pure indicators
+    files:
+      [
+        apps/api/src/market-data/order-book.provider.ts,
+        apps/api/src/market-data/order-book.service.ts,
+        apps/api/src/market-data/order-book-indicators.ts,
+        apps/api/src/market-data/stream.gateway.ts,
+        apps/api/src/market-data/stream.gateway.spec.ts,
+        apps/api/src/broker/webull,
+        apps/api/src/broker/broker.gateway.ts,
+        apps/api/src/redis/redis.service.ts,
+      ]
+    tests: [new provider/service/indicator specs, apps/api/src/market-data/stream.gateway.spec.ts]
+    tdd_steps:
+      [
+        Add RED payload/capability/distributed-rate/coalescing/bounds/stale/day-reset/every-active-state-teardown/repeat-refresh/golden-formula tests with fake clocks.,
+        Implement dedicated Webull-only depth seam and Redis-backed one-per-second app-key limiter.,
+        Implement bounded session state exact source-spec formulas and explicit unavailable results.,
+        Verify GREEN multi-instance rate safety and leak-free lifecycle metrics.,
+      ]
+    commands:
+      [
+        npm run test --workspace apps/api -- --runInBand market-data,
+        npm run lint --workspace apps/api,
+        npm run build --workspace apps/api,
+      ]
+    acceptance: No rate violation or resource leak; unsupported/unentitled/stale data is explicit; all indicators are deterministic.
+  - id: T4
+    title: L2 desktop and iOS decoding presentation and performance evidence
+    files:
+      [
+        apps/desktop/src/core/api/QuoteSocket.ts,
+        apps/desktop/src/core/api/QuoteSocket.test.ts,
+        apps/desktop/src/features/chart/ChartStore.ts,
+        apps/desktop/src/features/chart/ChartView.tsx,
+        apps/ios/0dteTrader/Core/Networking/QuoteSocketClient.swift,
+        apps/ios/0dteTrader/Features/Chart/ChartViewModel.swift,
+        apps/ios/0dteTrader/Features/Chart/ChartView.swift,
+        docs/RUNBOOK.md,
+      ]
+    tests:
+      [paired socket decoder/store/presentation tests, payload benchmark, Swift decoder benchmark]
+    tdd_steps:
+      [
+        Add RED subscribe/unsubscribe/stale/No-L2/payload decoder cases.,
+        Implement independent L2 client state and truthful UI.,
+        Measure capped payload bytes and decoder time automatically.,
+        Run and record 15-minute physical-iPhone Energy Log before completion.,
+      ]
+    commands:
+      [
+        npm run test --workspace apps/desktop -- QuoteSocket ChartStore ChartView,
+        bash apps/ios/scripts/generate-env.sh,
+        xcodegen --spec apps/ios/project.yml,
+        xcodebuild test -project apps/ios/0dteTrader.xcodeproj -scheme 0dteTrader -destination "platform=iOS Simulator,
+        id=2E528611-E27C-4D08-B483-8E1872A850E8" CODE_SIGNING_ALLOWED=NO,
+        swiftlint lint --strict --config apps/ios/.swiftlint.yml,
+      ]
+    acceptance: Paired clients show data or No L2 data consistently; automated measurements pass; physical Energy Log artifact exists.
+  - id: T5
+    title: ATM IV interpolation snapshot migration and detector
+    files:
+      [
+        apps/api/src/options-analytics/options-analytics.engine.ts,
+        apps/api/src/options-analytics/options-analytics.engine.spec.ts,
+        apps/api/src/options-analytics/options-analytics.capture.ts,
+        apps/api/src/options-analytics/options-analytics.capture.spec.ts,
+        apps/api/src/options-analytics/iv-alert.detector.ts,
+        apps/api/src/options-analytics/iv-alert.service.ts,
+        apps/api/prisma/schema.prisma,
+        apps/api/prisma/migrations,
+      ]
+    tests:
+      [
+        engine exact/interpolation failures,
+        detector fake-clock golden tests,
+        capture restart/isolation/migration tests,
+      ]
+    tdd_steps:
+      [
+        Add RED exact/bracket/missing-leg/no-extrapolation tests.,
+        Implement pair averaging and linear interpolation and bump version.,
+        Add RED prior-only raw-MAD/signed-threshold/zero-MAD/direction/cooldown-boundary/banner-median/RTH/warmup/streak/gap/restart/user-symbol tests.,
+        Add Prisma migration and atomic service then verify GREEN.,
+      ]
+    commands:
+      [
+        'npm run db:generate --workspace apps/api',
+        'npx prisma validate --schema apps/api/prisma/schema.prisma',
+        'npm run test --workspace apps/api -- --runInBand options-analytics',
+      ]
+    acceptance: atmIv is nullable/indexed and correct; detector is finite restart-safe and isolated across SPX NDX RUT users.
+  - id: T6
+    title: IV websocket configuration alerts and paired banners
+    files:
+      [
+        apps/api/src/market-data/stream.gateway.ts,
+        apps/api/src/options-analytics/options-analytics.module.ts,
+        apps/desktop/src/core/api/QuoteSocket.ts,
+        apps/desktop/src/features/chart/ChartView.tsx,
+        apps/desktop/src/core/storage/SettingsStore.ts,
+        apps/ios/0dteTrader/Core/Networking/QuoteSocketClient.swift,
+        apps/ios/0dteTrader/Features/Chart/ChartView.swift,
+        apps/ios/0dteTrader/Core/Storage/SettingsStore.swift,
+      ]
+    tests:
+      [
+        gateway authorization/config/delivery tests,
+        desktop banner tests,
+        iOS banner/accessibility tests,
+      ]
+    tdd_steps:
+      [
+        Add RED configure persistence authorization and user-isolation tests.,
+        Implement ivAlertConfigure and scoped ivAlert.,
+        Add RED paired banner dismissal/nonblocking/accessibility tests.,
+        Implement and verify GREEN.,
+      ]
+    commands:
+      [
+        npm run test --workspace apps/api -- --runInBand stream.gateway iv-alert,
+        npm run test --workspace apps/desktop -- QuoteSocket ChartView,
+        bash apps/ios/scripts/generate-env.sh,
+        xcodegen --spec apps/ios/project.yml,
+        xcodebuild test -project apps/ios/0dteTrader.xcodeproj -scheme 0dteTrader -destination "platform=iOS Simulator,
+        id=2E528611-E27C-4D08-B483-8E1872A850E8" CODE_SIGNING_ALLOWED=NO,
+      ]
+    acceptance: Preferences persist server-side and alerts never cross users; both clients show accessible dismissible banners.
+  - id: T7
+    title: Pure scored Auto engine candidates and persisted preferences
+    files:
+      [
+        packages/shared-types/src/index.ts,
+        packages/shared-types/fixtures/auto-scoring-v1.json,
+        apps/api/src/trading/auto-contract-scorer.ts,
+        apps/api/src/trading/auto-candidates.service.ts,
+        apps/api/src/trading/trading.controller.ts,
+        apps/api/src/trading/trading.module.ts,
+        apps/api/prisma/schema.prisma,
+        apps/api/prisma/migrations,
+        apps/desktop/src/features/trade/autoContractSelector.ts,
+        apps/ios/0dteTrader/Features/Trade/AutoContractSelector.swift,
+      ]
+    tests:
+      [
+        API scorer/candidate/auth/preference-stale-write-conflict specs,
+        apps/desktop/src/features/trade/autoContractSelector.test.ts,
+        apps/ios/0dteTraderTests/AutoContractSelectorTests.swift,
+      ]
+    tdd_steps:
+      [
+        Add RED shared golden and property vectors for numeric presets weighted formulas direction constant-domain normalization IV median quote/analytics freshness and ties.,
+        Implement canonical pure scorer in all three runtimes.,
+        Add RED AutoScoringPreference v1 schema unique-user first-read migration authenticated merge and expectedUpdatedAt optimistic-concurrency conflict tests.,
+        Implement candidate service and Prisma preferences with HTTP 409 on stale writes then verify GREEN.,
+      ]
+    commands:
+      [
+        'npm run test --workspace apps/api -- --runInBand auto-contract',
+        'npm run test --workspace apps/desktop -- autoContractSelector',
+        'bash apps/ios/scripts/generate-env.sh',
+        'xcodegen --spec apps/ios/project.yml',
+        'xcodebuild test -project apps/ios/0dteTrader.xcodeproj -scheme 0dteTrader -destination "platform=iOS Simulator,id=2E528611-E27C-4D08-B483-8E1872A850E8" -only-testing:0dteTraderTests/AutoContractSelectorTests CODE_SIGNING_ALLOWED=NO',
+      ]
+    acceptance: API desktop and Swift ranks/exclusions/rationale match full-precision fixture exactly; missing required data never scores.
+  - id: T8
+    title: Scored Auto UI fallback confirmation and authoritative order revalidation
+    files:
+      [
+        apps/api/src/trading/dto/order-request.dto.ts,
+        apps/api/src/trading/trading.service.ts,
+        apps/api/src/trading/trading.service.spec.ts,
+        apps/api/src/broker/contract-resolution.ts,
+        apps/desktop/src/features/trade/ChainStore.ts,
+        apps/desktop/src/features/trade/TradeStore.ts,
+        apps/desktop/src/features/trade/TradePanel.tsx,
+        apps/desktop/src/features/profile/ProfileView.tsx,
+        apps/desktop/src/core/storage/SettingsStore.ts,
+        apps/ios/0dteTrader/Features/Trade/OptionsChainViewModel.swift,
+        apps/ios/0dteTrader/Features/Trade/TradeViewModel.swift,
+        apps/ios/0dteTrader/Features/Trade/TradePanelView.swift,
+        apps/ios/0dteTrader/Features/Profile/ProfileView+Preferences.swift,
+        apps/ios/0dteTrader/Core/Storage/SettingsStore.swift,
+      ]
+    tests:
+      [
+        DTO and trading rerank race tests,
+        desktop ChainStore/TradeStore/TradePanel/settings tests,
+        iOS view-model/UI tests,
+      ]
+    tdd_steps:
+      [
+        Add RED mode/DTO/rationale/no-pass/acknowledgment/scored-confirmation/fresh-rerank and separate-Classic-path tests.,
+        Implement scored UI and server revalidation while preserving Classic behavior outside the scorer.,
+        Delete standalone offset storage/profile UI and stale comments.,
+        Verify no silent fallback bypass or broker send on changed selection.,
+      ]
+    commands:
+      [
+        npm run test --workspace apps/api -- --runInBand trading,
+        npm run test --workspace apps/desktop -- ChainStore TradeStore TradePanel SettingsStore,
+        bash apps/ios/scripts/generate-env.sh,
+        xcodegen --spec apps/ios/project.yml,
+        xcodebuild test -project apps/ios/0dteTrader.xcodeproj -scheme 0dteTrader -destination "platform=iOS Simulator,
+        id=2E528611-E27C-4D08-B483-8E1872A850E8" CODE_SIGNING_ALLOWED=NO,
+      ]
+    acceptance: Explanations and runners-up are visible; no-pass is honest; fallback and scored orders require the correct acknowledgments; server rejects stale/changed rankings.
+  - id: T9
+    title: Documentation capability evidence cleanup and full verification
+    files:
+      [
+        docs/openapi.yaml,
+        docs/API-SPEC.md,
+        docs/ARCHITECTURE.md,
+        docs/RUNBOOK.md,
+        docs/ROADMAP.md,
+        docs/SECURITY.md,
+        docs/legal/privacy.md,
+        all changed code/tests,
+        this plan,
+        paired checking plan,
+      ]
+    tests:
+      [
+        residue scans,
+        full automated suites,
+        independent spec review,
+        independent code-quality review,
+        physical-device evidence,
+        GitHub issue comment,
+      ]
+    tdd_steps:
+      - Update source-of-truth docs and operational thresholds.
+      - Run strict full verification and remediate every finding.
+      - Prove old flat/manual/offset code is removed.
+      - 'Post verified provider capability result to #45 with auth and attach physical Energy Log evidence.'
+    commands:
+      [
+        'npm run db:generate --workspace apps/api',
+        'npx prisma validate --schema apps/api/prisma/schema.prisma',
+        'npm run build',
+        'npm run lint',
+        'npm run test',
+        'npm run format:check',
+        'swiftlint lint --strict --config apps/ios/.swiftlint.yml',
+        'bash apps/ios/scripts/generate-env.sh',
+        'xcodegen --spec apps/ios/project.yml',
+        'xcodebuild test -project apps/ios/0dteTrader.xcodeproj -scheme 0dteTrader -destination "platform=iOS Simulator,id=2E528611-E27C-4D08-B483-8E1872A850E8" CODE_SIGNING_ALLOWED=NO',
+        'git diff --check',
+      ]
+    acceptance: No open P0/P1 or obsolete path; all checks pass or baseline warnings are explicitly unchanged; device and GitHub gates have links.
+
+task_checklist:
+  update_every_message: true
+  items:
+    - { id: T0, status: completed }
+    - { id: T1, status: completed }
+    - { id: T2, status: in_progress }
+    - { id: T3, status: in_progress }
+    - { id: T4, status: pending }
+    - { id: T5, status: pending }
+    - { id: T6, status: pending }
+    - { id: T7, status: pending }
+    - { id: T8, status: pending }
+    - { id: T9, status: pending }
+
+task_tracker:
+  update_every_message: true
+  current_phase: T2-desktop-ios-generic-indicators-RED and T3-api-L2-RED in parallel
+  next_checkpoint: Capture failing desktop iOS registry/migration/parity/render tests and failing API provider/lifecycle/indicator tests before production changes, then bring each independent slice to GREEN and review.
+
+acceptance_criteria:
+  - {
+      id: AC-1,
+      criterion: Every REQ in the source spec has automated or explicit manual evidence in the paired checking plan.,
+    }
+  - {
+      id: AC-2,
+      criterion: Shared indicator and Auto fixtures pass API desktop and Swift parity gates; indicator tolerance is at most 1e-6.,
+    }
+  - {
+      id: AC-3,
+      criterion: L2 rate lifecycle session bounds staleness unavailable state metrics and teardown tests pass with no leak.,
+    }
+  - {
+      id: AC-4,
+      criterion: ATM IV interpolation detector restart user isolation and RTH behavior pass migration-backed tests.,
+    }
+  - {
+      id: AC-5,
+      criterion: Scored Auto explanation fallback confirmation and fresh server rerank prevent invalid broker sends while Classic remains unchanged.,
+    }
+  - {
+      id: AC-6,
+      criterion: Full strict TypeScript Prisma desktop iOS lint format build test and residue checks pass with warnings accounted for.,
+    }
+  - {
+      id: AC-7,
+      criterion: 'Automated payload/decoder measurements, 15-minute physical-iPhone Energy Log, and authenticated GitHub #45 capability comment URL are recorded.',
+    }
+
+verification_plan:
+  run_after_meaningful_changes:
+    lint: npm run lint
+    typecheck: npm run build
+    relevant_tests: Run exact task-focused Jest Vitest or xcodebuild target fresh.
+    format: npm run format:check and git diff --check
+    database: npm run db:generate --workspace apps/api and npx prisma validate --schema apps/api/prisma/schema.prisma
+  final_commands:
+    [
+      'npm run build',
+      'npm run lint',
+      'npm run test',
+      'npm run format:check',
+      'swiftlint lint --strict --config apps/ios/.swiftlint.yml',
+      'bash apps/ios/scripts/generate-env.sh',
+      'xcodegen --spec apps/ios/project.yml',
+      'xcodebuild test -project apps/ios/0dteTrader.xcodeproj -scheme 0dteTrader -destination "platform=iOS Simulator,id=2E528611-E27C-4D08-B483-8E1872A850E8" CODE_SIGNING_ALLOWED=NO',
+      'git diff --check',
+    ]
+  manual_external_gates:
+    [
+      15-minute physical-iPhone Instruments Energy Log,
+      authenticated GitHub issue 45 capability comment,
+      production entitlement probe result,
+    ]
+
+paired_checking_plan_requirements:
+  file_path: docs/plans/checking_plan_2026-08-05-issues-44-48.yaml
+  base_template: docs/plans/checking_plan_plan-template.yaml
+  must_create_immediately_after_plan_creation: true
+  must_update_as_plan_changes: true
+  block_completion_on:
+    [
+      unresolved P0 or P1,
+      failed required test,
+      missing cleanup,
+      missing physical-device evidence,
+      missing GitHub capability comment,
+    ]
+  must_fill:
+    [
+      baseline,
+      live progress,
+      live findings,
+      recommendations,
+      paired-plan parts inventory,
+      coverage matrix,
+      post-listing remediation log,
+      artifact lineage,
+      final evidence,
+    ]
+
+pr_references:
+  plan_line: 'Plan: docs/plans/2026-08-05-issues-44-48.yaml'
+  checking_plan_line: 'CheckingPlan: docs/plans/checking_plan_2026-08-05-issues-44-48.yaml'

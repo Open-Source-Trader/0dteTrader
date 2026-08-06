@@ -109,6 +109,9 @@ export class InMemoryPrismaService {
   readonly discordSettingsRows: any[] = [];
   readonly discordDeliveries: any[] = [];
   readonly legalAcceptances: any[] = [];
+  readonly ivAlertPreferences: any[] = [];
+  readonly ivAlertDetectorStates: any[] = [];
+  readonly autoScoringPreferences: any[] = [];
 
   private tradeOrderConflict(data: any, except?: any): boolean {
     return this.tradeOrders.some((row) => {
@@ -466,6 +469,7 @@ export class InMemoryPrismaService {
       const row = {
         id: randomUUID(),
         createdAt: new Date(),
+        detectorProcessedAt: null,
         ...data,
       };
       this.optionsAnalyticsSnapshots.push(row);
@@ -479,6 +483,17 @@ export class InMemoryPrismaService {
         rows.sort((a, b) => b.bucket.getTime() - a.bucket.getTime());
       }
       return take === undefined ? rows : rows.slice(0, take);
+    },
+    findFirst: async ({ where }: any = {}) =>
+      this.optionsAnalyticsSnapshots.find((row) => matches(row, where)) ?? null,
+    updateMany: async ({ where, data }: any) => {
+      let count = 0;
+      for (const row of this.optionsAnalyticsSnapshots) {
+        if (!matches(row, where)) continue;
+        Object.assign(row, definedOnly(data));
+        count += 1;
+      }
+      return { count };
     },
     deleteMany: async ({ where }: any = {}) => {
       let count = 0;
@@ -1066,6 +1081,97 @@ export class InMemoryPrismaService {
     },
   };
 
+  readonly ivAlertPreference = {
+    findUnique: async ({ where }: any) =>
+      this.ivAlertPreferences.find((row) => row.userId === where.userId) ?? null,
+    findMany: async ({ where }: any = {}) =>
+      this.ivAlertPreferences.filter((row) => matches(row, where)),
+    upsert: async ({ where, create, update }: any) => {
+      const existing = this.ivAlertPreferences.find((row) => row.userId === where.userId);
+      if (existing) {
+        const values = definedOnly(update);
+        Object.assign(existing, values, { updatedAt: values.updatedAt ?? new Date() });
+        return existing;
+      }
+      const now = new Date();
+      const row = {
+        id: randomUUID(),
+        schemaVersion: 1,
+        enabled: false,
+        createdAt: now,
+        updatedAt: now,
+        ...create,
+      };
+      this.ivAlertPreferences.push(row);
+      return row;
+    },
+  };
+
+  readonly ivAlertDetectorState = {
+    findUnique: async ({ where }: any) => {
+      const key = where.userId_symbol;
+      return (
+        this.ivAlertDetectorStates.find(
+          (row) => row.userId === key.userId && row.symbol === key.symbol,
+        ) ?? null
+      );
+    },
+    create: async ({ data }: any) => {
+      if (
+        this.ivAlertDetectorStates.some(
+          (row) => row.userId === data.userId && row.symbol === data.symbol,
+        )
+      ) {
+        throw p2002('userId, symbol');
+      }
+      const now = new Date();
+      const row = {
+        id: randomUUID(),
+        streakCount: 0,
+        version: 0,
+        createdAt: now,
+        updatedAt: now,
+        ...data,
+      };
+      this.ivAlertDetectorStates.push(row);
+      return row;
+    },
+    update: async ({ where, data }: any) => {
+      const row = this.ivAlertDetectorStates.find((candidate) => candidate.id === where.id);
+      if (!row) throw Object.assign(new Error('Record not found'), { code: 'P2025' });
+      Object.assign(row, definedOnly(data), { updatedAt: new Date() });
+      return row;
+    },
+    deleteMany: async ({ where }: any = {}) => {
+      const keep = this.ivAlertDetectorStates.filter((row) => !matches(row, where));
+      const count = this.ivAlertDetectorStates.length - keep.length;
+      this.ivAlertDetectorStates.length = 0;
+      this.ivAlertDetectorStates.push(...keep);
+      return { count };
+    },
+  };
+
+  readonly autoScoringPreference = {
+    findUnique: async ({ where }: any) =>
+      this.autoScoringPreferences.find((row) => row.userId === where.userId) ?? null,
+    create: async ({ data }: any) => {
+      if (this.autoScoringPreferences.some((row) => row.userId === data.userId)) {
+        throw p2002('userId');
+      }
+      const now = new Date();
+      const row = { id: randomUUID(), createdAt: now, updatedAt: now, ...data };
+      this.autoScoringPreferences.push(row);
+      return row;
+    },
+    updateMany: async ({ where, data }: any) => {
+      const rows = this.autoScoringPreferences.filter((row) => matches(row, where));
+      rows.forEach((row) =>
+        Object.assign(row, definedOnly(data), { updatedAt: data.updatedAt ?? new Date() }),
+      );
+      return { count: rows.length };
+    },
+  };
+
   readonly discordDelivery = {
     findFirst: async ({ where }: any = {}) =>
       this.discordDeliveries.find((row) => matches(row, where)) ?? null,
@@ -1181,6 +1287,9 @@ export class InMemoryPrismaService {
       this.discordSettingsRows,
       this.discordDeliveries,
       this.legalAcceptances,
+      this.ivAlertPreferences,
+      this.ivAlertDetectorStates,
+      this.autoScoringPreferences,
     ];
   }
 

@@ -78,6 +78,7 @@ struct ProfileView: View {
                 if viewModel.me == nil {
                     await viewModel.load()
                 }
+                await viewModel.loadAutoScoringPreference()
                 if viewModel.tradingProvider == .snaptrade {
                     await viewModel.loadSnapTradeConnections()
                 }

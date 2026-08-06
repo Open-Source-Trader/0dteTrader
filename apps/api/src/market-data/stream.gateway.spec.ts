@@ -7,6 +7,14 @@ import { InMemoryPrismaService } from '../../test/in-memory-prisma.service';
 import { CryptoDataService } from './crypto-data.service';
 import { IndexDataService } from './index-data.service';
 import { StreamGateway } from './stream.gateway';
+import { OrderBookService } from './order-book.service';
+
+const orderBooks = {
+  subscribe: jest.fn(),
+  unsubscribe: jest.fn(),
+  disconnect: jest.fn(),
+  destroy: jest.fn(),
+} as unknown as OrderBookService;
 
 function fakeSocket(): { readyState: number; send: jest.Mock; close: jest.Mock } {
   return { readyState: WebSocket.OPEN, send: jest.fn(), close: jest.fn() };
@@ -68,6 +76,7 @@ describe('StreamGateway.tickSymbol', () => {
         latestSequence,
         pollOnce,
       } as unknown as EventTransportService,
+      orderBooks,
     );
   });
 
@@ -348,6 +357,7 @@ describe('StreamGateway.tickSymbol', () => {
       {} as never,
       {} as never,
       receiver,
+      orderBooks,
     );
     const internals = actualGateway as unknown as {
       clients: Map<

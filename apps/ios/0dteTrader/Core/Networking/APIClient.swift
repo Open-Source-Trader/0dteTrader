@@ -251,6 +251,22 @@ struct APIClient: @unchecked Sendable {
         }
     }
 
+    func autoScoringPreferences() async throws -> AutoScoringPreferenceRecord {
+        try await request(Endpoint(method: .get, path: "v1/auto-scoring/preferences"))
+    }
+
+    func updateAutoScoringPreferences(
+        _ update: AutoScoringPreferenceUpdate
+    ) async throws -> AutoScoringPreferenceRecord {
+        let endpoint = Endpoint(method: .put, path: "v1/auto-scoring/preferences")
+        return try await request(endpoint, body: encode(update))
+    }
+
+    func rankAutoContracts(_ rankRequest: AutoScoringRankRequest) async throws -> AutoScoringResult {
+        let endpoint = Endpoint(method: .post, path: "v1/auto-scoring/rank")
+        return try await request(endpoint, body: encode(rankRequest))
+    }
+
     func orderHistory() async throws -> TradeHistoryDTO {
         try await request(Endpoint(method: .get, path: "v1/orders/history"))
     }

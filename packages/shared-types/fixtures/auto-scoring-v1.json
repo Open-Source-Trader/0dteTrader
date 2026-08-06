@@ -1,0 +1,973 @@
+{
+  "schemaVersion": 1,
+  "tolerance": 0.000001,
+  "generatedAt": "2026-08-05T15:00:04.000Z",
+  "cases": [
+    {
+      "id": "weighted-ranking",
+      "serverTime": "2026-08-05T15:00:04.000Z",
+      "request": {
+        "underlying": "SPX",
+        "expiration": "2026-08-05",
+        "optionType": "call",
+        "spot": 6002,
+        "classicFallbackAcknowledged": false
+      },
+      "preferences": {
+        "schemaVersion": 1,
+        "preset": "conservative",
+        "targetAbsDelta": 0.25,
+        "strikeRungs": 5,
+        "maxSpreadBps": 500,
+        "maxPremiumDollars": 250,
+        "minOpenInterest": 100,
+        "gammaMode": "avoid",
+        "weights": { "delta": 0.3, "spread": 0.25, "openInterest": 0.2, "gamma": 0.1, "iv": 0.15 }
+      },
+      "candidates": [
+        {
+          "symbol": "SPXW260805C06000000",
+          "underlying": "SPX",
+          "expiration": "2026-08-05",
+          "optionType": "call",
+          "strike": 6000,
+          "bid": 2,
+          "ask": 2.1,
+          "providerMid": 999,
+          "delta": 0.25,
+          "gamma": 0.01,
+          "impliedVolatility": 0.2,
+          "openInterest": 100,
+          "quoteProvider": "webull",
+          "quoteTimestamp": "2026-08-05T15:00:00.000Z",
+          "analyticsTimestamp": "2026-08-05T14:59:30.000Z"
+        },
+        {
+          "symbol": "SPXW260805C06005000",
+          "underlying": "SPX",
+          "expiration": "2026-08-05",
+          "optionType": "call",
+          "strike": 6005,
+          "bid": 2,
+          "ask": 2.08,
+          "providerMid": 0.01,
+          "delta": 0.3,
+          "gamma": 0.02,
+          "impliedVolatility": 0.25,
+          "openInterest": 200,
+          "quoteProvider": "webull",
+          "quoteTimestamp": "2026-08-05T15:00:00.000Z",
+          "analyticsTimestamp": "2026-08-05T14:59:30.000Z"
+        },
+        {
+          "symbol": "SPXW260805C06010000",
+          "underlying": "SPX",
+          "expiration": "2026-08-05",
+          "optionType": "call",
+          "strike": 6010,
+          "bid": 2,
+          "ask": 2.2,
+          "delta": 0.25,
+          "gamma": 0.01,
+          "impliedVolatility": 0.2,
+          "openInterest": 500,
+          "quoteProvider": "webull",
+          "quoteTimestamp": "2026-08-05T15:00:00.000Z",
+          "analyticsTimestamp": "2026-08-05T14:59:30.000Z"
+        },
+        {
+          "symbol": "SPXW260805C06015000",
+          "underlying": "SPX",
+          "expiration": "2026-08-05",
+          "optionType": "call",
+          "strike": 6015,
+          "bid": 2,
+          "ask": 2.05,
+          "delta": 0.25,
+          "gamma": null,
+          "impliedVolatility": 0.2,
+          "openInterest": 500,
+          "quoteProvider": "webull",
+          "quoteTimestamp": "2026-08-05T15:00:00.000Z",
+          "analyticsTimestamp": "2026-08-05T14:59:30.000Z"
+        },
+        {
+          "symbol": "SPXW260805C06020000",
+          "underlying": "SPX",
+          "expiration": "2026-08-05",
+          "optionType": "call",
+          "strike": 6020,
+          "bid": 2,
+          "ask": 2.05,
+          "delta": 0.25,
+          "gamma": 0.01,
+          "impliedVolatility": 0.2,
+          "openInterest": 500,
+          "quoteProvider": "webull",
+          "quoteTimestamp": "2026-08-05T14:59:50.000Z",
+          "analyticsTimestamp": "2026-08-05T14:59:30.000Z"
+        }
+      ],
+      "expected": {
+        "rankings": [
+          {
+            "rank": 1,
+            "symbol": "SPXW260805C06000000",
+            "score": 0.55,
+            "summary": "Closest to target delta with lower gamma and IV.",
+            "mid": 2.05,
+            "spreadBps": 487.80487804878055,
+            "premiumDollars": 204.99999999999997,
+            "atmDistance": 2,
+            "normalized": { "delta": 1, "spread": 0, "openInterest": 0, "gamma": 1, "iv": 1 },
+            "weighted": { "delta": 0.3, "spread": 0, "openInterest": 0, "gamma": 0.1, "iv": 0.15 }
+          },
+          {
+            "rank": 2,
+            "symbol": "SPXW260805C06005000",
+            "score": 0.45,
+            "summary": "Narrower spread and higher open interest.",
+            "mid": 2.04,
+            "spreadBps": 392.15686274509835,
+            "premiumDollars": 204,
+            "atmDistance": 3,
+            "normalized": { "delta": 0, "spread": 1, "openInterest": 1, "gamma": 0, "iv": 0 },
+            "weighted": { "delta": 0, "spread": 0.25, "openInterest": 0.2, "gamma": 0, "iv": 0 }
+          }
+        ],
+        "exclusions": [
+          { "symbol": "SPXW260805C06010000", "reason": "spread_too_wide" },
+          { "symbol": "SPXW260805C06015000", "reason": "missing_gamma" },
+          { "symbol": "SPXW260805C06020000", "reason": "stale_quote" }
+        ],
+        "selectedSymbol": "SPXW260805C06000000",
+        "noPass": false,
+        "requiresConfirmation": true
+      }
+    },
+    {
+      "id": "put-absolute-delta-gamma-seek",
+      "serverTime": "2026-08-05T15:00:04.000Z",
+      "request": {
+        "underlying": "SPX",
+        "expiration": "2026-08-05",
+        "optionType": "put",
+        "spot": 6000,
+        "classicFallbackAcknowledged": false
+      },
+      "preferences": {
+        "schemaVersion": 1,
+        "preset": "custom",
+        "targetAbsDelta": 0.4,
+        "strikeRungs": 1,
+        "maxSpreadBps": 1000,
+        "maxPremiumDollars": 500,
+        "minOpenInterest": 0,
+        "gammaMode": "seek",
+        "weights": { "delta": 0.5, "spread": 0, "openInterest": 0, "gamma": 0.5, "iv": 0 }
+      },
+      "candidates": [
+        {
+          "symbol": "SPXW260805P06000000",
+          "underlying": "SPX",
+          "expiration": "2026-08-05",
+          "optionType": "put",
+          "strike": 6000,
+          "bid": 2,
+          "ask": 2.02,
+          "delta": -0.4,
+          "gamma": 0.03,
+          "impliedVolatility": 0.2,
+          "openInterest": 100,
+          "quoteProvider": "webull",
+          "quoteTimestamp": "2026-08-05T15:00:00.000Z",
+          "analyticsTimestamp": "2026-08-05T14:59:30.000Z"
+        },
+        {
+          "symbol": "SPXW260805P05995000",
+          "underlying": "SPX",
+          "expiration": "2026-08-05",
+          "optionType": "put",
+          "strike": 5995,
+          "bid": 2,
+          "ask": 2.02,
+          "delta": -0.3,
+          "gamma": 0.01,
+          "impliedVolatility": 0.2,
+          "openInterest": 100,
+          "quoteProvider": "webull",
+          "quoteTimestamp": "2026-08-05T15:00:00.000Z",
+          "analyticsTimestamp": "2026-08-05T14:59:30.000Z"
+        }
+      ],
+      "expected": {
+        "rankings": [
+          {
+            "rank": 1,
+            "symbol": "SPXW260805P06000000",
+            "score": 1,
+            "summary": "Matches absolute put delta and seeks higher absolute gamma.",
+            "mid": 2.01,
+            "spreadBps": 99.50248756218915,
+            "premiumDollars": 200.99999999999997,
+            "atmDistance": 0,
+            "normalized": { "delta": 1, "spread": 1, "openInterest": 1, "gamma": 1, "iv": 1 },
+            "weighted": { "delta": 0.5, "spread": 0, "openInterest": 0, "gamma": 0.5, "iv": 0 }
+          },
+          {
+            "rank": 2,
+            "symbol": "SPXW260805P05995000",
+            "score": 0,
+            "summary": "Lower absolute delta fit and gamma than the winner.",
+            "mid": 2.01,
+            "spreadBps": 99.50248756218915,
+            "premiumDollars": 200.99999999999997,
+            "atmDistance": 5,
+            "normalized": { "delta": 0, "spread": 1, "openInterest": 1, "gamma": 0, "iv": 1 },
+            "weighted": { "delta": 0, "spread": 0, "openInterest": 0, "gamma": 0, "iv": 0 }
+          }
+        ],
+        "exclusions": [],
+        "selectedSymbol": "SPXW260805P06000000",
+        "noPass": false,
+        "requiresConfirmation": true
+      }
+    },
+    {
+      "id": "hard-filter-exclusions",
+      "serverTime": "2026-08-05T15:00:04.000Z",
+      "request": {
+        "underlying": "SPX",
+        "expiration": "2026-08-05",
+        "optionType": "call",
+        "spot": 6000,
+        "classicFallbackAcknowledged": false
+      },
+      "preferences": {
+        "schemaVersion": 1,
+        "preset": "custom",
+        "targetAbsDelta": 0.25,
+        "strikeRungs": 1,
+        "maxSpreadBps": 500,
+        "maxPremiumDollars": 250,
+        "minOpenInterest": 100,
+        "gammaMode": "avoid",
+        "weights": { "delta": 1, "spread": 0, "openInterest": 0, "gamma": 0, "iv": 0 }
+      },
+      "candidates": [
+        {
+          "symbol": "SPXW260805C06000000",
+          "underlying": "SPX",
+          "expiration": "2026-08-05",
+          "optionType": "call",
+          "strike": 6000,
+          "bid": 2,
+          "ask": 2.05,
+          "delta": 0.25,
+          "gamma": 0.01,
+          "impliedVolatility": 0.2,
+          "openInterest": 100,
+          "quoteProvider": "webull",
+          "quoteTimestamp": "2026-08-05T15:00:00.000Z",
+          "analyticsTimestamp": "2026-08-05T14:59:30.000Z"
+        },
+        {
+          "symbol": "SPXW260805C05995000",
+          "underlying": "SPX",
+          "expiration": "2026-08-05",
+          "optionType": "call",
+          "strike": 5995,
+          "bid": 3,
+          "ask": 3.1,
+          "delta": 0.25,
+          "gamma": 0.01,
+          "impliedVolatility": 0.2,
+          "openInterest": 100,
+          "quoteProvider": "webull",
+          "quoteTimestamp": "2026-08-05T15:00:00.000Z",
+          "analyticsTimestamp": "2026-08-05T14:59:30.000Z"
+        },
+        {
+          "symbol": "SPXW260805C06005000",
+          "underlying": "SPX",
+          "expiration": "2026-08-05",
+          "optionType": "call",
+          "strike": 6005,
+          "bid": 2,
+          "ask": 2.08,
+          "delta": 0.25,
+          "gamma": 0.01,
+          "impliedVolatility": 0.2,
+          "openInterest": 100,
+          "quoteProvider": "webull",
+          "quoteTimestamp": "2026-08-05T15:00:00.000Z",
+          "analyticsTimestamp": "2026-08-05T14:59:30.000Z"
+        },
+        {
+          "symbol": "SPXW260805C06010000",
+          "underlying": "SPX",
+          "expiration": "2026-08-05",
+          "optionType": "call",
+          "strike": 6010,
+          "bid": 2,
+          "ask": 2.02,
+          "delta": 0.25,
+          "gamma": 0.01,
+          "impliedVolatility": 0.2,
+          "openInterest": 100,
+          "quoteProvider": "webull",
+          "quoteTimestamp": "2026-08-05T15:00:00.000Z",
+          "analyticsTimestamp": "2026-08-05T14:59:30.000Z"
+        }
+      ],
+      "expected": {
+        "rankings": [
+          {
+            "rank": 1,
+            "symbol": "SPXW260805C06000000",
+            "score": 1,
+            "summary": "Passes all hard filters at the ATM strike.",
+            "mid": 2.025,
+            "spreadBps": 246.91358024691233,
+            "premiumDollars": 202.5,
+            "atmDistance": 0,
+            "normalized": { "delta": 1, "spread": 1, "openInterest": 1, "gamma": 1, "iv": 1 },
+            "weighted": { "delta": 1, "spread": 0, "openInterest": 0, "gamma": 0, "iv": 0 }
+          },
+          {
+            "rank": 2,
+            "symbol": "SPXW260805C06005000",
+            "score": 1,
+            "summary": "Passes all hard filters within the strike window.",
+            "mid": 2.04,
+            "spreadBps": 392.15686274509835,
+            "premiumDollars": 204,
+            "atmDistance": 5,
+            "normalized": { "delta": 1, "spread": 0, "openInterest": 1, "gamma": 1, "iv": 1 },
+            "weighted": { "delta": 1, "spread": 0, "openInterest": 0, "gamma": 0, "iv": 0 }
+          }
+        ],
+        "exclusions": [
+          { "symbol": "SPXW260805C05995000", "reason": "premium_too_high" },
+          { "symbol": "SPXW260805C06010000", "reason": "outside_strike_window" }
+        ],
+        "selectedSymbol": "SPXW260805C06000000",
+        "noPass": false,
+        "requiresConfirmation": true
+      }
+    },
+    {
+      "id": "tie-break-spread",
+      "serverTime": "2026-08-05T15:00:04.000Z",
+      "request": {
+        "underlying": "SPX",
+        "expiration": "2026-08-05",
+        "optionType": "call",
+        "spot": 6000,
+        "classicFallbackAcknowledged": false
+      },
+      "preferences": {
+        "schemaVersion": 1,
+        "preset": "custom",
+        "targetAbsDelta": 0.25,
+        "strikeRungs": 1,
+        "maxSpreadBps": 500,
+        "maxPremiumDollars": 250,
+        "minOpenInterest": 100,
+        "gammaMode": "avoid",
+        "weights": { "delta": 1, "spread": 0, "openInterest": 0, "gamma": 0, "iv": 0 }
+      },
+      "candidates": [
+        {
+          "symbol": "SPXW260805C06000000",
+          "underlying": "SPX",
+          "expiration": "2026-08-05",
+          "optionType": "call",
+          "strike": 6000,
+          "bid": 2,
+          "ask": 2.02,
+          "delta": 0.25,
+          "gamma": 0.01,
+          "impliedVolatility": 0.2,
+          "openInterest": 100,
+          "quoteProvider": "webull",
+          "quoteTimestamp": "2026-08-05T15:00:00.000Z",
+          "analyticsTimestamp": "2026-08-05T14:59:30.000Z"
+        },
+        {
+          "symbol": "SPXW260805C06005000",
+          "underlying": "SPX",
+          "expiration": "2026-08-05",
+          "optionType": "call",
+          "strike": 6005,
+          "bid": 2,
+          "ask": 2.05,
+          "delta": 0.25,
+          "gamma": 0.01,
+          "impliedVolatility": 0.2,
+          "openInterest": 100,
+          "quoteProvider": "webull",
+          "quoteTimestamp": "2026-08-05T15:00:00.000Z",
+          "analyticsTimestamp": "2026-08-05T14:59:30.000Z"
+        }
+      ],
+      "expected": {
+        "rankings": [
+          {
+            "rank": 1,
+            "symbol": "SPXW260805C06000000",
+            "score": 1,
+            "summary": "Wins the score tie with the narrower spread.",
+            "mid": 2.01,
+            "spreadBps": 99.50248756218915,
+            "premiumDollars": 200.99999999999997,
+            "atmDistance": 0,
+            "normalized": { "delta": 1, "spread": 1, "openInterest": 1, "gamma": 1, "iv": 1 },
+            "weighted": { "delta": 1, "spread": 0, "openInterest": 0, "gamma": 0, "iv": 0 }
+          },
+          {
+            "rank": 2,
+            "symbol": "SPXW260805C06005000",
+            "score": 1,
+            "summary": "Loses the score tie on spread width.",
+            "mid": 2.025,
+            "spreadBps": 246.91358024691233,
+            "premiumDollars": 202.5,
+            "atmDistance": 5,
+            "normalized": { "delta": 1, "spread": 0, "openInterest": 1, "gamma": 1, "iv": 1 },
+            "weighted": { "delta": 1, "spread": 0, "openInterest": 0, "gamma": 0, "iv": 0 }
+          }
+        ],
+        "exclusions": [],
+        "selectedSymbol": "SPXW260805C06000000",
+        "noPass": false,
+        "requiresConfirmation": true
+      }
+    },
+    {
+      "id": "tie-break-open-interest",
+      "serverTime": "2026-08-05T15:00:04.000Z",
+      "request": {
+        "underlying": "SPX",
+        "expiration": "2026-08-05",
+        "optionType": "call",
+        "spot": 6002.5,
+        "classicFallbackAcknowledged": false
+      },
+      "preferences": {
+        "schemaVersion": 1,
+        "preset": "custom",
+        "targetAbsDelta": 0.25,
+        "strikeRungs": 1,
+        "maxSpreadBps": 500,
+        "maxPremiumDollars": 250,
+        "minOpenInterest": 100,
+        "gammaMode": "avoid",
+        "weights": { "delta": 1, "spread": 0, "openInterest": 0, "gamma": 0, "iv": 0 }
+      },
+      "candidates": [
+        {
+          "symbol": "SPXW260805C06000000",
+          "underlying": "SPX",
+          "expiration": "2026-08-05",
+          "optionType": "call",
+          "strike": 6000,
+          "bid": 2,
+          "ask": 2.02,
+          "delta": 0.25,
+          "gamma": 0.01,
+          "impliedVolatility": 0.2,
+          "openInterest": 100,
+          "quoteProvider": "webull",
+          "quoteTimestamp": "2026-08-05T15:00:00.000Z",
+          "analyticsTimestamp": "2026-08-05T14:59:30.000Z"
+        },
+        {
+          "symbol": "SPXW260805C06005000",
+          "underlying": "SPX",
+          "expiration": "2026-08-05",
+          "optionType": "call",
+          "strike": 6005,
+          "bid": 2,
+          "ask": 2.02,
+          "delta": 0.25,
+          "gamma": 0.01,
+          "impliedVolatility": 0.2,
+          "openInterest": 200,
+          "quoteProvider": "webull",
+          "quoteTimestamp": "2026-08-05T15:00:00.000Z",
+          "analyticsTimestamp": "2026-08-05T14:59:30.000Z"
+        }
+      ],
+      "expected": {
+        "rankings": [
+          {
+            "rank": 1,
+            "symbol": "SPXW260805C06005000",
+            "score": 1,
+            "summary": "Wins the score and spread tie with higher open interest.",
+            "mid": 2.01,
+            "spreadBps": 99.50248756218915,
+            "premiumDollars": 200.99999999999997,
+            "atmDistance": 2.5,
+            "normalized": { "delta": 1, "spread": 1, "openInterest": 1, "gamma": 1, "iv": 1 },
+            "weighted": { "delta": 1, "spread": 0, "openInterest": 0, "gamma": 0, "iv": 0 }
+          },
+          {
+            "rank": 2,
+            "symbol": "SPXW260805C06000000",
+            "score": 1,
+            "summary": "Loses the tie on open interest.",
+            "mid": 2.01,
+            "spreadBps": 99.50248756218915,
+            "premiumDollars": 200.99999999999997,
+            "atmDistance": 2.5,
+            "normalized": { "delta": 1, "spread": 1, "openInterest": 0, "gamma": 1, "iv": 1 },
+            "weighted": { "delta": 1, "spread": 0, "openInterest": 0, "gamma": 0, "iv": 0 }
+          }
+        ],
+        "exclusions": [],
+        "selectedSymbol": "SPXW260805C06005000",
+        "noPass": false,
+        "requiresConfirmation": true
+      }
+    },
+    {
+      "id": "tie-break-atm-distance",
+      "serverTime": "2026-08-05T15:00:04.000Z",
+      "request": {
+        "underlying": "SPX",
+        "expiration": "2026-08-05",
+        "optionType": "call",
+        "spot": 6001,
+        "classicFallbackAcknowledged": false
+      },
+      "preferences": {
+        "schemaVersion": 1,
+        "preset": "custom",
+        "targetAbsDelta": 0.25,
+        "strikeRungs": 1,
+        "maxSpreadBps": 500,
+        "maxPremiumDollars": 250,
+        "minOpenInterest": 100,
+        "gammaMode": "avoid",
+        "weights": { "delta": 1, "spread": 0, "openInterest": 0, "gamma": 0, "iv": 0 }
+      },
+      "candidates": [
+        {
+          "symbol": "SPXW260805C06000000",
+          "underlying": "SPX",
+          "expiration": "2026-08-05",
+          "optionType": "call",
+          "strike": 6000,
+          "bid": 2,
+          "ask": 2.02,
+          "delta": 0.25,
+          "gamma": 0.01,
+          "impliedVolatility": 0.2,
+          "openInterest": 100,
+          "quoteProvider": "webull",
+          "quoteTimestamp": "2026-08-05T15:00:00.000Z",
+          "analyticsTimestamp": "2026-08-05T14:59:30.000Z"
+        },
+        {
+          "symbol": "SPXW260805C06005000",
+          "underlying": "SPX",
+          "expiration": "2026-08-05",
+          "optionType": "call",
+          "strike": 6005,
+          "bid": 2,
+          "ask": 2.02,
+          "delta": 0.25,
+          "gamma": 0.01,
+          "impliedVolatility": 0.2,
+          "openInterest": 100,
+          "quoteProvider": "webull",
+          "quoteTimestamp": "2026-08-05T15:00:00.000Z",
+          "analyticsTimestamp": "2026-08-05T14:59:30.000Z"
+        }
+      ],
+      "expected": {
+        "rankings": [
+          {
+            "rank": 1,
+            "symbol": "SPXW260805C06000000",
+            "score": 1,
+            "summary": "Wins the remaining tie by being closer to ATM.",
+            "mid": 2.01,
+            "spreadBps": 99.50248756218915,
+            "premiumDollars": 200.99999999999997,
+            "atmDistance": 1,
+            "normalized": { "delta": 1, "spread": 1, "openInterest": 1, "gamma": 1, "iv": 1 },
+            "weighted": { "delta": 1, "spread": 0, "openInterest": 0, "gamma": 0, "iv": 0 }
+          },
+          {
+            "rank": 2,
+            "symbol": "SPXW260805C06005000",
+            "score": 1,
+            "summary": "Loses the remaining tie on ATM distance.",
+            "mid": 2.01,
+            "spreadBps": 99.50248756218915,
+            "premiumDollars": 200.99999999999997,
+            "atmDistance": 4,
+            "normalized": { "delta": 1, "spread": 1, "openInterest": 1, "gamma": 1, "iv": 1 },
+            "weighted": { "delta": 1, "spread": 0, "openInterest": 0, "gamma": 0, "iv": 0 }
+          }
+        ],
+        "exclusions": [],
+        "selectedSymbol": "SPXW260805C06000000",
+        "noPass": false,
+        "requiresConfirmation": true
+      }
+    },
+    {
+      "id": "symbol-tie-break",
+      "serverTime": "2026-08-05T15:00:04.000Z",
+      "request": {
+        "underlying": "SPX",
+        "expiration": "2026-08-05",
+        "optionType": "call",
+        "spot": 5997.5,
+        "classicFallbackAcknowledged": false
+      },
+      "preferences": {
+        "schemaVersion": 1,
+        "preset": "custom",
+        "targetAbsDelta": 0.25,
+        "strikeRungs": 1,
+        "maxSpreadBps": 500,
+        "maxPremiumDollars": 250,
+        "minOpenInterest": 100,
+        "gammaMode": "avoid",
+        "weights": { "delta": 0.2, "spread": 0.2, "openInterest": 0.2, "gamma": 0.2, "iv": 0.2 }
+      },
+      "candidates": [
+        {
+          "symbol": "SPXW260805C06000000",
+          "underlying": "SPX",
+          "expiration": "2026-08-05",
+          "optionType": "call",
+          "strike": 6000,
+          "bid": 2,
+          "ask": 2.05,
+          "delta": 0.25,
+          "gamma": 0.01,
+          "impliedVolatility": 0.2,
+          "openInterest": 100,
+          "quoteProvider": "webull",
+          "quoteTimestamp": "2026-08-05T15:00:00.000Z",
+          "analyticsTimestamp": "2026-08-05T14:59:30.000Z"
+        },
+        {
+          "symbol": "SPXW260805C05995000",
+          "underlying": "SPX",
+          "expiration": "2026-08-05",
+          "optionType": "call",
+          "strike": 5995,
+          "bid": 2,
+          "ask": 2.05,
+          "delta": 0.25,
+          "gamma": 0.01,
+          "impliedVolatility": 0.2,
+          "openInterest": 100,
+          "quoteProvider": "webull",
+          "quoteTimestamp": "2026-08-05T15:00:00.000Z",
+          "analyticsTimestamp": "2026-08-05T14:59:30.000Z"
+        }
+      ],
+      "expected": {
+        "rankings": [
+          {
+            "rank": 1,
+            "symbol": "SPXW260805C05995000",
+            "score": 1,
+            "summary": "Wins the final tie by contract symbol.",
+            "mid": 2.025,
+            "spreadBps": 246.91358024691233,
+            "premiumDollars": 202.5,
+            "atmDistance": 2.5,
+            "normalized": { "delta": 1, "spread": 1, "openInterest": 1, "gamma": 1, "iv": 1 },
+            "weighted": {
+              "delta": 0.2,
+              "spread": 0.2,
+              "openInterest": 0.2,
+              "gamma": 0.2,
+              "iv": 0.2
+            }
+          },
+          {
+            "rank": 2,
+            "symbol": "SPXW260805C06000000",
+            "score": 1,
+            "summary": "Loses the final tie by contract symbol.",
+            "mid": 2.025,
+            "spreadBps": 246.91358024691233,
+            "premiumDollars": 202.5,
+            "atmDistance": 2.5,
+            "normalized": { "delta": 1, "spread": 1, "openInterest": 1, "gamma": 1, "iv": 1 },
+            "weighted": {
+              "delta": 0.2,
+              "spread": 0.2,
+              "openInterest": 0.2,
+              "gamma": 0.2,
+              "iv": 0.2
+            }
+          }
+        ],
+        "exclusions": [],
+        "selectedSymbol": "SPXW260805C05995000",
+        "noPass": false,
+        "requiresConfirmation": true
+      }
+    },
+    {
+      "id": "exclusion-reason-matrix",
+      "serverTime": "2026-08-05T15:00:04.000Z",
+      "request": {
+        "underlying": "SPX",
+        "expiration": "2026-08-05",
+        "optionType": "call",
+        "spot": 6000,
+        "classicFallbackAcknowledged": false
+      },
+      "preferences": {
+        "schemaVersion": 1,
+        "preset": "custom",
+        "targetAbsDelta": 0.25,
+        "strikeRungs": 20,
+        "maxSpreadBps": 1000,
+        "maxPremiumDollars": 500,
+        "minOpenInterest": 0,
+        "gammaMode": "avoid",
+        "weights": { "delta": 1, "spread": 0, "openInterest": 0, "gamma": 0, "iv": 0 }
+      },
+      "candidates": [
+        {
+          "symbol": "SPXW260806C05950000",
+          "underlying": "SPX",
+          "expiration": "2026-08-06",
+          "optionType": "call",
+          "strike": 5950,
+          "bid": 2,
+          "ask": 2.02,
+          "delta": 0.25,
+          "gamma": 0.01,
+          "impliedVolatility": 0.2,
+          "openInterest": 100,
+          "quoteProvider": "webull",
+          "quoteTimestamp": "2026-08-05T15:00:00.000Z",
+          "analyticsTimestamp": "2026-08-05T14:59:30.000Z"
+        },
+        {
+          "symbol": "SPXW260805P05960000",
+          "underlying": "SPX",
+          "expiration": "2026-08-05",
+          "optionType": "put",
+          "strike": 5960,
+          "bid": 2,
+          "ask": 2.02,
+          "delta": -0.25,
+          "gamma": 0.01,
+          "impliedVolatility": 0.2,
+          "openInterest": 100,
+          "quoteProvider": "webull",
+          "quoteTimestamp": "2026-08-05T15:00:00.000Z",
+          "analyticsTimestamp": "2026-08-05T14:59:30.000Z"
+        },
+        {
+          "symbol": "SPXW260805C05970000",
+          "underlying": "SPX",
+          "expiration": "2026-08-05",
+          "optionType": "call",
+          "strike": 5970,
+          "bid": null,
+          "ask": 2.02,
+          "delta": 0.25,
+          "gamma": 0.01,
+          "impliedVolatility": 0.2,
+          "openInterest": 100,
+          "quoteProvider": "webull",
+          "quoteTimestamp": "2026-08-05T15:00:00.000Z",
+          "analyticsTimestamp": "2026-08-05T14:59:30.000Z"
+        },
+        {
+          "symbol": "SPXW260805C05980000",
+          "underlying": "SPX",
+          "expiration": "2026-08-05",
+          "optionType": "call",
+          "strike": 5980,
+          "bid": 2,
+          "ask": 1.9,
+          "delta": 0.25,
+          "gamma": 0.01,
+          "impliedVolatility": 0.2,
+          "openInterest": 100,
+          "quoteProvider": "webull",
+          "quoteTimestamp": "2026-08-05T15:00:00.000Z",
+          "analyticsTimestamp": "2026-08-05T14:59:30.000Z"
+        },
+        {
+          "symbol": "SPXW260805C05990000",
+          "underlying": "SPX",
+          "expiration": "2026-08-05",
+          "optionType": "call",
+          "strike": 5990,
+          "bid": 2,
+          "ask": 2.02,
+          "delta": 0.25,
+          "gamma": 0.01,
+          "impliedVolatility": 0.2,
+          "openInterest": 100,
+          "quoteProvider": "webull",
+          "quoteTimestamp": "2026-08-05T15:00:07.000Z",
+          "analyticsTimestamp": "2026-08-05T14:59:30.000Z"
+        },
+        {
+          "symbol": "SPXW260805C06000000",
+          "underlying": "SPX",
+          "expiration": "2026-08-05",
+          "optionType": "call",
+          "strike": 6000,
+          "bid": 2,
+          "ask": 2.02,
+          "delta": null,
+          "gamma": 0.01,
+          "impliedVolatility": 0.2,
+          "openInterest": 100,
+          "quoteProvider": "webull",
+          "quoteTimestamp": "2026-08-05T15:00:00.000Z",
+          "analyticsTimestamp": "2026-08-05T14:59:30.000Z"
+        },
+        {
+          "symbol": "SPXW260805C06010000",
+          "underlying": "SPX",
+          "expiration": "2026-08-05",
+          "optionType": "call",
+          "strike": 6010,
+          "bid": 2,
+          "ask": 2.02,
+          "delta": 0.25,
+          "gamma": 0.01,
+          "impliedVolatility": null,
+          "openInterest": 100,
+          "quoteProvider": "webull",
+          "quoteTimestamp": "2026-08-05T15:00:00.000Z",
+          "analyticsTimestamp": "2026-08-05T14:59:30.000Z"
+        },
+        {
+          "symbol": "SPXW260805C06020000",
+          "underlying": "SPX",
+          "expiration": "2026-08-05",
+          "optionType": "call",
+          "strike": 6020,
+          "bid": 2,
+          "ask": 2.02,
+          "delta": 0.25,
+          "gamma": 0.01,
+          "impliedVolatility": 0.2,
+          "openInterest": null,
+          "quoteProvider": "webull",
+          "quoteTimestamp": "2026-08-05T15:00:00.000Z",
+          "analyticsTimestamp": "2026-08-05T14:59:30.000Z"
+        },
+        {
+          "symbol": "SPXW260805C06030000",
+          "underlying": "SPX",
+          "expiration": "2026-08-05",
+          "optionType": "call",
+          "strike": 6030,
+          "bid": 2,
+          "ask": 2.02,
+          "delta": 0.25,
+          "gamma": 0.01,
+          "impliedVolatility": 0.2,
+          "openInterest": 100,
+          "quoteProvider": "webull",
+          "quoteTimestamp": "2026-08-05T15:00:00.000Z",
+          "analyticsTimestamp": "2026-08-05T14:58:30.000Z"
+        },
+        {
+          "symbol": "SPXW260805C06040000",
+          "underlying": "SPX",
+          "expiration": "2026-08-05",
+          "optionType": "call",
+          "strike": 6040,
+          "bid": 2,
+          "ask": 2.02,
+          "delta": 1.1,
+          "gamma": 0.01,
+          "impliedVolatility": 0.2,
+          "openInterest": 100,
+          "quoteProvider": "webull",
+          "quoteTimestamp": "2026-08-05T15:00:00.000Z",
+          "analyticsTimestamp": "2026-08-05T14:59:30.000Z"
+        }
+      ],
+      "expected": {
+        "rankings": [],
+        "exclusions": [
+          { "symbol": "SPXW260806C05950000", "reason": "wrong_expiration" },
+          { "symbol": "SPXW260805P05960000", "reason": "wrong_option_type" },
+          { "symbol": "SPXW260805C05970000", "reason": "missing_quote" },
+          { "symbol": "SPXW260805C05980000", "reason": "invalid_quote" },
+          { "symbol": "SPXW260805C05990000", "reason": "future_quote" },
+          { "symbol": "SPXW260805C06000000", "reason": "missing_delta" },
+          { "symbol": "SPXW260805C06010000", "reason": "missing_iv" },
+          { "symbol": "SPXW260805C06020000", "reason": "missing_open_interest" },
+          { "symbol": "SPXW260805C06030000", "reason": "stale_analytics" },
+          { "symbol": "SPXW260805C06040000", "reason": "delta_out_of_range" }
+        ],
+        "selectedSymbol": null,
+        "noPass": true,
+        "requiresConfirmation": true
+      }
+    },
+    {
+      "id": "no-pass",
+      "serverTime": "2026-08-05T15:00:04.000Z",
+      "request": {
+        "underlying": "SPX",
+        "expiration": "2026-08-05",
+        "optionType": "put",
+        "spot": 6000,
+        "classicFallbackAcknowledged": false
+      },
+      "preferences": {
+        "schemaVersion": 1,
+        "preset": "aggressive",
+        "targetAbsDelta": 0.4,
+        "strikeRungs": 8,
+        "maxSpreadBps": 1000,
+        "maxPremiumDollars": 500,
+        "minOpenInterest": 25,
+        "gammaMode": "seek",
+        "weights": { "delta": 0.25, "spread": 0.15, "openInterest": 0.15, "gamma": 0.3, "iv": 0.15 }
+      },
+      "candidates": [
+        {
+          "symbol": "SPXW260805P06000000",
+          "underlying": "SPX",
+          "expiration": "2026-08-05",
+          "optionType": "put",
+          "strike": 6000,
+          "bid": 2,
+          "ask": 2.05,
+          "delta": -0.4,
+          "gamma": 0.02,
+          "impliedVolatility": 0.2,
+          "openInterest": 24,
+          "quoteProvider": "webull",
+          "quoteTimestamp": "2026-08-05T15:00:00.000Z",
+          "analyticsTimestamp": "2026-08-05T14:59:30.000Z"
+        }
+      ],
+      "expected": {
+        "rankings": [],
+        "exclusions": [{ "symbol": "SPXW260805P06000000", "reason": "open_interest_too_low" }],
+        "selectedSymbol": null,
+        "noPass": true,
+        "requiresConfirmation": true
+      }
+    }
+  ]
+}

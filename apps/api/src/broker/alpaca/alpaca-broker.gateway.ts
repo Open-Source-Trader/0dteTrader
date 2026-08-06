@@ -469,12 +469,7 @@ export class AlpacaBrokerGateway implements BrokerGateway, MarketDataProvider {
       );
       const contract =
         order.selection.mode === 'auto_otm'
-          ? resolveAutoOtm(
-              chain.contracts,
-              optionType,
-              chain.underlyingPrice,
-              order.selection.otmOffset,
-            )
+          ? resolveAutoOtm(chain.contracts, optionType, chain.underlyingPrice)
           : chain.contracts.find(
               (c) => c.optionType === optionType && c.strike === order.selection.strike,
             );

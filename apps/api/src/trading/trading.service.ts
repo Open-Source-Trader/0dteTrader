@@ -1,4 +1,4 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { Prisma, type User } from '@prisma/client';
 import {
   AccountSummary,
@@ -29,11 +29,22 @@ import { PrismaService } from '../prisma/prisma.service';
 import { LEGAL_VERSION } from '../legal/legal.service';
 import { OrderRequestDto } from './dto/order-request.dto';
 import { OrdersService, type PositionAnchor } from './orders.service';
+import { AutoCandidatesService } from './auto-candidates.service';
 
 type AuditAction = 'preview' | 'place' | 'cancel';
 
 /** A pending idempotency claim older than this is a crashed attempt. */
 const PENDING_CLAIM_TTL_MS = 2 * 60_000;
+const STALE_AUTO_EXCLUSION_REASONS = new Set(['stale_quote', 'future_quote', 'stale_analytics']);
+
+export interface TradingServiceMetrics {
+  scoredReranks: number;
+  scoredAccepted: number;
+  scoredSelectionChanges: number;
+  scoredNoPassRejections: number;
+  scoredStaleRejections: number;
+  scoredConfirmationRejections: number;
+}
 
 /** Guards against a source reporting 0 / NaN for a price we would anchor on. */
 function usablePrice(value: number | undefined): number | undefined {
@@ -62,12 +73,21 @@ function placementOutcomeUncertain(error: unknown): boolean {
 @Injectable()
 export class TradingService {
   private readonly logger = new Logger(TradingService.name);
+  readonly metrics: TradingServiceMetrics = {
+    scoredReranks: 0,
+    scoredAccepted: 0,
+    scoredSelectionChanges: 0,
+    scoredNoPassRejections: 0,
+    scoredStaleRejections: 0,
+    scoredConfirmationRejections: 0,
+  };
 
   constructor(
     private readonly prisma: PrismaService,
     @Inject(BROKER_GATEWAY) private readonly gateway: BrokerGateway,
     private readonly orders: OrdersService,
     private readonly events: OrderEventsService,
+    @Optional() private readonly autoCandidates?: AutoCandidatesService,
   ) {}
 
   async preview(userId: string, dto: OrderRequestDto): Promise<OrderPreview> {
@@ -145,7 +165,10 @@ export class TradingService {
         request: normalized,
         underlyingPrice,
         contractSymbol,
-      } = prevalidated ?? (await this.resolveAndValidate(userId, dto));
+        contract,
+      } = prevalidated && dto.selection.mode !== 'auto_scored'
+        ? prevalidated
+        : await this.resolveAndValidate(userId, dto);
       const { order: capped, heldQuantity } = await this.capToPosition(
         userId,
         normalized,
@@ -178,7 +201,7 @@ export class TradingService {
           idempotencyKey,
           mode,
           heldQuantity,
-          undefined,
+          contract,
           executionScope,
         ),
       );
@@ -352,7 +375,7 @@ export class TradingService {
 
   private async recoverStalePlacement(
     userId: string,
-    dto: OrderRequest,
+    dto: OrderRequest | OrderRequestDto,
     claimedAt: Date,
     expectedScope?: BrokerExecutionScope,
     idempotencyKey?: string,
@@ -384,8 +407,28 @@ export class TradingService {
         'The broker account could not be queried for the interrupted order; it remains pending for safety',
       );
     }
+    let scoredSelectedSymbol: string | null = null;
+    if (dto.selection.mode === 'auto_scored' && 'autoScoring' in dto.selection) {
+      const autoScoring = dto.selection.autoScoring;
+      if (
+        autoScoring &&
+        typeof autoScoring === 'object' &&
+        'selectedSymbol' in autoScoring &&
+        typeof autoScoring.selectedSymbol === 'string' &&
+        autoScoring.selectedSymbol.length > 0
+      ) {
+        scoredSelectedSymbol = autoScoring.selectedSymbol;
+      }
+    }
+    if (dto.selection.mode === 'auto_scored' && scoredSelectedSymbol === null) {
+      throw errors.unavailable(
+        'ORDER_RECOVERY_UNAVAILABLE',
+        'The interrupted scored-Auto order has no selected contract identity; it remains pending for safety',
+      );
+    }
     const expectedSymbol =
-      dto.assetClass === 'option' &&
+      scoredSelectedSymbol ??
+      (dto.assetClass === 'option' &&
       dto.selection.expiration &&
       dto.selection.optionType &&
       dto.selection.strike !== undefined
@@ -395,7 +438,7 @@ export class TradingService {
             dto.selection.optionType,
             dto.selection.strike,
           )
-        : null;
+        : null);
     const candidates = recent.filter((order) => {
       const placedAt = Date.parse(order.timestamp);
       if (Number.isFinite(placedAt) && placedAt < since.getTime()) return false;
@@ -712,6 +755,108 @@ export class TradingService {
     if (!selection.optionType) {
       throw errors.validation('selection.optionType is required for option orders');
     }
+
+    if (selection.mode === 'auto_scored') {
+      if (!selection.autoScoring || selection.autoScoring.scoredConfirmationAccepted !== true) {
+        this.metrics.scoredConfirmationRejections += 1;
+        this.logger.log(
+          JSON.stringify({
+            event: 'scored_auto_rerank',
+            userId,
+            underlying: dto.underlying,
+            outcome: 'confirmation_required',
+          }),
+        );
+        throw errors.badRequest(
+          'SCORED_CONFIRMATION_REQUIRED',
+          'Scored Auto orders require explicit scored confirmation.',
+        );
+      }
+      if (!selection.expiration) {
+        throw errors.validation('selection.expiration is required for scored Auto orders');
+      }
+      if (!this.autoCandidates) {
+        throw errors.unavailable('AUTO_SCORING_UNAVAILABLE', 'Scored Auto ranking is unavailable.');
+      }
+      const fresh = await timed(this.logger, 'trading.resolveAndValidate.autoScored', () =>
+        this.autoCandidates!.rankResolved(
+          userId,
+          {
+            underlying: dto.underlying,
+            expiration: selection.expiration!,
+            optionType: selection.optionType!,
+          },
+          selection.autoScoring!.preferences,
+        ),
+      );
+      this.metrics.scoredReranks += 1;
+      if (fresh.result.noPass || fresh.selectedContract === null) {
+        const staleRejected = fresh.result.exclusions.some((exclusion) =>
+          STALE_AUTO_EXCLUSION_REASONS.has(exclusion.reason),
+        );
+        this.metrics.scoredNoPassRejections += 1;
+        if (staleRejected) this.metrics.scoredStaleRejections += 1;
+        this.logger.log(
+          JSON.stringify({
+            event: 'scored_auto_rerank',
+            userId,
+            underlying: dto.underlying,
+            submittedSymbol: selection.autoScoring.selectedSymbol,
+            freshSymbol: fresh.result.selectedSymbol,
+            outcome: 'no_pass',
+            staleRejected,
+            exclusions: fresh.result.exclusions,
+          }),
+        );
+        throw errors.conflict(
+          'AUTO_SCORING_NO_PASS',
+          'No contract passes the current scored Auto requirements.',
+        );
+      }
+      if (fresh.result.selectedSymbol !== selection.autoScoring.selectedSymbol) {
+        this.metrics.scoredSelectionChanges += 1;
+        this.logger.log(
+          JSON.stringify({
+            event: 'scored_auto_rerank',
+            userId,
+            underlying: dto.underlying,
+            submittedSymbol: selection.autoScoring.selectedSymbol,
+            freshSymbol: fresh.result.selectedSymbol,
+            outcome: 'selection_changed',
+          }),
+        );
+        throw errors.conflict(
+          'AUTO_SCORING_SELECTION_CHANGED',
+          'The scored Auto winner changed; review and confirm the fresh ranking.',
+        );
+      }
+      const contract = fresh.selectedContract;
+      this.metrics.scoredAccepted += 1;
+      this.logger.log(
+        JSON.stringify({
+          event: 'scored_auto_rerank',
+          userId,
+          underlying: dto.underlying,
+          submittedSymbol: selection.autoScoring.selectedSymbol,
+          freshSymbol: fresh.result.selectedSymbol,
+          outcome: 'accepted',
+        }),
+      );
+      return {
+        request: {
+          ...dto,
+          selection: {
+            mode: 'explicit',
+            optionType: contract.optionType,
+            expiration: contract.expiration,
+            strike: contract.strike,
+          },
+        },
+        underlyingPrice: usablePrice(fresh.underlyingPrice),
+        contractSymbol: contract.symbol,
+        contract,
+      };
+    }
     const chain = await timed(this.logger, 'trading.resolveAndValidate.chain', () =>
       this.getChainValidated(userId, dto.underlying, selection.expiration),
     );
@@ -721,12 +866,7 @@ export class TradingService {
       const quote = await timed(this.logger, 'trading.resolveAndValidate.quote', () =>
         this.gateway.getQuote(userId, dto.underlying),
       );
-      const contract = resolveAutoOtm(
-        chain.contracts,
-        selection.optionType,
-        quote.last,
-        selection.otmOffset,
-      );
+      const contract = resolveAutoOtm(chain.contracts, selection.optionType, quote.last);
       return {
         request: {
           ...dto,

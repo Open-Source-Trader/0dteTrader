@@ -120,8 +120,10 @@ struct ChartView: View {
                 CandleChartRepresentable(
                     candles: viewModel.candles,
                     overlays: viewModel.priceOverlays,
-                    overlayColors: ChartStyle.overlayColors,
-                    showVolume: viewModel.indicatorSettings.volumeEnabled,
+                    overlayColors: viewModel.indicatorColors,
+                    indicatorFillPlans: viewModel.overlayRenderPlans,
+                    indicatorProfileRows: viewModel.priceProfileRows,
+                    showVolume: viewModel.chartDisplayPreferences.volumeEnabled,
                     intervalSeconds: viewModel.interval.seconds,
                     drawingsModel: drawings,
                     twcModel: viewModel.twcRenderModel,
@@ -185,94 +187,8 @@ struct ChartView: View {
             .padding(.vertical, AppSpacing.xxs)
             .layoutPriority(1)
 
-            if let rsi = viewModel.rsiSeries {
-                hudPane(
-                    title: "RSI (\(viewModel.indicatorSettings.rsiPeriod))",
-                    readouts: [readout(for: rsi, label: "", colorId: "rsi")],
-                    onReset: { paneResetTokens["rsi", default: 0] += 1 },
-                    content: {
-                        IndicatorPaneRepresentable(
-                            series: [.init(id: rsi.id, kind: .line, values: rsi.values)],
-                            colors: ["rsi": ChartStyle.paneColors["rsi"]!],
-                            guideLines: [30, 70],
-                            yRange: 0...100,
-                            xValueCount: viewModel.candles.count,
-                            resetToken: paneResetTokens["rsi", default: 0]
-                        )
-                    }
-                )
-            }
-
-            if let macd = viewModel.macdSeries {
-                hudPane(
-                    title: "MACD (12, 26, 9)",
-                    readouts: [
-                        readout(for: macd.macd, label: "MACD", colorId: "macd"),
-                        readout(for: macd.signal, label: "Sig", colorId: "macdSignal"),
-                        histogramReadout(for: macd.histogram, label: "Hist"),
-                    ],
-                    onReset: { paneResetTokens["macd", default: 0] += 1 },
-                    content: {
-                        IndicatorPaneRepresentable(
-                            series: [
-                                .init(id: macd.histogram.id, kind: .histogram, values: macd.histogram.values),
-                                .init(id: macd.macd.id, kind: .line, values: macd.macd.values),
-                                .init(id: macd.signal.id, kind: .line, values: macd.signal.values),
-                            ],
-                            colors: [
-                                "macd": ChartStyle.paneColors["macd"]!,
-                                "macdSignal": ChartStyle.paneColors["macdSignal"]!,
-                            ],
-                            xValueCount: viewModel.candles.count,
-                            resetToken: paneResetTokens["macd", default: 0]
-                        )
-                    }
-                )
-            }
-
-            if let stoch = viewModel.stochSeries {
-                let settings = viewModel.indicatorSettings
-                let title = "Stoch (\(settings.stochKPeriod), \(settings.stochKSmooth), \(settings.stochDPeriod))"
-                hudPane(
-                    title: title,
-                    readouts: [
-                        readout(for: stoch.k, label: "%K", colorId: "stochK"),
-                        readout(for: stoch.d, label: "%D", colorId: "stochD"),
-                    ],
-                    onReset: { paneResetTokens["stoch", default: 0] += 1 },
-                    content: {
-                        IndicatorPaneRepresentable(
-                            series: [
-                                .init(id: stoch.k.id, kind: .line, values: stoch.k.values),
-                                .init(id: stoch.d.id, kind: .line, values: stoch.d.values),
-                            ],
-                            colors: [
-                                "stochK": ChartStyle.paneColors["stochK"]!,
-                                "stochD": ChartStyle.paneColors["stochD"]!,
-                            ],
-                            guideLines: [20, 80],
-                            yRange: 0...100,
-                            xValueCount: viewModel.candles.count,
-                            resetToken: paneResetTokens["stoch", default: 0]
-                        )
-                    }
-                )
-            }
-
-            if let atr = viewModel.atrSeries {
-                hudPane(
-                    title: "ATR (\(viewModel.indicatorSettings.atrPeriod))",
-                    readouts: [readout(for: atr, label: "", colorId: "atr")],
-                    onReset: { paneResetTokens["atr", default: 0] += 1 },
-                    content: {
-                        IndicatorPaneRepresentable(
-                            series: [.init(id: atr.id, kind: .line, values: atr.values)],
-                            colors: ["atr": ChartStyle.paneColors["atr"]!],
-                            xValueCount: viewModel.candles.count,
-                            resetToken: paneResetTokens["atr", default: 0]
-                        )
-                    }
-                )
+            ForEach(viewModel.subPanePresentations) { presentation in
+                indicatorPane(presentation)
             }
         }
         .background(Color.appBackground)
@@ -307,21 +223,49 @@ struct ChartView: View {
         return nil
     }
 
-    private func readout(for series: IndicatorSeries, label: String, colorId: String) -> PaneReadout {
-        PaneReadout(
-            label: label,
-            value: lastValue(series.values).map { String(format: "%.2f", $0) } ?? "—",
-            color: ChartStyle.paneColor(for: colorId)
-        )
+    private func readouts(for presentation: IndicatorPanePresentation) -> [PaneReadout] {
+        presentation.series.map { series in
+            let value = lastValue(series.values)
+            let color = series.kind == .histogram
+                ? ((value ?? 0) >= 0 ? Color.pnlPositive : Color.pnlNegative)
+                : ChartStyle.indicatorSwiftUIColor(for: series.styleToken)
+            return PaneReadout(
+                label: presentation.series.count == 1 ? "" : series.label,
+                value: value.map { String(format: "%.2f", $0) } ?? "—",
+                color: color
+            )
+        }
     }
 
-    /// Histogram readout: sign color (green/red) instead of a line color.
-    private func histogramReadout(for series: IndicatorSeries, label: String) -> PaneReadout {
-        let value = lastValue(series.values)
-        return PaneReadout(
-            label: label,
-            value: value.map { String(format: "%.2f", $0) } ?? "—",
-            color: (value ?? 0) >= 0 ? .pnlPositive : .pnlNegative
+    @ViewBuilder
+    private func indicatorPane(_ presentation: IndicatorPanePresentation) -> some View {
+        hudPane(
+            title: presentation.title,
+            readouts: readouts(for: presentation),
+            onReset: { paneResetTokens[presentation.id, default: 0] += 1 },
+            content: {
+                if let reason = presentation.unavailableReason {
+                    Text(reason)
+                        .font(.caption)
+                        .foregroundStyle(Color.secondary)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    IndicatorPaneRepresentable(
+                        series: presentation.series.map { series in
+                            .init(
+                                id: series.styleToken,
+                                kind: series.kind == .histogram ? .histogram : .line,
+                                values: series.values
+                            )
+                        },
+                        colors: viewModel.indicatorColors,
+                        guideLines: presentation.guideLines,
+                        yRange: presentation.yRange,
+                        xValueCount: viewModel.candles.count,
+                        resetToken: paneResetTokens[presentation.id, default: 0]
+                    )
+                }
+            }
         )
     }
 

@@ -1,4 +1,7 @@
 import Foundation
+// DTOs intentionally remain together so every HTTP and socket wire shape is
+// reviewable as one contract surface.
+// swiftlint:disable file_length
 
 // MARK: - Error envelope
 // All API errors decode from `{ "error": { "code": ..., "message": ... } }`.
@@ -226,6 +229,182 @@ struct OptionsChainDTO: Decodable, Equatable, Sendable {
     let contracts: [OptionContractDTO]
 }
 
+enum OrderBookProviderDTO: String, Decodable, Equatable, Sendable {
+    case webull
+}
+
+enum OrderBookCapabilityDTO: String, Decodable, Equatable, Sendable {
+    case nasdaqTotalViewNonDisplay = "nasdaq_totalview_non_display"
+}
+
+enum OrderBookFreshnessDTO: String, Decodable, Equatable, Sendable {
+    case fresh
+    case stale
+}
+
+enum OrderBookUnavailableReasonDTO: String, Decodable, Equatable, Sendable {
+    case unsupportedInstrument = "unsupported_instrument"
+    case entitlementMissing = "entitlement_missing"
+    case providerUnconfigured = "provider_unconfigured"
+    case invalidCredentials = "invalid_credentials"
+    case providerError = "provider_error"
+    case rateLimiterUnavailable = "rate_limiter_unavailable"
+    case requestTimeout = "request_timeout"
+    case noData = "no_data"
+    case marketClosed = "market_closed"
+    case stale
+    case invalidBook = "invalid_book"
+    case disconnected
+}
+
+struct OrderBookLevelDTO: Decodable, Equatable, Sendable {
+    let price: Double
+    let size: Double
+}
+
+struct OrderBookSnapshotDTO: Decodable, Equatable, Sendable {
+    let symbol: String
+    let provider: OrderBookProviderDTO
+    let capability: OrderBookCapabilityDTO
+    let freshness: OrderBookFreshnessDTO
+    let timestamp: String
+    let receivedAt: String
+    let depth: Int
+    let bids: [OrderBookLevelDTO]
+    let asks: [OrderBookLevelDTO]
+}
+
+struct OrderBookIndicatorsDTO: Decodable, Equatable, Sendable {
+    let spreadAbs: Double?
+    let spreadBps: Double?
+    let spreadPercentile: Double?
+    let topBookImbalance: Double?
+    let tickPressure: Double?
+    let depthImbalance: Double?
+    let cumulativePressure: Double?
+    let touchDepletion: Double?
+}
+
+struct L2SnapshotPayloadDTO: Decodable, Equatable, Sendable {
+    let snapshot: OrderBookSnapshotDTO
+    let indicators: OrderBookIndicatorsDTO
+}
+
+enum OrderBookStatusDTO: Decodable, Equatable, Sendable {
+    case available(
+        symbol: String,
+        provider: OrderBookProviderDTO,
+        capability: OrderBookCapabilityDTO
+    )
+    case unavailable(
+        symbol: String,
+        provider: OrderBookProviderDTO?,
+        capability: OrderBookCapabilityDTO?,
+        freshness: OrderBookFreshnessDTO?,
+        reason: OrderBookUnavailableReasonDTO,
+        message: String,
+        retryable: Bool
+    )
+
+    var symbol: String {
+        switch self {
+        case .available(let symbol, _, _), .unavailable(let symbol, _, _, _, _, _, _): symbol
+        }
+    }
+
+    var unavailableMessage: String? {
+        guard case .unavailable(_, _, _, _, _, let message, _) = self else { return nil }
+        return message
+    }
+
+    var isAvailable: Bool {
+        if case .available = self { return true }
+        return false
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case availability, symbol, provider, capability, freshness, reason, message, retryable
+    }
+
+    private enum Availability: String, Decodable {
+        case available
+        case unavailable
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        switch try values.decode(Availability.self, forKey: .availability) {
+        case .available:
+            guard try values.decode(OrderBookFreshnessDTO.self, forKey: .freshness) == .fresh else {
+                throw DecodingError.dataCorruptedError(
+                    forKey: .freshness,
+                    in: values,
+                    debugDescription: "Available L2 status must be fresh."
+                )
+            }
+            self = .available(
+                symbol: try values.decode(String.self, forKey: .symbol),
+                provider: try values.decode(OrderBookProviderDTO.self, forKey: .provider),
+                capability: try values.decode(OrderBookCapabilityDTO.self, forKey: .capability)
+            )
+        case .unavailable:
+            self = .unavailable(
+                symbol: try values.decode(String.self, forKey: .symbol),
+                provider: try values.decodeIfPresent(OrderBookProviderDTO.self, forKey: .provider),
+                capability: try values.decodeIfPresent(OrderBookCapabilityDTO.self, forKey: .capability),
+                freshness: try values.decodeIfPresent(OrderBookFreshnessDTO.self, forKey: .freshness),
+                reason: try values.decode(OrderBookUnavailableReasonDTO.self, forKey: .reason),
+                message: try values.decode(String.self, forKey: .message),
+                retryable: try values.decode(Bool.self, forKey: .retryable)
+            )
+        }
+    }
+}
+
+enum IVAlertSymbolDTO: String, Codable, CaseIterable, Equatable, Sendable {
+    case SPX
+    case NDX
+    case RUT
+}
+
+enum IVAlertDirectionDTO: String, Decodable, Equatable, Sendable {
+    case expansion
+    case crush
+}
+
+struct IVAlertConfigurationDTO: Codable, Equatable, Sendable {
+    let enabled: Bool
+    let symbols: [IVAlertSymbolDTO]
+    let lookbackMinutes: Int
+    let thresholdK: Double
+    let consecutiveBreaches: Int
+    let warmupMinutes: Int
+    let warmupSamples: Int
+    let cooldownMinutes: Int
+}
+
+struct IVAlertConfigurationStateDTO: Decodable, Equatable, Sendable {
+    let enabled: Bool
+    let symbols: [IVAlertSymbolDTO]
+    let lookbackMinutes: Int
+    let thresholdK: Double
+    let consecutiveBreaches: Int
+    let warmupMinutes: Int
+    let warmupSamples: Int
+    let cooldownMinutes: Int
+    let schemaVersion: Int
+    let updatedAt: String
+}
+
+struct IVAlertDTO: Decodable, Equatable, Sendable {
+    let symbol: IVAlertSymbolDTO
+    let direction: IVAlertDirectionDTO
+    let currentIv: Double
+    let baselineIv: Double
+    let zScore: Double
+    let timestamp: String
+}
+
 // MARK: - Trading
 
 struct OrderSelectionDTO: Encodable, Equatable, Sendable {
@@ -233,10 +412,8 @@ struct OrderSelectionDTO: Encodable, Equatable, Sendable {
     let optionType: String?
     let expiration: String?
     let strike: Double?
-    /// auto_otm only: strikes OTM from the ATM strike; 0 = ATM; nil (omitted)
-    /// means 1. Encoded as absent rather than null when nil, so servers
-    /// predating the field see the request shape they always did.
-    var otmOffset: Int? = nil
+    var classicFallbackAcknowledged: Bool? = nil
+    var autoScoring: AutoScoringSelectionDTO? = nil
 }
 
 struct OrderRequestDTO: Encodable, Equatable, Sendable {
@@ -484,12 +661,44 @@ struct SocketSubscribeMessage: Encodable, Sendable {
     let symbols: [String]
 }
 
+struct SocketL2SubscribeMessage: Encodable, Sendable {
+    let type = "l2Subscribe"
+    let symbol: String
+    let levels: Int
+}
+
+struct SocketL2UnsubscribeMessage: Encodable, Sendable {
+    let type = "l2Unsubscribe"
+    let symbol: String
+}
+
+struct SocketIVAlertConfigureMessage: Encodable, Sendable {
+    let type = "ivAlertConfigure"
+    let data: IVAlertConfigurationDTO
+}
+
 struct SocketEnvelope: Decodable, Sendable {
     let type: String
 }
 
 struct SocketQuoteMessage: Decodable, Sendable {
     let data: QuoteDTO
+}
+
+struct SocketL2SnapshotMessage: Decodable, Sendable {
+    let data: L2SnapshotPayloadDTO
+}
+
+struct SocketL2StatusMessage: Decodable, Sendable {
+    let data: OrderBookStatusDTO
+}
+
+struct SocketIVAlertMessage: Decodable, Sendable {
+    let data: IVAlertDTO
+}
+
+struct SocketIVAlertConfigurationMessage: Decodable, Sendable {
+    let data: IVAlertConfigurationStateDTO
 }
 
 struct SocketChartOrderMessage: Decodable, Sendable {

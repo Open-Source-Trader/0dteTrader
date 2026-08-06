@@ -28,6 +28,8 @@ targets:
         excludes:
           - 0dteTrader.entitlements
           - 0dteTrader-production.entitlements
+      - path: ../../packages/shared-types/indicator-registry.json
+        buildPhase: resources
     dependencies:
       - package: Charts
         product: DGCharts
@@ -86,6 +88,8 @@ targets:
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
         NSFaceIDUsageDescription: 0dteTrader uses Face ID to unlock the app.
+        # Fail closed by default. Entitled builds can set L2_CAPABILITY_ENABLED=YES.
+        L2CapabilityEnabled: $(L2_CAPABILITY_ENABLED)
         # Resources are copied flat into the bundle, so bare filenames here.
         UIAppFonts:
           - Orbitron-Medium.ttf

@@ -131,7 +131,7 @@ private extension AIAnalysisModelsTests {
                 let high = Double(values[1])
                 let low = Double(values[2])
                 let close = Double(values[3])
-                let volume = Int(values[4])
+                let volume = Double(values[4])
                 XCTAssertNotNil(open)
                 XCTAssertNotNil(high)
                 XCTAssertNotNil(low)
@@ -153,7 +153,7 @@ private extension AIAnalysisModelsTests {
                 let deltaHigh = Double(values[1])
                 let deltaLow = Double(values[2])
                 let deltaClose = Double(values[3])
-                let volume = Int(values[4])
+                let volume = Double(values[4])
                 XCTAssertNotNil(deltaOpen)
                 XCTAssertNotNil(deltaHigh)
                 XCTAssertNotNil(deltaLow)
@@ -204,7 +204,7 @@ private extension AIAnalysisModelsTests {
                     high: 500.40 + Double(index) * 0.05,
                     low: 499.80 + Double(index) * 0.05,
                     close: 500.20 + Double(index) * 0.05,
-                    volume: 100_000 + index * 250
+                    volume: Double(100_000 + index * 250)
                 )
             )
         }

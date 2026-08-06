@@ -276,12 +276,7 @@ export class StubBrokerGateway implements BrokerGateway {
     const chain = await this.getOptionsChain(userId, order.underlying, order.selection.expiration);
     const contract =
       order.selection.mode === 'auto_otm'
-        ? resolveAutoOtm(
-            chain.contracts,
-            optionType,
-            chain.underlyingPrice,
-            order.selection.otmOffset,
-          )
+        ? resolveAutoOtm(chain.contracts, optionType, chain.underlyingPrice)
         : findExplicitOption(chain.contracts, optionType, order.selection.strike ?? NaN);
     if (!contract) {
       throw brokerErrors.contractNotFound(

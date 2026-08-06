@@ -1,5 +1,6 @@
 import { plainToInstance } from 'class-transformer';
 import { validateSync } from 'class-validator';
+import type { ValidationError } from 'class-validator';
 import { OrderRequestDto, OrderSelectionDto } from './order-request.dto';
 
 /**
@@ -55,7 +56,7 @@ describe('OrderRequestDto', () => {
   });
 });
 
-describe('OrderSelectionDto.otmOffset', () => {
+describe('OrderSelectionDto Classic Auto', () => {
   function selectionErrors(overrides: Record<string, unknown>): string[] {
     const dto = plainToInstance(OrderSelectionDto, {
       mode: 'auto_otm',
@@ -65,17 +66,83 @@ describe('OrderSelectionDto.otmOffset', () => {
     return validateSync(dto).flatMap((error) => Object.values(error.constraints ?? {}));
   }
 
-  it('accepts 0 through 10, and absence', () => {
+  it('accepts fixed +1 Classic Auto without an offset', () => {
     expect(selectionErrors({})).toEqual([]);
-    expect(selectionErrors({ otmOffset: 0 })).toEqual([]);
-    expect(selectionErrors({ otmOffset: 1 })).toEqual([]);
-    expect(selectionErrors({ otmOffset: 10 })).toEqual([]);
   });
 
-  it('rejects negative, fractional, oversized, and non-numeric offsets', () => {
-    expect(selectionErrors({ otmOffset: -1 }).join(' ')).toMatch(/otmOffset/);
-    expect(selectionErrors({ otmOffset: 1.5 }).join(' ')).toMatch(/otmOffset/);
-    expect(selectionErrors({ otmOffset: 11 }).join(' ')).toMatch(/otmOffset/);
-    expect(selectionErrors({ otmOffset: 'two' }).join(' ')).toMatch(/otmOffset/);
+  it('rejects the removed standalone offset field', () => {
+    expect(selectionErrors({ otmOffset: 0 }).join(' ')).toMatch(
+      /selection fields do not match mode/i,
+    );
+    expect(selectionErrors({ otmOffset: 2 }).join(' ')).toMatch(
+      /selection fields do not match mode/i,
+    );
+  });
+});
+
+describe('OrderSelectionDto scored Auto', () => {
+  const scored = {
+    selectedSymbol: 'SPY260805C00500000',
+    preferences: {
+      schemaVersion: 1,
+      preset: 'conservative',
+      targetAbsDelta: 0.25,
+      strikeRungs: 5,
+      maxSpreadBps: 500,
+      maxPremiumDollars: 250,
+      minOpenInterest: 100,
+      gammaMode: 'avoid',
+      weights: { delta: 0.3, spread: 0.25, openInterest: 0.2, gamma: 0.1, iv: 0.15 },
+    },
+    scoredConfirmationAccepted: true,
+    rankedAt: '2026-08-05T15:00:00.000Z',
+  };
+
+  function validateSelection(selection: Record<string, unknown>): string[] {
+    const dto = plainToInstance(OrderRequestDto, {
+      underlying: 'SPY',
+      assetClass: 'option',
+      side: 'buy',
+      quantity: 1,
+      orderType: 'mid',
+      selection,
+    });
+    const messages = (error: ValidationError): string[] => [
+      ...Object.values(error.constraints ?? {}),
+      ...(error.children ?? []).flatMap(messages),
+    ];
+    return validateSync(dto).flatMap(messages);
+  }
+
+  it('accepts an explicitly confirmed scored selection', () => {
+    expect(
+      validateSelection({
+        mode: 'auto_scored',
+        optionType: 'call',
+        expiration: '2026-08-05',
+        autoScoring: scored,
+      }),
+    ).toEqual([]);
+  });
+
+  it('rejects missing or false scored confirmation and contradictory fields', () => {
+    expect(
+      validateSelection({
+        mode: 'auto_scored',
+        optionType: 'call',
+        autoScoring: { ...scored, scoredConfirmationAccepted: false },
+      }).join(' '),
+    ).toMatch(/autoScoring|confirmation/i);
+    expect(validateSelection({ mode: 'auto_scored', optionType: 'call' }).join(' ')).toMatch(
+      /autoScoring/i,
+    );
+    expect(
+      validateSelection({
+        mode: 'auto_scored',
+        optionType: 'call',
+        strike: 500,
+        autoScoring: scored,
+      }).join(' '),
+    ).toMatch(/strike/i);
   });
 });

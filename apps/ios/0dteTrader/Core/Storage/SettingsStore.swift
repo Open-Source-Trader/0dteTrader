@@ -23,6 +23,8 @@ final class SettingsStore: @unchecked Sendable {
         static let layoutMode = "settings.layoutMode"
         static let splitFraction = "settings.splitFraction"
         static let indicatorSettings = "settings.indicatorSettings"
+        static let indicatorSettingsV1 = "settings.indicatorSettings.v1"
+        static let chartDisplayV1 = "settings.chartDisplay.v1"
         static let twcSettings = "settings.twcSettings"
         static let optionsAnalyticsSettings = "settings.optionsAnalytics.v1"
         static let chartTradingSettings = "settings.chartTrading.v1"
@@ -31,10 +33,233 @@ final class SettingsStore: @unchecked Sendable {
         static let appLockEnabled = "settings.appLockEnabled"
         static let tradingLocked = "settings.tradingLocked"
         static let bypassOrderConfirmation = "settings.bypassOrderConfirmation"
-        static let autoOtmOffset = "settings.autoOtmOffset"
         static let toastsEnabled = "settings.toastsEnabled"
         static let pushNotificationsEnabled = "settings.pushNotificationsEnabled"
         static let pushDeviceToken = "settings.pushDeviceToken"
+    }
+
+    private struct LegacyIndicatorSettings: Decodable {
+        let smaEnabled: Bool?
+        let smaPeriod: Int?
+        let emaEnabled: Bool?
+        let emaPeriod: Int?
+        let vwapEnabled: Bool?
+        let rsiEnabled: Bool?
+        let rsiPeriod: Int?
+        let macdEnabled: Bool?
+        let macdFastPeriod: Int?
+        let macdSlowPeriod: Int?
+        let macdSignalPeriod: Int?
+        let bollingerEnabled: Bool?
+        let bollingerPeriod: Int?
+        let bollingerMultiplier: Double?
+        let volumeEnabled: Bool?
+        let stochEnabled: Bool?
+        let stochKPeriod: Int?
+        let stochKSmooth: Int?
+        let stochDPeriod: Int?
+        let atrEnabled: Bool?
+        let atrPeriod: Int?
+    }
+
+    func loadIndicatorSettings(registry: IndicatorRegistry) throws -> IndicatorSettingsState {
+        if let data = defaults.data(forKey: Keys.indicatorSettingsV1) {
+            let state = try decoder.decode(IndicatorSettingsState.self, from: data)
+            try IndicatorSettingsValidator.validate(state, registry: registry)
+            try completeInterruptedMigration(state: state, registry: registry)
+            return state
+        }
+        guard let legacyData = defaults.data(forKey: Keys.indicatorSettings) else {
+            let state = try IndicatorSettingsState.defaults(for: registry)
+            try persistIndicatorSettings(state)
+            if defaults.data(forKey: Keys.chartDisplayV1) == nil {
+                try persistChartDisplayPreferences(.default)
+            }
+            return state
+        }
+
+        let legacy = try decoder.decode(LegacyIndicatorSettings.self, from: legacyData)
+        var state = try IndicatorSettingsState.defaults(for: registry)
+        applyLegacy(legacy, to: &state)
+        try IndicatorSettingsValidator.validate(state, registry: registry)
+
+        let display = ChartDisplayPreferences(
+            volumeEnabled: legacy.volumeEnabled ?? ChartDisplayPreferences.default.volumeEnabled
+        )
+        let previousSettingsData = defaults.data(forKey: Keys.indicatorSettingsV1)
+        let previousDisplayData = defaults.data(forKey: Keys.chartDisplayV1)
+        do {
+            try persistIndicatorSettings(state)
+            try persistChartDisplayPreferences(display)
+            _ = try readBack(state: state, display: display, registry: registry)
+        } catch {
+            restore(previousSettingsData, forKey: Keys.indicatorSettingsV1)
+            restore(previousDisplayData, forKey: Keys.chartDisplayV1)
+            throw error
+        }
+        defaults.removeObject(forKey: Keys.indicatorSettings)
+        return state
+    }
+
+    private func applyLegacy(_ legacy: LegacyIndicatorSettings, to state: inout IndicatorSettingsState) {
+        apply(enabled: legacy.smaEnabled, parameters: ["period": legacy.smaPeriod], id: "sma", to: &state)
+        apply(enabled: legacy.emaEnabled, parameters: ["period": legacy.emaPeriod], id: "ema", to: &state)
+        apply(
+            enabled: legacy.vwapEnabled,
+            parameters: [String: Int?](),
+            id: "anchored_vwap",
+            to: &state
+        )
+        apply(enabled: legacy.rsiEnabled, parameters: ["period": legacy.rsiPeriod], id: "rsi", to: &state)
+        apply(
+            enabled: legacy.macdEnabled,
+            parameters: [
+                "fastPeriod": legacy.macdFastPeriod,
+                "slowPeriod": legacy.macdSlowPeriod,
+                "signalPeriod": legacy.macdSignalPeriod,
+            ],
+            id: "macd",
+            to: &state
+        )
+        apply(
+            enabled: legacy.bollingerEnabled,
+            parameters: [
+                "period": legacy.bollingerPeriod.map(Double.init),
+                "multiplier": legacy.bollingerMultiplier,
+            ],
+            id: "bollinger",
+            to: &state
+        )
+        apply(
+            enabled: legacy.stochEnabled,
+            parameters: [
+                "kPeriod": legacy.stochKPeriod,
+                "kSmooth": legacy.stochKSmooth,
+                "dPeriod": legacy.stochDPeriod,
+            ],
+            id: "stochastic",
+            to: &state
+        )
+        apply(enabled: legacy.atrEnabled, parameters: ["period": legacy.atrPeriod], id: "atr", to: &state)
+    }
+
+    private func apply(
+        enabled: Bool?,
+        parameters: [String: Int?],
+        id: String,
+        to state: inout IndicatorSettingsState
+    ) {
+        if let enabled { state.indicators[id]?.enabled = enabled }
+        for (parameterId, value) in parameters {
+            if let value { state.indicators[id]?.parameters[parameterId] = Double(value) }
+        }
+    }
+
+    private func apply(
+        enabled: Bool?,
+        parameters: [String: Double?],
+        id: String,
+        to state: inout IndicatorSettingsState
+    ) {
+        if let enabled { state.indicators[id]?.enabled = enabled }
+        for (parameterId, value) in parameters {
+            if let value { state.indicators[id]?.parameters[parameterId] = value }
+        }
+    }
+
+    private func completeInterruptedMigration(
+        state: IndicatorSettingsState,
+        registry: IndicatorRegistry
+    ) throws {
+        guard let legacyData = defaults.data(forKey: Keys.indicatorSettings) else { return }
+        let previousDisplayData = defaults.data(forKey: Keys.chartDisplayV1)
+        let display: ChartDisplayPreferences
+        if let previousDisplayData,
+           let decoded = try? decoder.decode(ChartDisplayPreferences.self, from: previousDisplayData) {
+            display = decoded
+        } else {
+            let legacy = try? decoder.decode(LegacyIndicatorSettings.self, from: legacyData)
+            display = ChartDisplayPreferences(
+                volumeEnabled: legacy?.volumeEnabled ?? ChartDisplayPreferences.default.volumeEnabled
+            )
+            do {
+                try persistChartDisplayPreferences(display)
+            } catch {
+                restore(previousDisplayData, forKey: Keys.chartDisplayV1)
+                throw error
+            }
+        }
+        do {
+            _ = try readBack(state: state, display: display, registry: registry)
+            defaults.removeObject(forKey: Keys.indicatorSettings)
+        } catch {
+            restore(previousDisplayData, forKey: Keys.chartDisplayV1)
+            throw error
+        }
+    }
+
+    func updateIndicatorSettings(_ candidate: IndicatorSettingsState, registry: IndicatorRegistry) throws {
+        try IndicatorSettingsValidator.validate(candidate, registry: registry)
+        try persistIndicatorSettings(candidate)
+        let persisted = try decoder.decode(
+            IndicatorSettingsState.self,
+            from: defaults.data(forKey: Keys.indicatorSettingsV1) ?? Data()
+        )
+        try IndicatorSettingsValidator.validate(persisted, registry: registry)
+        guard persisted == candidate else {
+            throw IndicatorSettingsValidationError.invalid("Indicator settings could not be verified.")
+        }
+    }
+
+    func loadChartDisplayPreferences() throws -> ChartDisplayPreferences {
+        guard let data = defaults.data(forKey: Keys.chartDisplayV1) else { return .default }
+        return try decoder.decode(ChartDisplayPreferences.self, from: data)
+    }
+
+    func updateChartDisplayPreferences(_ preferences: ChartDisplayPreferences) throws {
+        try persistChartDisplayPreferences(preferences)
+        let persisted = try decoder.decode(
+            ChartDisplayPreferences.self,
+            from: defaults.data(forKey: Keys.chartDisplayV1) ?? Data()
+        )
+        guard persisted == preferences else {
+            throw IndicatorSettingsValidationError.invalid("Chart display settings could not be verified.")
+        }
+    }
+
+    private func persistIndicatorSettings(_ state: IndicatorSettingsState) throws {
+        defaults.set(try encoder.encode(state), forKey: Keys.indicatorSettingsV1)
+    }
+
+    private func persistChartDisplayPreferences(_ display: ChartDisplayPreferences) throws {
+        defaults.set(try encoder.encode(display), forKey: Keys.chartDisplayV1)
+    }
+
+    private func restore(_ data: Data?, forKey key: String) {
+        if let data {
+            defaults.set(data, forKey: key)
+        } else {
+            defaults.removeObject(forKey: key)
+        }
+    }
+
+    private func readBack(
+        state: IndicatorSettingsState,
+        display: ChartDisplayPreferences,
+        registry: IndicatorRegistry
+    ) throws -> Bool {
+        guard let settingsData = defaults.data(forKey: Keys.indicatorSettingsV1),
+              let displayData = defaults.data(forKey: Keys.chartDisplayV1)
+        else {
+            throw IndicatorSettingsValidationError.invalid("Migrated settings could not be read back.")
+        }
+        let savedState = try decoder.decode(IndicatorSettingsState.self, from: settingsData)
+        let savedDisplay = try decoder.decode(ChartDisplayPreferences.self, from: displayData)
+        try IndicatorSettingsValidator.validate(savedState, registry: registry)
+        guard savedState == state, savedDisplay == display else {
+            throw IndicatorSettingsValidationError.invalid("Migrated settings could not be verified.")
+        }
+        return true
     }
 
     /// Layout choice persists across launches (FR-12). Defaults to split view.
@@ -55,22 +280,6 @@ final class SettingsStore: @unchecked Sendable {
             return min(0.5, max(0.32, stored))
         }
         set { defaults.set(newValue, forKey: Keys.splitFraction) }
-    }
-
-    var indicatorSettings: IndicatorSettings {
-        get {
-            guard let data = defaults.data(forKey: Keys.indicatorSettings),
-                  let settings = try? decoder.decode(IndicatorSettings.self, from: data)
-            else {
-                return .default
-            }
-            return settings
-        }
-        set {
-            if let data = try? encoder.encode(newValue) {
-                defaults.set(data, forKey: Keys.indicatorSettings)
-            }
-        }
     }
 
     var twcSettings: TwcHeatmapSettings {
@@ -159,17 +368,6 @@ final class SettingsStore: @unchecked Sendable {
             return defaults.bool(forKey: Keys.toastsEnabled)
         }
         set { defaults.set(newValue, forKey: Keys.toastsEnabled) }
-    }
-
-    /// AUTO mode's OTM preference: strikes beyond the ATM anchor (0 = ATM,
-    /// default 1). Clamped on read so a stale or hand-edited value can never
-    /// walk AUTO off the strike ladder.
-    var autoOtmOffset: Int {
-        get {
-            guard defaults.object(forKey: Keys.autoOtmOffset) != nil else { return 1 }
-            return min(10, max(0, defaults.integer(forKey: Keys.autoOtmOffset)))
-        }
-        set { defaults.set(newValue, forKey: Keys.autoOtmOffset) }
     }
 
     /// Push notifications for order events. Off until the user opts in.

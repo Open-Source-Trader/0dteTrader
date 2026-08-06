@@ -1,6 +1,7 @@
 import type { OptionsAnalyticsFeedMode, OptionsAnalyticsSnapshot } from '@0dtetrader/shared-types';
 import {
   blackForwardKernel,
+  atmIvAtSpot,
   computeOptionsAnalyticsSnapshot,
   findRootsOnGrid,
   impliedForwardFromPairs,
@@ -48,12 +49,58 @@ interface EngineInput {
 
 const engine = {
   blackForwardKernel,
+  atmIvAtSpot,
   solveImpliedVolatility,
   impliedForwardFromPairs,
   findRootsOnGrid,
   computeOptionsAnalyticsSnapshot: (input: EngineInput): OptionsAnalyticsSnapshot =>
     computeOptionsAnalyticsSnapshot(input),
 };
+
+describe('atmIvAtSpot', () => {
+  const leg = (impliedVolatility: number | null) => ({ impliedVolatility });
+  const strike = (value: number, callIv: number | null, putIv: number | null) => ({
+    strike: value,
+    call: leg(callIv),
+    put: leg(putIv),
+  });
+
+  it('uses the exact paired strike arithmetic mean', () => {
+    expect(
+      engine.atmIvAtSpot(
+        [strike(95, 0.2, 0.22), strike(100, 0.3, 0.34), strike(105, 0.4, 0.42)],
+        100,
+      ),
+    ).toBeCloseTo(0.32, 12);
+  });
+
+  it('linearly interpolates the nearest paired strikes independent of input order', () => {
+    expect(
+      engine.atmIvAtSpot(
+        [strike(110, 0.5, 0.5), strike(100, 0.2, 0.2), strike(105, 0.3, 0.4)],
+        102,
+      ),
+    ).toBeCloseTo(0.26, 12);
+  });
+
+  it('ignores missing-leg strikes and never extrapolates or invents a one-leg fallback', () => {
+    const rows = [
+      strike(95, 0.2, 0.2),
+      strike(100, 0.3, null),
+      strike(105, null, 0.4),
+      strike(110, 0.5, 0.5),
+    ];
+    expect(engine.atmIvAtSpot(rows, 100)).toBeCloseTo(0.3, 12);
+    expect(engine.atmIvAtSpot(rows, 90)).toBeNull();
+    expect(engine.atmIvAtSpot(rows, 115)).toBeNull();
+    expect(engine.atmIvAtSpot([strike(100, 0.3, null)], 100)).toBeNull();
+  });
+
+  it('rejects non-finite spot or IV input without producing a non-finite value', () => {
+    expect(engine.atmIvAtSpot([strike(100, 0.2, 0.2)], Number.NaN)).toBeNull();
+    expect(engine.atmIvAtSpot([strike(100, Number.POSITIVE_INFINITY, 0.2)], 100)).toBeNull();
+  });
+});
 
 const OBSERVED_AT = new Date('2026-07-20T14:00:00.000Z');
 const SETTLEMENT_AT = new Date('2026-08-19T14:00:00.000Z');
@@ -369,6 +416,7 @@ describe('options analytics aggregation', () => {
       confidence: 0.68,
       label: 'model-implied 68% range',
     });
+    expect(snapshot.quality.calculationVersion).toBe('options-analytics-v2');
     const totalVariance = snapshot.impliedRange!.atmIv ** 2 * TIME_YEARS;
     expect(snapshot.impliedRange!.lower).toBeCloseTo(
       snapshot.scope.forward * Math.exp(-totalVariance / 2 - Math.sqrt(totalVariance)),

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { sameColorsExceptLast } from './candleRepaint';
 import { extendPriceRange } from './priceReveal';
+import { normalizeVisibleCandleViewport } from './candleViewport';
 
 describe('sameColorsExceptLast', () => {
   it('treats null vs array as different', () => {
@@ -53,5 +54,29 @@ describe('extendPriceRange ("Show on chart" reveal)', () => {
     expect(min).toBe(100);
     expect(max).toBeGreaterThan(120);
     expect(max).toBeLessThanOrEqual(120 + (120 - 100) * 0.1);
+  });
+});
+
+describe('normalizeVisibleCandleViewport', () => {
+  it('includes partially visible candles and clamps whitespace to loaded data', () => {
+    expect(normalizeVisibleCandleViewport({ from: -4.2, to: 3.1 }, 10)).toEqual({
+      kind: 'range',
+      from: 0,
+      to: 4,
+    });
+    expect(normalizeVisibleCandleViewport({ from: 7.8, to: 20 }, 10)).toEqual({
+      kind: 'range',
+      from: 7,
+      to: 9,
+    });
+  });
+
+  it('distinguishes an uninitialized scale from a valid empty intersection', () => {
+    expect(normalizeVisibleCandleViewport(null, 10)).toEqual({ kind: 'uninitialized' });
+    expect(normalizeVisibleCandleViewport({ from: 12, to: 20 }, 10)).toEqual({ kind: 'empty' });
+    expect(normalizeVisibleCandleViewport({ from: -20, to: -2 }, 10)).toEqual({ kind: 'empty' });
+    expect(normalizeVisibleCandleViewport({ from: 0, to: 2 }, 0)).toEqual({
+      kind: 'uninitialized',
+    });
   });
 });

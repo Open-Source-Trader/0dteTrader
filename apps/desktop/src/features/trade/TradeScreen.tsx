@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type {
   ChartOrder,
+  IVAlert,
   Me,
   OptionContract,
   OrderSide,
@@ -28,7 +29,7 @@ import {
 } from '../../design/icons';
 import { DesktopSettingsPanel } from '../../design/components/DesktopSettingsPanel';
 import type { TradeLayout } from '../../core/storage/SettingsStore';
-import { enabledSubPanes } from '../chart/indicatorSettings';
+import { enabledSubPaneIds } from '../chart/indicatorRegistry';
 import type { ChartTradingProps } from '../chart/CandleChart';
 import { chartChromeSlice } from '../chart/ChartStore';
 import { ChartView } from '../chart/ChartView';
@@ -47,6 +48,7 @@ import {
   StopTargetEditorStore,
 } from './TradeManagementWorkspaceModel';
 import { HistoryView } from './HistoryView';
+import { IvAlertBanner } from './IvAlertBanner';
 import { OrderConfirmPopup } from './OrderConfirmPopup';
 import { PositionsStrip } from './PositionsStrip';
 import { ToastView } from './ToastView';
@@ -109,6 +111,7 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
   const [showProfile, setShowProfile] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [showGexHeatmap, setShowGexHeatmap] = useState(false);
+  const [activeIvAlert, setActiveIvAlert] = useState<IVAlert | null>(null);
 
   // 'practice' is only the pre-fetch placeholder; the server value wins.
   const [tradingMode, setTradingMode] = useState<TradingMode>('practice');
@@ -271,6 +274,8 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
     [quoteSocket, chainStore, tradeStore],
   );
 
+  useEffect(() => quoteSocket.onIvAlert(setActiveIvAlert), [quoteSocket]);
+
   // Keep indicative chain quotes fresh; paused while the confirm
   // sheet is open so the armed ticket's context doesn't shift underneath it.
   useEffect(() => {
@@ -397,7 +402,7 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
   // panel never scrolls (see TradePanel density).
   // No pixel floor: at the phone frame's height the fraction lands under the
   // old 300px floor and would never switch.
-  const paneCount = enabledSubPanes(chart.indicatorSettings).length;
+  const paneCount = enabledSubPaneIds(chart.indicatorSettings).length;
   const PANEL_FRACTIONS = [1 / 3, 0.3, 0.27] as const;
   const PANEL_DENSITIES = ['roomy', 'compact', 'dense'] as const;
   const panelHeight = Math.round(contentHeight * PANEL_FRACTIONS[paneCount]);
@@ -661,6 +666,9 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
         position: 'relative',
       }}
     >
+      {activeIvAlert ? (
+        <IvAlertBanner alert={activeIvAlert} onDismiss={() => setActiveIvAlert(null)} />
+      ) : null}
       {/* Desktop grid renders chart controls inside ChartView's chart shell;
           compact layouts keep the app NavBar above content. */}
       {isDesktopGrid ? null : (
@@ -783,6 +791,7 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
               content: (
                 <ProfileView
                   onLogout={onLogout}
+                  onAutoScoringPreferencesSaved={() => chainStore.refreshAutoScoring()}
                   onDismiss={() => {
                     setShowProfile(false);
                     quoteSocket.reconnect();
@@ -799,7 +808,9 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
               content: (
                 <IndicatorSettingsDesktop
                   settings={chart.indicatorSettings}
+                  chartDisplay={chart.chartDisplay}
                   onChange={(settings) => chartStore.setIndicatorSettings(settings)}
+                  onChangeChartDisplay={(preferences) => chartStore.setChartDisplay(preferences)}
                   twcEnabled={chart.twcSettings.enabled}
                   onToggleTwc={(on) =>
                     chartStore.setTwcSettings({ ...chart.twcSettings, enabled: on })
@@ -822,7 +833,9 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
       {!isDesktopGrid && showIndicatorSettings ? (
         <IndicatorSettingsView
           settings={chart.indicatorSettings}
+          chartDisplay={chart.chartDisplay}
           onChange={(settings) => chartStore.setIndicatorSettings(settings)}
+          onChangeChartDisplay={(preferences) => chartStore.setChartDisplay(preferences)}
           onDismiss={() => setShowIndicatorSettings(false)}
           twcEnabled={chart.twcSettings.enabled}
           onToggleTwc={(on) => chartStore.setTwcSettings({ ...chart.twcSettings, enabled: on })}
@@ -840,6 +853,7 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
       {!isDesktopGrid && showProfile ? (
         <ProfileView
           onLogout={onLogout}
+          onAutoScoringPreferencesSaved={() => chainStore.refreshAutoScoring()}
           onDismiss={() => {
             setShowProfile(false);
             quoteSocket.reconnect();

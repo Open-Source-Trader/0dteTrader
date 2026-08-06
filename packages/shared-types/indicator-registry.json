@@ -1,0 +1,683 @@
+{
+  "version": 1,
+  "maxSubPanes": 2,
+  "paneLimitMessage": "You can display up to 2 indicator panes.",
+  "indicators": [
+    {
+      "id": "sma",
+      "displayName": "Simple Moving Average",
+      "pane": "overlay",
+      "requiresL2": false,
+      "parameters": {
+        "period": {
+          "id": "period",
+          "label": "Period",
+          "kind": "integer",
+          "minimum": 1,
+          "maximum": 500,
+          "default": 20
+        }
+      },
+      "defaultSettings": { "enabled": false, "parameters": { "period": 20 } },
+      "styleTokens": { "value": "indicator.sma.value" },
+      "geometry": {
+        "kind": "line",
+        "series": [{ "id": "value", "label": "SMA", "styleToken": "indicator.sma.value" }]
+      }
+    },
+    {
+      "id": "ema",
+      "displayName": "Exponential Moving Average",
+      "pane": "overlay",
+      "requiresL2": false,
+      "parameters": {
+        "period": {
+          "id": "period",
+          "label": "Period",
+          "kind": "integer",
+          "minimum": 1,
+          "maximum": 500,
+          "default": 9
+        }
+      },
+      "defaultSettings": { "enabled": true, "parameters": { "period": 9 } },
+      "styleTokens": { "value": "indicator.ema.value" },
+      "geometry": {
+        "kind": "line",
+        "series": [{ "id": "value", "label": "EMA", "styleToken": "indicator.ema.value" }]
+      }
+    },
+    {
+      "id": "rsi",
+      "displayName": "Relative Strength Index",
+      "pane": "subpane",
+      "requiresL2": false,
+      "parameters": {
+        "period": {
+          "id": "period",
+          "label": "Period",
+          "kind": "integer",
+          "minimum": 1,
+          "maximum": 500,
+          "default": 14
+        }
+      },
+      "defaultSettings": { "enabled": false, "parameters": { "period": 14 } },
+      "styleTokens": { "value": "indicator.rsi.value" },
+      "geometry": {
+        "kind": "line",
+        "series": [{ "id": "value", "label": "RSI", "styleToken": "indicator.rsi.value" }]
+      }
+    },
+    {
+      "id": "macd",
+      "displayName": "MACD",
+      "pane": "subpane",
+      "requiresL2": false,
+      "parameters": {
+        "fastPeriod": {
+          "id": "fastPeriod",
+          "label": "Fast Period",
+          "kind": "integer",
+          "minimum": 1,
+          "maximum": 500,
+          "default": 12
+        },
+        "slowPeriod": {
+          "id": "slowPeriod",
+          "label": "Slow Period",
+          "kind": "integer",
+          "minimum": 1,
+          "maximum": 500,
+          "default": 26
+        },
+        "signalPeriod": {
+          "id": "signalPeriod",
+          "label": "Signal Period",
+          "kind": "integer",
+          "minimum": 1,
+          "maximum": 500,
+          "default": 9
+        }
+      },
+      "constraints": [
+        {
+          "kind": "less_than",
+          "left": "fastPeriod",
+          "right": "slowPeriod",
+          "message": "Fast period must be less than slow period."
+        }
+      ],
+      "defaultSettings": {
+        "enabled": false,
+        "parameters": { "fastPeriod": 12, "slowPeriod": 26, "signalPeriod": 9 }
+      },
+      "styleTokens": {
+        "macd": "indicator.macd.value",
+        "signal": "indicator.macd.signal",
+        "histogram": "indicator.macd.histogram"
+      },
+      "geometry": {
+        "kind": "multi_line",
+        "series": [
+          {
+            "id": "macd",
+            "label": "MACD",
+            "styleToken": "indicator.macd.value",
+            "renderAs": "line"
+          },
+          {
+            "id": "signal",
+            "label": "Signal",
+            "styleToken": "indicator.macd.signal",
+            "renderAs": "line"
+          },
+          {
+            "id": "histogram",
+            "label": "Histogram",
+            "styleToken": "indicator.macd.histogram",
+            "renderAs": "histogram"
+          }
+        ]
+      }
+    },
+    {
+      "id": "bollinger",
+      "displayName": "Bollinger Bands",
+      "pane": "overlay",
+      "requiresL2": false,
+      "parameters": {
+        "period": {
+          "id": "period",
+          "label": "Period",
+          "kind": "integer",
+          "minimum": 1,
+          "maximum": 500,
+          "default": 20
+        },
+        "multiplier": {
+          "id": "multiplier",
+          "label": "Multiplier",
+          "kind": "number",
+          "minimum": 0.1,
+          "maximum": 20,
+          "default": 2
+        }
+      },
+      "defaultSettings": { "enabled": false, "parameters": { "period": 20, "multiplier": 2 } },
+      "styleTokens": {
+        "upper": "indicator.bollinger.upper",
+        "middle": "indicator.bollinger.middle",
+        "lower": "indicator.bollinger.lower"
+      },
+      "geometry": {
+        "kind": "band",
+        "series": [
+          { "id": "upper", "label": "Upper", "styleToken": "indicator.bollinger.upper" },
+          { "id": "middle", "label": "Middle", "styleToken": "indicator.bollinger.middle" },
+          { "id": "lower", "label": "Lower", "styleToken": "indicator.bollinger.lower" }
+        ]
+      }
+    },
+    {
+      "id": "stochastic",
+      "displayName": "Stochastic Oscillator",
+      "pane": "subpane",
+      "requiresL2": false,
+      "parameters": {
+        "kPeriod": {
+          "id": "kPeriod",
+          "label": "%K Period",
+          "kind": "integer",
+          "minimum": 1,
+          "maximum": 500,
+          "default": 14
+        },
+        "kSmooth": {
+          "id": "kSmooth",
+          "label": "%K Smoothing",
+          "kind": "integer",
+          "minimum": 1,
+          "maximum": 500,
+          "default": 3
+        },
+        "dPeriod": {
+          "id": "dPeriod",
+          "label": "%D Period",
+          "kind": "integer",
+          "minimum": 1,
+          "maximum": 500,
+          "default": 3
+        }
+      },
+      "defaultSettings": {
+        "enabled": false,
+        "parameters": { "kPeriod": 14, "kSmooth": 3, "dPeriod": 3 }
+      },
+      "styleTokens": { "k": "indicator.stochastic.k", "d": "indicator.stochastic.d" },
+      "geometry": {
+        "kind": "multi_line",
+        "series": [
+          { "id": "k", "label": "%K", "styleToken": "indicator.stochastic.k" },
+          { "id": "d", "label": "%D", "styleToken": "indicator.stochastic.d" }
+        ]
+      }
+    },
+    {
+      "id": "atr",
+      "displayName": "Average True Range",
+      "pane": "subpane",
+      "requiresL2": false,
+      "parameters": {
+        "period": {
+          "id": "period",
+          "label": "Period",
+          "kind": "integer",
+          "minimum": 1,
+          "maximum": 500,
+          "default": 14
+        }
+      },
+      "defaultSettings": { "enabled": false, "parameters": { "period": 14 } },
+      "styleTokens": { "value": "indicator.atr.value" },
+      "geometry": {
+        "kind": "line",
+        "series": [{ "id": "value", "label": "ATR", "styleToken": "indicator.atr.value" }]
+      }
+    },
+    {
+      "id": "anchored_vwap",
+      "displayName": "Anchored VWAP",
+      "pane": "overlay",
+      "requiresL2": false,
+      "parameters": {
+        "anchorTimestamp": {
+          "id": "anchorTimestamp",
+          "label": "Anchor",
+          "kind": "timestamp",
+          "minimum": 0,
+          "maximum": 8640000000000000,
+          "default": 0,
+          "zeroMeansSessionAnchor": true
+        }
+      },
+      "defaultSettings": { "enabled": true, "parameters": { "anchorTimestamp": 0 } },
+      "styleTokens": { "value": "indicator.anchored_vwap.value" },
+      "geometry": {
+        "kind": "line",
+        "series": [
+          { "id": "value", "label": "AVWAP", "styleToken": "indicator.anchored_vwap.value" }
+        ]
+      }
+    },
+    {
+      "id": "supertrend",
+      "displayName": "Supertrend",
+      "pane": "overlay",
+      "requiresL2": false,
+      "parameters": {
+        "atrPeriod": {
+          "id": "atrPeriod",
+          "label": "ATR Period",
+          "kind": "integer",
+          "minimum": 1,
+          "maximum": 500,
+          "default": 10
+        },
+        "multiplier": {
+          "id": "multiplier",
+          "label": "Multiplier",
+          "kind": "number",
+          "minimum": 0.1,
+          "maximum": 20,
+          "default": 3
+        }
+      },
+      "defaultSettings": { "enabled": false, "parameters": { "atrPeriod": 10, "multiplier": 3 } },
+      "styleTokens": {
+        "bullish": "indicator.supertrend.bullish",
+        "bearish": "indicator.supertrend.bearish"
+      },
+      "geometry": {
+        "kind": "segmented_line",
+        "series": [
+          { "id": "bullish", "label": "Bullish", "styleToken": "indicator.supertrend.bullish" },
+          { "id": "bearish", "label": "Bearish", "styleToken": "indicator.supertrend.bearish" }
+        ]
+      }
+    },
+    {
+      "id": "keltner",
+      "displayName": "Keltner Channels",
+      "pane": "overlay",
+      "requiresL2": false,
+      "parameters": {
+        "emaPeriod": {
+          "id": "emaPeriod",
+          "label": "EMA Period",
+          "kind": "integer",
+          "minimum": 1,
+          "maximum": 500,
+          "default": 20
+        },
+        "atrPeriod": {
+          "id": "atrPeriod",
+          "label": "ATR Period",
+          "kind": "integer",
+          "minimum": 1,
+          "maximum": 500,
+          "default": 10
+        },
+        "multiplier": {
+          "id": "multiplier",
+          "label": "Multiplier",
+          "kind": "number",
+          "minimum": 0.1,
+          "maximum": 20,
+          "default": 2
+        }
+      },
+      "defaultSettings": {
+        "enabled": false,
+        "parameters": { "emaPeriod": 20, "atrPeriod": 10, "multiplier": 2 }
+      },
+      "styleTokens": {
+        "upper": "indicator.keltner.upper",
+        "middle": "indicator.keltner.middle",
+        "lower": "indicator.keltner.lower"
+      },
+      "geometry": {
+        "kind": "band",
+        "series": [
+          { "id": "upper", "label": "Upper", "styleToken": "indicator.keltner.upper" },
+          { "id": "middle", "label": "Middle", "styleToken": "indicator.keltner.middle" },
+          { "id": "lower", "label": "Lower", "styleToken": "indicator.keltner.lower" }
+        ]
+      }
+    },
+    {
+      "id": "vpvr",
+      "displayName": "Visible Range Volume Profile",
+      "pane": "overlay",
+      "requiresL2": false,
+      "parameters": {
+        "rowCount": {
+          "id": "rowCount",
+          "label": "Rows",
+          "kind": "integer",
+          "minimum": 4,
+          "maximum": 200,
+          "default": 24
+        },
+        "valueAreaPercent": {
+          "id": "valueAreaPercent",
+          "label": "Value Area %",
+          "kind": "number",
+          "minimum": 1,
+          "maximum": 100,
+          "default": 70
+        }
+      },
+      "defaultSettings": {
+        "enabled": false,
+        "parameters": { "rowCount": 24, "valueAreaPercent": 70 }
+      },
+      "styleTokens": { "row": "indicator.vpvr.row", "valueArea": "indicator.vpvr.value_area" },
+      "geometry": {
+        "kind": "price_profile",
+        "series": [
+          { "id": "row", "label": "Volume", "styleToken": "indicator.vpvr.row" },
+          { "id": "valueArea", "label": "Value Area", "styleToken": "indicator.vpvr.value_area" }
+        ]
+      }
+    },
+    {
+      "id": "adx_dmi",
+      "displayName": "ADX / DMI",
+      "pane": "subpane",
+      "requiresL2": false,
+      "parameters": {
+        "period": {
+          "id": "period",
+          "label": "Period",
+          "kind": "integer",
+          "minimum": 1,
+          "maximum": 500,
+          "default": 14
+        }
+      },
+      "defaultSettings": { "enabled": false, "parameters": { "period": 14 } },
+      "styleTokens": {
+        "adx": "indicator.adx_dmi.adx",
+        "plusDi": "indicator.adx_dmi.plus_di",
+        "minusDi": "indicator.adx_dmi.minus_di"
+      },
+      "geometry": {
+        "kind": "multi_line",
+        "series": [
+          { "id": "adx", "label": "ADX", "styleToken": "indicator.adx_dmi.adx" },
+          { "id": "plusDi", "label": "+DI", "styleToken": "indicator.adx_dmi.plus_di" },
+          { "id": "minusDi", "label": "-DI", "styleToken": "indicator.adx_dmi.minus_di" }
+        ]
+      }
+    },
+    {
+      "id": "obv",
+      "displayName": "On-Balance Volume",
+      "pane": "subpane",
+      "requiresL2": false,
+      "parameters": {},
+      "defaultSettings": { "enabled": false, "parameters": {} },
+      "styleTokens": { "value": "indicator.obv.value" },
+      "geometry": {
+        "kind": "line",
+        "series": [{ "id": "value", "label": "OBV", "styleToken": "indicator.obv.value" }]
+      }
+    },
+    {
+      "id": "cci",
+      "displayName": "Commodity Channel Index",
+      "pane": "subpane",
+      "requiresL2": false,
+      "parameters": {
+        "period": {
+          "id": "period",
+          "label": "Period",
+          "kind": "integer",
+          "minimum": 1,
+          "maximum": 500,
+          "default": 20
+        }
+      },
+      "defaultSettings": { "enabled": false, "parameters": { "period": 20 } },
+      "styleTokens": { "value": "indicator.cci.value" },
+      "geometry": {
+        "kind": "line",
+        "series": [{ "id": "value", "label": "CCI", "styleToken": "indicator.cci.value" }]
+      }
+    },
+    {
+      "id": "williams_r",
+      "displayName": "Williams %R",
+      "pane": "subpane",
+      "requiresL2": false,
+      "parameters": {
+        "period": {
+          "id": "period",
+          "label": "Period",
+          "kind": "integer",
+          "minimum": 1,
+          "maximum": 500,
+          "default": 14
+        }
+      },
+      "defaultSettings": { "enabled": false, "parameters": { "period": 14 } },
+      "styleTokens": { "value": "indicator.williams_r.value" },
+      "geometry": {
+        "kind": "line",
+        "series": [
+          { "id": "value", "label": "Williams %R", "styleToken": "indicator.williams_r.value" }
+        ]
+      }
+    },
+    {
+      "id": "ichimoku",
+      "displayName": "Ichimoku Cloud",
+      "pane": "overlay",
+      "requiresL2": false,
+      "parameters": {
+        "conversionPeriod": {
+          "id": "conversionPeriod",
+          "label": "Conversion Period",
+          "kind": "integer",
+          "minimum": 1,
+          "maximum": 500,
+          "default": 9
+        },
+        "basePeriod": {
+          "id": "basePeriod",
+          "label": "Base Period",
+          "kind": "integer",
+          "minimum": 1,
+          "maximum": 500,
+          "default": 26
+        },
+        "spanBPeriod": {
+          "id": "spanBPeriod",
+          "label": "Span B Period",
+          "kind": "integer",
+          "minimum": 1,
+          "maximum": 500,
+          "default": 52
+        },
+        "displacement": {
+          "id": "displacement",
+          "label": "Displacement",
+          "kind": "integer",
+          "minimum": 1,
+          "maximum": 500,
+          "default": 26
+        }
+      },
+      "defaultSettings": {
+        "enabled": false,
+        "parameters": {
+          "conversionPeriod": 9,
+          "basePeriod": 26,
+          "spanBPeriod": 52,
+          "displacement": 26
+        }
+      },
+      "styleTokens": {
+        "conversion": "indicator.ichimoku.conversion",
+        "base": "indicator.ichimoku.base",
+        "spanA": "indicator.ichimoku.span_a",
+        "spanB": "indicator.ichimoku.span_b",
+        "lagging": "indicator.ichimoku.lagging"
+      },
+      "geometry": {
+        "kind": "cloud",
+        "series": [
+          {
+            "id": "conversion",
+            "label": "Conversion",
+            "styleToken": "indicator.ichimoku.conversion"
+          },
+          { "id": "base", "label": "Base", "styleToken": "indicator.ichimoku.base" },
+          { "id": "spanA", "label": "Leading Span A", "styleToken": "indicator.ichimoku.span_a" },
+          { "id": "spanB", "label": "Leading Span B", "styleToken": "indicator.ichimoku.span_b" },
+          { "id": "lagging", "label": "Lagging Span", "styleToken": "indicator.ichimoku.lagging" }
+        ]
+      }
+    },
+    {
+      "id": "spread",
+      "displayName": "Spread",
+      "pane": "subpane",
+      "requiresL2": true,
+      "parameters": {},
+      "defaultSettings": { "enabled": false, "parameters": {} },
+      "styleTokens": {
+        "absolute": "indicator.spread.absolute",
+        "bps": "indicator.spread.bps",
+        "percentile": "indicator.spread.percentile"
+      },
+      "geometry": {
+        "kind": "multi_line",
+        "sessionWindow": true,
+        "series": [
+          { "id": "absolute", "label": "Absolute", "styleToken": "indicator.spread.absolute" },
+          { "id": "bps", "label": "Basis Points", "styleToken": "indicator.spread.bps" },
+          {
+            "id": "percentile",
+            "label": "Session Percentile",
+            "styleToken": "indicator.spread.percentile"
+          }
+        ]
+      }
+    },
+    {
+      "id": "top_book_imbalance",
+      "displayName": "Top Book Imbalance",
+      "pane": "subpane",
+      "requiresL2": true,
+      "parameters": {},
+      "defaultSettings": { "enabled": false, "parameters": {} },
+      "styleTokens": { "value": "indicator.top_book_imbalance.value" },
+      "geometry": {
+        "kind": "histogram",
+        "series": [
+          {
+            "id": "value",
+            "label": "Imbalance",
+            "styleToken": "indicator.top_book_imbalance.value"
+          }
+        ]
+      }
+    },
+    {
+      "id": "tick_pressure",
+      "displayName": "Tick Pressure",
+      "pane": "subpane",
+      "requiresL2": true,
+      "parameters": {},
+      "defaultSettings": { "enabled": false, "parameters": {} },
+      "styleTokens": { "value": "indicator.tick_pressure.value" },
+      "geometry": {
+        "kind": "histogram",
+        "fixedWindowSeconds": 60,
+        "series": [
+          { "id": "value", "label": "Pressure", "styleToken": "indicator.tick_pressure.value" }
+        ]
+      }
+    },
+    {
+      "id": "depth_imbalance",
+      "displayName": "Depth Imbalance",
+      "pane": "subpane",
+      "requiresL2": true,
+      "parameters": {
+        "levels": {
+          "id": "levels",
+          "label": "Levels",
+          "kind": "integer",
+          "minimum": 1,
+          "maximum": 50,
+          "default": 5
+        }
+      },
+      "defaultSettings": { "enabled": false, "parameters": { "levels": 5 } },
+      "styleTokens": { "value": "indicator.depth_imbalance.value" },
+      "geometry": {
+        "kind": "histogram",
+        "series": [
+          { "id": "value", "label": "Imbalance", "styleToken": "indicator.depth_imbalance.value" }
+        ]
+      }
+    },
+    {
+      "id": "cumulative_pressure",
+      "displayName": "Cumulative Pressure",
+      "pane": "subpane",
+      "requiresL2": true,
+      "parameters": {
+        "levels": {
+          "id": "levels",
+          "label": "Levels",
+          "kind": "integer",
+          "minimum": 1,
+          "maximum": 50,
+          "default": 5
+        }
+      },
+      "defaultSettings": { "enabled": false, "parameters": { "levels": 5 } },
+      "styleTokens": { "value": "indicator.cumulative_pressure.value" },
+      "geometry": {
+        "kind": "histogram",
+        "fixedWindowSeconds": 60,
+        "series": [
+          {
+            "id": "value",
+            "label": "Pressure",
+            "styleToken": "indicator.cumulative_pressure.value"
+          }
+        ]
+      }
+    },
+    {
+      "id": "touch_depletion",
+      "displayName": "Touch Depletion",
+      "pane": "subpane",
+      "requiresL2": true,
+      "parameters": {},
+      "defaultSettings": { "enabled": false, "parameters": {} },
+      "styleTokens": { "value": "indicator.touch_depletion.value" },
+      "geometry": {
+        "kind": "histogram",
+        "series": [
+          { "id": "value", "label": "Depletion", "styleToken": "indicator.touch_depletion.value" }
+        ]
+      }
+    }
+  ]
+}

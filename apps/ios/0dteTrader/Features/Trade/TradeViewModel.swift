@@ -158,6 +158,7 @@ final class TradeViewModel: ObservableObject {
         let selection: OrderSelectionDTO
         let summary: String
         let optionType = chainViewModel.optionType
+        var mayBypassConfirmation = bypass
 
         // Sent only for `.custom`; the server rejects it alongside any other
         // variant, because those four are priced from its own quote.
@@ -290,19 +291,50 @@ final class TradeViewModel: ObservableObject {
                 summary = "\(underlying) \(contract.expiration) \(leg)"
             }
         } else if chainViewModel.isAutoMode {
-            let offset = chainViewModel.autoOtmOffset
-            selection = OrderSelectionDTO(
-                mode: "auto_otm",
-                optionType: optionType.rawValue,
-                expiration: chainViewModel.selectedExpiration,
-                strike: nil,
-                // Omitted at the default so servers predating the field see
-                // the request shape they always did (they resolve +1 anyway).
-                otmOffset: offset == 1 ? nil : offset
-            )
             let expirationLabel = chainViewModel.selectedExpiration ?? "nearest"
-            let offsetLabel = offset == 0 ? "ATM" : "+\(offset) OTM"
-            summary = "\(underlying) AUTO \(offsetLabel) \(optionType.displayName) · exp \(expirationLabel)"
+            if chainViewModel.autoSelectionStrategy == .scored,
+               !chainViewModel.classicFallbackAcknowledged {
+                guard !chainViewModel.isAutoScoringLoading else {
+                    showToast("Scored Auto is still loading.", style: .error)
+                    return
+                }
+                guard let result = chainViewModel.autoScoringResult else {
+                    showToast(chainViewModel.autoScoringError ?? "Scored Auto is still loading.", style: .error)
+                    return
+                }
+                guard !result.noPass,
+                      let winner = result.rankings.first,
+                      let preferences = chainViewModel.autoScoringPreferences
+                else {
+                    showToast("No contract passes. Acknowledge Classic fallback to continue.", style: .error)
+                    return
+                }
+                selection = OrderSelectionDTO(
+                    mode: "auto_scored",
+                    optionType: optionType.rawValue,
+                    expiration: chainViewModel.selectedExpiration,
+                    strike: nil,
+                    autoScoring: AutoScoringSelectionDTO(
+                        selectedSymbol: winner.candidate.symbol,
+                        preferences: preferences,
+                        scoredConfirmationAccepted: true,
+                        rankedAt: result.rankedAt
+                    )
+                )
+                summary = "\(underlying) Scored Auto · \(winner.rationale.summary)"
+                // Scored Auto always requires the visible confirmation sheet,
+                // even when the global preference bypasses Classic orders.
+                mayBypassConfirmation = false
+            } else {
+                selection = OrderSelectionDTO(
+                    mode: "auto_otm",
+                    optionType: optionType.rawValue,
+                    expiration: chainViewModel.selectedExpiration,
+                    strike: nil,
+                    classicFallbackAcknowledged: chainViewModel.classicFallbackAcknowledged ? true : nil
+                )
+                summary = "\(underlying) Classic +1 OTM \(optionType.displayName) · exp \(expirationLabel)"
+            }
         } else {
             guard let strike = chainViewModel.selectedStrike,
                   let expiration = chainViewModel.selectedExpiration
@@ -328,7 +360,7 @@ final class TradeViewModel: ObservableObject {
             limitPrice: limitPrice,
             selection: selection
         )
-        finish(request: request, side: side, summary: summary, bypass: bypass)
+        finish(request: request, side: side, summary: summary, bypass: mayBypassConfirmation)
     }
 
     /// The one place an order leaves `arm()`: either straight to the broker

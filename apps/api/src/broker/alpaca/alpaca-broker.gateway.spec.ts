@@ -231,6 +231,9 @@ describe('AlpacaBrokerGateway (SDK-backed)', () => {
     expect(call).toBeDefined();
     expect((call!.req as { underlyingSymbol: string }).underlyingSymbol).toBe(SYMBOL);
     expect(chain.contracts.map((c) => c.symbol)).toContain(EXPECTED_OCC);
+    expect(
+      chain.contracts.find((contract) => contract.symbol === EXPECTED_OCC)?.quoteTimestamp,
+    ).toBe('2024-01-01T15:00:00.000Z');
     expect(chain.underlyingPrice).toBe(UNDER);
   });
 

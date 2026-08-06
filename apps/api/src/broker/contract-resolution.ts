@@ -31,21 +31,19 @@ export function pickExpiration(expirations: string[], requested?: string): strin
 }
 
 // ---------------------------------------------------------------------------
-// Auto-OTM strike resolution (ATM anchor + N strikes out of the money)
+// Classic Auto strike resolution (ATM anchor + exactly one strike OTM)
 // ---------------------------------------------------------------------------
 
 /**
  * Resolves the auto-selected contract from the live quote and chain: anchor on
  * the ATM strike — the one closest to the underlying's last price, ties
- * resolving toward the OTM side — then step `otmOffset` rungs out of the money
- * (calls up the ladder, puts down). Offset 0 trades the ATM strike itself;
- * omitted means 1.
+ * resolving toward the OTM side — then step exactly one rung out of the money
+ * (calls up the ladder, puts down).
  */
 export function resolveAutoOtm(
   contracts: OptionContract[],
   optionType: OptionType,
   last: number,
-  otmOffset = 1,
 ): OptionContract {
   const ladder = [
     ...new Set(contracts.filter((c) => c.optionType === optionType).map((c) => c.strike)),
@@ -61,12 +59,11 @@ export function resolveAutoOtm(
   }
 
   // Out-of-range indexes (including the empty ladder) fall out as undefined.
-  const target: number | undefined =
-    ladder[optionType === 'call' ? atm + otmOffset : atm - otmOffset];
+  const target: number | undefined = ladder[optionType === 'call' ? atm + 1 : atm - 1];
 
   if (target === undefined) {
     throw errors.validation(
-      `No ${optionType} contract ${otmOffset} strike${otmOffset === 1 ? '' : 's'} out from ` +
+      `No ${optionType} contract one strike out from ` +
         `the at-the-money strike for underlying price ${last} in this chain`,
     );
   }

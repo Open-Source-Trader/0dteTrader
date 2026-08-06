@@ -1,6 +1,8 @@
 import { Logger } from '@nestjs/common';
 import type { ConfigService } from '@nestjs/config';
 import type { OptionsAnalyticsSnapshot } from '@0dtetrader/shared-types';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { InMemoryPrismaService } from '../../test/in-memory-prisma.service';
 import type { OptionsAnalyticsSnapshotResult } from './options-analytics.service';
 import { OptionsAnalyticsCaptureService } from './options-analytics.capture';
@@ -122,8 +124,19 @@ describe('OptionsAnalyticsCaptureService', () => {
       config(),
     );
 
-    await expect(service.persist(result(), 'viewed', NOW)).resolves.toBe(true);
-    await expect(service.persist(result(), 'viewed', NOW)).resolves.toBe(true);
+    const captured = result();
+    captured.snapshot.impliedRange = {
+      lower: 95,
+      upper: 105,
+      confidence: 0.68,
+      label: 'model-implied 68% range',
+      atmIv: 0.25,
+      straddleLower: 96,
+      straddleUpper: 104,
+    };
+    captured.snapshot.quality.calculationVersion = 'options-analytics-v2';
+    await expect(service.persist(captured, 'viewed', NOW)).resolves.toBe(true);
+    await expect(service.persist(captured, 'viewed', NOW)).resolves.toBe(true);
 
     expect(prisma.optionsAnalyticsSnapshots).toHaveLength(1);
     expect(prisma.optionsAnalyticsSnapshots[0]).toMatchObject({
@@ -131,13 +144,235 @@ describe('OptionsAnalyticsCaptureService', () => {
       expiration: '2026-07-20',
       captureReason: 'viewed',
       resolutionMinutes: 1,
-      calculationVersion: 'options-analytics-v1',
+      calculationVersion: 'options-analytics-v2',
+      atmIv: 0.25,
     });
     expect(prisma.optionsAnalyticsSnapshots[0].bucket.toISOString()).toBe(
       '2026-07-20T15:00:00.000Z',
     );
     expect(service.metrics.writes).toBe(1);
     expect(service.metrics.deduplications).toBe(1);
+  });
+
+  it('persists null ATM IV when no exact pair or interpolation bracket exists', async () => {
+    const service = new OptionsAnalyticsCaptureService(
+      prisma as never,
+      analyticsService() as never,
+      config(),
+    );
+    await expect(service.persist(result(), 'viewed', NOW)).resolves.toBe(true);
+    expect(prisma.optionsAnalyticsSnapshots[0]).toMatchObject({ atmIv: null });
+  });
+
+  it('advances IV alerts once only for a newly created core snapshot', async () => {
+    const alerts = { processCapture: jest.fn().mockResolvedValue([]) };
+    const service = new OptionsAnalyticsCaptureService(
+      prisma as never,
+      analyticsService() as never,
+      config(),
+      alerts as never,
+    );
+    const captured = result('SPX');
+    captured.snapshot.impliedRange = {
+      lower: 95,
+      upper: 105,
+      confidence: 0.68,
+      label: 'model-implied 68% range',
+      atmIv: 0.25,
+      straddleLower: 96,
+      straddleUpper: 104,
+    };
+
+    await service.persist(captured, 'core', NOW);
+    await service.persist(captured, 'core', NOW);
+    await service.persist(captured, 'viewed', new Date(NOW.getTime() + 60_000));
+
+    expect(alerts.processCapture).toHaveBeenCalledTimes(1);
+    expect(alerts.processCapture).toHaveBeenCalledWith({
+      symbol: 'SPX',
+      timestamp: NOW,
+      atmIv: 0.25,
+    });
+  });
+
+  it('advances the detector when a viewed snapshot claimed the core minute first', async () => {
+    const alerts = { processCapture: jest.fn().mockResolvedValue([]) };
+    const service = new OptionsAnalyticsCaptureService(
+      prisma as never,
+      analyticsService() as never,
+      config(),
+      alerts as never,
+    );
+    const captured = result('SPX');
+    captured.snapshot.impliedRange = {
+      lower: 95,
+      upper: 105,
+      confidence: 0.68,
+      label: 'model-implied 68% range',
+      atmIv: 0.25,
+      straddleLower: 96,
+      straddleUpper: 104,
+    };
+
+    await service.persist(captured, 'viewed', NOW);
+    await expect(service.persist(captured, 'core', NOW)).resolves.toBe(true);
+
+    expect(prisma.optionsAnalyticsSnapshots).toHaveLength(1);
+    expect(alerts.processCapture).toHaveBeenCalledTimes(1);
+    expect(alerts.processCapture).toHaveBeenCalledWith({
+      symbol: 'SPX',
+      timestamp: NOW,
+      atmIv: 0.25,
+    });
+  });
+
+  it('keeps a core capture pending until detector processing succeeds', async () => {
+    const alerts = {
+      processCapture: jest
+        .fn()
+        .mockRejectedValueOnce(new Error('detector database unavailable'))
+        .mockResolvedValueOnce([]),
+    };
+    const service = new OptionsAnalyticsCaptureService(
+      prisma as never,
+      analyticsService() as never,
+      config(),
+      alerts as never,
+    );
+    const captured = result('SPX');
+
+    await expect(service.persist(captured, 'core', NOW)).resolves.toBe(false);
+    expect(prisma.optionsAnalyticsSnapshots[0]).toMatchObject({
+      captureReason: 'core',
+      detectorProcessedAt: null,
+    });
+
+    await expect(service.persist(captured, 'core', NOW)).resolves.toBe(true);
+    expect(prisma.optionsAnalyticsSnapshots[0].detectorProcessedAt).toBeInstanceOf(Date);
+    expect(alerts.processCapture).toHaveBeenCalledTimes(2);
+  });
+
+  it('drains a detector-pending core row after restart before capturing the current minute', async () => {
+    const failingAlerts = {
+      processCapture: jest.fn().mockRejectedValue(new Error('detector database unavailable')),
+    };
+    const captured = result('SPX');
+    const first = new OptionsAnalyticsCaptureService(
+      prisma as never,
+      analyticsService() as never,
+      config({ 'optionsAnalytics.coreSymbols': ['SPX'] }),
+      failingAlerts as never,
+    );
+    await expect(first.persist(captured, 'core', NOW)).resolves.toBe(false);
+
+    const recoveredAlerts = { processCapture: jest.fn().mockResolvedValue([]) };
+    const restarted = new OptionsAnalyticsCaptureService(
+      prisma as never,
+      analyticsService() as never,
+      config({ 'optionsAnalytics.coreSymbols': ['SPX'] }),
+      recoveredAlerts as never,
+    );
+    jest.spyOn(restarted, 'maintain').mockResolvedValue(true);
+
+    await restarted.runScheduledTick(new Date(NOW.getTime() + 60_000));
+
+    expect(recoveredAlerts.processCapture).toHaveBeenCalledTimes(2);
+    expect(prisma.optionsAnalyticsSnapshots).toHaveLength(2);
+    expect(
+      prisma.optionsAnalyticsSnapshots.every(
+        (row) => row.captureReason === 'core' && row.detectorProcessedAt instanceof Date,
+      ),
+    ).toBe(true);
+    expect(restarted.metrics.detectorPendingRecovered).toBe(1);
+    expect(restarted.metrics.detectorPendingDeferred).toBe(0);
+  });
+
+  it('does not let more than 1,000 migration-backfilled history rows block fresh capture', async () => {
+    const migration = readFileSync(
+      join(
+        __dirname,
+        '../../prisma/migrations/20260805220000_options_analytics_atm_iv/migration.sql',
+      ),
+      'utf8',
+    );
+    const backfillPosition = migration.indexOf('UPDATE "options_analytics_snapshots"');
+    const pendingIndexPosition = migration.indexOf(
+      'CREATE INDEX "options_analytics_detector_pending_idx"',
+    );
+    expect(backfillPosition).toBeGreaterThan(-1);
+    expect(pendingIndexPosition).toBeGreaterThan(backfillPosition);
+    expect(migration).toContain('SET "detectorProcessedAt" = "createdAt"');
+
+    const migratedAt = new Date('2026-08-05T12:00:00.000Z');
+    for (let index = 0; index < 1_001; index += 1) {
+      prisma.optionsAnalyticsSnapshots.push({
+        id: `historical-${index}`,
+        symbol: 'SPX',
+        expiration: '2026-07-20',
+        observedAt: new Date(migratedAt.getTime() - index * 60_000),
+        settlementAt: migratedAt,
+        bucket: new Date(migratedAt.getTime() - index * 60_000),
+        captureReason: 'core',
+        resolutionMinutes: 1,
+        calculationVersion: 'options-analytics-v1',
+        atmIv: null,
+        detectorProcessedAt: migratedAt,
+        input: {},
+        output: {},
+        quality: {},
+        createdAt: migratedAt,
+      });
+    }
+    const analytics = analyticsService();
+    const service = new OptionsAnalyticsCaptureService(
+      prisma as never,
+      analytics as never,
+      config({ 'optionsAnalytics.coreSymbols': ['SPX'] }),
+      { processCapture: jest.fn().mockResolvedValue([]) } as never,
+    );
+    jest.spyOn(service, 'maintain').mockResolvedValue(true);
+
+    await service.runScheduledTick(NOW);
+
+    expect(analytics.calls).toEqual(['SPX']);
+    expect(prisma.optionsAnalyticsSnapshots).toHaveLength(1_002);
+    expect(service.metrics).toMatchObject({
+      coreSuccess: 1,
+      detectorPendingRecovered: 0,
+      detectorPendingDeferred: 0,
+    });
+  });
+
+  it('bounds a real pending backlog and reports recovered and deferred work directly', async () => {
+    for (let index = 0; index < 1_001; index += 1) {
+      prisma.optionsAnalyticsSnapshots.push({
+        id: `pending-${index}`,
+        symbol: 'SPY',
+        observedAt: new Date(NOW.getTime() - (index + 1) * 60_000),
+        bucket: new Date(NOW.getTime() - (index + 1) * 60_000),
+        captureReason: 'core',
+        resolutionMinutes: 1,
+        detectorProcessedAt: null,
+      });
+    }
+    const analytics = analyticsService();
+    const service = new OptionsAnalyticsCaptureService(
+      prisma as never,
+      analytics as never,
+      config({ 'optionsAnalytics.coreSymbols': ['SPX'] }),
+    );
+
+    await service.runScheduledTick(NOW);
+
+    expect(analytics.calls).toEqual([]);
+    expect(service.metrics).toMatchObject({
+      coreFailure: 1,
+      detectorPendingRecovered: 1_000,
+      detectorPendingDeferred: 1,
+    });
+    expect(
+      prisma.optionsAnalyticsSnapshots.filter((row) => row.detectorProcessedAt === null),
+    ).toHaveLength(1);
   });
 
   it('uses capture time for the minute bucket while preserving source observedAt', async () => {

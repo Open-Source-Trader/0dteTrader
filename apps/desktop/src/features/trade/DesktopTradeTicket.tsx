@@ -82,6 +82,9 @@ export function DesktopTradeTicket({
   const customRef = useRef<HTMLInputElement>(null);
 
   const selectedContract = chainStore.selectedContract;
+  const scoringWinner = chain.isAutoScoringLoading
+    ? null
+    : (chain.autoScoringResult?.rankings[0] ?? null);
   const selectedSymbol = selectedContract?.symbol ?? null;
   useEffect(() => {
     tradeStore.clearCustomLimitPrice();
@@ -247,6 +250,66 @@ export function DesktopTradeTicket({
             </button>
           ) : null}
         </div>
+
+        {chain.isAutoMode ? (
+          <div
+            className="desktop-ticket-config-row"
+            role="group"
+            aria-label="Auto selection strategy"
+            aria-live="polite"
+          >
+            <button
+              type="button"
+              className={`desktop-mode-button${chain.autoSelectionStrategy === 'scored' ? ' selected' : ''}`}
+              aria-pressed={chain.autoSelectionStrategy === 'scored'}
+              onClick={() => chainStore.setAutoSelectionStrategy('scored')}
+            >
+              Scored
+            </button>
+            <button
+              type="button"
+              className={`desktop-mode-button${chain.autoSelectionStrategy === 'classic' ? ' selected' : ''}`}
+              aria-pressed={chain.autoSelectionStrategy === 'classic'}
+              onClick={() => chainStore.setAutoSelectionStrategy('classic')}
+            >
+              Classic +1
+            </button>
+            {chain.isAutoScoringLoading ? <Spinner size={13} /> : null}
+            {chain.autoSelectionStrategy === 'scored' && chain.autoScoringError ? (
+              <button
+                type="button"
+                className="desktop-ticket-config-error"
+                onClick={() => void chainStore.refreshAutoScoring()}
+              >
+                Scoring unavailable · Retry
+              </button>
+            ) : null}
+            {chain.autoSelectionStrategy === 'scored' && chain.autoScoringResult?.noPass ? (
+              <button
+                type="button"
+                className="desktop-ticket-config-error"
+                aria-pressed={chain.classicFallbackAcknowledged}
+                onClick={() => chainStore.acknowledgeClassicFallback()}
+              >
+                {chain.classicFallbackAcknowledged
+                  ? 'Classic +1 fallback acknowledged'
+                  : 'No pass · Acknowledge Classic +1 fallback'}
+              </button>
+            ) : null}
+            {chain.autoSelectionStrategy === 'scored' && scoringWinner ? (
+              <span className="text-secondary">
+                {scoringWinner.candidate.strike} · score {scoringWinner.score.toFixed(3)} ·{' '}
+                {scoringWinner.rationale.summary}
+                {chain.autoScoringResult && chain.autoScoringResult.rankings.length > 1
+                  ? ` · Next: ${chain.autoScoringResult.rankings
+                      .slice(1, 3)
+                      .map((ranking) => `${ranking.candidate.strike} (${ranking.score.toFixed(3)})`)
+                      .join(', ')}`
+                  : ''}
+              </span>
+            ) : null}
+          </div>
+        ) : null}
 
         <DesktopContractSummary
           selectedContract={selectedContract}

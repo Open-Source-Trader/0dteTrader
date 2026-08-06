@@ -1,5 +1,8 @@
 import Combine
 import Foundation
+// The chart's candle, socket, analytics, and indicator state transitions are
+// intentionally co-located to keep symbol changes atomic.
+// swiftlint:disable file_length
 
 enum ChartInterval: String, CaseIterable, Sendable {
     case m1 = "1m"
@@ -117,7 +120,9 @@ enum OptionsAnalyticsDisplayState: Equatable, Sendable {
 final class ChartViewModel: ObservableObject {
     @Published private(set) var symbol: String
     @Published private(set) var interval: AnyChartInterval = .candle(.m1)
-    @Published private(set) var candles: [Candle] = []
+    @Published private(set) var candles: [Candle] = [] {
+        didSet { refreshIndicatorRenderSnapshot() }
+    }
     @Published private(set) var quote: Quote?
     @Published private(set) var isLoading = false
     @Published var errorMessage: String?
@@ -132,9 +137,19 @@ final class ChartViewModel: ObservableObject {
     /// Drawing tools + price alerts for the current symbol.
     let drawings = ChartDrawingsModel()
 
-    @Published var indicatorSettings: IndicatorSettings {
-        didSet { settingsStore.indicatorSettings = indicatorSettings }
-    }
+    let indicatorRegistry: IndicatorRegistry
+    let defaultIndicatorSettings: IndicatorSettingsState
+    @Published private(set) var indicatorSettings: IndicatorSettingsState
+    @Published private(set) var chartDisplayPreferences: ChartDisplayPreferences
+    @Published private(set) var indicatorErrorMessage: String?
+    @Published private(set) var indicatorRenderSnapshot = IndicatorRenderSnapshot.empty
+    @Published private(set) var l2UnavailableReason = "No L2 data"
+    private(set) var currentL2Indicators: OrderBookIndicatorsDTO?
+
+    var hasFreshL2Data: Bool { currentL2Indicators != nil }
+
+    private var indicatorRenderRevision: IndicatorRenderRevision?
+    private(set) var indicatorRenderComputationCount = 0
 
     @Published var twcSettings: TwcHeatmapSettings {
         didSet { settingsStore.twcSettings = twcSettings }
@@ -187,9 +202,33 @@ final class ChartViewModel: ObservableObject {
         apiClient: APIClient,
         socket: QuoteSocketClient,
         settingsStore: SettingsStore,
+        indicatorRegistry: IndicatorRegistry? = nil,
         optionsAnalyticsLoader: (@Sendable (String, String) async throws -> OptionsAnalyticsSnapshotDTO)? = nil,
         optionsAnalyticsNow: @escaping @Sendable () -> Date = { Date() }
     ) {
+        let registry: IndicatorRegistry
+        do {
+            registry = try indicatorRegistry ?? IndicatorRegistry.bundled()
+        } catch {
+            preconditionFailure("The bundled indicator registry is invalid: \(error.localizedDescription)")
+        }
+        self.indicatorRegistry = registry
+        let defaultIndicatorSettings: IndicatorSettingsState
+        do {
+            defaultIndicatorSettings = try IndicatorSettingsState.defaults(for: registry)
+        } catch {
+            preconditionFailure("The indicator registry defaults are invalid: \(error.localizedDescription)")
+        }
+        self.defaultIndicatorSettings = defaultIndicatorSettings
+        do {
+            self.indicatorSettings = try settingsStore.loadIndicatorSettings(registry: registry)
+            self.chartDisplayPreferences = try settingsStore.loadChartDisplayPreferences()
+            self.indicatorErrorMessage = nil
+        } catch {
+            self.indicatorSettings = defaultIndicatorSettings
+            self.chartDisplayPreferences = .default
+            self.indicatorErrorMessage = error.localizedDescription
+        }
         self.apiClient = apiClient
         self.socket = socket
         self.settingsStore = settingsStore
@@ -198,7 +237,6 @@ final class ChartViewModel: ObservableObject {
         }
         self.optionsAnalyticsNow = optionsAnalyticsNow
         self.symbol = settingsStore.lastSymbol ?? "SPY"
-        self.indicatorSettings = settingsStore.indicatorSettings
         self.twcSettings = settingsStore.twcSettings
         self.optionsAnalyticsSettings = settingsStore.optionsAnalyticsSettings
         drawings.setSymbol(self.symbol)
@@ -209,6 +247,15 @@ final class ChartViewModel: ObservableObject {
                 self?.handleLiveQuote(quote)
             }
             .store(in: &cancellables)
+
+        socket.$l2Snapshots
+            .combineLatest(socket.$l2Statuses)
+            .sink { [weak self] snapshots, statuses in
+                self?.updateL2State(snapshots: snapshots, statuses: statuses)
+            }
+            .store(in: &cancellables)
+
+        refreshIndicatorRenderSnapshot(clearExistingError: false)
 
     }
 
@@ -221,6 +268,7 @@ final class ChartViewModel: ObservableObject {
     /// Initial load + subscription. Called when the trade screen appears.
     func start() async {
         socket.subscribe(symbols: [symbol])
+        socket.subscribeL2(symbol: symbol, levels: 50)
         await loadCandles()
     }
 
@@ -283,6 +331,7 @@ final class ChartViewModel: ObservableObject {
         let normalized = newSymbol.uppercased().trimmingCharacters(in: .whitespaces)
         guard !normalized.isEmpty, normalized != symbol else { return }
         socket.unsubscribe(symbols: [symbol])
+        socket.unsubscribeL2(symbol: symbol)
         symbol = normalized
         settingsStore.lastSymbol = normalized
         drawings.setSymbol(normalized)
@@ -291,6 +340,7 @@ final class ChartViewModel: ObservableObject {
         quote = nil
         candles = []
         socket.subscribe(symbols: [normalized])
+        socket.subscribeL2(symbol: normalized, levels: 50)
         // Never pair the new symbol with the previous chain's expiration.
         // Shadow capture resumes after the new chain selects an exact date.
         optionsAnalyticsExpiration = nil
@@ -583,117 +633,117 @@ final class ChartViewModel: ObservableObject {
         Task { await TickStorage.shared.save(symbol: symbol, interval: tickInterval, state: snapshot) }
     }
 
-    // MARK: - Indicator series for rendering
+    // MARK: - Indicator settings and rendering
 
-    /// Change vs the open of the first candle of the current session — a
-    /// client-side prev-close proxy (Quote carries no previous close).
-    var dayChange: (change: Double, percent: Double)? {
-        guard let last = candles.last else { return nil }
-        let calendar = Calendar.current
-        guard let sessionOpen = candles.first(where: {
-            calendar.isDate($0.time, inSameDayAs: last.time)
-        })?.open, sessionOpen > 0 else { return nil }
-        let current = quote?.last ?? last.close
-        let change = current - sessionOpen
-        return (change, change / sessionOpen * 100)
+    func setIndicatorEnabled(id: String, enabled: Bool) {
+        guard indicatorRegistry.descriptor(id: id) != nil else {
+            indicatorErrorMessage = "Unknown indicator \(id)."
+            return
+        }
+        var candidate = indicatorSettings
+        candidate.indicators[id]?.enabled = enabled
+        applyIndicatorSettings(candidate)
     }
 
-    /// Overlays drawn on top of the candles (SMA, EMA, VWAP, Bollinger).
-    /// TWC Heatmap render model, recomputed from the current candles and
-    /// settings on every SwiftUI body evaluation (same lifecycle as the
-    /// indicator series below; ~2 ms at 600 candles).
-    var twcRenderModel: TwcRenderModel? {
-        let seconds: Int
-        if case .tick(let t) = interval {
-            seconds = t.tickSize
-        } else {
-            seconds = Int(interval.seconds)
+    func setIndicatorParameter(id: String, parameterId: String, value: Double) {
+        guard indicatorRegistry.descriptor(id: id)?.parameters[parameterId] != nil else {
+            indicatorErrorMessage = "Unknown parameter \(id).\(parameterId)."
+            return
         }
-        return TwcEngine.compute(
-            candles: candles,
-            settings: twcSettings,
-            intervalSeconds: seconds
-        )
+        var candidate = indicatorSettings
+        candidate.indicators[id]?.parameters[parameterId] = value
+        applyIndicatorSettings(candidate)
     }
 
-    var priceOverlays: [IndicatorSeries] {
-        var series: [IndicatorSeries] = []
-        if indicatorSettings.smaEnabled {
-            series.append(
-                IndicatorSeries(
-                    id: "sma",
-                    name: "SMA \(indicatorSettings.smaPeriod)",
-                    values: IndicatorEngine.sma(candles: candles, period: indicatorSettings.smaPeriod)
-                )
-            )
+    func resetIndicatorSettings() {
+        applyIndicatorSettings(defaultIndicatorSettings)
+    }
+
+    func setVolumeEnabled(_ enabled: Bool) {
+        let candidate = ChartDisplayPreferences(volumeEnabled: enabled)
+        do {
+            try settingsStore.updateChartDisplayPreferences(candidate)
+            chartDisplayPreferences = candidate
+        } catch {
+            indicatorErrorMessage = error.localizedDescription
         }
-        if indicatorSettings.emaEnabled {
-            series.append(
-                IndicatorSeries(
-                    id: "ema",
-                    name: "EMA \(indicatorSettings.emaPeriod)",
-                    values: IndicatorEngine.ema(candles: candles, period: indicatorSettings.emaPeriod)
-                )
-            )
-        }
-        if indicatorSettings.vwapEnabled {
-            series.append(
-                IndicatorSeries(id: "vwap", name: "VWAP", values: IndicatorEngine.vwap(candles: candles))
-            )
-        }
-        if indicatorSettings.bollingerEnabled {
-            let bands = IndicatorEngine.bollingerBands(
+    }
+
+    private func applyIndicatorSettings(_ candidate: IndicatorSettingsState) {
+        do {
+            let candidateSnapshot = try IndicatorRenderSnapshot.make(
+                registry: indicatorRegistry,
+                settings: candidate,
                 candles: candles,
-                period: indicatorSettings.bollingerPeriod,
-                multiplier: indicatorSettings.bollingerMultiplier
+                l2Indicators: currentL2Indicators,
+                l2UnavailableReason: l2UnavailableReason
             )
-            series.append(IndicatorSeries(id: "bollingerUpper", name: "BB Upper", values: bands.upper))
-            series.append(IndicatorSeries(id: "bollingerMiddle", name: "BB Mid", values: bands.middle))
-            series.append(IndicatorSeries(id: "bollingerLower", name: "BB Lower", values: bands.lower))
+            try settingsStore.updateIndicatorSettings(candidate, registry: indicatorRegistry)
+            indicatorSettings = candidate
+            indicatorRenderRevision = IndicatorRenderRevision(
+                settings: candidate,
+                candles: candles,
+                l2Indicators: currentL2Indicators,
+                l2UnavailableReason: l2UnavailableReason
+            )
+            indicatorRenderComputationCount += 1
+            indicatorRenderSnapshot = candidateSnapshot
+            indicatorErrorMessage = nil
+        } catch {
+            indicatorErrorMessage = error.localizedDescription
         }
-        return series
     }
 
-    var rsiSeries: IndicatorSeries? {
-        guard indicatorSettings.rsiEnabled else { return nil }
-        return IndicatorSeries(
-            id: "rsi",
-            name: "RSI \(indicatorSettings.rsiPeriod)",
-            values: IndicatorEngine.rsi(candles: candles, period: indicatorSettings.rsiPeriod)
-        )
-    }
-
-    // swiftlint:disable:next large_tuple
-    var macdSeries: (macd: IndicatorSeries, signal: IndicatorSeries, histogram: IndicatorSeries)? {
-        guard indicatorSettings.macdEnabled else { return nil }
-        let values = IndicatorEngine.macd(candles: candles)
-        return (
-            IndicatorSeries(id: "macd", name: "MACD", values: values.macdLine),
-            IndicatorSeries(id: "macdSignal", name: "Signal", values: values.signalLine),
-            IndicatorSeries(id: "macdHistogram", name: "Histogram", values: values.histogram)
-        )
-    }
-
-    var stochSeries: (k: IndicatorSeries, d: IndicatorSeries)? {
-        guard indicatorSettings.stochEnabled else { return nil }
-        let values = IndicatorEngine.stochastic(
+    private func refreshIndicatorRenderSnapshot(clearExistingError: Bool = true) {
+        let revision = IndicatorRenderRevision(
+            settings: indicatorSettings,
             candles: candles,
-            kPeriod: indicatorSettings.stochKPeriod,
-            kSmooth: indicatorSettings.stochKSmooth,
-            dPeriod: indicatorSettings.stochDPeriod
+            l2Indicators: currentL2Indicators,
+            l2UnavailableReason: l2UnavailableReason
         )
-        return (
-            IndicatorSeries(id: "stochK", name: "%K", values: values.k),
-            IndicatorSeries(id: "stochD", name: "%D", values: values.d)
-        )
+        guard revision != indicatorRenderRevision else { return }
+        indicatorRenderRevision = revision
+        indicatorRenderComputationCount += 1
+        do {
+            indicatorRenderSnapshot = try IndicatorRenderSnapshot.make(
+                registry: indicatorRegistry,
+                settings: indicatorSettings,
+                candles: candles,
+                l2Indicators: currentL2Indicators,
+                l2UnavailableReason: l2UnavailableReason
+            )
+            if clearExistingError {
+                indicatorErrorMessage = nil
+            }
+        } catch {
+            indicatorErrorMessage = error.localizedDescription
+        }
     }
 
-    var atrSeries: IndicatorSeries? {
-        guard indicatorSettings.atrEnabled else { return nil }
-        return IndicatorSeries(
-            id: "atr",
-            name: "ATR \(indicatorSettings.atrPeriod)",
-            values: IndicatorEngine.atr(candles: candles, period: indicatorSettings.atrPeriod)
-        )
+    private func updateL2State(
+        snapshots: [String: L2SnapshotPayloadDTO],
+        statuses: [String: OrderBookStatusDTO]
+    ) {
+        let key = symbol.uppercased()
+        let status = statuses[key]
+        let payload = snapshots[key]
+        let nextIndicators: OrderBookIndicatorsDTO?
+        let nextReason: String
+        if status?.isAvailable == true, payload?.snapshot.freshness == .fresh {
+            nextIndicators = payload?.indicators
+            nextReason = ""
+        } else {
+            nextIndicators = nil
+            if let message = status?.unavailableMessage, !message.isEmpty {
+                nextReason = "No L2 data — \(message)"
+            } else {
+                nextReason = "No L2 data"
+            }
+        }
+        guard nextIndicators != currentL2Indicators || nextReason != l2UnavailableReason else { return }
+        currentL2Indicators = nextIndicators
+        l2UnavailableReason = nextReason
+        refreshIndicatorRenderSnapshot()
     }
+
 }

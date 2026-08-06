@@ -185,17 +185,19 @@ struct AIAnalysisSheet: View {
         indicators.overlays = AIAnalysisSheet.cappedPriceOverlays(chartViewModel.priceOverlays).map {
             .init(name: $0.name, values: $0.values)
         }
-        indicators.rsi = chartViewModel.rsiSeries?.values
-        if let macd = chartViewModel.macdSeries {
-            indicators.macdLine = macd.macd.values
-            indicators.macdSignal = macd.signal.values
-            indicators.macdHistogram = macd.histogram.values
+        let paneItems = Dictionary(
+            uniqueKeysWithValues: chartViewModel.indicatorRenderModel.subPanes.map { ($0.indicatorId, $0) }
+        )
+        func values(indicatorId: String, seriesId: String) -> [Double?]? {
+            paneItems[indicatorId]?.geometry.series[seriesId]
         }
-        if let stoch = chartViewModel.stochSeries {
-            indicators.stochK = stoch.k.values
-            indicators.stochD = stoch.d.values
-        }
-        indicators.atr = chartViewModel.atrSeries?.values
+        indicators.rsi = values(indicatorId: "rsi", seriesId: "value")
+        indicators.macdLine = values(indicatorId: "macd", seriesId: "macd")
+        indicators.macdSignal = values(indicatorId: "macd", seriesId: "signal")
+        indicators.macdHistogram = values(indicatorId: "macd", seriesId: "histogram")
+        indicators.stochK = values(indicatorId: "stochastic", seriesId: "k")
+        indicators.stochD = values(indicatorId: "stochastic", seriesId: "d")
+        indicators.atr = values(indicatorId: "atr", seriesId: "value")
 
         return AIAnalysisSnapshot(
             symbol: chartViewModel.symbol,

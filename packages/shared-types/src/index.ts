@@ -63,7 +63,7 @@ export function narrowToChartOrderType(orderType: OrderType): ChartOrderType {
 }
 
 export type OptionType = 'call' | 'put';
-export type SelectionMode = 'auto_otm' | 'explicit';
+export type SelectionMode = 'auto_otm' | 'auto_scored' | 'explicit';
 export type OrderStatus = 'submitted' | 'filled' | 'partially_filled' | 'cancelled' | 'rejected';
 export type ChartOrderKind = 'limit' | 'target' | 'stop';
 export type ChartOrderStatus =
@@ -73,6 +73,220 @@ export type ChartOrderArmedSide = 'above' | 'below';
 export type CandleInterval = '1m' | '5m' | '15m' | '30m' | '1h' | '4h' | '1d' | '1w';
 export type TickInterval = '10t' | '25t' | '50t' | '100t' | '250t';
 export type ChartInterval = CandleInterval | TickInterval;
+
+// ---------------------------------------------------------------------------
+// Chart indicator registry
+// ---------------------------------------------------------------------------
+
+export type IndicatorId =
+  | 'sma'
+  | 'ema'
+  | 'rsi'
+  | 'macd'
+  | 'bollinger'
+  | 'stochastic'
+  | 'atr'
+  | 'anchored_vwap'
+  | 'supertrend'
+  | 'keltner'
+  | 'vpvr'
+  | 'adx_dmi'
+  | 'obv'
+  | 'cci'
+  | 'williams_r'
+  | 'ichimoku'
+  | 'spread'
+  | 'top_book_imbalance'
+  | 'tick_pressure'
+  | 'depth_imbalance'
+  | 'cumulative_pressure'
+  | 'touch_depletion';
+
+export type IndicatorPane = 'overlay' | 'subpane';
+
+interface IndicatorParameterBase {
+  id: string;
+  label: string;
+  minimum: number;
+  maximum: number;
+  default: number;
+}
+
+export interface IndicatorIntegerParameter extends IndicatorParameterBase {
+  kind: 'integer';
+}
+
+export interface IndicatorNumberParameter extends IndicatorParameterBase {
+  kind: 'number';
+}
+
+export interface IndicatorTimestampParameter extends IndicatorParameterBase {
+  kind: 'timestamp';
+  /** Zero selects the first candle in the current New York session. */
+  zeroMeansSessionAnchor: true;
+}
+
+export type IndicatorParameterDescriptor =
+  IndicatorIntegerParameter | IndicatorNumberParameter | IndicatorTimestampParameter;
+
+export interface IndicatorLessThanConstraint {
+  kind: 'less_than';
+  left: string;
+  right: string;
+  message: string;
+}
+
+export interface IndicatorGeometrySeriesDescriptor {
+  id: string;
+  label: string;
+  styleToken: string;
+  renderAs?: 'line' | 'histogram';
+}
+
+export interface IndicatorLineGeometry {
+  kind: 'line';
+  series: [IndicatorGeometrySeriesDescriptor];
+}
+
+export interface IndicatorMultiLineGeometry {
+  kind: 'multi_line';
+  series: IndicatorGeometrySeriesDescriptor[];
+  fixedWindowSeconds?: number;
+  sessionWindow?: boolean;
+}
+
+export interface IndicatorBandGeometry {
+  kind: 'band';
+  series: [
+    IndicatorGeometrySeriesDescriptor,
+    IndicatorGeometrySeriesDescriptor,
+    IndicatorGeometrySeriesDescriptor,
+  ];
+}
+
+export interface IndicatorCloudGeometry {
+  kind: 'cloud';
+  series: IndicatorGeometrySeriesDescriptor[];
+}
+
+export interface IndicatorHistogramGeometry {
+  kind: 'histogram';
+  series: [IndicatorGeometrySeriesDescriptor];
+  fixedWindowSeconds?: number;
+}
+
+export interface IndicatorSegmentedLineGeometry {
+  kind: 'segmented_line';
+  series: [IndicatorGeometrySeriesDescriptor, IndicatorGeometrySeriesDescriptor];
+}
+
+export interface IndicatorPriceProfileGeometry {
+  kind: 'price_profile';
+  series: [IndicatorGeometrySeriesDescriptor, IndicatorGeometrySeriesDescriptor];
+}
+
+export type IndicatorGeometryDescriptor =
+  | IndicatorLineGeometry
+  | IndicatorMultiLineGeometry
+  | IndicatorBandGeometry
+  | IndicatorCloudGeometry
+  | IndicatorHistogramGeometry
+  | IndicatorSegmentedLineGeometry
+  | IndicatorPriceProfileGeometry;
+
+export type IndicatorSeriesValues = Array<number | null>;
+
+export interface LineIndicatorGeometryData {
+  kind: 'line';
+  series: Record<string, IndicatorSeriesValues>;
+}
+
+export interface MultiLineIndicatorGeometryData {
+  kind: 'multi_line';
+  series: Record<string, IndicatorSeriesValues>;
+}
+
+export interface BandIndicatorGeometryData {
+  kind: 'band';
+  series: Record<string, IndicatorSeriesValues>;
+}
+
+export interface CloudIndicatorGeometryData {
+  kind: 'cloud';
+  series: Record<string, IndicatorSeriesValues>;
+}
+
+export interface HistogramIndicatorGeometryData {
+  kind: 'histogram';
+  series: Record<string, IndicatorSeriesValues>;
+}
+
+export interface SegmentedLineIndicatorGeometryData {
+  kind: 'segmented_line';
+  series: Record<string, IndicatorSeriesValues>;
+}
+
+export interface IndicatorPriceProfileRow {
+  low: number;
+  high: number;
+  volume: number;
+  inValueArea: boolean;
+}
+
+export interface PriceProfileIndicatorGeometryData {
+  kind: 'price_profile';
+  rows: IndicatorPriceProfileRow[];
+}
+
+/** Finite computed geometry; warmup cells remain null and preserve input alignment. */
+export type IndicatorGeometry =
+  | LineIndicatorGeometryData
+  | MultiLineIndicatorGeometryData
+  | BandIndicatorGeometryData
+  | CloudIndicatorGeometryData
+  | HistogramIndicatorGeometryData
+  | SegmentedLineIndicatorGeometryData
+  | PriceProfileIndicatorGeometryData;
+
+export interface IndicatorDescriptor {
+  id: IndicatorId;
+  displayName: string;
+  pane: IndicatorPane;
+  requiresL2: boolean;
+  parameters: Record<string, IndicatorParameterDescriptor>;
+  constraints?: IndicatorLessThanConstraint[];
+  defaultSettings: {
+    enabled: boolean;
+    parameters: Record<string, number>;
+  };
+  styleTokens: Record<string, string>;
+  geometry: IndicatorGeometryDescriptor;
+}
+
+export interface IndicatorRegistry {
+  version: 1;
+  maxSubPanes: 2;
+  paneLimitMessage: string;
+  indicators: IndicatorDescriptor[];
+}
+
+export interface IndicatorParameterValues {
+  [parameterId: string]: number;
+}
+
+export interface IndicatorSetting {
+  enabled: boolean;
+  parameters: IndicatorParameterValues;
+}
+
+export interface IndicatorSettingsState {
+  registryVersion: 1;
+  indicators: Record<IndicatorId, IndicatorSetting>;
+}
+
+export interface ChartDisplayPreferences {
+  volumeEnabled: boolean;
+}
 
 // ---------------------------------------------------------------------------
 // Options analytics
@@ -189,6 +403,36 @@ export interface OptionsAnalyticsSnapshot {
   scenarios: OptionsAnalyticsScenarios;
   impliedRange: OptionsAnalyticsImpliedRange | null;
   strikes: OptionsAnalyticsStrike[];
+}
+
+export type IVAlertSymbol = 'SPX' | 'NDX' | 'RUT';
+export type IVAlertDirection = 'expansion' | 'crush';
+
+export interface IVAlertConfiguration {
+  enabled: boolean;
+  symbols: IVAlertSymbol[];
+  lookbackMinutes: number;
+  thresholdK: number;
+  consecutiveBreaches: number;
+  warmupMinutes: number;
+  warmupSamples: number;
+  cooldownMinutes: number;
+}
+
+export interface IVAlertConfigurationState extends IVAlertConfiguration {
+  schemaVersion: 1;
+  /** ISO-8601 date-time. */
+  updatedAt: string;
+}
+
+export interface IVAlert {
+  symbol: IVAlertSymbol;
+  direction: IVAlertDirection;
+  currentIv: number;
+  baselineIv: number;
+  zScore: number;
+  /** ISO-8601 date-time. */
+  timestamp: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -384,6 +628,77 @@ export interface CandleRequest {
   to?: string;
 }
 
+export interface OrderBookLevel {
+  price: number;
+  size: number;
+}
+
+export type OrderBookProvider = 'webull';
+export type OrderBookCapability = 'nasdaq_totalview_non_display';
+export type OrderBookFreshness = 'fresh' | 'stale';
+export type OrderBookUnavailableReason =
+  | 'unsupported_instrument'
+  | 'entitlement_missing'
+  | 'provider_unconfigured'
+  | 'invalid_credentials'
+  | 'provider_error'
+  | 'rate_limiter_unavailable'
+  | 'request_timeout'
+  | 'no_data'
+  | 'market_closed'
+  | 'stale'
+  | 'invalid_book'
+  | 'disconnected';
+
+export interface OrderBookSnapshot {
+  symbol: string;
+  provider: OrderBookProvider;
+  capability: OrderBookCapability;
+  freshness: OrderBookFreshness;
+  /** ISO-8601 provider observation time. */
+  timestamp: string;
+  /** ISO-8601 server time when the complete provider payload was received. */
+  receivedAt: string;
+  /** Number of levels actually published on each side after server capping. */
+  depth: number;
+  bids: OrderBookLevel[];
+  asks: OrderBookLevel[];
+}
+
+export interface FreshOrderBookSnapshot extends OrderBookSnapshot {
+  freshness: 'fresh';
+}
+
+export type OrderBookStatus =
+  | {
+      availability: 'available';
+      symbol: string;
+      provider: OrderBookProvider;
+      capability: OrderBookCapability;
+      freshness: 'fresh';
+    }
+  | {
+      availability: 'unavailable';
+      symbol: string;
+      provider: OrderBookProvider | null;
+      capability: OrderBookCapability | null;
+      freshness: 'stale' | null;
+      reason: OrderBookUnavailableReason;
+      message: string;
+      retryable: boolean;
+    };
+
+export interface OrderBookIndicators {
+  spreadAbs: number | null;
+  spreadBps: number | null;
+  spreadPercentile: number | null;
+  topBookImbalance: number | null;
+  tickPressure: number | null;
+  depthImbalance: number | null;
+  cumulativePressure: number | null;
+  touchDepletion: number | null;
+}
+
 export interface OptionContract {
   symbol: string;
   underlying: string;
@@ -394,6 +709,16 @@ export interface OptionContract {
   bid: number;
   ask: number;
   last: number;
+  volume?: number;
+  openInterest?: number;
+  impliedVolatility?: number;
+  delta?: number;
+  gamma?: number;
+  /** ISO-8601 active-broker quote time. */
+  quoteTimestamp?: string;
+  /** ISO-8601 analytics observation time. */
+  analyticsTimestamp?: string;
+  quoteProvider?: BrokerProvider;
 }
 
 export interface OptionsChain {
@@ -414,22 +739,186 @@ export interface OptionsChain {
 // Trading
 // ---------------------------------------------------------------------------
 
-export interface OrderSelection {
-  mode: SelectionMode;
-  /** Required for auto_otm and for explicit option orders. */
-  optionType?: OptionType;
+export type AutoScoringPreset = 'conservative' | 'aggressive' | 'custom';
+export type AutoScoringGammaMode = 'seek' | 'avoid';
+
+export interface AutoScoringWeights {
+  delta: number;
+  spread: number;
+  openInterest: number;
+  gamma: number;
+  iv: number;
+}
+
+export interface AutoScoringPreferences {
+  schemaVersion: 1;
+  preset: AutoScoringPreset;
+  targetAbsDelta: number;
+  strikeRungs: number;
+  maxSpreadBps: number;
+  maxPremiumDollars: number;
+  minOpenInterest: number;
+  gammaMode: AutoScoringGammaMode;
+  weights: AutoScoringWeights;
+}
+
+/** Authenticated persistence DTO; field names mirror the Prisma columns exactly. */
+export interface AutoScoringPreferenceCreate {
+  schemaVersion: 1;
+  preset: AutoScoringPreset;
+  targetAbsDelta: number;
+  strikeRungs: number;
+  maxSpreadBps: number;
+  maxPremiumDollars: number;
+  minOpenInterest: number;
+  gammaMode: AutoScoringGammaMode;
+  deltaWeight: number;
+  spreadWeight: number;
+  openInterestWeight: number;
+  gammaWeight: number;
+  ivWeight: number;
+}
+
+export interface AutoScoringPreferenceRecord extends AutoScoringPreferenceCreate {
+  /** ISO-8601 date-time. */
+  createdAt: string;
+  /** ISO-8601 date-time used for optimistic concurrency. */
+  updatedAt: string;
+}
+
+export interface AutoScoringPreferenceUpdate extends AutoScoringPreferenceCreate {
+  /** ISO-8601 value copied from the last successful preference read. */
+  expectedUpdatedAt: string;
+}
+
+export interface AutoScoringCandidate {
+  symbol: string;
+  underlying: string;
+  expiration: string;
+  optionType: OptionType;
+  strike: number;
+  bid: number | null;
+  ask: number | null;
+  delta: number | null;
+  gamma: number | null;
+  impliedVolatility: number | null;
+  openInterest: number | null;
+  quoteProvider: BrokerProvider;
+  /** ISO-8601 active-broker quote time. */
+  quoteTimestamp: string | null;
+  /** ISO-8601 Tradier analytics observation time. */
+  analyticsTimestamp: string | null;
+}
+
+export type AutoScoringExclusionReason =
+  | 'wrong_expiration'
+  | 'wrong_option_type'
+  | 'outside_strike_window'
+  | 'missing_quote'
+  | 'invalid_quote'
+  | 'stale_quote'
+  | 'future_quote'
+  | 'missing_delta'
+  | 'missing_gamma'
+  | 'missing_iv'
+  | 'missing_open_interest'
+  | 'stale_analytics'
+  | 'delta_out_of_range'
+  | 'spread_too_wide'
+  | 'premium_too_high'
+  | 'open_interest_too_low';
+
+export interface AutoScoringExclusion {
+  symbol: string;
+  reason: AutoScoringExclusionReason;
+}
+
+export interface AutoScoringContributions {
+  delta: number;
+  spread: number;
+  openInterest: number;
+  gamma: number;
+  iv: number;
+}
+
+export interface AutoScoringRationale {
+  summary: string;
+  mid: number;
+  spreadBps: number;
+  premiumDollars: number;
+  atmDistance: number;
+  normalized: AutoScoringContributions;
+  weighted: AutoScoringContributions;
+}
+
+export interface AutoScoringRanking {
+  rank: number;
+  candidate: AutoScoringCandidate;
+  score: number;
+  rationale: AutoScoringRationale;
+}
+
+interface AutoScoringResultBase {
+  exclusions: AutoScoringExclusion[];
+  requiresConfirmation: true;
+  /** ISO-8601 server ranking time. */
+  rankedAt: string;
+}
+
+export interface AutoScoringPassingResult extends AutoScoringResultBase {
+  selectedSymbol: string;
+  rankings: [AutoScoringRanking, ...AutoScoringRanking[]];
+  noPass: false;
+}
+
+export interface AutoScoringNoPassResult extends AutoScoringResultBase {
+  selectedSymbol: null;
+  rankings: [];
+  noPass: true;
+}
+
+export type AutoScoringResult = AutoScoringPassingResult | AutoScoringNoPassResult;
+
+export interface AutoScoringSelection {
+  selectedSymbol: string;
+  preferences: AutoScoringPreferences;
+  scoredConfirmationAccepted: true;
+  /** ISO-8601 time of the client ranking being confirmed. */
+  rankedAt: string;
+}
+
+interface OrderSelectionBase {
   /** YYYY-MM-DD; defaults to the nearest expiration. */
   expiration?: string;
-  /** Explicit option orders only. */
-  strike?: number;
-  /**
-   * auto_otm only: how many strikes out of the money to step from the ATM
-   * strike (the one closest to the live underlying price). 0 selects the ATM
-   * strike itself; omitted means 1. Servers predating this field strip it in
-   * validation, silently degrading to the default rather than erroring.
-   */
-  otmOffset?: number;
 }
+
+export interface AutoOtmOrderSelection extends OrderSelectionBase {
+  mode: 'auto_otm';
+  optionType: OptionType;
+  /** True only when this Classic request is an acknowledged scored-Auto fallback. */
+  classicFallbackAcknowledged?: boolean;
+  strike?: never;
+  autoScoring?: never;
+}
+
+export interface AutoScoredOrderSelection extends OrderSelectionBase {
+  mode: 'auto_scored';
+  optionType: OptionType;
+  autoScoring: AutoScoringSelection;
+  strike?: never;
+  classicFallbackAcknowledged?: never;
+}
+
+export interface ExplicitOrderSelection extends OrderSelectionBase {
+  mode: 'explicit';
+  optionType: OptionType;
+  strike: number;
+  classicFallbackAcknowledged?: never;
+  autoScoring?: never;
+}
+
+export type OrderSelection =
+  AutoOtmOrderSelection | AutoScoredOrderSelection | ExplicitOrderSelection;
 
 export interface OrderRequest {
   underlying: string;
@@ -779,9 +1268,54 @@ export interface StreamSubscribeMessage {
   symbols: string[];
 }
 
+export interface StreamL2SubscribeMessage {
+  type: 'l2Subscribe';
+  symbol: string;
+  levels: number;
+}
+
+export interface StreamL2UnsubscribeMessage {
+  type: 'l2Unsubscribe';
+  symbol: string;
+}
+
+export interface StreamIVAlertConfigureMessage {
+  type: 'ivAlertConfigure';
+  data: IVAlertConfiguration;
+}
+
+export type StreamClientMessage =
+  | StreamSubscribeMessage
+  | StreamL2SubscribeMessage
+  | StreamL2UnsubscribeMessage
+  | StreamIVAlertConfigureMessage;
+
 export interface StreamQuoteMessage {
   type: 'quote';
   data: Quote;
+}
+
+export interface StreamL2SnapshotMessage {
+  type: 'l2Snapshot';
+  data: {
+    snapshot: FreshOrderBookSnapshot;
+    indicators: OrderBookIndicators;
+  };
+}
+
+export interface StreamL2StatusMessage {
+  type: 'l2Status';
+  data: OrderBookStatus;
+}
+
+export interface StreamIVAlertMessage {
+  type: 'ivAlert';
+  data: IVAlert;
+}
+
+export interface StreamIVAlertConfigurationMessage {
+  type: 'ivAlertConfiguration';
+  data: IVAlertConfigurationState;
 }
 
 export interface StreamOrderUpdateMessage {
@@ -817,6 +1351,10 @@ export interface StreamErrorMessage {
 
 export type StreamServerMessage =
   | StreamQuoteMessage
+  | StreamL2SnapshotMessage
+  | StreamL2StatusMessage
+  | StreamIVAlertMessage
+  | StreamIVAlertConfigurationMessage
   | StreamOrderUpdateMessage
   | StreamChartOrderMessage
   | StreamEventCursorMessage

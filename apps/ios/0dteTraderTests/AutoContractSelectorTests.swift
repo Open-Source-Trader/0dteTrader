@@ -3,7 +3,7 @@ import XCTest
 
 /// Canonical AUTO expectation table (shared with the server's resolveAutoOtm):
 /// strikes [100, 101, 102, 103], ATM anchor = nearest strike with equidistant
-/// ties resolving toward the OTM side, then walk `otmOffset` strikes OTM.
+/// ties resolving toward the OTM side, then walk exactly one strike OTM.
 final class AutoContractSelectorTests: XCTestCase {
     private let expiration = "2026-07-17"
 
@@ -42,16 +42,7 @@ final class AutoContractSelectorTests: XCTestCase {
         )
     }
 
-    private func select(_ type: OptionType, last: Double, offset: Int? = nil) -> OptionContract? {
-        if let offset {
-            return AutoContractSelector.selectAutoOTM(
-                chain: makeChain(),
-                optionType: type,
-                last: last,
-                otmOffset: offset,
-                today: today
-            )
-        }
+    private func select(_ type: OptionType, last: Double) -> OptionContract? {
         return AutoContractSelector.selectAutoOTM(
             chain: makeChain(),
             optionType: type,
@@ -98,26 +89,6 @@ final class AutoContractSelectorTests: XCTestCase {
         XCTAssertEqual(select(.put, last: 101.5)?.strike, 100) // ATM 101
     }
 
-    // MARK: - Offset 0 trades the ATM strike itself
-
-    func testCall_offsetZero_picksAtm() {
-        XCTAssertEqual(select(.call, last: 100.6, offset: 0)?.strike, 101)
-    }
-
-    func testPut_offsetZero_picksAtm() {
-        XCTAssertEqual(select(.put, last: 100.6, offset: 0)?.strike, 101)
-    }
-
-    // MARK: - Offset 2
-
-    func testCall_offsetTwo_walksTwoUp() {
-        XCTAssertEqual(select(.call, last: 100.4, offset: 2)?.strike, 102) // ATM 100
-    }
-
-    func testPut_offsetTwo_walksTwoDown() {
-        XCTAssertEqual(select(.put, last: 102.6, offset: 2)?.strike, 101) // ATM 103
-    }
-
     // MARK: - Ladder exhaustion → nil
 
     func testCall_atmAtTopOfLadder_returnsNil() {
@@ -126,10 +97,6 @@ final class AutoContractSelectorTests: XCTestCase {
 
     func testPut_atmAtBottomOfLadder_returnsNil() {
         XCTAssertNil(select(.put, last: 100.01)) // ATM 100, nothing below
-    }
-
-    func testCall_offsetBeyondLadder_returnsNil() {
-        XCTAssertNil(select(.call, last: 100.4, offset: 10))
     }
 
     func testEmptyChain_returnsNil() {

@@ -1,5 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { OptionContract, OrderResult, Position } from '@0dtetrader/shared-types';
+import type {
+  AutoScoringPreferences,
+  AutoScoringResult,
+  OptionContract,
+  OrderResult,
+  Position,
+} from '@0dtetrader/shared-types';
 import type { ApiClient } from '../../core/api/ApiClient';
 import type { ChainStore } from './ChainStore';
 import { TradeStore } from './TradeStore';
@@ -51,11 +57,9 @@ function withResolver(store: TradeStore, contracts: OptionContract[]): TradeStor
   return store;
 }
 
-/** Minimal ChainStore double: arm() only reads getState() and the AUTO
- *  offset. Auto mode avoids the explicit strike/expiration guard. */
-function autoModeChainStore(autoOtmOffset = 1): ChainStore {
+/** Minimal ChainStore double. Auto mode avoids the explicit strike/expiration guard. */
+function autoModeChainStore(): ChainStore {
   return {
-    autoOtmOffset,
     getState: () => ({
       optionType: 'call' as const,
       isAutoMode: true,
@@ -63,6 +67,67 @@ function autoModeChainStore(autoOtmOffset = 1): ChainStore {
       selectedStrike: null,
     }),
   } as unknown as ChainStore;
+}
+
+const SCORED_PREFERENCES: AutoScoringPreferences = {
+  schemaVersion: 1,
+  preset: 'conservative',
+  targetAbsDelta: 0.25,
+  strikeRungs: 5,
+  maxSpreadBps: 500,
+  maxPremiumDollars: 250,
+  minOpenInterest: 100,
+  gammaMode: 'avoid',
+  weights: { delta: 0.3, spread: 0.25, openInterest: 0.2, gamma: 0.1, iv: 0.15 },
+};
+
+const SCORED_RESULT: AutoScoringResult = {
+  selectedSymbol: CONTRACT.symbol,
+  noPass: false,
+  requiresConfirmation: true,
+  rankedAt: '2026-08-05T14:30:00.000Z',
+  exclusions: [],
+  rankings: [
+    {
+      rank: 1,
+      candidate: {
+        ...CONTRACT,
+        bid: 1,
+        ask: 1.02,
+        delta: 0.25,
+        gamma: 0.02,
+        impliedVolatility: 0.3,
+        openInterest: 500,
+        quoteProvider: 'webull',
+        quoteTimestamp: '2026-08-05T14:29:59.000Z',
+        analyticsTimestamp: '2026-08-05T14:29:30.000Z',
+      },
+      score: 0.91,
+      rationale: {
+        summary: 'Best executable delta and spread fit',
+        mid: 1.01,
+        spreadBps: 198,
+        premiumDollars: 101,
+        atmDistance: 5,
+        normalized: { delta: 1, spread: 1, openInterest: 1, gamma: 1, iv: 1 },
+        weighted: { delta: 0.3, spread: 0.25, openInterest: 0.2, gamma: 0.1, iv: 0.15 },
+      },
+    },
+  ],
+};
+
+function scoredAutoChain(overrides: Partial<Record<string, unknown>> = {}): ChainStore {
+  return chainStub({
+    isAutoMode: true,
+    isCurrMode: false,
+    autoSelectionStrategy: 'scored',
+    autoScoringPreferences: SCORED_PREFERENCES,
+    autoScoringResult: SCORED_RESULT,
+    isAutoScoringLoading: false,
+    autoScoringError: null,
+    classicFallbackAcknowledged: false,
+    ...overrides,
+  });
 }
 
 function position(quantity: number): Position {
@@ -376,23 +441,71 @@ describe('TradeStore.arm — CURR mode (explicit owned leg)', () => {
   });
 });
 
-describe('TradeStore.arm — AUTO selection offset', () => {
-  it('sends the configured otmOffset so the server resolves what the panel shows', () => {
+describe('TradeStore.arm — fixed Classic selection', () => {
+  it('sends no legacy offset and describes the fixed +1 OTM rule', () => {
     const store = makeStore();
-    store.arm('buy', 'SPY', autoModeChainStore(2));
+    store.arm('buy', 'SPY', autoModeChainStore());
 
     const ticket = store.getState().armedTicket;
-    expect(ticket?.request.selection).toMatchObject({ mode: 'auto_otm', otmOffset: 2 });
-    expect(ticket?.summary).toContain('AUTO +2 OTM');
+    expect(ticket?.request.selection).toEqual({
+      mode: 'auto_otm',
+      optionType: 'call',
+      expiration: '2026-07-21',
+    });
+    expect(ticket?.summary).toContain('AUTO +1 OTM');
+  });
+});
+
+describe('TradeStore.arm — Scored Auto', () => {
+  it('sends the exact selected symbol and forces confirmation despite the global bypass', () => {
+    const placeOrder = vi.fn(async () => placedOrder);
+    const store = makeStore({ placeOrder });
+
+    store.arm('buy', 'SPY', scoredAutoChain(), true);
+
+    expect(placeOrder).not.toHaveBeenCalled();
+    expect(store.getState().armedTicket?.request.selection).toEqual({
+      mode: 'auto_scored',
+      optionType: 'call',
+      expiration: CONTRACT.expiration,
+      autoScoring: {
+        selectedSymbol: CONTRACT.symbol,
+        preferences: SCORED_PREFERENCES,
+        scoredConfirmationAccepted: true,
+        rankedAt: SCORED_RESULT.rankedAt,
+      },
+    });
+    expect(store.getState().armedTicket?.summary).toContain('Best executable delta and spread fit');
   });
 
-  it('labels offset 0 as ATM', () => {
+  it('blocks no-pass until Classic fallback is explicitly acknowledged, then still confirms', () => {
+    const noPass: AutoScoringResult = {
+      selectedSymbol: null,
+      rankings: [],
+      exclusions: [],
+      noPass: true,
+      requiresConfirmation: true,
+      rankedAt: SCORED_RESULT.rankedAt,
+    };
     const store = makeStore();
-    store.arm('buy', 'SPY', autoModeChainStore(0));
 
-    const ticket = store.getState().armedTicket;
-    expect(ticket?.request.selection).toMatchObject({ mode: 'auto_otm', otmOffset: 0 });
-    expect(ticket?.summary).toContain('AUTO ATM');
+    store.arm('buy', 'SPY', scoredAutoChain({ autoScoringResult: noPass }));
+    expect(store.getState().armedTicket).toBeNull();
+    expect(store.getState().toast?.message).toContain('Acknowledge Classic +1 fallback');
+
+    store.arm(
+      'buy',
+      'SPY',
+      scoredAutoChain({
+        autoScoringResult: noPass,
+        classicFallbackAcknowledged: true,
+      }),
+      true,
+    );
+    expect(store.getState().armedTicket?.request.selection).toMatchObject({
+      mode: 'auto_otm',
+      classicFallbackAcknowledged: true,
+    });
   });
 });
 

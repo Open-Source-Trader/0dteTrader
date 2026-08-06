@@ -1,9 +1,11 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { Subject } from 'rxjs';
-import type { UserEvent } from '@prisma/client';
+import { Prisma, type UserEvent } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
-export type DurableEventType = 'orderUpdate' | 'chartOrder';
+// IV alerts use this durable table as an atomic live outbox, but the stream
+// gateway deliberately advances past them without replaying after reconnect.
+export type DurableEventType = 'orderUpdate' | 'chartOrder' | 'ivAlert' | 'ivAlertConfiguration';
 
 export interface DurableUserEvent {
   id: string;
@@ -54,52 +56,65 @@ export class EventTransportService implements OnModuleInit, OnModuleDestroy {
     payload: unknown,
     dedupeKey?: string,
   ): Promise<DurableUserEvent> {
-    const row = await this.prisma.$transaction(
-      async (database) => {
-        // This singleton is the commit-order barrier for every publisher. The
-        // update takes a row lock which remains held until this transaction has
-        // inserted its event and commits. Thus a greater ordinal can never be
-        // visible before a smaller one, and the same lock also makes the user's
-        // next sequence allocation race-free.
-        const allocation = await database.eventTransportState.upsert({
-          where: { name: 'global' },
-          create: { name: 'global', nextOrdinal: 2n },
-          update: { nextOrdinal: { increment: 1n } },
-        });
-        const ordinal = allocation.nextOrdinal - 1n;
-
-        if (dedupeKey) {
-          const existing = await database.userEvent.findUnique({
-            where: { userId_dedupeKey: { userId, dedupeKey } },
-          });
-          if (existing) return existing;
-        }
-
-        const latest = await database.userEvent.findFirst({
-          where: { userId },
-          orderBy: { sequence: 'desc' },
-        });
-        return database.userEvent.create({
-          data: {
-            ordinal,
-            userId,
-            sequence: (latest?.sequence ?? 0) + 1,
-            dedupeKey,
-            type,
-            payload: JSON.parse(JSON.stringify(payload)),
-          },
-        });
-      },
+    const event = await this.prisma.$transaction(
+      (database) => this.publishInTransaction(database, userId, type, payload, dedupeKey),
       // A burst queues behind the singleton by design; the default 2s maxWait
       // is too short for a healthy but busy publisher cohort.
       { maxWait: 10_000, timeout: 10_000 },
     );
-    const event = this.toEvent(row);
     // Do not fan out directly: polling preserves global commit order on every
     // instance. A transient poll failure must not turn a committed publish
     // into an application-level failure; the scheduled poll will retry it.
     await this.pollSafely('publish');
     return event;
+  }
+
+  /**
+   * Writes an event inside an existing domain transaction. This is the outbox
+   * path for state transitions that must never commit without their delivery
+   * record. The caller owns the transaction and polls only after it commits.
+   */
+  async publishInTransaction(
+    database: Prisma.TransactionClient,
+    userId: string,
+    type: DurableEventType,
+    payload: unknown,
+    dedupeKey?: string,
+  ): Promise<DurableUserEvent> {
+    // This singleton is the commit-order barrier for every publisher. The
+    // update takes a row lock which remains held until this transaction has
+    // inserted its event and commits. Thus a greater ordinal can never be
+    // visible before a smaller one, and the same lock also makes the user's
+    // next sequence allocation race-free.
+    const allocation = await database.eventTransportState.upsert({
+      where: { name: 'global' },
+      create: { name: 'global', nextOrdinal: 2n },
+      update: { nextOrdinal: { increment: 1n } },
+    });
+    // Check only after taking the singleton lock. Concurrent publishers with
+    // the same semantic key then observe the first committed row instead of
+    // racing into the unique constraint.
+    if (dedupeKey) {
+      const existing = await database.userEvent.findUnique({
+        where: { userId_dedupeKey: { userId, dedupeKey } },
+      });
+      if (existing) return this.toEvent(existing);
+    }
+    const latest = await database.userEvent.findFirst({
+      where: { userId },
+      orderBy: { sequence: 'desc' },
+    });
+    const row = await database.userEvent.create({
+      data: {
+        ordinal: allocation.nextOrdinal - 1n,
+        userId,
+        sequence: (latest?.sequence ?? 0) + 1,
+        dedupeKey,
+        type,
+        payload: JSON.parse(JSON.stringify(payload)),
+      },
+    });
+    return this.toEvent(row);
   }
 
   async replay(userId: string, afterSequence: number, limit = 1_000): Promise<DurableUserEvent[]> {

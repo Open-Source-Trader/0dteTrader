@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 import type { Quote } from '@0dtetrader/shared-types';
 import type { ApiClient } from '../../core/api/ApiClient';
-import type { QuoteSocket } from '../../core/api/QuoteSocket';
+import type { L2ClientState, QuoteSocket } from '../../core/api/QuoteSocket';
 import type { SettingsStore } from '../../core/storage/SettingsStore';
 import { loadTickState, saveTickState } from '../../core/storage/tickStorage';
 import { bucketStartSeconds, chartChromeSlice, ChartStore, type ChartCandle } from './ChartStore';
+import { DEFAULT_CHART_DISPLAY, DEFAULT_INDICATOR_SETTINGS_STATE } from './indicatorRegistry';
 
 vi.mock('../../core/storage/tickStorage', () => ({
   loadTickState: vi.fn(async () => ({ candles: [], accumulator: null })),
@@ -127,6 +128,68 @@ describe('ChartStore.handleLiveQuote', () => {
     const last = store.getState().candles.at(-1)!;
     expect(last.close).toBe(501.9); // only the latest tick's values applied
     expect(last.high).toBe(501.9);
+  });
+});
+
+describe('ChartStore Level 2 lifecycle', () => {
+  it('subscribes independently and keeps unavailable and stale states nonnumeric', async () => {
+    let l2Listener: ((update: L2ClientState) => void) | undefined;
+    const subscribeL2 = vi.fn(() => true);
+    const unsubscribeL2 = vi.fn(() => true);
+    const socket = {
+      l2CapabilityEnabled: true,
+      onQuote: () => () => undefined,
+      onL2Update: (listener: (update: L2ClientState) => void) => {
+        l2Listener = listener;
+        return () => undefined;
+      },
+      subscribe: () => () => undefined,
+      getState: () => ({ connectionState: 'connected' }),
+      subscribeSymbols: () => undefined,
+      unsubscribeSymbols: () => undefined,
+      subscribeL2,
+      unsubscribeL2,
+    } as unknown as QuoteSocket;
+    const settingsStore = {
+      lastSymbol: 'SPY',
+      indicatorSettings: {},
+      twcSettings: {},
+      optionsAnalytics: {},
+    } as unknown as SettingsStore;
+    const apiClient = { candles: vi.fn(async () => []) } as unknown as ApiClient;
+    const store = new ChartStore(apiClient, socket, settingsStore);
+
+    await store.start();
+    expect(subscribeL2).toHaveBeenCalledWith('SPY', 50);
+    expect(store.getState().l2).toEqual({
+      kind: 'unavailable',
+      reason: 'Waiting for Level 2 data',
+      isStale: false,
+    });
+
+    l2Listener?.({
+      kind: 'unavailable',
+      status: {
+        availability: 'unavailable',
+        symbol: 'SPY',
+        provider: 'webull',
+        capability: 'nasdaq_totalview_non_display',
+        freshness: 'stale',
+        reason: 'stale',
+        message: 'Last book is older than five seconds',
+        retryable: true,
+      },
+    });
+    expect(store.getState().l2).toEqual({
+      kind: 'unavailable',
+      reason: 'Last book is older than five seconds',
+      isStale: true,
+    });
+    expect(store.getState().l2).not.toHaveProperty('indicators');
+
+    store.selectSymbol('QQQ');
+    expect(unsubscribeL2).toHaveBeenCalledWith('SPY');
+    expect(subscribeL2).toHaveBeenCalledWith('QQQ', 50);
   });
 });
 
@@ -324,6 +387,7 @@ describe('chartChromeSlice', () => {
     const slice = chartChromeSlice(store.getState());
     expect(Object.keys(slice).sort()).toEqual(
       [
+        'chartDisplay',
         'errorMessage',
         'indicatorSettings',
         'optionsAnalytics',
@@ -332,6 +396,45 @@ describe('chartChromeSlice', () => {
         'visiblePriceRange',
       ].sort(),
     );
+  });
+});
+
+describe('ChartStore indicator mutation validation', () => {
+  it('rejects invalid candidate geometry before persistence and preserves the last valid state', () => {
+    const socket = {
+      onQuote: () => () => undefined,
+      subscribe: () => () => undefined,
+      getState: () => ({ connectionState: 'connected' }),
+      subscribeSymbols: () => undefined,
+      unsubscribeSymbols: () => undefined,
+    } as unknown as QuoteSocket;
+    const persisted: unknown[] = [];
+    let stored = structuredClone(DEFAULT_INDICATOR_SETTINGS_STATE);
+    const settingsStore = {
+      lastSymbol: 'SPY',
+      get indicatorSettings() {
+        return stored;
+      },
+      set indicatorSettings(value) {
+        persisted.push(value);
+        stored = value;
+      },
+      chartDisplay: DEFAULT_CHART_DISPLAY,
+      twcSettings: {},
+      optionsAnalytics: {},
+    } as SettingsStore;
+    const store = new ChartStore({} as ApiClient, socket, settingsStore);
+    const before = store.getState().indicatorSettings;
+    (store as unknown as { set(patch: object): void }).set({
+      candles: [{ time: 1, open: 10, high: 11, low: 9, close: Number.NaN, volume: 100 }],
+    });
+    const candidate = structuredClone(before);
+    candidate.indicators.sma.enabled = true;
+
+    store.setIndicatorSettings(candidate);
+
+    expect(store.getState().indicatorSettings).toEqual(before);
+    expect(persisted).toEqual([]);
   });
 });
 

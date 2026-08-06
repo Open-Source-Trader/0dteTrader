@@ -71,6 +71,8 @@ export const EP = {
 
   // Market data — data host, GET. bars rate limit: 60 req/min [verified: docs].
   stockSnapshot: { host: 'data', method: 'GET', path: '/openapi/market-data/stock/snapshot' },
+  // Quotes depth — 1 call / second / App Key [verified: official reference].
+  stockDepth: { host: 'data', method: 'GET', path: '/openapi/market-data/stock/depth' },
   stockBars: { host: 'data', method: 'GET', path: '/openapi/market-data/stock/bars' },
   optionSnapshot: { host: 'data', method: 'GET', path: '/openapi/market-data/option/snapshot' },
   optionBars: { host: 'data', method: 'GET', path: '/openapi/market-data/option/bars' },

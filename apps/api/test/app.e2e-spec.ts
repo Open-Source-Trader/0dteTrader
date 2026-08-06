@@ -289,7 +289,7 @@ describe('0dteTrader API (e2e)', () => {
       quality: {
         feedMode: 'sandbox',
         cacheStatus: 'fresh',
-        calculationVersion: 'options-analytics-v1',
+        calculationVersion: 'options-analytics-v2',
       },
     });
     expect(first.body.structure).not.toHaveProperty('gammaRoots');

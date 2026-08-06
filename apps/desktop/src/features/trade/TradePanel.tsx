@@ -102,6 +102,9 @@ export function TradePanel({
   const chain = useStore(chainStore);
 
   const autoContract = chainStore.autoContract;
+  const scoringWinner = chain.isAutoScoringLoading
+    ? null
+    : (chain.autoScoringResult?.rankings[0] ?? null);
   const selectedContract = chainStore.selectedContract;
   const autoMid = autoContract ? midPrice(autoContract.bid, autoContract.ask) : null;
 
@@ -151,6 +154,12 @@ export function TradePanel({
   // They used to be a `.chip-button` against a hand-rolled `minHeight: 36` div,
   // which is what made the row change height with the toggle.
   let autoModeContent;
+  let autoDetail = '—';
+  if (scoringWinner && chain.autoSelectionStrategy === 'scored') {
+    autoDetail = `Score ${scoringWinner.score.toFixed(3)} · ${scoringWinner.rationale.summary}`;
+  } else if (autoMid !== null) {
+    autoDetail = `≈ ${Format.price(autoMid)}`;
+  }
   if (chain.errorMessage) {
     autoModeContent = (
       <button
@@ -163,11 +172,38 @@ export function TradePanel({
         </span>
       </button>
     );
-  } else if (chain.isLoading) {
+  } else if (chain.isLoading || chain.isAutoScoringLoading) {
     autoModeContent = (
       <div className="chip-button chip-button--static">
         <Spinner size={14} />
       </div>
+    );
+  } else if (chain.autoSelectionStrategy === 'scored' && chain.autoScoringError) {
+    autoModeContent = (
+      <button
+        className="chip-button"
+        onClick={() => void chainStore.refreshAutoScoring()}
+        aria-label={`Scored Auto failed: ${chain.autoScoringError}. Activate to retry`}
+      >
+        <span style={{ color: 'var(--pnl-negative)' }}>
+          Scoring unavailable — <u>Retry</u>
+        </span>
+      </button>
+    );
+  } else if (chain.autoSelectionStrategy === 'scored' && chain.autoScoringResult?.noPass) {
+    autoModeContent = (
+      <button
+        className="chip-button"
+        onClick={() => chainStore.acknowledgeClassicFallback()}
+        aria-label="No contract passed scoring. Use Classic plus one OTM fallback"
+        aria-pressed={chain.classicFallbackAcknowledged}
+      >
+        <span className="chip-title">
+          {chain.classicFallbackAcknowledged
+            ? 'Classic +1 acknowledged'
+            : 'No pass · Use Classic +1'}
+        </span>
+      </button>
     );
   } else if (autoContract) {
     autoModeContent = (
@@ -177,9 +213,7 @@ export function TradePanel({
           {Format.strike(autoContract.strike)}
           {autoContract.optionType === 'call' ? 'C' : 'P'}
         </span>
-        <span className="chip-detail numeric">
-          {autoMid !== null ? `≈ ${Format.price(autoMid)}` : '—'}
-        </span>
+        <span className="chip-detail numeric">{autoDetail}</span>
       </div>
     );
   } else {
@@ -287,6 +321,70 @@ export function TradePanel({
             </button>
           </div>
         </div>
+
+        {chain.isAutoMode ? (
+          <div
+            role="group"
+            aria-label="Auto selection strategy"
+            style={{ display: 'flex', alignItems: 'center', gap: 8, minHeight: 24 }}
+          >
+            <button
+              className={
+                chain.autoSelectionStrategy === 'scored' ? 'hud-toggle-chip on' : 'hud-toggle-chip'
+              }
+              onClick={() => chainStore.setAutoSelectionStrategy('scored')}
+              aria-pressed={chain.autoSelectionStrategy === 'scored'}
+            >
+              Scored
+            </button>
+            <button
+              className={
+                chain.autoSelectionStrategy === 'classic' ? 'hud-toggle-chip on' : 'hud-toggle-chip'
+              }
+              onClick={() => chainStore.setAutoSelectionStrategy('classic')}
+              aria-pressed={chain.autoSelectionStrategy === 'classic'}
+            >
+              Classic +1
+            </button>
+            {chain.autoSelectionStrategy === 'scored' && chain.isAutoScoringLoading ? (
+              <span className="text-secondary" role="status" aria-live="polite">
+                Ranking fresh contracts…
+              </span>
+            ) : null}
+            {chain.autoSelectionStrategy === 'scored' && chain.autoScoringError ? (
+              <button
+                type="button"
+                className="hud-toggle-chip"
+                onClick={() => void chainStore.refreshAutoScoring()}
+              >
+                Scoring unavailable · Retry
+              </button>
+            ) : null}
+            {chain.autoSelectionStrategy === 'scored' && chain.autoScoringResult?.noPass ? (
+              <button
+                type="button"
+                className="hud-toggle-chip"
+                aria-pressed={chain.classicFallbackAcknowledged}
+                onClick={() => chainStore.acknowledgeClassicFallback()}
+              >
+                {chain.classicFallbackAcknowledged
+                  ? 'Classic +1 fallback acknowledged'
+                  : 'No pass · Acknowledge Classic +1 fallback'}
+              </button>
+            ) : null}
+            {chain.autoSelectionStrategy === 'scored' && scoringWinner ? (
+              <span className="text-secondary" role="status" aria-live="polite">
+                {scoringWinner.rationale.summary}
+                {chain.autoScoringResult && chain.autoScoringResult.rankings.length > 1
+                  ? ` · Next: ${chain.autoScoringResult.rankings
+                      .slice(1, 3)
+                      .map((ranking) => `${ranking.candidate.strike} (${ranking.score.toFixed(3)})`)
+                      .join(', ')}`
+                  : ''}
+              </span>
+            ) : null}
+          </div>
+        ) : null}
 
         <div
           inert={locked}

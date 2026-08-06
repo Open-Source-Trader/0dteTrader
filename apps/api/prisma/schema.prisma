@@ -20,32 +20,35 @@ datasource db {
 }
 
 model User {
-  id                String                       @id @default(uuid()) @db.Uuid
-  email             String                       @unique
-  passwordHash      String
-  tradingDisabled   Boolean                      @default(false)
-  tradingMode       String                       @default("live")
+  id                    String                       @id @default(uuid()) @db.Uuid
+  email                 String                       @unique
+  passwordHash          String
+  tradingDisabled       Boolean                      @default(false)
+  tradingMode           String                       @default("live")
   /// Broker the user trades through ('webull' | 'alpaca'); default webull.
-  tradingProvider   String                       @default("webull")
-  createdAt         DateTime                     @default(now())
-  updatedAt         DateTime                     @updatedAt
-  credentials       WebullCredential[]
-  refreshTokens     RefreshToken[]
-  orderAudits       OrderAudit[]
-  webullApiTokens   WebullApiToken[]
-  brokerCredentials BrokerCredential[]
-  brokerApiTokens   BrokerApiToken[]
-  brokerConnections BrokerConnection[]
-  tradeOrders       TradeOrder[]
-  chartOrders       ChartOrder[]
-  bracketGroups     BracketGroup[]
-  deviceTokens      DeviceToken[]
-  pushDeliveries    PushDelivery[]
-  webhookInbox      WebhookInbox[]
-  userEvents        UserEvent[]
-  discordSettings   DiscordNotificationSettings?
-  discordDeliveries DiscordDelivery[]
-  legalAcceptances  LegalAcceptance[]
+  tradingProvider       String                       @default("webull")
+  createdAt             DateTime                     @default(now())
+  updatedAt             DateTime                     @updatedAt
+  credentials           WebullCredential[]
+  refreshTokens         RefreshToken[]
+  orderAudits           OrderAudit[]
+  webullApiTokens       WebullApiToken[]
+  brokerCredentials     BrokerCredential[]
+  brokerApiTokens       BrokerApiToken[]
+  brokerConnections     BrokerConnection[]
+  tradeOrders           TradeOrder[]
+  chartOrders           ChartOrder[]
+  bracketGroups         BracketGroup[]
+  deviceTokens          DeviceToken[]
+  pushDeliveries        PushDelivery[]
+  webhookInbox          WebhookInbox[]
+  userEvents            UserEvent[]
+  discordSettings       DiscordNotificationSettings?
+  discordDeliveries     DiscordDelivery[]
+  legalAcceptances      LegalAcceptance[]
+  ivAlertPreference     IvAlertPreference?
+  ivAlertDetectorStates IvAlertDetectorState[]
+  autoScoringPreference AutoScoringPreference?
 
   @@map("users")
 }
@@ -351,25 +354,92 @@ model OrderAudit {
 }
 
 model OptionsAnalyticsSnapshotRecord {
-  id                 String   @id @default(uuid()) @db.Uuid
-  symbol             String
-  expiration         String
-  observedAt         DateTime
-  settlementAt       DateTime
-  bucket             DateTime
+  id                  String    @id @default(uuid()) @db.Uuid
+  symbol              String
+  expiration          String
+  observedAt          DateTime
+  settlementAt        DateTime
+  bucket              DateTime
   // "core" | "viewed"; enforced by a database check constraint.
-  captureReason      String
+  captureReason       String
   // 1 | 5; enforced by a database check constraint.
-  resolutionMinutes  Int
-  calculationVersion String
-  input              Json
-  output             Json
-  quality            Json
-  createdAt          DateTime @default(now())
+  resolutionMinutes   Int
+  calculationVersion  String
+  atmIv               Float?
+  // Core rows remain null until every user detector transaction is complete.
+  detectorProcessedAt DateTime?
+  input               Json
+  output              Json
+  quality             Json
+  createdAt           DateTime  @default(now())
 
   @@unique([symbol, expiration, bucket, calculationVersion, resolutionMinutes], map: "options_analytics_snapshot_identity_key")
   @@index([resolutionMinutes, bucket])
+  @@index([atmIv])
+  @@index([captureReason, resolutionMinutes, detectorProcessedAt, bucket], map: "options_analytics_detector_pending_idx")
   @@map("options_analytics_snapshots")
+}
+
+model IvAlertPreference {
+  id                  String   @id @default(uuid()) @db.Uuid
+  userId              String   @unique @db.Uuid
+  user                User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  schemaVersion       Int      @default(1)
+  enabled             Boolean  @default(false)
+  symbols             String[]
+  lookbackMinutes     Int      @default(30)
+  thresholdK          Float    @default(3)
+  consecutiveBreaches Int      @default(2)
+  warmupMinutes       Int      @default(10)
+  warmupSamples       Int      @default(10)
+  cooldownMinutes     Int      @default(5)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  @@map("iv_alert_preferences")
+}
+
+model IvAlertDetectorState {
+  id               String    @id @default(uuid()) @db.Uuid
+  userId           String    @db.Uuid
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  symbol           String
+  samples          Json
+  firstPostResetAt DateTime?
+  lastProcessedAt  DateTime?
+  streakDirection  String?
+  streakCount      Int       @default(0)
+  cooldownUntil    DateTime?
+  version          Int       @default(0)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  @@unique([userId, symbol])
+  @@index([symbol, lastProcessedAt])
+  @@map("iv_alert_detector_states")
+}
+
+model AutoScoringPreference {
+  id                 String   @id @default(uuid()) @db.Uuid
+  userId             String   @unique @db.Uuid
+  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  schemaVersion      Int      @default(1)
+  preset             String
+  targetAbsDelta     Float
+  strikeRungs        Int
+  maxSpreadBps       Float
+  maxPremiumDollars  Float
+  minOpenInterest    Int
+  gammaMode          String
+  deltaWeight        Float
+  spreadWeight       Float
+  openInterestWeight Float
+  gammaWeight        Float
+  ivWeight           Float
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@map("auto_scoring_preferences")
 }
 
 // A device registered for push notifications. `token` is globally unique —

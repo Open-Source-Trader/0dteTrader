@@ -368,19 +368,64 @@ export class TradeStore extends Store<TradeStoreState> {
     }
 
     if (chainState.isAutoMode) {
-      // Sending the offset pins the server to the exact contract the panel
-      // shows, rather than whatever its own default would resolve to.
-      const otmOffset = chainStore.autoOtmOffset;
-      selection = {
-        mode: 'auto_otm',
-        optionType,
-        expiration: chainState.selectedExpiration ?? undefined,
-        otmOffset,
-      };
       const expirationLabel = chainState.selectedExpiration ?? 'nearest';
       const typeName = optionType === 'call' ? 'Call' : 'Put';
-      const offsetLabel = otmOffset === 0 ? 'ATM' : `+${otmOffset} OTM`;
-      summary = `${underlying} AUTO ${offsetLabel} ${typeName} · exp ${expirationLabel}`;
+      if (chainState.autoSelectionStrategy === 'scored') {
+        const result = chainState.autoScoringResult;
+        const preferences = chainState.autoScoringPreferences;
+        if (chainState.isAutoScoringLoading) {
+          this.showToast('Scored Auto is still ranking fresh contracts.', 'info');
+          return;
+        }
+        if (chainState.autoScoringError) {
+          this.showToast(chainState.autoScoringError, 'error');
+          return;
+        }
+        if (result?.noPass) {
+          if (!chainState.classicFallbackAcknowledged) {
+            this.showToast(
+              'No contract passed scoring. Acknowledge Classic +1 fallback first.',
+              'error',
+            );
+            return;
+          }
+          selection = {
+            mode: 'auto_otm',
+            optionType,
+            expiration: chainState.selectedExpiration ?? undefined,
+            classicFallbackAcknowledged: true,
+          };
+          summary = `${underlying} Scored Auto fallback · Classic +1 OTM ${typeName} · exp ${expirationLabel}`;
+        } else {
+          const winner = result?.rankings[0];
+          if (!result?.selectedSymbol || !winner || !preferences) {
+            this.showToast('Scored Auto has no fresh ranking yet.', 'error');
+            return;
+          }
+          selection = {
+            mode: 'auto_scored',
+            optionType,
+            expiration: chainState.selectedExpiration ?? undefined,
+            autoScoring: {
+              selectedSymbol: result.selectedSymbol,
+              preferences,
+              scoredConfirmationAccepted: true,
+              rankedAt: result.rankedAt,
+            },
+          };
+          summary = `${underlying} Scored Auto · ${winner.candidate.strike}${optionType === 'call' ? 'C' : 'P'} · ${winner.rationale.summary}`;
+        }
+        // Scored selection and its explicitly acknowledged fallback always
+        // show the final preview; the global speed bypass never applies.
+        bypassConfirmation = false;
+      } else {
+        selection = {
+          mode: 'auto_otm',
+          optionType,
+          expiration: chainState.selectedExpiration ?? undefined,
+        };
+        summary = `${underlying} AUTO +1 OTM ${typeName} · exp ${expirationLabel}`;
+      }
     } else {
       const strike = chainState.selectedStrike;
       const expiration = chainState.selectedExpiration;

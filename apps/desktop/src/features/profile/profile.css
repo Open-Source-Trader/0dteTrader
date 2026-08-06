@@ -40,6 +40,19 @@
   flex: 1;
   min-width: 0;
 }
+.profile-view .iv-alert-number-input,
+.desktop-settings-body .iv-alert-number-input {
+  width: 92px;
+  margin-left: auto;
+  padding: 4px 6px;
+  color: var(--text-secondary);
+  background: transparent;
+  border: 1px solid var(--hud-stroke-dim);
+  border-radius: 6px;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
 .profile-view .clear-field {
   flex: none;
   display: flex;

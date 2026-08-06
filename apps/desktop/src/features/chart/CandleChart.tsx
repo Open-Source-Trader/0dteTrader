@@ -44,9 +44,19 @@ import { optionsAnalyticsRailWidth } from './optionsAnalytics/optionsAnalyticsGe
 import type { OptionsAnalyticsSettings } from './optionsAnalytics/optionsAnalyticsSettings';
 import { TwcOverlay } from './TwcOverlay';
 import type { TwcRenderModel } from './twc/twcTypes';
+import { IndicatorDecorationLayer } from './IndicatorDecorationLayer';
+import type { IndicatorFill, IndicatorProfileDecorationRow } from './indicatorRenderModel';
+import {
+  normalizeVisibleCandleViewport,
+  UNINITIALIZED_VISIBLE_CANDLE_VIEWPORT,
+  type VisibleCandleViewport,
+} from './candleViewport';
+import { applySeriesDataLifecycle, type SeriesDataPoint } from './seriesDataLifecycle';
+import { createChartRepaintSignal, type ChartRepaintSignal } from './chartRepaintSignal';
 
 export interface OverlaySeries {
   id: string;
+  kind?: 'line';
   color: string;
   values: (number | null)[];
   /** 1..4 (lightweight-charts LineWidth); defaults to 1. */
@@ -58,6 +68,8 @@ export interface OverlaySeries {
 interface CandleChartProps {
   candles: ChartCandle[];
   overlays: OverlaySeries[];
+  indicatorFills?: IndicatorFill[];
+  indicatorProfileRows?: IndicatorProfileDecorationRow[];
   symbol: string;
   interval: ChartInterval;
   showVolume: boolean;
@@ -81,6 +93,8 @@ interface CandleChartProps {
   /** Reports the pane's visible price domain after every repaint-worthy
    *  change; null when it cannot be read (no data yet, chart torn down). */
   onVisiblePriceRange?: (range: { min: number; max: number } | null) => void;
+  /** Reports candle indices intersecting the viewport for visible-window geometry such as VPVR. */
+  onVisibleCandleViewport?: (viewport: VisibleCandleViewport) => void;
 }
 
 /** Inputs for the order-line overlay, passed through from the trade screen. */
@@ -108,6 +122,8 @@ const VISIBLE_CANDLES = 120;
 export function CandleChart({
   candles,
   overlays,
+  indicatorFills = [],
+  indicatorProfileRows = [],
   symbol,
   interval,
   showVolume,
@@ -122,6 +138,7 @@ export function CandleChart({
   chartTrading = null,
   revealPrice = null,
   onVisiblePriceRange,
+  onVisibleCandleViewport,
 }: CandleChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -139,11 +156,17 @@ export function CandleChart({
     ids: string[];
     lengths: number[];
     firstTime: number | null;
+    data: SeriesDataPoint[][];
   } | null>(null);
   const lastLengthRef = useRef(0);
   const lastFirstTimeRef = useRef<number | null>(null);
   const lastBarRef = useRef<ChartCandle | null>(null);
   const prevSymbolRef = useRef(symbol);
+  const candleCountRef = useRef(candles.length);
+  candleCountRef.current = candles.length;
+  const verticalScaleChangesRef = useRef<ChartRepaintSignal | null>(null);
+  verticalScaleChangesRef.current ??= createChartRepaintSignal();
+  const verticalScaleChanges = verticalScaleChangesRef.current;
   const [apis, setApis] = useState<{
     chart: IChartApi;
     series: ISeriesApi<'Candlestick'>;
@@ -348,7 +371,8 @@ export function CandleChart({
       if (restore !== null && !scale.options().autoScale) scale.setVisibleRange(restore);
       else if (scale.options().autoScale) scale.applyOptions({ autoScale: true });
     }
-  }, [revealPrice]);
+    verticalScaleChanges.emit();
+  }, [revealPrice, verticalScaleChanges]);
 
   // Reports the pane's visible price domain (the workspace's "Show on chart"
   // affordance needs to know when an order line sits outside it). Same
@@ -389,6 +413,37 @@ export function CandleChart({
     };
   }, [apis, onVisiblePriceRange]);
 
+  const reportCandleViewportRef = useRef<() => void>(() => {});
+  useEffect(() => {
+    if (!apis || !onVisibleCandleViewport) return;
+    let frame = 0;
+    const report = () => {
+      frame = 0;
+      onVisibleCandleViewport(
+        normalizeVisibleCandleViewport(
+          apis.chart.timeScale().getVisibleLogicalRange(),
+          candleCountRef.current,
+        ),
+      );
+    };
+    const schedule = () => {
+      if (!frame) frame = requestAnimationFrame(report);
+    };
+    reportCandleViewportRef.current = schedule;
+    apis.chart.timeScale().subscribeVisibleLogicalRangeChange(schedule);
+    schedule();
+    return () => {
+      reportCandleViewportRef.current = () => {};
+      apis.chart.timeScale().unsubscribeVisibleLogicalRangeChange(schedule);
+      if (frame) cancelAnimationFrame(frame);
+      onVisibleCandleViewport(UNINITIALIZED_VISIBLE_CANDLE_VIEWPORT);
+    };
+  }, [apis, onVisibleCandleViewport]);
+
+  useEffect(() => {
+    reportCandleViewportRef.current();
+  }, [candles.length]);
+
   // Candle data and the reveal both move the price↔pixel transform under the
   // reported range.
   useEffect(() => {
@@ -424,11 +479,12 @@ export function CandleChart({
     // cached history so the next dataset recenters instead of reusing the
     // previous symbol's viewport and price scale.
     chart.priceScale('left').applyOptions({ autoScale: true });
+    verticalScaleChanges.emit();
     lastLengthRef.current = 0;
     lastFirstTimeRef.current = null;
     lastCandleColorsRef.current = null;
     prevOverlaysRef.current = null;
-  }, [symbol]);
+  }, [symbol, verticalScaleChanges]);
 
   useEffect(() => {
     const chart = chartRef.current;
@@ -562,22 +618,29 @@ export function CandleChart({
       // data head moved on truncation) requires a full setData. Otherwise the
       // overlay's forming (last) point is the only thing that changed on this
       // tick, so update() it instead of rebuilding the whole series every quote.
-      const structural =
+      const forceReplace =
         !prev ||
         entry.id !== prev.ids[idx] ||
         prev.firstTime !== firstTime ||
         entry.data.length !== prev.lengths[idx];
-      if (structural) {
-        series.setData(entry.data);
-      } else {
-        const lastPoint = entry.data[entry.data.length - 1];
-        if (lastPoint) series.update(lastPoint);
-      }
+      const lastPoint = entry.data[entry.data.length - 1];
+      applySeriesDataLifecycle(
+        prev?.data[idx],
+        entry.data,
+        {
+          setData: () => series.setData(entry.data),
+          update: () => {
+            if (lastPoint) series.update(lastPoint);
+          },
+        },
+        forceReplace,
+      );
     }
     prevOverlaysRef.current = {
       ids: expanded.map((entry) => entry.id),
       lengths: expanded.map((entry) => entry.data.length),
       firstTime,
+      data: expanded.map((entry) => entry.data),
     };
   }, [candles, overlays]);
 
@@ -590,6 +653,7 @@ export function CandleChart({
       from: Math.max(0, candles.length - VISIBLE_CANDLES),
       to: candles.length + 12,
     });
+    verticalScaleChanges.emit();
   };
 
   const lastBar = candles.length > 0 ? candles[candles.length - 1] : null;
@@ -643,10 +707,23 @@ export function CandleChart({
           series={apis.series}
           candles={candles}
           interval={interval}
+          onVerticalScaleChange={verticalScaleChanges.emit}
         />
       ) : null}
       {apis && candles.length > 0 && twcModel ? (
         <TwcOverlay chart={apis.chart} series={apis.series} model={twcModel} candles={candles} />
+      ) : null}
+      {apis &&
+      candles.length > 0 &&
+      (indicatorFills.length > 0 || indicatorProfileRows.length > 0) ? (
+        <IndicatorDecorationLayer
+          chart={apis.chart}
+          series={apis.series}
+          verticalScaleChanges={verticalScaleChanges}
+          overlays={overlays}
+          fills={indicatorFills}
+          profileRows={indicatorProfileRows}
+        />
       ) : null}
       {apis && candles.length > 0 && optionsAnalyticsSnapshot && optionsAnalyticsSettings ? (
         <OptionsAnalyticsOverlay

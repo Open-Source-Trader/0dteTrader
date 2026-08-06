@@ -1,4 +1,7 @@
 import type {
+  AutoScoringPreferenceRecord,
+  AutoScoringPreferences,
+  AutoScoringResult,
   OptionContract,
   OptionType,
   OptionsChain,
@@ -9,7 +12,6 @@ import type { ApiClient } from '../../core/api/ApiClient';
 import { errorMessage } from '../../core/api/ApiError';
 import { Store } from '../../core/observable';
 import { parseOccSymbol } from '../../core/models/occSymbol';
-import type { SettingsStore } from '../../core/storage/SettingsStore';
 import { nearestExpiration, selectAutoOTM } from './autoContractSelector';
 
 interface ChainStoreState {
@@ -19,6 +21,12 @@ interface ChainStoreState {
   errorMessage: string | null;
   optionType: OptionType;
   isAutoMode: boolean;
+  autoSelectionStrategy: 'scored' | 'classic';
+  autoScoringPreferences: AutoScoringPreferences | null;
+  autoScoringResult: AutoScoringResult | null;
+  isAutoScoringLoading: boolean;
+  autoScoringError: string | null;
+  classicFallbackAcknowledged: boolean;
   /** CURR mode: pick among currently-owned contracts only. Excludes AUTO. */
   isCurrMode: boolean;
   selectedExpiration: string | null;
@@ -59,16 +67,13 @@ export class ChainStore extends Store<ChainStoreState> {
    * newer load has started, so a slow response can't clobber a newer symbol.
    */
   private loadGeneration = 0;
+  private autoScoringGeneration = 0;
 
   /** Open positions source for CURR mode; wired from the container
    *  (TradeStore owns positions). Null only in tests. */
   positionsProvider: (() => Position[]) | null = null;
 
-  constructor(
-    private readonly apiClient: ApiClient,
-    /** AUTO-offset preference source; absent (tests) falls back to +1. */
-    private readonly settings?: Pick<SettingsStore, 'autoOtmOffset'>,
-  ) {
+  constructor(private readonly apiClient: ApiClient) {
     super({
       underlying: '',
       chain: null,
@@ -76,6 +81,12 @@ export class ChainStore extends Store<ChainStoreState> {
       errorMessage: null,
       optionType: 'call',
       isAutoMode: true,
+      autoSelectionStrategy: 'classic',
+      autoScoringPreferences: null,
+      autoScoringResult: null,
+      isAutoScoringLoading: false,
+      autoScoringError: null,
+      classicFallbackAcknowledged: false,
       isCurrMode: false,
       selectedExpiration: null,
       selectedStrike: null,
@@ -158,16 +169,39 @@ export class ChainStore extends Store<ChainStoreState> {
     return [...new Set(values)].sort((a, b) => a - b);
   }
 
-  /** AUTO's configured distance from the ATM anchor (Profile preference). */
-  get autoOtmOffset(): number {
-    return this.settings?.autoOtmOffset ?? 1;
-  }
-
   /** The contract AUTO mode would trade right now. */
   get autoContract(): OptionContract | null {
-    const { chain, optionType, selectedExpiration, underlyingLast } = this.getState();
+    const {
+      chain,
+      optionType,
+      selectedExpiration,
+      underlyingLast,
+      underlying,
+      autoSelectionStrategy,
+      autoScoringResult,
+      isAutoScoringLoading,
+      classicFallbackAcknowledged,
+    } = this.getState();
     if (!chain) return null;
-    return selectAutoOTM(chain, optionType, selectedExpiration, underlyingLast, this.autoOtmOffset);
+    if (autoSelectionStrategy === 'scored') {
+      if (isAutoScoringLoading) return null;
+      if (autoScoringResult?.selectedSymbol) {
+        const selected =
+          chain.contracts.find(
+            (contract) => contract.symbol === autoScoringResult.selectedSymbol,
+          ) ?? null;
+        if (
+          selected?.underlying !== underlying ||
+          selected.expiration !== selectedExpiration ||
+          selected.optionType !== optionType
+        ) {
+          return null;
+        }
+        return selected;
+      }
+      if (!autoScoringResult?.noPass || !classicFallbackAcknowledged) return null;
+    }
+    return selectAutoOTM(chain, optionType, selectedExpiration, underlyingLast);
   }
 
   /** The contract the ticket resolves to (AUTO pick, or manual exp+strike). */
@@ -193,15 +227,86 @@ export class ChainStore extends Store<ChainStoreState> {
   }
 
   setOptionType(optionType: OptionType): void {
-    this.set({ optionType });
+    this.set({ optionType, classicFallbackAcknowledged: false });
     // CURR follows the CALL/PUT toggle: flipping sides re-lands the pickers on
     // that side's most recent holding (or clears them when none is held).
     if (this.getState().isCurrMode) this.preselectCurrLeg();
+    if (this.getState().isAutoMode) void this.refreshAutoScoring();
   }
 
   setAutoMode(isAutoMode: boolean): void {
     // AUTO and CURR are mutually exclusive pickers.
     this.set(isAutoMode ? { isAutoMode, isCurrMode: false } : { isAutoMode });
+    if (isAutoMode) void this.refreshAutoScoring();
+  }
+
+  setAutoSelectionStrategy(strategy: 'scored' | 'classic'): void {
+    this.autoScoringGeneration += 1;
+    this.set({
+      autoSelectionStrategy: strategy,
+      autoScoringResult: null,
+      autoScoringPreferences: null,
+      autoScoringError: null,
+      isAutoScoringLoading: false,
+      classicFallbackAcknowledged: false,
+    });
+    if (strategy === 'scored' && this.getState().isAutoMode) void this.refreshAutoScoring();
+  }
+
+  acknowledgeClassicFallback(): void {
+    const { autoSelectionStrategy, autoScoringResult } = this.getState();
+    if (autoSelectionStrategy !== 'scored' || autoScoringResult?.noPass !== true) return;
+    this.set({ classicFallbackAcknowledged: true });
+  }
+
+  async refreshAutoScoring(): Promise<void> {
+    const { isAutoMode, autoSelectionStrategy, underlying, selectedExpiration, optionType } =
+      this.getState();
+    if (!isAutoMode || autoSelectionStrategy !== 'scored' || !underlying || !selectedExpiration) {
+      return;
+    }
+    const generation = ++this.autoScoringGeneration;
+    this.set({
+      isAutoScoringLoading: true,
+      autoScoringPreferences: null,
+      autoScoringResult: null,
+      autoScoringError: null,
+      classicFallbackAcknowledged: false,
+    });
+    try {
+      const preference = await this.apiClient.autoScoringPreferences();
+      if (generation !== this.autoScoringGeneration) return;
+      const result = await this.apiClient.rankAutoContracts({
+        underlying,
+        expiration: selectedExpiration,
+        optionType,
+      });
+      if (generation !== this.autoScoringGeneration) return;
+      this.set({
+        autoScoringPreferences: preferencesFromRecord(preference),
+        autoScoringResult: result,
+      });
+    } catch (error) {
+      if (generation !== this.autoScoringGeneration) return;
+      this.set({
+        autoScoringPreferences: null,
+        autoScoringResult: null,
+        autoScoringError: errorMessage(error),
+      });
+    } finally {
+      if (generation === this.autoScoringGeneration) this.set({ isAutoScoringLoading: false });
+    }
+  }
+
+  private invalidateAutoScoring(): void {
+    this.autoScoringGeneration += 1;
+    this.set({
+      autoScoringPreferences: null,
+      autoScoringResult: null,
+      isAutoScoringLoading: false,
+      autoScoringError: null,
+      classicFallbackAcknowledged: false,
+    });
   }
 
   /** CURR mode: restrict the pickers to currently-owned contracts on the
@@ -267,6 +372,7 @@ export class ChainStore extends Store<ChainStoreState> {
       // New underlying: reset selection state. CURR is per-underlying — the
       // owned legs it was scoped to belong to the old symbol.
       this.loadedExpirations = new Set();
+      this.invalidateAutoScoring();
       this.set({
         chain: null,
         isCurrMode: false,
@@ -300,6 +406,7 @@ export class ChainStore extends Store<ChainStoreState> {
         const auto = this.autoContract;
         if (auto) this.set({ selectedStrike: auto.strike });
       }
+      await this.refreshAutoScoring();
     } catch (error) {
       if (gen !== this.loadGeneration) return;
       this.set({ errorMessage: errorMessage(error) });
@@ -347,6 +454,7 @@ export class ChainStore extends Store<ChainStoreState> {
   /** Expiration picker change; lazily fetches that expiration's contracts. */
   selectExpiration(expiration: string): void {
     if (expiration === this.getState().selectedExpiration) return;
+    this.invalidateAutoScoring();
     this.set({ selectedExpiration: expiration, selectedStrike: null });
     if (this.getState().isCurrMode) {
       // CURR: land on the selected side's most recently opened leg of that
@@ -357,7 +465,7 @@ export class ChainStore extends Store<ChainStoreState> {
       );
       if (recent) this.set({ selectedStrike: recent.contract.strike });
     }
-    void this.ensureContracts(expiration);
+    void this.ensureContracts(expiration).then(() => this.refreshAutoScoring());
   }
 
   private async ensureContracts(expiration: string): Promise<void> {
@@ -395,4 +503,24 @@ export class ChainStore extends Store<ChainStoreState> {
   selectStrike(strike: number): void {
     this.set({ selectedStrike: strike });
   }
+}
+
+function preferencesFromRecord(record: AutoScoringPreferenceRecord): AutoScoringPreferences {
+  return {
+    schemaVersion: record.schemaVersion,
+    preset: record.preset,
+    targetAbsDelta: record.targetAbsDelta,
+    strikeRungs: record.strikeRungs,
+    maxSpreadBps: record.maxSpreadBps,
+    maxPremiumDollars: record.maxPremiumDollars,
+    minOpenInterest: record.minOpenInterest,
+    gammaMode: record.gammaMode,
+    weights: {
+      delta: record.deltaWeight,
+      spread: record.spreadWeight,
+      openInterest: record.openInterestWeight,
+      gamma: record.gammaWeight,
+      iv: record.ivWeight,
+    },
+  };
 }

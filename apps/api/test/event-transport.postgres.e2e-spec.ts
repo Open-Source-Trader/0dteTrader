@@ -3,6 +3,7 @@ import { WebSocket } from 'ws';
 import { BrokerGateway } from '../src/broker/broker-gateway.interface';
 import { EventTransportService } from '../src/events/event-transport.service';
 import { StreamGateway } from '../src/market-data/stream.gateway';
+import { OrderBookService } from '../src/market-data/order-book.service';
 import { CryptoDataService } from '../src/market-data/crypto-data.service';
 import { IndexDataService } from '../src/market-data/index-data.service';
 import { PrismaService } from '../src/prisma/prisma.service';
@@ -40,6 +41,12 @@ postgresDescribe('Event transport (two real Postgres clients)', () => {
       {} as never,
       {} as never,
       receiver,
+      {
+        subscribe: jest.fn(),
+        unsubscribe: jest.fn(),
+        disconnect: jest.fn(),
+        destroy: jest.fn(),
+      } as unknown as OrderBookService,
     );
   });
 

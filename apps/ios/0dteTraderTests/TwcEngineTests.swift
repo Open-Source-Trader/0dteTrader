@@ -10,7 +10,7 @@ final class TwcEngineTests: XCTestCase {
 
     // MARK: - Fixtures
 
-    private func candle(_ i: Int, open: Double, high: Double, low: Double, close: Double, volume: Int = 1000) -> Candle {
+    private func candle(_ i: Int, open: Double, high: Double, low: Double, close: Double, volume: Double = 1000) -> Candle {
         Candle(
             time: Date(timeIntervalSince1970: baseTime + TimeInterval(i * minute)),
             open: open,

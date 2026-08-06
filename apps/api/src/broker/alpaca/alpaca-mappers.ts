@@ -37,6 +37,15 @@ function isoFrom(value: unknown): string {
   return String(value);
 }
 
+function optionalIsoFrom(value: unknown): string | undefined {
+  if (value === undefined || value === null) return undefined;
+  const candidate =
+    value instanceof Date
+      ? value
+      : new Date(typeof value === 'number' && value < 1e12 ? value * 1000 : String(value));
+  return Number.isFinite(candidate.getTime()) ? candidate.toISOString() : undefined;
+}
+
 /**
  * Build a Quote from an option or stock snapshot. Both snapshot shapes expose
  * `latestQuote` (bp/ap/bps/aps) and `latestTrade` (p/s), so a single mapper
@@ -84,6 +93,7 @@ export function toOptionContract(symbol: string, snap: SdkOptionSnapshot): Optio
     bid: num(q.bp),
     ask: num(q.ap),
     last: num(t.p ?? q.bp),
+    quoteTimestamp: optionalIsoFrom(q.t ?? t.t),
   };
 }
 

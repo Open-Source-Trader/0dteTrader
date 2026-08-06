@@ -20,6 +20,23 @@ struct TickAccumulatorState: Codable, Equatable, Sendable {
     var firstTimestamp: TimeInterval
 }
 
+enum TickStorageCodec {
+    static func decode(_ data: Data) throws -> StoredTickState {
+        let stored = try JSONDecoder().decode(StoredState.self, from: data)
+        return StoredTickState(
+            candles: stored.candles.map(\.candle),
+            accumulator: stored.accumulator
+        )
+    }
+
+    static func encode(_ state: StoredTickState) throws -> Data {
+        try JSONEncoder().encode(StoredState(
+            candles: state.candles.map(StoredCandle.init),
+            accumulator: state.accumulator
+        ))
+    }
+}
+
 /// Actor rather than an enum of static functions: `save` is called from
 /// `ChartViewModel.handleTickQuote` on every live tick (up to ~1/sec), and
 /// the encode + atomic file write it does is synchronous blocking I/O. That
@@ -44,21 +61,18 @@ actor TickStorage {
     func load(symbol: String, interval: TickInterval) -> StoredTickState {
         let url = fileURL(symbol: symbol, interval: interval)
         guard let data = try? Data(contentsOf: url),
-              let stored = try? JSONDecoder().decode(StoredState.self, from: data) else {
+              let stored = try? TickStorageCodec.decode(data) else {
             return StoredTickState(candles: [], accumulator: nil)
         }
-        return StoredTickState(candles: stored.candles.map(\.candle), accumulator: stored.accumulator)
+        return stored
     }
 
     func save(symbol: String, interval: TickInterval, state: StoredTickState) {
         let candles = state.candles.count > maxCandles
             ? Array(state.candles.suffix(maxCandles))
             : state.candles
-        let stored = StoredState(
-            candles: candles.map(StoredCandle.init),
-            accumulator: state.accumulator
-        )
-        guard let data = try? JSONEncoder().encode(stored) else { return }
+        let stored = StoredTickState(candles: candles, accumulator: state.accumulator)
+        guard let data = try? TickStorageCodec.encode(stored) else { return }
         let url = fileURL(symbol: symbol, interval: interval)
         try? data.write(to: url, options: .atomic)
     }
@@ -75,7 +89,7 @@ private struct StoredCandle: Codable {
     let high: Double
     let low: Double
     let close: Double
-    let volume: Int
+    let volume: Double
 
     init(_ candle: Candle) {
         time = candle.time.timeIntervalSince1970

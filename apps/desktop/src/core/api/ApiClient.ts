@@ -1,5 +1,8 @@
 import type {
   AccountSummary,
+  AutoScoringPreferenceRecord,
+  AutoScoringPreferenceUpdate,
+  AutoScoringResult,
   AuthTokens,
   BrokerCredentialsInput,
   BrokerCredentialsSaved,
@@ -252,6 +255,24 @@ export class ApiClient {
       query: { symbol: normalizedSymbol, expiration },
       signal,
     }).then((value) => validateOptionsAnalyticsSnapshot(value, normalizedSymbol, expiration));
+  }
+
+  rankAutoContracts(input: {
+    underlying: string;
+    expiration: string;
+    optionType: 'call' | 'put';
+  }): Promise<AutoScoringResult> {
+    return this.request({ method: 'POST', path: 'v1/auto-scoring/rank', body: input });
+  }
+
+  autoScoringPreferences(): Promise<AutoScoringPreferenceRecord> {
+    return this.request({ method: 'GET', path: 'v1/auto-scoring/preferences' });
+  }
+
+  updateAutoScoringPreferences(
+    input: AutoScoringPreferenceUpdate,
+  ): Promise<AutoScoringPreferenceRecord> {
+    return this.request({ method: 'PUT', path: 'v1/auto-scoring/preferences', body: input });
   }
 
   previewOrder(order: OrderRequest): Promise<OrderPreview> {

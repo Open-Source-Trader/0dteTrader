@@ -270,6 +270,82 @@ struct TradePanelView: View {
             }
             .disabled(tradingLocked)
             .opacity(tradingLocked ? 0.55 : 1)
+
+            if chainViewModel.isAutoMode {
+                autoScoringRow
+            }
+        }
+    }
+
+    private var autoScoringRow: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HudSegmentedControl(
+                options: [
+                    .init(AutoSelectionStrategy.scored, "Scored", accent: .appAccent),
+                    .init(AutoSelectionStrategy.classic, "Classic +1", accent: .appAccent),
+                ],
+                selection: $chainViewModel.autoSelectionStrategy,
+                minHeight: density.segmentedMinHeight
+            )
+            .accessibilityLabel("Auto contract strategy")
+
+            if chainViewModel.autoSelectionStrategy == .scored {
+                autoScoringStatus
+            } else {
+                Text("Classic always selects exactly one strike out of the money.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .disabled(tradingLocked)
+        .opacity(tradingLocked ? 0.55 : 1)
+    }
+
+    @ViewBuilder
+    private var autoScoringStatus: some View {
+        if chainViewModel.isAutoScoringLoading {
+            Text("Ranking fresh executable quotes…")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .accessibilityLabel("Scored Auto ranking in progress")
+        } else if let error = chainViewModel.autoScoringError {
+            Text(error)
+                .font(.caption2)
+                .foregroundStyle(Color.sellRed)
+                .accessibilityLabel("Scored Auto unavailable. \(error)")
+        } else if chainViewModel.autoScoringResult?.noPass == true,
+                  !chainViewModel.classicFallbackAcknowledged {
+            HStack(spacing: AppSpacing.sm) {
+                Text("No contract passes the current filters.")
+                    .font(.caption2)
+                    .foregroundStyle(Color.sellRed)
+                Button("Use Classic +1") { chainViewModel.acknowledgeClassicFallback() }
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Color.appAccent)
+                    .accessibilityHint("Explicitly acknowledges the Classic fallback")
+            }
+        } else if chainViewModel.classicFallbackAcknowledged {
+            Text("Classic +1 fallback acknowledged.")
+                .font(.caption2)
+                .foregroundStyle(Color.appAccent)
+        } else if let result = chainViewModel.autoScoringResult,
+                  let winner = result.rankings.first {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Winner: \(winner.candidate.symbol) · \(winner.rationale.summary)")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                if result.rankings.count > 1 {
+                    Text("Runners-up: " + result.rankings.dropFirst().prefix(2)
+                        .map { "\($0.candidate.symbol) \(Format.price($0.score))" }
+                        .joined(separator: " · "))
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(
+                "Scored Auto winner \(winner.candidate.symbol). \(winner.rationale.summary)"
+            )
         }
     }
 

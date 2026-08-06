@@ -1,15 +1,25 @@
-import { Inject, Logger, OnModuleDestroy } from '@nestjs/common';
+import { Inject, Logger, OnModuleDestroy, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { OnGatewayConnection, OnGatewayDisconnect, WebSocketGateway } from '@nestjs/websockets';
 import { IncomingMessage } from 'node:http';
 import { WebSocket } from 'ws';
-import { ChartOrder, OrderResult, Quote, StreamServerMessage } from '@0dtetrader/shared-types';
+import {
+  ChartOrder,
+  IVAlert,
+  IVAlertConfiguration,
+  IVAlertConfigurationState,
+  OrderResult,
+  Quote,
+  StreamServerMessage,
+} from '@0dtetrader/shared-types';
 import { BROKER_GATEWAY, BrokerGateway } from '../broker/broker-gateway.interface';
 import { DurableUserEvent, EventTransportService } from '../events/event-transport.service';
 import { Subscription } from 'rxjs';
 import { CryptoDataService } from './crypto-data.service';
 import { IndexDataService } from './index-data.service';
+import { OrderBookService } from './order-book.service';
+import { IvAlertService } from '../options-analytics/iv-alert.service';
 
 const QUOTE_TICK_MS = 1000;
 /** Index quotes poll slower: Tradier allows ~120 market-data req/min shared
@@ -23,9 +33,18 @@ const SYMBOL_PATTERN = /^[A-Za-z0-9.-]{1,32}$/;
 interface ClientState {
   userId: string;
   symbols: Set<string>;
+  l2Symbols: Set<string>;
   lastSequence: number;
   replaying: boolean;
   pending: DurableUserEvent[];
+  deliveredLiveIvAlertIds?: Set<string>;
+  lastIvAlertConfigurationUpdatedAt?: number;
+}
+
+export interface StreamGatewayMetrics {
+  ivAlertDelivered: number;
+  ivAlertDeliveryFailures: number;
+  ivAlertConfigurationFanout: number;
 }
 
 /**
@@ -49,6 +68,11 @@ export class StreamGateway implements OnGatewayConnection, OnGatewayDisconnect, 
   /** Last logged quote-tick warning per key — identical failures log once. */
   private readonly tickWarnings = new Map<string, string>();
   private readonly durableEventsSub: Subscription;
+  readonly metrics: StreamGatewayMetrics = {
+    ivAlertDelivered: 0,
+    ivAlertDeliveryFailures: 0,
+    ivAlertConfigurationFanout: 0,
+  };
 
   constructor(
     @Inject(BROKER_GATEWAY) private readonly broker: BrokerGateway,
@@ -57,6 +81,8 @@ export class StreamGateway implements OnGatewayConnection, OnGatewayDisconnect, 
     private readonly jwt: JwtService,
     private readonly config: ConfigService,
     private readonly eventTransport: EventTransportService,
+    private readonly orderBooks: OrderBookService,
+    @Optional() private readonly ivAlerts?: IvAlertService,
   ) {
     this.durableEventsSub = eventTransport.events$.subscribe((event) =>
       this.pushDurableEvent(event),
@@ -67,6 +93,7 @@ export class StreamGateway implements OnGatewayConnection, OnGatewayDisconnect, 
     this.durableEventsSub.unsubscribe();
     for (const timer of this.timers.values()) clearInterval(timer);
     this.timers.clear();
+    this.orderBooks.destroy();
   }
 
   // -------------------------------------------------------------------------
@@ -86,16 +113,19 @@ export class StreamGateway implements OnGatewayConnection, OnGatewayDisconnect, 
     }
 
     const cursor = this.extractCursor(req);
-    this.clients.set(client, {
+    const state: ClientState = {
       userId,
       symbols: new Set(),
+      l2Symbols: new Set(),
       lastSequence: cursor ?? 0,
       replaying: true,
       pending: [],
-    });
+    };
+    this.clients.set(client, state);
     client.on('message', (raw) => this.handleMessage(client, raw));
     client.on('close', () => this.handleDisconnect(client));
     client.on('error', () => this.handleDisconnect(client));
+    void this.sendInitialIvAlertConfiguration(client, state);
     void this.replayClient(client, userId, cursor);
   }
 
@@ -105,6 +135,7 @@ export class StreamGateway implements OnGatewayConnection, OnGatewayDisconnect, 
     for (const symbol of state.symbols) {
       this.removeSubscriber(symbol, client);
     }
+    this.orderBooks.disconnect(client);
     this.clients.delete(client);
   }
 
@@ -113,7 +144,13 @@ export class StreamGateway implements OnGatewayConnection, OnGatewayDisconnect, 
   // -------------------------------------------------------------------------
 
   private handleMessage(client: WebSocket, raw: unknown): void {
-    let msg: { type?: string; symbols?: unknown };
+    let msg: {
+      type?: string;
+      symbols?: unknown;
+      symbol?: unknown;
+      levels?: unknown;
+      data?: unknown;
+    };
     try {
       msg = JSON.parse(String(raw));
     } catch {
@@ -130,19 +167,123 @@ export class StreamGateway implements OnGatewayConnection, OnGatewayDisconnect, 
     const state = this.clients.get(client);
     if (!state) return;
 
+    if (msg.type === 'ivAlertConfigure') {
+      void this.configureIvAlerts(client, state, msg.data);
+      return;
+    }
+
+    if (msg.type === 'l2Subscribe') {
+      if (
+        typeof msg.symbol !== 'string' ||
+        !SYMBOL_PATTERN.test(msg.symbol) ||
+        !Number.isInteger(msg.levels) ||
+        (msg.levels as number) < 1 ||
+        (msg.levels as number) > 50
+      ) {
+        this.badMessage(
+          client,
+          'l2Subscribe requires a valid symbol and integer levels from 1 to 50',
+        );
+        return;
+      }
+      const symbol = msg.symbol.toUpperCase();
+      if (!state.l2Symbols.has(symbol) && state.l2Symbols.size >= MAX_SUBSCRIPTIONS_PER_CLIENT) {
+        this.send(client, {
+          type: 'error',
+          error: {
+            code: 'SUBSCRIPTION_LIMIT',
+            message: `At most ${MAX_SUBSCRIPTIONS_PER_CLIENT} Level 2 symbols per connection`,
+          },
+        });
+        return;
+      }
+      state.l2Symbols.add(symbol);
+      this.orderBooks.subscribe(client, symbol, msg.levels as number, (message) => {
+        this.send(client, message);
+        if (message.type === 'l2Status' && message.data.availability === 'unavailable') {
+          if (!message.data.retryable) state.l2Symbols.delete(symbol);
+        }
+      });
+      return;
+    }
+    if (msg.type === 'l2Unsubscribe') {
+      if (typeof msg.symbol !== 'string' || !SYMBOL_PATTERN.test(msg.symbol)) {
+        this.badMessage(client, 'l2Unsubscribe requires a valid symbol');
+        return;
+      }
+      const symbol = msg.symbol.toUpperCase();
+      state.l2Symbols.delete(symbol);
+      this.orderBooks.unsubscribe(client, symbol);
+      return;
+    }
+
     if (msg.type === 'subscribe') {
       for (const symbol of symbols) this.addSubscriber(symbol, client, state);
     } else if (msg.type === 'unsubscribe') {
       for (const symbol of symbols) this.removeSubscriber(symbol, client, state);
     } else {
+      this.badMessage(
+        client,
+        'type must be subscribe, unsubscribe, l2Subscribe, l2Unsubscribe, or ivAlertConfigure',
+      );
+    }
+  }
+
+  private async configureIvAlerts(
+    client: WebSocket,
+    state: ClientState,
+    data: unknown,
+  ): Promise<void> {
+    if (!this.ivAlerts || data === null || typeof data !== 'object' || Array.isArray(data)) {
       this.send(client, {
         type: 'error',
         error: {
-          code: 'BAD_MESSAGE',
-          message: 'type must be "subscribe" or "unsubscribe"',
+          code: 'IV_ALERT_CONFIGURATION_INVALID',
+          message: 'IV alert configuration is unavailable or invalid.',
+        },
+      });
+      return;
+    }
+    try {
+      const configured = await this.ivAlerts.configure(state.userId, data as IVAlertConfiguration);
+      for (const [peer, peerState] of this.clients) {
+        if (peerState.userId !== state.userId) continue;
+        this.sendIvAlertConfiguration(peer, peerState, configured, true);
+      }
+    } catch (error) {
+      if (this.clients.get(client) !== state) return;
+      this.send(client, {
+        type: 'error',
+        error: {
+          code: 'IV_ALERT_CONFIGURATION_INVALID',
+          message: error instanceof Error ? error.message : 'Invalid IV alert configuration.',
         },
       });
     }
+  }
+
+  private async sendInitialIvAlertConfiguration(
+    client: WebSocket,
+    state: ClientState,
+  ): Promise<void> {
+    if (!this.ivAlerts) return;
+    try {
+      const configuration = await this.ivAlerts.getConfiguration(state.userId);
+      if (this.clients.get(client) !== state) return;
+      this.sendIvAlertConfiguration(client, state, configuration, false);
+    } catch (error) {
+      this.logger.warn(
+        JSON.stringify({
+          event: 'iv_alert_configuration_load_failed',
+          userId: state.userId,
+          message: error instanceof Error ? error.message : String(error),
+        }),
+      );
+    }
+  }
+
+  private badMessage(client: WebSocket, message: string): void {
+    this.send(client, { type: 'error', error: { code: 'BAD_MESSAGE', message } });
   }
 
   private addSubscriber(symbol: string, client: WebSocket, state: ClientState): void {
@@ -286,7 +427,7 @@ export class StreamGateway implements OnGatewayConnection, OnGatewayDisconnect, 
     for (const [client, state] of this.clients) {
       if (state.userId !== event.userId) continue;
       if (state.replaying) state.pending.push(event);
-      else this.sendDurable(client, state, event);
+      else this.sendDurable(client, state, event, true);
     }
   }
 
@@ -324,7 +465,7 @@ export class StreamGateway implements OnGatewayConnection, OnGatewayDisconnect, 
         for (;;) {
           const missed = await this.eventTransport.replay(userId, after, 1_000);
           if (this.clients.get(client) !== state) return;
-          for (const event of missed) this.sendDurable(client, state, event);
+          for (const event of missed) this.sendDurable(client, state, event, false);
           if (missed.length < 1_000) break;
           after = missed[missed.length - 1].sequence;
         }
@@ -332,7 +473,7 @@ export class StreamGateway implements OnGatewayConnection, OnGatewayDisconnect, 
       if (this.clients.get(client) !== state) return;
       state.replaying = false;
       const pending = state.pending.splice(0).sort((a, b) => a.sequence - b.sequence);
-      for (const event of pending) this.sendDurable(client, state, event);
+      for (const event of pending) this.sendDurable(client, state, event, true);
       // A client that has never received a durable event still needs a saved
       // baseline. Without this handshake, reconnecting with local cursor 0
       // looks brand new and silently skips everything emitted while offline.
@@ -347,7 +488,40 @@ export class StreamGateway implements OnGatewayConnection, OnGatewayDisconnect, 
     }
   }
 
-  private sendDurable(client: WebSocket, state: ClientState, event: DurableUserEvent): void {
+  private sendDurable(
+    client: WebSocket,
+    state: ClientState,
+    event: DurableUserEvent,
+    live: boolean,
+  ): void {
+    if (event.type === 'ivAlert' && live) {
+      const delivered = (state.deliveredLiveIvAlertIds ??= new Set<string>());
+      if (delivered.has(event.id)) return;
+      delivered.add(event.id);
+      if (delivered.size > 2_048) {
+        const oldest = delivered.values().next().value;
+        if (oldest) delivered.delete(oldest);
+      }
+      state.lastSequence = Math.max(state.lastSequence, event.sequence);
+      this.sendLiveIvAlert(client, event);
+      return;
+    }
+    if (event.type === 'ivAlertConfiguration' && live) {
+      state.lastSequence = Math.max(state.lastSequence, event.sequence);
+      if (isIvAlertConfigurationState(event.payload)) {
+        this.sendIvAlertConfiguration(client, state, event.payload, true);
+      } else {
+        this.logger.error(
+          JSON.stringify({
+            event: 'iv_alert_configuration_delivery_failed',
+            userId: event.userId,
+            eventId: event.id,
+            reason: 'invalid_payload',
+          }),
+        );
+      }
+      return;
+    }
     if (event.sequence <= state.lastSequence) return;
     state.lastSequence = event.sequence;
     if (event.type === 'orderUpdate') {
@@ -357,13 +531,71 @@ export class StreamGateway implements OnGatewayConnection, OnGatewayDisconnect, 
         sequence: event.sequence,
         data: event.payload as OrderResult,
       });
-    } else {
+    } else if (event.type === 'chartOrder') {
       this.send(client, {
         type: 'chartOrder',
         eventId: event.id,
         sequence: event.sequence,
         data: event.payload as ChartOrder,
       });
+    }
+    // IV alerts and configuration updates are intentionally live-only. Their
+    // historical rows still advance the cursor so reconnect replay terminates
+    // without re-firing notifications or stale configuration updates.
+  }
+
+  private sendIvAlertConfiguration(
+    client: WebSocket,
+    state: ClientState,
+    configuration: IVAlertConfigurationState,
+    countFanout: boolean,
+  ): boolean {
+    const updatedAt = Date.parse(configuration.updatedAt);
+    if (
+      state.lastIvAlertConfigurationUpdatedAt !== undefined &&
+      updatedAt <= state.lastIvAlertConfigurationUpdatedAt
+    ) {
+      return true;
+    }
+    if (!this.send(client, { type: 'ivAlertConfiguration', data: configuration })) return false;
+    state.lastIvAlertConfigurationUpdatedAt = updatedAt;
+    if (countFanout) this.metrics.ivAlertConfigurationFanout += 1;
+    return true;
+  }
+
+  private sendLiveIvAlert(client: WebSocket, event: DurableUserEvent): void {
+    if (isIvAlert(event.payload)) {
+      if (this.send(client, { type: 'ivAlert', data: event.payload })) {
+        this.metrics.ivAlertDelivered += 1;
+        this.logger.log(
+          JSON.stringify({
+            event: 'iv_alert_delivered',
+            userId: event.userId,
+            eventId: event.id,
+            symbol: event.payload.symbol,
+          }),
+        );
+      } else {
+        this.metrics.ivAlertDeliveryFailures += 1;
+        this.logger.warn(
+          JSON.stringify({
+            event: 'iv_alert_delivery_failed',
+            userId: event.userId,
+            eventId: event.id,
+            symbol: event.payload.symbol,
+          }),
+        );
+      }
+    } else {
+      this.metrics.ivAlertDeliveryFailures += 1;
+      this.logger.error(
+        JSON.stringify({
+          event: 'iv_alert_delivery_failed',
+          userId: event.userId,
+          eventId: event.id,
+          reason: 'invalid_payload',
+        }),
+      );
     }
   }
 
@@ -407,9 +639,70 @@ export class StreamGateway implements OnGatewayConnection, OnGatewayDisconnect, 
     for (const client of set) this.send(client, message);
   }
 
-  private send(client: WebSocket, message: StreamServerMessage): void {
-    if (client.readyState === WebSocket.OPEN) {
+  private send(client: WebSocket, message: StreamServerMessage): boolean {
+    if (client.readyState !== WebSocket.OPEN) return false;
+    try {
       client.send(JSON.stringify(message));
+      return true;
+    } catch (error) {
+      this.logger.warn(
+        JSON.stringify({
+          event: 'websocket_send_failed',
+          messageType: message.type,
+          message: error instanceof Error ? error.message : String(error),
+        }),
+      );
+      return false;
     }
   }
+}
+
+function isIvAlert(value: unknown): value is IVAlert {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
+  const candidate = value as Partial<IVAlert>;
+  return (
+    (candidate.symbol === 'SPX' || candidate.symbol === 'NDX' || candidate.symbol === 'RUT') &&
+    (candidate.direction === 'expansion' || candidate.direction === 'crush') &&
+    typeof candidate.timestamp === 'string' &&
+    Number.isFinite(Date.parse(candidate.timestamp)) &&
+    typeof candidate.currentIv === 'number' &&
+    Number.isFinite(candidate.currentIv) &&
+    typeof candidate.baselineIv === 'number' &&
+    Number.isFinite(candidate.baselineIv) &&
+    typeof candidate.zScore === 'number' &&
+    Number.isFinite(candidate.zScore)
+  );
+}
+
+function isIvAlertConfigurationState(value: unknown): value is IVAlertConfigurationState {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
+  const candidate = value as Partial<IVAlertConfigurationState>;
+  const symbols = candidate.symbols;
+  return (
+    candidate.schemaVersion === 1 &&
+    typeof candidate.updatedAt === 'string' &&
+    Number.isFinite(Date.parse(candidate.updatedAt)) &&
+    typeof candidate.enabled === 'boolean' &&
+    Array.isArray(symbols) &&
+    symbols.length >= 1 &&
+    symbols.length <= 3 &&
+    new Set(symbols).size === symbols.length &&
+    symbols.every((symbol) => symbol === 'SPX' || symbol === 'NDX' || symbol === 'RUT') &&
+    isBoundedInteger(candidate.lookbackMinutes, 5, 240) &&
+    isBoundedNumber(candidate.thresholdK, 0.1, 20) &&
+    isBoundedInteger(candidate.consecutiveBreaches, 1, 10) &&
+    isBoundedInteger(candidate.warmupMinutes, 0, 60) &&
+    isBoundedInteger(candidate.warmupSamples, 1, 240) &&
+    isBoundedInteger(candidate.cooldownMinutes, 0, 1_440)
+  );
+}
+
+function isBoundedInteger(value: unknown, minimum: number, maximum: number): value is number {
+  return Number.isInteger(value) && (value as number) >= minimum && (value as number) <= maximum;
+}
+
+function isBoundedNumber(value: unknown, minimum: number, maximum: number): value is number {
+  return (
+    typeof value === 'number' && Number.isFinite(value) && value >= minimum && value <= maximum
+  );
 }

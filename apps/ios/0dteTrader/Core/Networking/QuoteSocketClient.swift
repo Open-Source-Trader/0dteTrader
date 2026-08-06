@@ -1,4 +1,7 @@
 import Foundation
+// Connection lifecycle, durable replay, and non-durable market streams share
+// one state machine; splitting them would hide generation and teardown rules.
+// swiftlint:disable file_length
 
 enum DurableCursorDecision: Equatable {
     case accepted
@@ -110,6 +113,16 @@ enum SocketConnectionState: Equatable {
     case connected
 }
 
+struct SocketClientError: Equatable, Sendable {
+    let code: String?
+    let message: String
+
+    init(code: String? = nil, message: String) {
+        self.code = code
+        self.message = message
+    }
+}
+
 /// WebSocket client for `GET /v1/stream?token=<accessToken>`.
 ///
 /// - subscribe/unsubscribe messages per the API contract;
@@ -121,6 +134,10 @@ final class QuoteSocketClient: ObservableObject {
     @Published private(set) var connectionState: SocketConnectionState = .disconnected
     @Published private(set) var quotes: [String: Quote] = [:]
     @Published private(set) var lastQuote: Quote?
+    @Published private(set) var l2Snapshots: [String: L2SnapshotPayloadDTO] = [:]
+    @Published private(set) var l2Statuses: [String: OrderBookStatusDTO] = [:]
+    @Published private(set) var latestIVAlert: IVAlertDTO?
+    @Published private(set) var ivAlertConfiguration: IVAlertConfigurationStateDTO?
     /// Per-message order delivery. A single @Published slot can coalesce two
     /// back-to-back transitions before SwiftUI renders, so durable events use
     /// direct callbacks and are checkpointed only after this callback returns.
@@ -147,12 +164,13 @@ final class QuoteSocketClient: ObservableObject {
     /// Whether a connection was ever established, so the next `.connected`
     /// transition is a RE-connection with a gap to make up.
     private var hasConnected = false
-    @Published private(set) var lastErrorMessage: String?
+    @Published private(set) var lastError: SocketClientError?
 
     private let streamURL: URL
     private let tokenProvider: () async throws -> String
     private let encoder = JSONEncoder()
     private let urlSession: URLSession
+    private let l2CapabilityEnabled: Bool
 
     private var webSocketTask: URLSessionWebSocketTask?
     private var connectionTask: Task<Void, Never>?
@@ -161,6 +179,8 @@ final class QuoteSocketClient: ObservableObject {
     private var legacyReadyTask: Task<Void, Never>?
     private var reconnectTask: Task<Void, Never>?
     private var subscribedSymbols: Set<String> = []
+    private var l2Subscriptions: [String: Int] = [:]
+    private var l2FreshnessTasks: [String: Task<Void, Never>] = [:]
     private var shouldBeConnected = false
     private var reconnectAttempt = 0
     private let durableCursor: DurableEventCursor
@@ -169,16 +189,27 @@ final class QuoteSocketClient: ObservableObject {
     private var deferredServerCursor: Int?
     private var isDrainingDurableEvents = false
     private static let maxPendingDurableEvents = 2_048
+    nonisolated static let maxL2Subscriptions = 50
+    nonisolated static let maxSocketPayloadBytes = 65_536
+
+    private nonisolated static var configuredL2CapabilityEnabled: Bool {
+        let value = Bundle.main.object(forInfoDictionaryKey: "L2CapabilityEnabled")
+        if let enabled = value as? Bool { return enabled }
+        if let text = value as? String { return (text as NSString).boolValue }
+        return false
+    }
 
     init(
         streamURL: URL,
         urlSession: URLSession = .shared,
         cursorDefaults: UserDefaults = .standard,
+        l2CapabilityEnabled: Bool = QuoteSocketClient.configuredL2CapabilityEnabled,
         tokenProvider: @escaping () async throws -> String
     ) {
         self.streamURL = streamURL
         self.urlSession = urlSession
         self.tokenProvider = tokenProvider
+        self.l2CapabilityEnabled = l2CapabilityEnabled
         self.durableCursor = DurableEventCursor(defaults: cursorDefaults, serverKey: streamURL.absoluteString)
     }
 
@@ -244,6 +275,63 @@ final class QuoteSocketClient: ObservableObject {
         }
     }
 
+    @discardableResult
+    func subscribeL2(symbol: String, levels: Int) -> Bool {
+        let normalized = symbol.uppercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty, (1...50).contains(levels) else { return false }
+        guard l2CapabilityEnabled else {
+            l2Snapshots[normalized] = nil
+            l2Statuses[normalized] = .unavailable(
+                symbol: normalized,
+                provider: nil,
+                capability: nil,
+                freshness: nil,
+                reason: .entitlementMissing,
+                message: "L2 capability is disabled on this device.",
+                retryable: false
+            )
+            return false
+        }
+        guard l2Subscriptions[normalized] != nil
+                || l2Subscriptions.count < Self.maxL2Subscriptions else {
+            l2Statuses[normalized] = .unavailable(
+                symbol: normalized,
+                provider: nil,
+                capability: nil,
+                freshness: nil,
+                reason: .rateLimiterUnavailable,
+                message: "The 50-symbol L2 subscription limit has been reached.",
+                retryable: false
+            )
+            return false
+        }
+        let changed = l2Subscriptions[normalized] != levels
+        l2Subscriptions[normalized] = levels
+        if webSocketTask != nil, changed {
+            send(SocketL2SubscribeMessage(symbol: normalized, levels: levels))
+        }
+        return true
+    }
+
+    func unsubscribeL2(symbol: String) {
+        let normalized = symbol.uppercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        guard l2Subscriptions.removeValue(forKey: normalized) != nil else { return }
+        l2FreshnessTasks.removeValue(forKey: normalized)?.cancel()
+        l2Snapshots[normalized] = nil
+        l2Statuses[normalized] = nil
+        if webSocketTask != nil {
+            send(SocketL2UnsubscribeMessage(symbol: normalized))
+        }
+    }
+
+    func configureIVAlerts(_ configuration: IVAlertConfigurationDTO) {
+        send(SocketIVAlertConfigureMessage(data: configuration))
+    }
+
+    func dismissLatestIVAlert() {
+        latestIVAlert = nil
+    }
+
     // MARK: - Connection management
 
     private func openConnection() {
@@ -292,6 +380,9 @@ final class QuoteSocketClient: ObservableObject {
                 if !self.subscribedSymbols.isEmpty {
                     self.send(SocketSubscribeMessage(type: "subscribe", symbols: Array(self.subscribedSymbols)))
                 }
+                for (symbol, levels) in self.l2Subscriptions.sorted(by: { $0.key < $1.key }) {
+                    self.send(SocketL2SubscribeMessage(symbol: symbol, levels: levels))
+                }
                 // Resume starts transport I/O; remain `.connecting` until an
                 // eventCursor proves authentication and replay catch-up. A
                 // bounded non-checkpointing fallback supports an old API
@@ -303,7 +394,7 @@ final class QuoteSocketClient: ObservableObject {
                 guard !Task.isCancelled,
                       self.shouldBeConnected,
                       self.connectionGeneration == generation else { return }
-                self.lastErrorMessage = error.localizedDescription
+                self.lastError = SocketClientError(message: error.localizedDescription)
                 self.connectionState = .disconnected
                 self.scheduleReconnect()
             }
@@ -348,12 +439,28 @@ final class QuoteSocketClient: ObservableObject {
         @unknown default:
             return nil
         }
+        guard data.count <= maxSocketPayloadBytes else { return nil }
         let decoder = JSONDecoder()
         guard let envelope = try? decoder.decode(SocketEnvelope.self, from: data) else { return nil }
         switch envelope.type {
         case "quote":
             guard let payload = try? decoder.decode(SocketQuoteMessage.self, from: data) else { return nil }
             return .quote(Quote(dto: payload.data))
+        case "l2Snapshot":
+            guard let payload = try? decoder.decode(SocketL2SnapshotMessage.self, from: data),
+                  validate(payload.data) else { return nil }
+            return .l2Snapshot(payload.data)
+        case "l2Status":
+            guard let payload = try? decoder.decode(SocketL2StatusMessage.self, from: data) else { return nil }
+            return .l2Status(payload.data)
+        case "ivAlert":
+            guard let payload = try? decoder.decode(SocketIVAlertMessage.self, from: data),
+                  validate(payload.data) else { return nil }
+            return .ivAlert(payload.data)
+        case "ivAlertConfiguration":
+            guard let payload = try? decoder.decode(SocketIVAlertConfigurationMessage.self, from: data),
+                  validate(payload.data) else { return nil }
+            return .ivAlertConfiguration(payload.data)
         case "orderUpdate":
             guard let payload = try? decoder.decode(SocketOrderUpdateMessage.self, from: data) else { return nil }
             return .orderUpdate(OrderResult(dto: payload.data), payload.eventId, payload.sequence)
@@ -366,10 +473,106 @@ final class QuoteSocketClient: ObservableObject {
             return .eventCursor(payload.sequence)
         case "error":
             guard let payload = try? decoder.decode(SocketErrorMessage.self, from: data) else { return nil }
-            return .error(payload.error.message)
+            return .error(payload.error)
         default:
             return nil
         }
+    }
+
+    nonisolated static func decodePayloadForTesting(_ data: Data) async -> DecodedSocketMessage? {
+        await decode(.data(data))
+    }
+
+    func processPayloadForTesting(_ data: Data) async {
+        guard let decoded = await Self.decodePayloadForTesting(data) else { return }
+        publish(decoded)
+    }
+
+    var l2FreshnessTaskCountForTesting: Int { l2FreshnessTasks.count }
+
+    #if DEBUG
+    func setConnectionStateForTesting(_ state: SocketConnectionState) {
+        connectionState = state
+    }
+    #endif
+
+    private nonisolated static func validate(_ payload: L2SnapshotPayloadDTO) -> Bool {
+        let snapshot = payload.snapshot
+        guard let sourceTimestamp = parseISO8601(snapshot.timestamp),
+              let receivedAt = parseISO8601(snapshot.receivedAt),
+              sourceTimestamp.timeIntervalSince(receivedAt) <= 1,
+              snapshot.freshness == .fresh,
+              (1...50).contains(snapshot.depth),
+              snapshot.bids.count == snapshot.depth,
+              snapshot.asks.count == snapshot.depth,
+              !snapshot.symbol.isEmpty,
+              snapshot.bids.allSatisfy({ $0.price.isFinite && $0.price > 0 && $0.size.isFinite && $0.size >= 0 }),
+              snapshot.asks.allSatisfy({ $0.price.isFinite && $0.price > 0 && $0.size.isFinite && $0.size >= 0 }),
+              zip(snapshot.bids, snapshot.bids.dropFirst()).allSatisfy({ $0.0.price > $0.1.price }),
+              zip(snapshot.asks, snapshot.asks.dropFirst()).allSatisfy({ $0.0.price < $0.1.price }),
+              snapshot.bids[0].price <= snapshot.asks[0].price
+        else { return false }
+        let values = [
+            payload.indicators.spreadAbs,
+            payload.indicators.spreadBps,
+            payload.indicators.spreadPercentile,
+            payload.indicators.topBookImbalance,
+            payload.indicators.tickPressure,
+            payload.indicators.depthImbalance,
+            payload.indicators.cumulativePressure,
+            payload.indicators.touchDepletion,
+        ]
+        guard values.allSatisfy({ $0?.isFinite ?? true }) else { return false }
+        let spread = snapshot.asks[0].price - snapshot.bids[0].price
+        let midpoint = (snapshot.asks[0].price + snapshot.bids[0].price) / 2
+        if let spreadAbs = payload.indicators.spreadAbs,
+           abs(spreadAbs - spread) > 0.000_001 { return false }
+        if let spreadBps = payload.indicators.spreadBps,
+           abs(spreadBps - spread / midpoint * 10_000) > 0.000_01 { return false }
+        if let percentile = payload.indicators.spreadPercentile,
+           !(0...100).contains(percentile) { return false }
+        let unitIntervalValues = [
+            payload.indicators.topBookImbalance,
+            payload.indicators.tickPressure,
+            payload.indicators.depthImbalance,
+            payload.indicators.cumulativePressure,
+            payload.indicators.touchDepletion,
+        ]
+        return unitIntervalValues.allSatisfy { value in
+            guard let value else { return true }
+            return (-1...1).contains(value)
+        }
+    }
+
+    private nonisolated static func validate(_ alert: IVAlertDTO) -> Bool {
+        alert.currentIv.isFinite
+            && alert.currentIv >= 0
+            && alert.baselineIv.isFinite
+            && alert.baselineIv >= 0
+            && alert.zScore.isFinite
+            && parseISO8601(alert.timestamp) != nil
+            && ((alert.direction == .expansion && alert.zScore > 0)
+                || (alert.direction == .crush && alert.zScore < 0))
+    }
+
+    private nonisolated static func validate(_ configuration: IVAlertConfigurationStateDTO) -> Bool {
+        configuration.schemaVersion == 1
+            && Set(configuration.symbols.map(\.rawValue)).count == configuration.symbols.count
+            && (1...3).contains(configuration.symbols.count)
+            && (5...240).contains(configuration.lookbackMinutes)
+            && configuration.thresholdK.isFinite
+            && (0.1...20).contains(configuration.thresholdK)
+            && (1...10).contains(configuration.consecutiveBreaches)
+            && (0...60).contains(configuration.warmupMinutes)
+            && (1...240).contains(configuration.warmupSamples)
+            && (0...1_440).contains(configuration.cooldownMinutes)
+            && parseISO8601(configuration.updatedAt) != nil
+    }
+
+    private nonisolated static func parseISO8601(_ value: String) -> Date? {
+        let fractional = ISO8601DateFormatter()
+        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return fractional.date(from: value) ?? ISO8601DateFormatter().date(from: value)
     }
 
     private func publish(_ decoded: DecodedSocketMessage) {
@@ -377,6 +580,28 @@ final class QuoteSocketClient: ObservableObject {
         case .quote(let quote):
             quotes[quote.symbol] = quote
             lastQuote = quote
+        case .l2Snapshot(let payload):
+            let symbol = payload.snapshot.symbol.uppercased()
+            guard l2Subscriptions[symbol] != nil else { return }
+            guard armL2FreshnessDeadline(payload, symbol: symbol) else { return }
+            l2Snapshots[symbol] = payload
+            l2Statuses[symbol] = .available(
+                symbol: symbol,
+                provider: payload.snapshot.provider,
+                capability: payload.snapshot.capability
+            )
+        case .l2Status(let status):
+            let symbol = status.symbol.uppercased()
+            guard l2Subscriptions[symbol] != nil else { return }
+            if !status.isAvailable {
+                l2FreshnessTasks.removeValue(forKey: symbol)?.cancel()
+                l2Snapshots[symbol] = nil
+            }
+            l2Statuses[symbol] = status
+        case .ivAlert(let alert):
+            latestIVAlert = alert
+        case .ivAlertConfiguration(let configuration):
+            ivAlertConfiguration = configuration
         case .orderUpdate(let result, let eventId, let sequence):
             enqueueDurable(.order(result, eventId, sequence))
         case .chartOrder(let order, let eventId, let sequence):
@@ -384,14 +609,14 @@ final class QuoteSocketClient: ObservableObject {
         case .eventCursor(let sequence):
             deferredServerCursor = max(deferredServerCursor ?? 0, sequence)
             drainDurableEvents()
-        case .error(let message):
-            lastErrorMessage = message
+        case .error(let error):
+            lastError = SocketClientError(code: error.code, message: error.message)
         }
     }
 
     private func enqueueDurable(_ event: PendingDurableEvent) {
         guard pendingDurableEvents.count < Self.maxPendingDurableEvents else {
-            lastErrorMessage = "Durable event delivery backlog exceeded its safety limit"
+            lastError = SocketClientError(message: "Durable event delivery backlog exceeded its safety limit")
             handleUnexpectedDisconnect()
             return
         }
@@ -421,7 +646,7 @@ final class QuoteSocketClient: ObservableObject {
                     pendingDurableEvents.removeFirst()
                     continue
                 case .gap:
-                    lastErrorMessage = "Durable event gap before sequence \(sequence)"
+                    lastError = SocketClientError(message: "Durable event gap before sequence \(sequence)")
                     handleUnexpectedDisconnect()
                     return
                 case .accepted:
@@ -439,7 +664,7 @@ final class QuoteSocketClient: ObservableObject {
             }
             if let (eventID, sequence) = event.metadata,
                !durableCursor.commit(eventID: eventID, sequence: sequence) {
-                lastErrorMessage = "Could not commit durable event \(sequence)"
+                lastError = SocketClientError(message: "Could not commit durable event \(sequence)")
                 handleUnexpectedDisconnect()
                 return
             }
@@ -465,7 +690,7 @@ final class QuoteSocketClient: ObservableObject {
         legacyReadyTask?.cancel()
         legacyReadyTask = nil
         connectionState = .connected
-        lastErrorMessage = nil
+        lastError = nil
         reconnectAttempt = 0
         let reconnected = hasConnected
         hasConnected = true
@@ -555,11 +780,71 @@ final class QuoteSocketClient: ObservableObject {
         pingTask = nil
         webSocketTask?.cancel(with: .normalClosure, reason: nil)
         webSocketTask = nil
+        for task in l2FreshnessTasks.values { task.cancel() }
+        l2FreshnessTasks.removeAll()
+        latestIVAlert = nil
+        ivAlertConfiguration = nil
+        for symbol in l2Subscriptions.keys {
+            l2Snapshots[symbol] = nil
+            l2Statuses[symbol] = .unavailable(
+                symbol: symbol,
+                provider: .webull,
+                capability: .nasdaqTotalViewNonDisplay,
+                freshness: .stale,
+                reason: .disconnected,
+                message: "The L2 stream is disconnected.",
+                retryable: true
+            )
+        }
+    }
+
+    private func armL2FreshnessDeadline(
+        _ payload: L2SnapshotPayloadDTO,
+        symbol: String
+    ) -> Bool {
+        guard let sourceTime = DateParsing.dateTime(payload.snapshot.timestamp) else { return false }
+        let age = Date().timeIntervalSince(sourceTime)
+        guard age < 5 else {
+            l2Snapshots[symbol] = nil
+            l2Statuses[symbol] = .unavailable(
+                symbol: symbol,
+                provider: payload.snapshot.provider,
+                capability: payload.snapshot.capability,
+                freshness: .stale,
+                reason: .stale,
+                message: "The latest L2 snapshot is stale.",
+                retryable: true
+            )
+            return false
+        }
+        l2FreshnessTasks.removeValue(forKey: symbol)?.cancel()
+        // Never trust a future source clock to extend freshness beyond five
+        // seconds from receipt on this client.
+        let delay = min(5, max(0, 5 - age))
+        let sourceTimestamp = payload.snapshot.timestamp
+        l2FreshnessTasks[symbol] = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            guard let self,
+                  !Task.isCancelled,
+                  self.l2Snapshots[symbol]?.snapshot.timestamp == sourceTimestamp else { return }
+            self.l2Snapshots[symbol] = nil
+            self.l2Statuses[symbol] = .unavailable(
+                symbol: symbol,
+                provider: payload.snapshot.provider,
+                capability: payload.snapshot.capability,
+                freshness: .stale,
+                reason: .stale,
+                message: "The latest L2 snapshot is stale.",
+                retryable: true
+            )
+            self.l2FreshnessTasks[symbol] = nil
+        }
+        return true
     }
 
     // MARK: - Wire protocol
 
-    private func send(_ message: SocketSubscribeMessage) {
+    private func send<Message: Encodable>(_ message: Message) {
         guard let data = try? encoder.encode(message), let text = String(data: data, encoding: .utf8) else {
             return
         }
@@ -567,19 +852,23 @@ final class QuoteSocketClient: ObservableObject {
             do {
                 try await self?.webSocketTask?.send(.string(text))
             } catch {
-                self?.lastErrorMessage = error.localizedDescription
+                self?.lastError = SocketClientError(message: error.localizedDescription)
             }
         }
     }
 
 }
 
-private enum DecodedSocketMessage {
+enum DecodedSocketMessage {
     case quote(Quote)
+    case l2Snapshot(L2SnapshotPayloadDTO)
+    case l2Status(OrderBookStatusDTO)
+    case ivAlert(IVAlertDTO)
+    case ivAlertConfiguration(IVAlertConfigurationStateDTO)
     case orderUpdate(OrderResult, String?, Int?)
     case chartOrder(ChartOrder, String?, Int?)
     case eventCursor(Int)
-    case error(String)
+    case error(APIErrorBody)
 }
 
 private enum PendingDurableEvent {

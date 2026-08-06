@@ -11,6 +11,7 @@ import {
   TradingMode,
   WebullAccount,
 } from '@0dtetrader/shared-types';
+import { Logger } from '@nestjs/common';
 import {
   computeMid,
   estimateBuyingPower,
@@ -25,6 +26,7 @@ import { OrderEventsService } from '../broker/order-events.service';
 import { OrderRequestDto } from './dto/order-request.dto';
 import { OrdersService } from './orders.service';
 import { TradingService } from './trading.service';
+import type { AutoCandidateRankingContext } from './auto-candidates.service';
 
 const round2 = (v: number): number => Math.round(v * 100) / 100;
 
@@ -128,10 +130,17 @@ class StubBrokerGateway implements BrokerGateway {
     _idempotencyKey: string,
     _expectedMode?: TradingMode,
     _heldQuantity?: number,
-    _resolvedContract?: OptionContract,
+    resolvedContract?: OptionContract,
     _expectedScope?: BrokerExecutionScope,
   ): Promise<OrderResult> {
-    const resolved = await this.resolveContract(userId, order);
+    const resolved = resolvedContract
+      ? {
+          contractSymbol: resolvedContract.symbol,
+          bid: resolvedContract.bid,
+          ask: resolvedContract.ask,
+          last: resolvedContract.last,
+        }
+      : await this.resolveContract(userId, order);
     const result: OrderResult = {
       orderId: `STUB-${String(++this.counter).padStart(6, '0')}`,
       status: 'submitted',
@@ -222,9 +231,11 @@ describe('TradingService', () => {
   let orders: OrdersService;
   let orderEvents: OrderEventsService;
   let trading: TradingService;
+  let autoCandidates: { rankResolved: jest.Mock };
   let userId: string;
 
   beforeEach(async () => {
+    jest.spyOn(Logger.prototype, 'log').mockImplementation();
     prisma = new InMemoryPrismaService();
     gateway = new StubBrokerGateway();
     orderEvents = new OrderEventsService();
@@ -233,11 +244,13 @@ describe('TradingService', () => {
       orderEvents,
       gateway as BrokerGateway,
     );
+    autoCandidates = { rankResolved: jest.fn() };
     trading = new TradingService(
       prisma as unknown as ConstructorParameters<typeof TradingService>[0],
       gateway as BrokerGateway,
       orders,
       orderEvents,
+      autoCandidates as never,
     );
     const user = await prisma.user.create({
       data: { email: 'trader@example.com', passwordHash: 'x' },
@@ -245,6 +258,8 @@ describe('TradingService', () => {
     userId = user.id;
     prisma.acceptCurrentTradingLegal(userId);
   });
+
+  afterEach(() => jest.restoreAllMocks());
 
   describe('auto_otm re-validation', () => {
     it('resolves +1 OTM strike from the live quote and normalizes to explicit', async () => {
@@ -261,30 +276,6 @@ describe('TradingService', () => {
       expect(sent.selection.mode).toBe('explicit');
       expect(sent.selection.strike).toBe(quote.last + 1);
       expect(sent.selection.expiration).toBe(chain.expirations[0]);
-    });
-
-    it('honors selection.otmOffset when resolving auto_otm', async () => {
-      const placeSpy = jest.spyOn(gateway, 'placeOrder');
-      const quote = await gateway.getQuote(userId, 'SPY');
-
-      await trading.place(
-        userId,
-        autoOtmCall({
-          selection: { mode: 'auto_otm', optionType: 'call', otmOffset: 2 },
-        }),
-        'idem-auto-offset-1',
-      );
-      await trading.place(
-        userId,
-        autoOtmCall({
-          selection: { mode: 'auto_otm', optionType: 'put', otmOffset: 2 },
-        }),
-        'idem-auto-offset-2',
-      );
-      const sentCall = placeSpy.mock.calls[0][1] as OrderRequest;
-      const sentPut = placeSpy.mock.calls[1][1] as OrderRequest;
-      expect(sentCall.selection.strike).toBe(quote.last + 2);
-      expect(sentPut.selection.strike).toBe(quote.last - 2);
     });
 
     it('records the placement quote under the immutable execution account scope', async () => {
@@ -304,19 +295,6 @@ describe('TradingService', () => {
         clientOrderId: result.orderId,
         underlyingPrice: StubBrokerGateway.PRICE,
       });
-    });
-
-    it('otmOffset 0 trades the ATM strike itself', async () => {
-      const quote = await gateway.getQuote(userId, 'SPY');
-      const preview = await trading.preview(
-        userId,
-        autoOtmCall({
-          selection: { mode: 'auto_otm', optionType: 'call', otmOffset: 0 },
-        }),
-      );
-      // The OCC symbol encodes the strike in thousandths.
-      const strike = Number(preview.resolved.contractSymbol.slice(-8)) / 1000;
-      expect(strike).toBe(quote.last);
     });
 
     it('defaults a missing expiration to the nearest one', async () => {
@@ -351,6 +329,176 @@ describe('TradingService', () => {
           }),
         ),
       ).rejects.toMatchObject({ status: 400, code: 'VALIDATION_ERROR' });
+    });
+  });
+
+  describe('scored Auto authoritative re-ranking', () => {
+    const autoPreferences = {
+      schemaVersion: 1 as const,
+      preset: 'conservative' as const,
+      targetAbsDelta: 0.25,
+      strikeRungs: 5,
+      maxSpreadBps: 500,
+      maxPremiumDollars: 250,
+      minOpenInterest: 100,
+      gammaMode: 'avoid' as const,
+      weights: { delta: 0.3, spread: 0.25, openInterest: 0.2, gamma: 0.1, iv: 0.15 },
+    };
+
+    function scoredRequest(selectedSymbol: string): OrderRequestDto {
+      return {
+        underlying: 'SPY',
+        assetClass: 'option',
+        side: 'buy',
+        quantity: 1,
+        orderType: 'mid',
+        selection: {
+          mode: 'auto_scored',
+          optionType: 'call',
+          expiration: '2026-08-05',
+          autoScoring: {
+            selectedSymbol,
+            preferences: autoPreferences,
+            scoredConfirmationAccepted: true,
+            rankedAt: '2026-08-05T15:00:00.000Z',
+          },
+        },
+      } as OrderRequestDto;
+    }
+
+    function rerank(selectedSymbol: string | null): AutoCandidateRankingContext {
+      const contract: OptionContract = {
+        symbol: selectedSymbol ?? 'SPY260805C00500000',
+        underlying: 'SPY',
+        expiration: '2026-08-05',
+        strike: selectedSymbol?.includes('501') ? 501 : 500,
+        optionType: 'call',
+        bid: 2,
+        ask: 2.1,
+        last: 2.05,
+        quoteTimestamp: new Date().toISOString(),
+      };
+      return {
+        result: selectedSymbol
+          ? {
+              selectedSymbol,
+              noPass: false,
+              requiresConfirmation: true,
+              rankedAt: new Date().toISOString(),
+              exclusions: [],
+              rankings: [
+                {
+                  rank: 1,
+                  candidate: {
+                    ...contract,
+                    quoteTimestamp: contract.quoteTimestamp ?? null,
+                    delta: 0.25,
+                    gamma: 0.01,
+                    impliedVolatility: 0.2,
+                    openInterest: 100,
+                    quoteProvider: 'webull',
+                    analyticsTimestamp: new Date().toISOString(),
+                  },
+                  score: 1,
+                  rationale: {
+                    summary: 'winner',
+                    mid: 2.05,
+                    spreadBps: 100,
+                    premiumDollars: 205,
+                    atmDistance: 0,
+                    normalized: { delta: 1, spread: 1, openInterest: 1, gamma: 1, iv: 1 },
+                    weighted: { delta: 0.3, spread: 0.25, openInterest: 0.2, gamma: 0.1, iv: 0.15 },
+                  },
+                },
+              ],
+            }
+          : {
+              selectedSymbol: null,
+              noPass: true,
+              requiresConfirmation: true,
+              rankedAt: new Date().toISOString(),
+              exclusions: [],
+              rankings: [],
+            },
+        selectedContract: selectedSymbol ? contract : null,
+        underlyingPrice: 500,
+      };
+    }
+
+    it('rejects when the fresh winner changed before broker acceptance', async () => {
+      autoCandidates.rankResolved.mockResolvedValue(rerank('SPY260805C00501000'));
+      const place = jest.spyOn(gateway, 'placeOrder');
+
+      await expect(
+        trading.place(userId, scoredRequest('SPY260805C00500000'), 'scored-changed'),
+      ).rejects.toMatchObject({ code: 'AUTO_SCORING_SELECTION_CHANGED' });
+      expect(place).not.toHaveBeenCalled();
+      expect(trading.metrics).toMatchObject({
+        scoredReranks: 1,
+        scoredSelectionChanges: 1,
+        scoredNoPassRejections: 0,
+      });
+      expect(Logger.prototype.log).toHaveBeenCalledWith(
+        expect.stringContaining('"outcome":"selection_changed"'),
+      );
+    });
+
+    it('rejects a fresh no-pass result without entering the broker', async () => {
+      const staleNoPass = rerank(null);
+      staleNoPass.result.exclusions = [{ symbol: 'SPY260805C00500000', reason: 'stale_quote' }];
+      autoCandidates.rankResolved.mockResolvedValue(staleNoPass);
+      const place = jest.spyOn(gateway, 'placeOrder');
+
+      await expect(
+        trading.place(userId, scoredRequest('SPY260805C00500000'), 'scored-no-pass'),
+      ).rejects.toMatchObject({ code: 'AUTO_SCORING_NO_PASS' });
+      expect(place).not.toHaveBeenCalled();
+      expect(trading.metrics).toMatchObject({
+        scoredReranks: 1,
+        scoredSelectionChanges: 0,
+        scoredNoPassRejections: 1,
+        scoredStaleRejections: 1,
+      });
+      expect(Logger.prototype.log).toHaveBeenCalledWith(
+        expect.stringContaining('"outcome":"no_pass"'),
+      );
+    });
+
+    it('sends only the exact freshly reranked contract as explicit', async () => {
+      const selectedSymbol = 'SPY260805C00500000';
+      autoCandidates.rankResolved.mockResolvedValue(rerank(selectedSymbol));
+      const place = jest.spyOn(gateway, 'placeOrder');
+
+      await trading.place(userId, scoredRequest(selectedSymbol), 'scored-match');
+
+      expect(autoCandidates.rankResolved).toHaveBeenCalledWith(
+        userId,
+        { underlying: 'SPY', expiration: '2026-08-05', optionType: 'call' },
+        autoPreferences,
+      );
+      expect(place.mock.calls[0][1].selection).toEqual({
+        mode: 'explicit',
+        optionType: 'call',
+        expiration: '2026-08-05',
+        strike: 500,
+      });
+      expect(place.mock.calls[0][5]).toMatchObject({ symbol: selectedSymbol });
+      expect(trading.metrics).toMatchObject({
+        scoredReranks: 1,
+        scoredAccepted: 1,
+      });
+      expect(Logger.prototype.log).toHaveBeenCalledWith(
+        expect.stringContaining('"outcome":"accepted"'),
+      );
+    });
+
+    it('defensively rejects unconfirmed scored requests passed outside DTO validation', async () => {
+      const request = scoredRequest('SPY260805C00500000');
+      request.selection.autoScoring!.scoredConfirmationAccepted = false as true;
+      await expect(trading.place(userId, request, 'scored-unconfirmed')).rejects.toMatchObject({
+        code: 'SCORED_CONFIRMATION_REQUIRED',
+      });
+      expect(autoCandidates.rankResolved).not.toHaveBeenCalled();
     });
   });
 
@@ -469,7 +617,20 @@ describe('TradingService', () => {
           strike: 101,
         },
       });
-      const accepted = await gateway.placeOrder(userId, dto, 'crash-after-accept');
+      const acceptedRequest: OrderRequest = {
+        underlying: dto.underlying,
+        assetClass: dto.assetClass,
+        side: dto.side,
+        quantity: dto.quantity,
+        orderType: dto.orderType,
+        selection: {
+          mode: 'explicit',
+          optionType: 'call',
+          expiration: chain.expirations[0],
+          strike: 101,
+        },
+      };
+      const accepted = await gateway.placeOrder(userId, acceptedRequest, 'crash-after-accept');
       const pending = await prisma.orderAudit.create({
         data: {
           userId,
@@ -483,6 +644,90 @@ describe('TradingService', () => {
       const place = jest.spyOn(gateway, 'placeOrder');
 
       await expect(trading.place(userId, dto, 'crash-after-accept')).resolves.toEqual(accepted);
+      expect(place).not.toHaveBeenCalled();
+    });
+
+    it('matches stale scored-Auto recovery to the exact selected contract', async () => {
+      const chain = await gateway.getOptionsChain(userId, 'SPY');
+      const expiration = chain.expirations[0];
+      const selectedRequest: OrderRequest = {
+        underlying: 'SPY',
+        assetClass: 'option',
+        side: 'buy',
+        quantity: 1,
+        orderType: 'mid',
+        selection: {
+          mode: 'explicit',
+          optionType: 'call',
+          expiration,
+          strike: 101,
+        },
+      };
+      const competingRequest: OrderRequest = {
+        underlying: 'SPY',
+        assetClass: 'option',
+        side: 'buy',
+        quantity: 1,
+        orderType: 'mid',
+        selection: {
+          mode: 'explicit',
+          optionType: 'call',
+          expiration,
+          strike: 102,
+        },
+      };
+      const accepted = await gateway.placeOrder(userId, selectedRequest, 'scored-selected');
+      await gateway.placeOrder(userId, competingRequest, 'scored-competing');
+      const scoredRequest: OrderRequest = {
+        underlying: 'SPY',
+        assetClass: 'option',
+        side: 'buy',
+        quantity: 1,
+        orderType: 'mid',
+        selection: {
+          mode: 'auto_scored',
+          optionType: 'call',
+          expiration,
+          autoScoring: {
+            selectedSymbol: accepted.contractSymbol,
+            preferences: {
+              schemaVersion: 1,
+              preset: 'conservative',
+              targetAbsDelta: 0.25,
+              strikeRungs: 5,
+              maxSpreadBps: 500,
+              maxPremiumDollars: 250,
+              minOpenInterest: 100,
+              gammaMode: 'avoid',
+              weights: {
+                delta: 0.3,
+                spread: 0.25,
+                openInterest: 0.2,
+                gamma: 0.1,
+                iv: 0.15,
+              },
+            },
+            scoredConfirmationAccepted: true,
+            rankedAt: new Date().toISOString(),
+          },
+        },
+      };
+      const dto = autoOtmCall({ orderType: 'mid' });
+      const pending = await prisma.orderAudit.create({
+        data: {
+          userId,
+          idempotencyKey: 'scored-crash-after-accept',
+          request: { action: 'place', order: dto, preparedOrder: scoredRequest },
+          response: null,
+          status: 'pending',
+        },
+      });
+      pending.createdAt = new Date(Date.now() - 3 * 60_000);
+      const place = jest.spyOn(gateway, 'placeOrder');
+
+      await expect(trading.place(userId, dto, 'scored-crash-after-accept')).resolves.toEqual(
+        accepted,
+      );
       expect(place).not.toHaveBeenCalled();
     });
 

@@ -19,7 +19,7 @@ The indicator is a stateful chart script, not a stateless numeric series. It the
 | Render projection            | `usrRender.ts`                             | `UsrRenderEngine.swift`                       |
 | Orchestration                | `computeUsr.ts`                            | `UsrEngine.compute`                           |
 
-The desktop `ScriptRenderModel` and iOS `TwcRenderModel.merging` compose stateful scripts into the existing overlay renderer. Neither analytical state nor model retention depends on proximity or visibility settings.
+The shared `ScriptRenderModel` contract composes stateful scripts into the existing overlay renderer on both clients. TWC retains compatibility aliases, while neither analytical state nor model retention depends on proximity or visibility settings.
 
 ## Causality invariants
 
@@ -37,6 +37,6 @@ The desktop `ScriptRenderModel` and iOS `TwcRenderModel.merging` compose statefu
 
 TradingView provides `syminfo.mintick`; the app candle model currently does not. `minimumTick` is therefore an explicit validated setting on both platforms (default `0.01`). All other defaults and input bounds mirror the Pine contract.
 
-Custom timeframes use Pine notation (`15S`, minute counts such as `60`, `1D`, `2W`, or `3M`). Auto mode preserves Pine's calendar 1M/2M/3M/12M buckets rather than approximating them as fixed day counts.
+Custom timeframes use Pine notation (`15S`, minute counts such as `60`, `1D`, `2W`, or `3M`). Auto mode preserves Pine's calendar 1M/2M/3M/12M buckets rather than approximating them as fixed day counts. When Pine cannot compare a requested clock with the chart clock in seconds (notably tick charts), the engine follows the source indicator and uses completed chart bars instead of inventing a cross-clock aggregation.
 
 Desktop and iOS deliberately keep separate language implementations because the repository ships independent clients. Module boundaries, event order, defaults, limits, source identities, and lifecycle rules are kept equivalent and covered by deterministic tests.

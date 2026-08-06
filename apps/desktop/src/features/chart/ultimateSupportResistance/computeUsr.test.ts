@@ -67,6 +67,28 @@ describe('Ultimate Support & Resistance causal engine', () => {
     expect(withLive.diagnostics.confirmedChartBars).toBe(closed.length);
   });
 
+  it('extends rendering to the open right-edge candle without consuming it analytically', () => {
+    const closed = history();
+    const now = closed.at(-1)!.time + 90;
+    const live: UsrCandle = {
+      time: now - 30,
+      open: 100,
+      high: 101,
+      low: 99,
+      close: 100,
+      volume: 100,
+    };
+    const renderSettings = { ...settings(), enableProximityFilter: false };
+    const base = computeUsr(closed, renderSettings, { chartIntervalSeconds: 60, now })!;
+    const withLive = computeUsr([...closed, live], renderSettings, {
+      chartIntervalSeconds: 60,
+      now,
+    })!;
+    expect(base.renderModel.segments.length).toBeGreaterThan(0);
+    expect(withLive.renderModel.segments[0].x2).toBe(base.renderModel.segments[0].x2 + 1);
+    expect(withLive.supportZones).toEqual(base.supportZones);
+  });
+
   it('keeps proximity strictly render-only', () => {
     const candles = history();
     const context = { chartIntervalSeconds: 60, now: candles.at(-1)!.time + 120 };
@@ -209,6 +231,54 @@ describe('Ultimate Support & Resistance causal engine', () => {
     expect(orderBlock?.analysisBirth).toBe(16);
   });
 
+  it('matches Pine queued source identities and reverse same-side commit order', () => {
+    const candles = Array.from({ length: 16 }, (_, index): UsrCandle => ({
+      time: 1_700_000_000 + index * 60,
+      open: 100,
+      high: 101,
+      low: 99,
+      close: 100,
+      volume: 100,
+    }));
+    candles[12] = {
+      ...candles[12],
+      open: 110,
+      high: 111,
+      low: 109,
+      close: 110.5,
+      volume: 300,
+    };
+    candles[13] = {
+      ...candles[13],
+      open: 120,
+      high: 121,
+      low: 119,
+      close: 120.5,
+      volume: 300,
+    };
+    candles[14] = { ...candles[14], open: 120, high: 121, low: 119, close: 120 };
+    candles[15] = { ...candles[15], open: 120, high: 121, low: 119, close: 120 };
+
+    const result = computeUsr(
+      candles,
+      {
+        ...settings(),
+        minimumRelativeVolume: 2,
+        minimumVolumeZScore: 0.5,
+        pivotRightBars: 5,
+        requirePriceVoidGaps: true,
+        showFvg: false,
+      },
+      { chartIntervalSeconds: 60, now: candles.at(-1)!.time + 120 },
+    )!;
+    const gaps = result.supportZones.filter(
+      (zone) => !zone.isLine && (zone.startBar === 12 || zone.startBar === 13),
+    );
+    expect(gaps.map((zone) => zone.startBar)).toEqual([12, 13]);
+    expect(gaps.map((zone) => zone.sourceId)).toEqual([2, 1]);
+    expect(gaps.map((zone) => zone.id)).toEqual([3, 4]);
+  });
+
   it('uses Pine chart ATR fallback during Wilder warm-up', () => {
     const candles = Array.from({ length: 8 }, (_, index): UsrCandle => ({
       time: 1_700_000_000 + index * 60,
@@ -261,5 +331,98 @@ describe('Ultimate Support & Resistance causal engine', () => {
     const fiveTicks = computeUsr(candles, { ...base, breakBufferTicks: 5 }, context)!;
     expect(oneTick.bullishFvgs[0].milestoneReached).toBe(false);
     expect(fiveTicks.bullishFvgs[0].milestoneReached).toBe(true);
+  });
+
+  it('keeps seeded stress histories deterministic, finite, unique, and within every cap', () => {
+    let seed = 0x5eed_1234;
+    const random = () => {
+      seed = (Math.imul(seed, 1_664_525) + 1_013_904_223) >>> 0;
+      return seed / 0x1_0000_0000;
+    };
+    let priorClose = 100;
+    const candles = Array.from({ length: 720 }, (_, index): UsrCandle => {
+      const open = priorClose;
+      const close = Math.max(5, open + (random() - 0.49) * 2.5);
+      const high = Math.max(open, close) + random() * 1.2;
+      const low = Math.min(open, close) - random() * 1.2;
+      priorClose = close;
+      return {
+        time: 1_700_000_000 + index * 60,
+        open,
+        high,
+        low,
+        close,
+        volume: 80 + random() * 40 + (index % 17 === 0 ? 500 : 0),
+      };
+    });
+    const context = { chartIntervalSeconds: 60, now: candles.at(-1)!.time + 120 };
+
+    for (const analysisTimeframe of ['chart', 'auto'] as const) {
+      const stressSettings = {
+        ...settings(),
+        analysisTimeframe,
+        showConfluence: true,
+        showBounceSignals: true,
+        showSweepSignals: true,
+        maxSequenceLength: 6,
+        maxSupportLevels: 40,
+        maxResistanceLevels: 35,
+        maxSupportPools: 8,
+        maxResistancePools: 7,
+        maxVisibleFvgs: 3,
+        fvgMaxBarsActive: 30,
+      };
+      const first = computeUsr(candles, stressSettings, context)!;
+      const second = computeUsr(candles, stressSettings, context)!;
+      expect(second).toEqual(first);
+
+      const zones = [...first.supportZones, ...first.resistanceZones];
+      expect(new Set(zones.map(({ id }) => id)).size).toBe(zones.length);
+      expect(first.supportZones.length + first.resistanceZones.length).toBeLessThanOrEqual(75);
+      expect(first.supportPools.length).toBeLessThanOrEqual(stressSettings.maxSupportPools);
+      expect(first.resistancePools.length).toBeLessThanOrEqual(stressSettings.maxResistancePools);
+      expect(
+        first.bullishFvgs.filter(({ visualVisible }) => visualVisible).length,
+      ).toBeLessThanOrEqual(stressSettings.maxVisibleFvgs);
+      expect(
+        first.bearishFvgs.filter(({ visualVisible }) => visualVisible).length,
+      ).toBeLessThanOrEqual(stressSettings.maxVisibleFvgs);
+
+      const zoneById = new Map(zones.map((zone) => [zone.id, zone]));
+      for (const pool of [...first.supportPools, ...first.resistancePools]) {
+        expect(pool.memberIds.length).toBeGreaterThanOrEqual(stressSettings.poolClusterThreshold);
+        for (const id of pool.memberIds) {
+          expect(zoneById.get(id)).toMatchObject({ inPool: true, poolId: pool.id });
+        }
+      }
+
+      const signalKeys = first.signals.map(
+        (signal) => `${signal.analysisBarId}|${signal.kind}|${signal.source}|${signal.sourceKey}`,
+      );
+      expect(new Set(signalKeys).size).toBe(signalKeys.length);
+      expect(
+        first.signals.every(
+          (signal) =>
+            signal.chartBarIndex >= 0 &&
+            signal.chartBarIndex < first.diagnostics.confirmedChartBars,
+        ),
+      ).toBe(true);
+
+      const geometry = first.renderModel;
+      const coordinates = [
+        ...geometry.segments.flatMap(({ x1, y1, x2, y2, width }) => [x1, y1, x2, y2, width]),
+        ...geometry.bands.flatMap(({ x1, x2, yTop, yBottom, borderWidth = 1 }) => [
+          x1,
+          x2,
+          yTop,
+          yBottom,
+          borderWidth,
+        ]),
+        ...geometry.labels.flatMap(({ barIndex, price }) => [barIndex, price]),
+        ...geometry.markers.map(({ barIndex }) => barIndex),
+      ];
+      expect(coordinates.every(Number.isFinite)).toBe(true);
+      expect(geometry.bands.every(({ yTop, yBottom }) => yTop >= yBottom)).toBe(true);
+    }
   });
 });

@@ -18,7 +18,7 @@ struct CandleChartRepresentable: UIViewRepresentable {
     var intervalSeconds: TimeInterval = 60
     var drawingsModel: ChartDrawingsModel?
     /// Merged stateful-script model: candle repaints, line series, and geometry.
-    var scriptModel: TwcRenderModel?
+    var scriptModel: ScriptRenderModel?
     /// Current options structure snapshot for the right-edge profile.
     var optionsAnalyticsSnapshot: OptionsAnalyticsSnapshotDTO?
     var optionsAnalyticsSettings: OptionsAnalyticsSettings = .default

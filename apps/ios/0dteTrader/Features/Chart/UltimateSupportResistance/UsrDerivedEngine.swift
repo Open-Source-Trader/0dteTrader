@@ -3,6 +3,22 @@ import Foundation
 /// Pure event simulator mirroring computeUsr.ts and the confirmed-bar Pine
 /// state machine. No UIKit/SwiftUI dependencies belong in this layer.
 extension UsrEngine {
+    static func stablePriorityPrefix<Element>(
+        _ values: [Element],
+        maximum: Int,
+        rankOnlyWhenCapped: Bool = true,
+        priority: (Element) -> Double
+    ) -> [Element] {
+        guard !rankOnlyWhenCapped || values.count > maximum else { return values }
+        return Array(values.enumerated().sorted { left, right in
+            let leftPriority = priority(left.element)
+            let rightPriority = priority(right.element)
+            return leftPriority == rightPriority
+                ? left.offset < right.offset
+                : leftPriority > rightPriority
+        }.prefix(maximum).map(\.element))
+    }
+
     static func sideConfluence(_ runtime: Runtime, zones: [UsrZone]) -> [UsrConfluence] {
         let candle = runtime.analysis[runtime.analysisBarId]
         let seededAtr = activeAtr(runtime, candle)
@@ -14,17 +30,27 @@ extension UsrEngine {
                 currentChartBar: currentChartBar
             )
         }
-        let candidates = zones
-            .filter { $0.isActive && strength($0, runtime.analysisBarId) > Constants.confluenceThreshold }
-            .sorted { priority($0) > priority($1) }
-            .prefix(Constants.maximumConfluenceCandidates)
+        // Pine scans newest-to-oldest and only ranks when the analytical cap
+        // is exceeded. Below the cap that order is the deterministic tie-break
+        // for equal-price intervals.
+        var selected = Array(zones.reversed().filter {
+            $0.isActive && strength($0, runtime.analysisBarId) > Constants.confluenceThreshold
+        })
+        selected = stablePriorityPrefix(
+            selected, maximum: Constants.maximumConfluenceCandidates, priority: priority
+        )
+        let ranged = selected
             .map { zone -> (UsrZone, Double, Double) in
                 let tolerance = seededAtr * 0.05
                 return zone.isLine
                     ? (zone, zone.top + tolerance, zone.bottom - tolerance)
                     : (zone, zone.top, zone.bottom)
             }
-            .sorted { $0.2 < $1.2 }
+        let candidates = ranged.enumerated().sorted { left, right in
+            left.element.2 == right.element.2
+                ? left.offset < right.offset
+                : left.element.2 < right.element.2
+        }.map(\.element)
         var groups: [UsrConfluence] = []
         var comparisons = 0
         guard candidates.count >= 2 else { return groups }
@@ -54,7 +80,7 @@ extension UsrEngine {
                 groups.append(UsrConfluence(
                     top: top,
                     bottom: bottom,
-                    startBar: members.map(\.activationBar).max() ?? 0,
+                    startBar: members.map { $0.activationBar > 0 ? $0.activationBar : $0.startBar }.max() ?? 0,
                     isMixed: false,
                     memberIds: members.map(\.id),
                     strength: members.map { strength($0, runtime.analysisBarId) }.reduce(0, +)
@@ -62,10 +88,9 @@ extension UsrEngine {
                 ))
             }
         }
-        return Array(groups.sorted {
+        return stablePriorityPrefix(groups, maximum: Constants.maximumConfluences) {
             recencyAdjustedPriority($0.strength, start: $0.startBar, currentChartBar: currentChartBar)
-                > recencyAdjustedPriority($1.strength, start: $1.startBar, currentChartBar: currentChartBar)
-        }.prefix(Constants.maximumConfluences))
+        }
     }
 
     static func rebuildConfluence(_ runtime: Runtime) {
@@ -82,16 +107,15 @@ extension UsrEngine {
                 if top >= bottom {
                     mixed.append(UsrConfluence(top: top, bottom: bottom,
                         startBar: max(left.startBar, right.startBar), isMixed: true,
-                        memberIds: left.memberIds + right.memberIds,
+                        memberIds: [],
                         strength: (left.strength + right.strength) / 2))
                 }
             }
         }
         let currentChartBar = runtime.analysis[runtime.analysisBarId].eventChartIndex
-        runtime.mixedConfluence = Array(mixed.sorted {
+        runtime.mixedConfluence = stablePriorityPrefix(mixed, maximum: Constants.maximumConfluences) {
             recencyAdjustedPriority($0.strength, start: $0.startBar, currentChartBar: currentChartBar)
-                > recencyAdjustedPriority($1.strength, start: $1.startBar, currentChartBar: currentChartBar)
-        }.prefix(Constants.maximumConfluences))
+        }
         runtime.lastConfluenceBuild = runtime.analysisBarId
     }
 
@@ -108,23 +132,21 @@ extension UsrEngine {
         let atr = activeAtr(runtime, runtime.analysis[runtime.analysisBarId])
         let tolerance = max(runtime.settings.minimumTick * 2, atr * runtime.settings.poolAtrFactor * 0.15)
         let currentChartBar = runtime.analysis[runtime.analysisBarId].eventChartIndex
-        let candidates = input.filter { $0.isActive && $0.isLine && !$0.isFlipped }
-            .sorted {
-                let left = recencyAdjustedPriority(
-                    strength($0, runtime.analysisBarId),
-                    start: $0.activationBar > 0 ? $0.activationBar : $0.startBar,
-                    currentChartBar: currentChartBar
-                )
-                let right = recencyAdjustedPriority(
-                    strength($1, runtime.analysisBarId),
-                    start: $1.activationBar > 0 ? $1.activationBar : $1.startBar,
-                    currentChartBar: currentChartBar
-                )
-                return left > right
-            }
-            .prefix(Constants.maximumClusterLevels)
-            .sorted { $0.top < $1.top }
-        var pools: [UsrPool] = []
+        var selected = Array(input.reversed().filter { $0.isActive && $0.isLine && !$0.isFlipped })
+        selected = stablePriorityPrefix(selected, maximum: Constants.maximumClusterLevels) {
+            recencyAdjustedPriority(
+                strength($0, runtime.analysisBarId),
+                start: $0.activationBar > 0 ? $0.activationBar : $0.startBar,
+                currentChartBar: currentChartBar
+            )
+        }
+        let candidates = selected.enumerated().sorted { left, right in
+            left.element.top == right.element.top
+                ? left.offset < right.offset
+                : left.element.top < right.element.top
+        }.map(\.element)
+        var pools = previous
+        var rebuiltIds = Set<String>()
         var position = 0
         while position < candidates.count {
             let floor = candidates[position].top
@@ -137,10 +159,10 @@ extension UsrEngine {
             }
             guard members.count >= runtime.settings.poolClusterThreshold else { continue }
             let id = "\(support ? "PS" : "PR")|" + members.map { String($0.id) }.joined(separator: "|")
-            let existing = previous.first { $0.id == id }
+            let existingIndex = pools.firstIndex { $0.id == id }
             let combined = min(1, members.map { strength($0, runtime.analysisBarId) }.reduce(0, +)
                 / Double(members.count) + Double(min(members.count - 1, 4)) * 0.05)
-            var pool = existing ?? UsrPool(
+            var pool = existingIndex.map { pools[$0] } ?? UsrPool(
                 id: id, top: 0, bottom: 0, strength: combined,
                 startBar: runtime.analysis[runtime.analysisBarId].eventChartIndex,
                 isSupport: support, state: .anticipated, memberIds: [],
@@ -150,11 +172,23 @@ extension UsrEngine {
             pool.bottom = members.map(\.bottom).min() ?? 0
             pool.strength = combined
             pool.memberIds = members.map(\.id)
-            pools.append(pool)
+            if let existingIndex { pools[existingIndex] = pool } else { pools.append(pool) }
+            rebuiltIds.insert(id)
         }
         let maximum = support ? runtime.settings.maxSupportPools : runtime.settings.maxResistancePools
-        let retained = Array(pools.sorted { $0.strength == $1.strength
-            ? $0.startBar > $1.startBar : $0.strength > $1.strength }.prefix(maximum))
+        var retained = pools.filter { rebuiltIds.contains($0.id) }
+        while retained.count > maximum {
+            var weakestIndex = 0
+            for index in retained.indices.dropFirst() {
+                let candidate = retained[index]
+                let weakest = retained[weakestIndex]
+                if candidate.strength < weakest.strength
+                    || (candidate.strength == weakest.strength && candidate.startBar < weakest.startBar) {
+                    weakestIndex = index
+                }
+            }
+            retained.remove(at: weakestIndex)
+        }
         for pool in retained {
             for index in input.indices where pool.memberIds.contains(input[index].id) {
                 input[index].inPool = true

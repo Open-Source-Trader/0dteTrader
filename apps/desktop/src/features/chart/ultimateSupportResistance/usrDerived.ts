@@ -31,15 +31,20 @@ function confluencePriority(runtime: UsrRuntime, confluence: UsrConfluence): num
 }
 
 function rankedZones(runtime: UsrRuntime, zones: UsrZone[]): UsrZone[] {
-  return zones
+  // Pine scans retained zones newest-to-oldest and only invokes the analytical
+  // priority selector when the bounded candidate cap is actually exceeded.
+  // Preserve that order below the cap because it is also the deterministic
+  // tie-break used by the interval sweep.
+  const candidates = [...zones]
+    .reverse()
     .filter(
       (zone) =>
         zone.isActive &&
         zoneStrength(zone, runtime.analysisBarId) > USR.confluenceStrengthThreshold,
-    )
-    .sort((a, b) => {
-      return zoneAnalyticalPriority(runtime, b) - zoneAnalyticalPriority(runtime, a);
-    })
+    );
+  if (candidates.length <= USR.maximumConfluenceCandidates) return candidates;
+  return candidates
+    .sort((a, b) => zoneAnalyticalPriority(runtime, b) - zoneAnalyticalPriority(runtime, a))
     .slice(0, USR.maximumConfluenceCandidates);
 }
 
@@ -93,7 +98,9 @@ function buildSide(runtime: UsrRuntime, zones: UsrZone[]): UsrConfluence[] {
       result.push({
         top,
         bottom,
-        startBar: Math.max(...members.map((zone) => zone.activationBar)),
+        startBar: Math.max(
+          ...members.map((zone) => (zone.activationBar > 0 ? zone.activationBar : zone.startBar)),
+        ),
         isMixed: false,
         memberIds: members.map((zone) => zone.id),
         strength:
@@ -102,6 +109,7 @@ function buildSide(runtime: UsrRuntime, zones: UsrZone[]): UsrConfluence[] {
       });
     }
   }
+  if (result.length <= USR.maximumConfluences) return result;
   return result
     .sort((a, b) => confluencePriority(runtime, b) - confluencePriority(runtime, a))
     .slice(0, USR.maximumConfluences);
@@ -126,13 +134,16 @@ function buildMixed(
           bottom,
           startBar: Math.max(left.startBar, right.startBar),
           isMixed: true,
-          memberIds: [...left.memberIds, ...right.memberIds],
+          // Pine deliberately keeps mixed membership analytical-only. Side
+          // confluences are the sole source of per-zone signal boosts.
+          memberIds: [],
           strength: (left.strength + right.strength) / 2,
         });
       }
     }
     if (comparisons > USR.confluencePairCap) break;
   }
+  if (mixed.length <= USR.maximumConfluences) return mixed;
   return mixed
     .sort((a, b) => confluencePriority(runtime, b) - confluencePriority(runtime, a))
     .slice(0, USR.maximumConfluences);
@@ -162,20 +173,48 @@ function poolId(support: boolean, members: UsrZone[]): string {
   return `${support ? 'PS' : 'PR'}|${members.map((zone) => zone.id).join('|')}`;
 }
 
+function retainStrongestPools(pools: UsrPool[], maximum: number): UsrPool[] {
+  const retained = [...pools];
+  while (retained.length > maximum) {
+    let weakestIndex = 0;
+    for (let index = 1; index < retained.length; index += 1) {
+      const candidate = retained[index];
+      const weakest = retained[weakestIndex];
+      if (
+        candidate.strength < weakest.strength ||
+        (candidate.strength === weakest.strength && candidate.startBar < weakest.startBar)
+      ) {
+        weakestIndex = index;
+      }
+    }
+    retained.splice(weakestIndex, 1);
+  }
+  return retained;
+}
+
 function rebuildSidePools(runtime: UsrRuntime, support: boolean, oldPools: UsrPool[]): UsrPool[] {
   const settings = runtime.settings;
   const atr = activeAnalysisAtr(runtime, runtime.analysis[runtime.analysisBarId]);
   const tolerance = Math.max(settings.minimumTick * 2, atr * settings.poolAtrFactor * 0.15);
-  const zones = (support ? runtime.supportZones : runtime.resistanceZones)
-    .filter((zone) => zone.isActive && zone.isLine && !zone.isFlipped)
-    .sort((a, b) => zoneAnalyticalPriority(runtime, b) - zoneAnalyticalPriority(runtime, a))
-    .slice(0, USR.maximumClusterLevels)
-    .sort((a, b) => a.top - b.top);
-  for (const zone of support ? runtime.supportZones : runtime.resistanceZones) {
+  const sourceZones = support ? runtime.supportZones : runtime.resistanceZones;
+  for (const zone of sourceZones) {
     zone.inPool = false;
     zone.poolId = '';
   }
-  const pools: UsrPool[] = [];
+  let zones = [...sourceZones]
+    .reverse()
+    .filter((zone) => zone.isActive && zone.isLine && !zone.isFlipped);
+  if (zones.length > USR.maximumClusterLevels) {
+    zones = zones
+      .sort((a, b) => zoneAnalyticalPriority(runtime, b) - zoneAnalyticalPriority(runtime, a))
+      .slice(0, USR.maximumClusterLevels);
+  }
+  // Modern JavaScript sorting is stable, so equal-price levels retain Pine's
+  // newest-to-oldest candidate order and therefore stable pool identities.
+  zones.sort((a, b) => a.top - b.top);
+
+  const pools = [...oldPools];
+  const rebuiltIds = new Set<string>();
   for (let position = 0; position < zones.length;) {
     const floor = zones[position].top;
     const members: UsrZone[] = [zones[position]];
@@ -190,7 +229,7 @@ function rebuildSidePools(runtime: UsrRuntime, support: boolean, oldPools: UsrPo
     }
     if (members.length < settings.poolClusterThreshold) continue;
     const id = poolId(support, members);
-    const existing = oldPools.find((pool) => pool.id === id);
+    const existing = pools.find((pool) => pool.id === id);
     const strength = Math.min(
       1,
       members.reduce((sum, zone) => sum + zoneStrength(zone, runtime.analysisBarId), 0) /
@@ -212,18 +251,20 @@ function rebuildSidePools(runtime: UsrRuntime, support: boolean, oldPools: UsrPo
       lastBounceSignalAnalysisBar: 0,
       lastSweepSignalAnalysisBar: 0,
     };
+    if (!existing) pools.push(pool);
     pool.top = Math.max(...members.map((zone) => zone.top));
     pool.bottom = Math.min(...members.map((zone) => zone.bottom));
     pool.strength = strength;
     pool.memberIds = members.map((zone) => zone.id);
-    pools.push(pool);
+    rebuiltIds.add(id);
   }
   const maximum = support ? settings.maxSupportPools : settings.maxResistancePools;
-  const retained = pools
-    .sort((a, b) => b.strength - a.strength || b.startBar - a.startBar)
-    .slice(0, maximum);
+  const retained = retainStrongestPools(
+    pools.filter((pool) => rebuiltIds.has(pool.id)),
+    maximum,
+  );
   for (const pool of retained) {
-    for (const zone of support ? runtime.supportZones : runtime.resistanceZones) {
+    for (const zone of sourceZones) {
       if (pool.memberIds.includes(zone.id)) {
         zone.inPool = true;
         zone.poolId = pool.id;
@@ -236,7 +277,6 @@ function rebuildSidePools(runtime: UsrRuntime, support: boolean, oldPools: UsrPo
 export function rebuildUsrPools(runtime: UsrRuntime): void {
   runtime.supportPools = rebuildSidePools(runtime, true, runtime.supportPools);
   runtime.resistancePools = rebuildSidePools(runtime, false, runtime.resistancePools);
-  runtime.poolGeneration += 1;
   runtime.lastPoolBuild = runtime.analysisBarId;
 }
 

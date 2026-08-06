@@ -7,7 +7,7 @@ extension UsrEngine {
         let groups: [UsrConfluence]
         let fill: String
         let border: String
-        let budget: Int
+        let cumulativeBudget: Int
     }
 
     static func proximity(_ runtime: Runtime, top: Double, bottom: Double, reference: Double) -> Bool {
@@ -44,41 +44,29 @@ extension UsrEngine {
     }
 
     static func visibleFvgs(_ records: [UsrFvg], maximum: Int) -> [UsrFvg] {
-        Array(records.enumerated().sorted { left, right in
-            let leftBirth = left.element.ifvgAnalysisBirth == 0
-                ? left.element.analysisBirth : left.element.ifvgAnalysisBirth
-            let rightBirth = right.element.ifvgAnalysisBirth == 0
-                ? right.element.analysisBirth : right.element.ifvgAnalysisBirth
-            return leftBirth == rightBirth ? left.offset < right.offset : leftBirth > rightBirth
-        }.prefix(maximum).map(\.element))
+        Array(records.filter(\.visualVisible).prefix(maximum))
     }
 
-    static func render(_ runtime: Runtime, lastBar: Int, reference: Double) -> TwcRenderModel {
+    static func render(_ runtime: Runtime, lastBar: Int, reference: Double) -> ScriptRenderModel {
         let flippedOrigins = runtime.settings.showFlippedOrigins && runtime.settings.enableSrFlip
         let allBroken = runtime.settings.showAllBrokenLevels && !flippedOrigins
-        let zones = (runtime.support + runtime.resistance)
-            .filter { zone in
-                let mature = zone.isFlipped || runtime.analysisBarId - zone.analysisBirth >= Constants.minimumAge
-                let invalid = !zone.isActive && (allBroken || (flippedOrigins && zone.hasActiveFlippedChild))
-                let pooled = runtime.settings.showLiquidityPools && runtime.settings.hidePooledLines
-                    && zone.inPool && !zone.isFlipped
-                return mature && !pooled && (zone.isActive || invalid)
-                    && proximity(runtime, top: zone.top, bottom: zone.bottom, reference: reference)
-            }
-            .sorted {
-                let left = ($0.isActive ? 2.0 : 0.0) + recencyAdjustedPriority(
-                    strength($0, runtime.analysisBarId),
-                    start: $0.activationBar > 0 ? $0.activationBar : $0.startBar,
-                    currentChartBar: lastBar
-                )
-                let right = ($1.isActive ? 2.0 : 0.0) + recencyAdjustedPriority(
-                    strength($1, runtime.analysisBarId),
-                    start: $1.activationBar > 0 ? $1.activationBar : $1.startBar,
-                    currentChartBar: lastBar
-                )
-                return left > right
-            }
-            .prefix(Constants.maximumZoneLines)
+        let eligibleZones = (runtime.support + runtime.resistance).filter { zone in
+            let mature = zone.isFlipped || runtime.analysisBarId - zone.analysisBirth >= Constants.minimumAge
+            let invalid = !zone.isActive && (allBroken || (flippedOrigins && zone.hasActiveFlippedChild))
+            let pooled = runtime.settings.showLiquidityPools && runtime.settings.hidePooledLines
+                && zone.inPool && !zone.isFlipped
+            return mature && !pooled && (zone.isActive || invalid)
+                && proximity(runtime, top: zone.top, bottom: zone.bottom, reference: reference)
+        }
+        let zones = stablePriorityPrefix(
+            eligibleZones, maximum: Constants.maximumZoneLines, rankOnlyWhenCapped: false
+        ) {
+            ($0.isActive ? 2.0 : 0.0) + recencyAdjustedPriority(
+                strength($0, runtime.analysisBarId),
+                start: $0.activationBar > 0 ? $0.activationBar : $0.startBar,
+                currentChartBar: lastBar
+            )
+        }
         var segments = zones.map { zone in
             TwcSegment(
                 x1: Double(max(0, zone.activationBar)),
@@ -97,19 +85,20 @@ extension UsrEngine {
             let partitions = [
                 ConfluencePartition(groups: runtime.supportConfluence,
                     fill: Constants.confluenceSupport,
-                    border: Constants.confluenceSupportBorder, budget: 20),
+                    border: Constants.confluenceSupportBorder, cumulativeBudget: 20),
                 ConfluencePartition(groups: runtime.resistanceConfluence,
                     fill: Constants.confluenceResistance,
-                    border: Constants.confluenceResistanceBorder, budget: 20),
+                    border: Constants.confluenceResistanceBorder, cumulativeBudget: 40),
                 ConfluencePartition(groups: runtime.mixedConfluence,
                     fill: Constants.confluenceMixed,
-                    border: Constants.confluenceMixedBorder, budget: 20)
+                    border: Constants.confluenceMixedBorder, cumulativeBudget: 60)
             ]
             for partition in partitions {
+                let remaining = max(0, partition.cumulativeBudget - bands.count)
                 bands += partition.groups.filter {
                     proximity(runtime, top: $0.top, bottom: $0.bottom, reference: reference)
                 }
-                    .prefix(partition.budget)
+                    .prefix(remaining)
                     .map { TwcBand(x1: Double($0.startBar), x2: Double(lastBar + 20),
                                    yTop: $0.top, yBottom: $0.bottom,
                                    fillColor: partition.fill, borderColor: partition.border,
@@ -190,7 +179,7 @@ extension UsrEngine {
                 textColor: color
             )
         }
-        return TwcRenderModel(candleColors: nil, markers: markers, lines: [], fills: [],
+        return ScriptRenderModel(candleColors: nil, markers: markers, lines: [], fills: [],
                               segments: segments, bands: bands, labels: labels, banner: nil)
     }
 }

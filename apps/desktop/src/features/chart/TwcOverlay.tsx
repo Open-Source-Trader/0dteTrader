@@ -14,9 +14,9 @@ interface TwcOverlayProps {
 const MARKER_PAD = 6;
 
 /**
- * Read-only canvas overlay for the TWC Heatmap render model: fib level lines,
- * Gann fans/frames, profit-target bands, labels, signal markers and area
- * fills. Same event-driven repaint pattern as DrawingLayer, but with no
+ * Read-only canvas overlay for shared stateful-script geometry: line segments,
+ * bands, labels, signal markers and area fills. It uses the same event-driven
+ * repaint pattern as DrawingLayer, but has no
  * pointer interaction; bar indices map straight to logical coordinates
  * (indices past the last bar project into the future).
  */
@@ -87,7 +87,7 @@ export function TwcOverlay({ chart, series, model, candles }: TwcOverlayProps) {
           const top = fill.top[i];
           const bottom = fill.bottom[i];
           const color = fill.colors[i];
-          if (top === null || bottom === null || color === null) {
+          if (top == null || bottom == null || color == null) {
             flush();
             continue;
           }

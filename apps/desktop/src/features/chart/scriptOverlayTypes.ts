@@ -82,29 +82,51 @@ export interface ScriptRenderModel {
   banner: ScriptBanner | null;
 }
 
-export function isValidScriptColor(color: string): boolean {
-  const trimmed = color.trim();
-  if (/^#[\da-f]{6}$/i.test(trimmed)) return true;
-  const match = /^(rgb|rgba)\(([^)]*)\)$/i.exec(trimmed);
-  if (!match) return false;
-  const parts = match[2].split(',').map((part) => Number(part.trim()));
-  const expected = match[1].toLowerCase() === 'rgba' ? 4 : 3;
-  return (
-    parts.length === expected &&
-    parts.every(Number.isFinite) &&
-    parts.slice(0, 3).every((part) => part >= 0 && part <= 255) &&
-    (expected === 3 || (parts[3] >= 0 && parts[3] <= 1))
-  );
+interface ScriptColorComponents {
+  red: number;
+  green: number;
+  blue: number;
+  alpha: number;
 }
 
-export function withScriptColorOpacity(color: string, opacity: number): string {
+function parseScriptColor(color: string): ScriptColorComponents | null {
   const trimmed = color.trim();
   const hex = /^#([\da-f]{2})([\da-f]{2})([\da-f]{2})$/i.exec(trimmed);
   if (hex) {
-    return `rgba(${Number.parseInt(hex[1], 16)}, ${Number.parseInt(hex[2], 16)}, ${Number.parseInt(hex[3], 16)}, ${opacity})`;
+    return {
+      red: Number.parseInt(hex[1], 16),
+      green: Number.parseInt(hex[2], 16),
+      blue: Number.parseInt(hex[3], 16),
+      alpha: 1,
+    };
   }
-  const rgb = /^rgba?\(\s*([^,]+),\s*([^,]+),\s*([^,)]+)/i.exec(trimmed);
-  return rgb ? `rgba(${rgb[1]}, ${rgb[2]}, ${rgb[3]}, ${opacity})` : color;
+  const match = /^(rgb|rgba)\(([^)]*)\)$/i.exec(trimmed);
+  if (!match) return null;
+  const rawParts = match[2].split(',').map((part) => part.trim());
+  const expected = match[1].toLowerCase() === 'rgba' ? 4 : 3;
+  if (rawParts.length !== expected || rawParts.some((part) => part.length === 0)) return null;
+  const decimal = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/i;
+  if (rawParts.some((part) => !decimal.test(part))) return null;
+  const parts = rawParts.map(Number);
+  if (
+    !parts.every(Number.isFinite) ||
+    !parts.slice(0, 3).every((part) => part >= 0 && part <= 255) ||
+    (expected === 4 && (parts[3] < 0 || parts[3] > 1))
+  ) {
+    return null;
+  }
+  return { red: parts[0], green: parts[1], blue: parts[2], alpha: parts[3] ?? 1 };
+}
+
+export function isValidScriptColor(color: string): boolean {
+  return parseScriptColor(color) !== null;
+}
+
+export function withScriptColorOpacity(color: string, opacity: number): string {
+  const components = parseScriptColor(color);
+  if (!components) return color;
+  const safeOpacity = Number.isFinite(opacity) ? Math.max(0, Math.min(1, opacity)) : 1;
+  return `rgba(${components.red}, ${components.green}, ${components.blue}, ${safeOpacity})`;
 }
 
 export function mergeScriptRenderModels(

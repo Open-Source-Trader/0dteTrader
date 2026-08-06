@@ -147,7 +147,61 @@ function candidateKey(
   return `${runtime.timeframeTag}|${origin.chartEndIndex}|${support ? 'S' : 'R'}|${quantizedPriceKey(top, tick)}|${quantizedPriceKey(bottom, tick)}`;
 }
 
-function createZone(
+interface PendingZoneDraft {
+  top: number;
+  bottom: number;
+  originIndex: number;
+  support: boolean;
+  relativeVolume: number;
+  detectionIndex: number;
+  sourceId: number;
+}
+
+interface PendingZoneQueues {
+  support: PendingZoneDraft[];
+  resistance: PendingZoneDraft[];
+}
+
+function queueZone(
+  runtime: UsrRuntime,
+  pending: PendingZoneQueues,
+  top: number,
+  bottom: number,
+  originIndex: number,
+  support: boolean,
+  relativeVolume: number,
+  detectionIndex: number,
+): void {
+  if (
+    !validBounds(top, bottom) ||
+    brokenBetween(runtime, top, bottom, support, originIndex, detectionIndex)
+  ) {
+    return;
+  }
+  const origin = runtime.analysis[originIndex];
+  const key = candidateKey(runtime, origin, top, bottom, support);
+  if (runtime.processedCandidates.has(key)) return;
+  runtime.processedCandidates.add(key);
+  runtime.candidateOrder.push(key);
+  if (runtime.candidateOrder.length > USR.maximumCandidateKeys) {
+    const removed = runtime.candidateOrder.shift();
+    if (removed) runtime.processedCandidates.delete(removed);
+  }
+  // Pine assigns the immutable setup identity when the candidate is queued.
+  // A distinct zone identity is assigned later when pending candidates commit.
+  runtime.identity += 1;
+  (support ? pending.support : pending.resistance).push({
+    top,
+    bottom,
+    originIndex,
+    support,
+    relativeVolume,
+    detectionIndex,
+    sourceId: runtime.identity,
+  });
+}
+
+function materializeZone(
   runtime: UsrRuntime,
   top: number,
   bottom: number,
@@ -155,29 +209,14 @@ function createZone(
   support: boolean,
   relativeVolume: number,
   detectionIndex: number,
-  flipped = false,
+  flipped: boolean,
+  sourceId: number,
   parent?: UsrZone,
 ): UsrZone | null {
-  if (
-    !validBounds(top, bottom) ||
-    brokenBetween(runtime, top, bottom, support, originIndex, detectionIndex)
-  ) {
-    return null;
-  }
+  if (!validBounds(top, bottom)) return null;
   const origin = runtime.analysis[originIndex];
   const detection = runtime.analysis[detectionIndex];
-  const key = candidateKey(runtime, origin, top, bottom, support);
-  if (!flipped) {
-    if (runtime.processedCandidates.has(key)) return null;
-    runtime.processedCandidates.add(key);
-    runtime.candidateOrder.push(key);
-    if (runtime.candidateOrder.length > USR.maximumCandidateKeys) {
-      const removed = runtime.candidateOrder.shift();
-      if (removed) runtime.processedCandidates.delete(removed);
-    }
-  }
   runtime.identity += 1;
-  const sourceId = parent?.sourceId ?? runtime.identity;
   const originId = parent ? parent.originZoneId || parent.id : 0;
   let originIsSupport = true;
   if (parent) originIsSupport = parent.originZoneId ? parent.originIsSupport : parent.isSupport;
@@ -220,6 +259,27 @@ function createZone(
   return zone;
 }
 
+function commitPending(runtime: UsrRuntime, pending: PendingZoneQueues): void {
+  // Pine drains each side from the end of its pending array. This restores
+  // chronological same-side ordering after the detector's newest-first scan.
+  for (const drafts of [pending.support, pending.resistance]) {
+    for (let index = drafts.length - 1; index >= 0; index -= 1) {
+      const draft = drafts[index];
+      materializeZone(
+        runtime,
+        draft.top,
+        draft.bottom,
+        draft.originIndex,
+        draft.support,
+        draft.relativeVolume,
+        draft.detectionIndex,
+        false,
+        draft.sourceId,
+      );
+    }
+  }
+}
+
 function pivotLow(runtime: UsrRuntime, index: number): boolean {
   const center = runtime.analysis[index]?.low;
   if (center === undefined) return false;
@@ -260,7 +320,11 @@ function pivotHigh(runtime: UsrRuntime, index: number): boolean {
   return true;
 }
 
-function processMaturePivot(runtime: UsrRuntime, detectionIndex: number): void {
+function processMaturePivot(
+  runtime: UsrRuntime,
+  detectionIndex: number,
+  pending: PendingZoneQueues,
+): void {
   const originIndex = detectionIndex - runtime.settings.pivotRightBars;
   const candle = runtime.analysis[originIndex];
   if (
@@ -275,11 +339,11 @@ function processMaturePivot(runtime: UsrRuntime, detectionIndex: number): void {
   const relativeVolume = volumeRatio(candle.volume, candle.volumeMean);
   if (pivotLow(runtime, originIndex)) {
     const level = Math.min(candle.open, candle.close);
-    createZone(runtime, level, level, originIndex, true, relativeVolume, detectionIndex);
+    queueZone(runtime, pending, level, level, originIndex, true, relativeVolume, detectionIndex);
   }
   if (pivotHigh(runtime, originIndex)) {
     const level = Math.max(candle.open, candle.close);
-    createZone(runtime, level, level, originIndex, false, relativeVolume, detectionIndex);
+    queueZone(runtime, pending, level, level, originIndex, false, relativeVolume, detectionIndex);
   }
 }
 
@@ -303,7 +367,12 @@ function structureLow(runtime: UsrRuntime, displacementIndex: number): number | 
     : null;
 }
 
-function processSequenceBar(runtime: UsrRuntime, index: number, detectionIndex: number): void {
+function processSequenceBar(
+  runtime: UsrRuntime,
+  index: number,
+  detectionIndex: number,
+  pending: PendingZoneQueues,
+): void {
   const candle = runtime.analysis[index];
   const previous = runtime.analysis[index - 1];
   if (!candle || !previous) return;
@@ -320,8 +389,9 @@ function processSequenceBar(runtime: UsrRuntime, index: number, detectionIndex: 
     ? voidDown
     : openingDown && previous.close - candle.high >= minimumGap;
   if (gapUp) {
-    createZone(
+    queueZone(
       runtime,
+      pending,
       candle.low,
       runtime.settings.requirePriceVoidGaps ? previous.high : previous.close,
       index,
@@ -331,8 +401,9 @@ function processSequenceBar(runtime: UsrRuntime, index: number, detectionIndex: 
     );
   }
   if (gapDown) {
-    createZone(
+    queueZone(
       runtime,
+      pending,
       runtime.settings.requirePriceVoidGaps ? previous.low : previous.close,
       candle.high,
       index,
@@ -366,8 +437,9 @@ function processSequenceBar(runtime: UsrRuntime, index: number, detectionIndex: 
     follow.close >= midpoint &&
     isAbove(runtime, follow.close, priorHigh as number)
   ) {
-    createZone(
+    queueZone(
       runtime,
+      pending,
       runtime.settings.orderBlockUseWicks ? origin.high : origin.open,
       runtime.settings.orderBlockUseWicks ? origin.low : origin.close,
       index - 1,
@@ -392,8 +464,9 @@ function processSequenceBar(runtime: UsrRuntime, index: number, detectionIndex: 
     follow.close <= midpoint &&
     isBelow(runtime, follow.close, priorLow as number)
   ) {
-    createZone(
+    queueZone(
       runtime,
+      pending,
       runtime.settings.orderBlockUseWicks ? origin.high : origin.close,
       runtime.settings.orderBlockUseWicks ? origin.low : origin.open,
       index - 1,
@@ -409,6 +482,7 @@ function processSequence(
   newestIndex: number,
   count: number,
   detectionIndex: number,
+  pending: PendingZoneQueues,
 ): void {
   for (let scanned = 0; scanned < count; scanned += 1) {
     const index = newestIndex - scanned;
@@ -422,12 +496,12 @@ function processSequence(
       )
     )
       break;
-    processSequenceBar(runtime, index, detectionIndex);
+    processSequenceBar(runtime, index, detectionIndex, pending);
   }
 }
 
 function flip(runtime: UsrRuntime, zone: UsrZone, index: number): void {
-  const child = createZone(
+  const child = materializeZone(
     runtime,
     zone.top,
     zone.bottom,
@@ -436,6 +510,7 @@ function flip(runtime: UsrRuntime, zone: UsrZone, index: number): void {
     zone.volumeRatio,
     index,
     true,
+    zone.sourceId,
     zone,
   );
   if (!child) return;
@@ -491,7 +566,7 @@ function updateState(
 function processLifecycle(runtime: UsrRuntime, index: number): void {
   const candle = runtime.analysis[index];
   const previous = runtime.analysis[index - 1];
-  for (const zone of [...runtime.supportZones, ...runtime.resistanceZones]) {
+  const processZone = (zone: UsrZone): void => {
     if (
       zone.isActive &&
       index > zone.analysisBirth &&
@@ -504,6 +579,15 @@ function processLifecycle(runtime: UsrRuntime, index: number): void {
       runtime.zonesChanged = true;
     }
     if (updateState(runtime, zone, candle, index)) runtime.zonesChanged = true;
+  };
+  // Pine processes each side newest-to-oldest, with support first. Support
+  // flips are therefore present when the resistance-side pass begins, while
+  // resistance flips do not retroactively enter the completed support pass.
+  for (let position = runtime.supportZones.length - 1; position >= 0; position -= 1) {
+    processZone(runtime.supportZones[position]);
+  }
+  for (let position = runtime.resistanceZones.length - 1; position >= 0; position -= 1) {
+    processZone(runtime.resistanceZones[position]);
   }
 }
 
@@ -561,7 +645,8 @@ function releaseTrimmedFlipOrigins(runtime: UsrRuntime, removed: readonly UsrZon
 export function processUsrZoneEvent(runtime: UsrRuntime, index: number): void {
   runtime.analysisBarId = index;
   runtime.zonesChanged = false;
-  processMaturePivot(runtime, index);
+  const pending: PendingZoneQueues = { support: [], resistance: [] };
+  processMaturePivot(runtime, index, pending);
   const candle = runtime.analysis[index];
   const anomalous = isVolumeAnomaly(
     candle,
@@ -571,7 +656,7 @@ export function processUsrZoneEvent(runtime: UsrRuntime, index: number): void {
   if (anomalous) {
     runtime.highVolumeSequenceLength += 1;
     if (runtime.highVolumeSequenceLength >= runtime.settings.maxSequenceLength) {
-      processSequence(runtime, index, runtime.highVolumeSequenceLength, index);
+      processSequence(runtime, index, runtime.highVolumeSequenceLength, index, pending);
       runtime.highVolumeSequenceLength = 1;
     }
   } else {
@@ -584,10 +669,11 @@ export function processUsrZoneEvent(runtime: UsrRuntime, index: number): void {
         runtime.settings.minimumVolumeZScore,
       );
     if (previousAnomalous && runtime.highVolumeSequenceLength > 0) {
-      processSequence(runtime, index - 1, runtime.highVolumeSequenceLength, index);
+      processSequence(runtime, index - 1, runtime.highVolumeSequenceLength, index, pending);
     }
     runtime.highVolumeSequenceLength = 0;
   }
+  commitPending(runtime, pending);
   processLifecycle(runtime, index);
   trimZones(runtime);
 }

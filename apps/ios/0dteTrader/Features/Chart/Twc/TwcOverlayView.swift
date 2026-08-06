@@ -8,7 +8,7 @@ import UIKit
 /// (forward projection).
 final class TwcOverlayView: UIView {
     weak var chart: CombinedChartView?
-    var model: TwcRenderModel? {
+    var model: ScriptRenderModel? {
         didSet { if model != oldValue { setNeedsDisplay() } }
     }
     var candles: [Candle] = []
@@ -63,7 +63,8 @@ final class TwcOverlayView: UIView {
                 context.fillPath()
             }
             for i in 0..<candles.count {
-                guard let top = fill.top[i], let bottom = fill.bottom[i], let color = fill.colors[i] else {
+                guard fill.top.indices.contains(i), fill.bottom.indices.contains(i), fill.colors.indices.contains(i),
+                      let top = fill.top[i], let bottom = fill.bottom[i], let color = fill.colors[i] else {
                     flush()
                     continue
                 }
@@ -203,31 +204,15 @@ extension UIColor {
     /// Resolves the compute layer's color strings: "#RRGGBB",
     /// "rgb(r, g, b)" or "rgba(r, g, b, a)".
     convenience init(twcColor: String) {
-        let value = twcColor.trimmingCharacters(in: .whitespaces)
-        if value.hasPrefix("#"), value.count >= 7 {
-            let raw = String(value.dropFirst())
-            let r = Int(raw.prefix(2), radix: 16) ?? 255
-            let g = Int(raw.dropFirst(2).prefix(2), radix: 16) ?? 255
-            let b = Int(raw.dropFirst(4).prefix(2), radix: 16) ?? 255
-            self.init(red: CGFloat(r) / 255, green: CGFloat(g) / 255, blue: CGFloat(b) / 255, alpha: 1)
+        guard let color = ScriptColor.parse(twcColor) else {
+            self.init(white: 1, alpha: 1)
             return
         }
-        if value.hasPrefix("rgb") {
-            let numbers = value
-                .drop(while: { $0 != "(" })
-                .trimmingCharacters(in: CharacterSet(charactersIn: "()"))
-                .split(separator: ",")
-                .compactMap { Double($0.trimmingCharacters(in: .whitespaces)) }
-            if numbers.count >= 3 {
-                self.init(
-                    red: CGFloat(numbers[0]) / 255,
-                    green: CGFloat(numbers[1]) / 255,
-                    blue: CGFloat(numbers[2]) / 255,
-                    alpha: numbers.count >= 4 ? CGFloat(numbers[3]) : 1
-                )
-                return
-            }
-        }
-        self.init(white: 1, alpha: 1)
+        self.init(
+            red: CGFloat(color.red) / 255,
+            green: CGFloat(color.green) / 255,
+            blue: CGFloat(color.blue) / 255,
+            alpha: CGFloat(color.alpha)
+        )
     }
 }

@@ -3,16 +3,39 @@ import Foundation
 /// Pure event simulator mirroring computeUsr.ts and the confirmed-bar Pine
 /// state machine. No UIKit/SwiftUI dependencies belong in this layer.
 extension UsrEngine {
+    static func enforceFvgVisualCap(_ fvgs: inout [UsrFvg], maximum: Int) {
+        var count = fvgs.filter(\.visualVisible).count
+        for index in fvgs.indices.reversed() {
+            guard count > maximum else { break }
+            guard fvgs[index].visualVisible else { continue }
+            fvgs[index].visualVisible = false
+            count -= 1
+        }
+    }
+
+    static func reserveFvgVisualSlot(_ fvgs: inout [UsrFvg], maximum: Int) {
+        var count = fvgs.filter(\.visualVisible).count
+        for index in fvgs.indices.reversed() {
+            guard count >= maximum else { break }
+            guard fvgs[index].visualVisible else { continue }
+            fvgs[index].visualVisible = false
+            count -= 1
+        }
+    }
+
     static func detectFvg(_ runtime: Runtime) {
         let index = runtime.analysisBarId
         guard index >= 2 else { return }
         let first = runtime.analysis[index - 2]
         let displacement = runtime.analysis[index - 1]
         let third = runtime.analysis[index]
-        let bodies = runtime.analysis.map { abs($0.close - $0.open) }
-        let averages = UsrMath.rollingLaggedMean(bodies, length: runtime.settings.fvgLookback)
-        guard let average = averages[index - 1] else { return }
-        let body = bodies[index - 1]
+        let displacementIndex = index - 1
+        let lookback = runtime.settings.fvgLookback
+        guard displacementIndex >= lookback else { return }
+        let laggedBodyTotal = runtime.analysis[(displacementIndex - lookback)..<displacementIndex]
+            .reduce(0.0) { $0 + abs($1.close - $1.open) }
+        let average = laggedBodyTotal / Double(lookback)
+        let body = abs(displacement.close - displacement.open)
         let wick = body * runtime.settings.fvgWickPercent
         let displacementAtr = runtime.timeframeTag == "chart"
             ? activeAtr(runtime, displacement)
@@ -53,12 +76,14 @@ extension UsrEngine {
             runtime.bullishFvgs.insert(UsrFvg(id: id, top: top, bottom: bottom,
                 ce: (top + bottom) / 2, startBar: start, analysisBirth: runtime.analysisBarId,
                 direction: direction), at: 0)
+            enforceFvgVisualCap(&runtime.bullishFvgs, maximum: runtime.settings.maxVisibleFvgs)
             if runtime.bullishFvgs.count > Constants.maximumStoredFvgs { runtime.bullishFvgs.removeLast() }
         } else {
             guard !runtime.bearishFvgs.contains(where: { $0.id == id }) else { return }
             runtime.bearishFvgs.insert(UsrFvg(id: id, top: top, bottom: bottom,
                 ce: (top + bottom) / 2, startBar: start, analysisBirth: runtime.analysisBarId,
                 direction: direction), at: 0)
+            enforceFvgVisualCap(&runtime.bearishFvgs, maximum: runtime.settings.maxVisibleFvgs)
             if runtime.bearishFvgs.count > Constants.maximumStoredFvgs { runtime.bearishFvgs.removeLast() }
         }
     }
@@ -75,7 +100,9 @@ extension UsrEngine {
                 let expired = runtime.analysisBarId - fvgs[index].ifvgAnalysisBirth > runtime.settings.fvgMaxBarsActive
                 if broken || expired {
                     fvgs[index].ifvgActive = false
-                    fvgs[index].ifvgEndBar = candle.chartEnd
+                    // Pine extends on the chart execution bar before retiring
+                    // the drawing; for HTF this is its event anchor.
+                    fvgs[index].ifvgEndBar = candle.eventChartIndex
                     fvgs[index].lifecycle = expired ? .expired : .invalidated
                 }
                 continue
@@ -83,7 +110,7 @@ extension UsrEngine {
             guard fvgs[index].isActive, runtime.analysisBarId > fvgs[index].analysisBirth else { continue }
             if runtime.analysisBarId - fvgs[index].analysisBirth > runtime.settings.fvgMaxBarsActive {
                 fvgs[index].isActive = false
-                fvgs[index].endBar = candle.chartEnd
+                fvgs[index].endBar = candle.eventChartIndex
                 fvgs[index].lifecycle = .expired
                 continue
             }
@@ -112,8 +139,11 @@ extension UsrEngine {
             if milestone { fvgs[index].milestoneReached = true }
             if farClose {
                 fvgs[index].isActive = false
-                fvgs[index].endBar = candle.chartEnd
+                fvgs[index].endBar = candle.eventChartIndex
                 if runtime.settings.showIfvg {
+                    fvgs[index].visualVisible = false
+                    reserveFvgVisualSlot(&fvgs, maximum: runtime.settings.maxVisibleFvgs)
+                    fvgs[index].visualVisible = true
                     fvgs[index].ifvgActive = true
                     fvgs[index].ifvgAnalysisBirth = runtime.analysisBarId
                     fvgs[index].lifecycle = .inverted
@@ -133,6 +163,7 @@ extension UsrEngine {
                 fvgs[index].lifecycle = .partial
             }
         }
+        enforceFvgVisualCap(&fvgs, maximum: runtime.settings.maxVisibleFvgs)
         return fvgs
     }
 

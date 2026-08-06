@@ -98,6 +98,7 @@ struct UsrFvg: Identifiable, Sendable {
     var endBar = 0
     var ifvgEndBar = 0
     let direction: UsrFvgDirection
+    var visualVisible = true
     var isActive = true
     var lifecycle = UsrFvgLifecycle.untouched
     var milestoneReached = false
@@ -124,7 +125,7 @@ struct UsrSignal: Sendable {
 }
 
 struct UsrComputation: Sendable {
-    let renderModel: TwcRenderModel
+    let renderModel: ScriptRenderModel
     let supportZones: [UsrZone]
     let resistanceZones: [UsrZone]
     let supportConfluence: [UsrConfluence]

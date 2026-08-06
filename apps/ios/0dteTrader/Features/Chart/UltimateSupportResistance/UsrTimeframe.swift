@@ -1,6 +1,9 @@
 import Foundation
 
 struct UsrPreparedHistory {
+    /// Canonical chart input, including the newest open candle for rendering.
+    let presentationCandles: [Candle]
+    /// Fully closed chart candles used by every analytical state transition.
     let chartCandles: [Candle]
     let analysisCandles: [UsrAnalysisCandle]
     let analysisSeconds: TimeInterval?
@@ -17,15 +20,20 @@ enum UsrTimeframe {
     struct Value {
         let seconds: TimeInterval?
         let months: Int?
+        let ticks: Int?
         let tag: String
     }
 
     private static func fixedSeconds(_ seconds: TimeInterval, tag: String? = nil) -> Value {
-        Value(seconds: seconds, months: nil, tag: tag ?? String(Int(seconds)))
+        Value(seconds: seconds, months: nil, ticks: nil, tag: tag ?? String(Int(seconds)))
     }
 
     private static func fixedMonths(_ months: Int) -> Value {
-        Value(seconds: nil, months: months, tag: "\(months)M")
+        Value(seconds: nil, months: months, ticks: nil, tag: "\(months)M")
+    }
+
+    private static func fixedTicks(_ ticks: Int) -> Value {
+        Value(seconds: nil, months: nil, ticks: ticks, tag: "\(ticks)T")
     }
 
     private static func auto(_ chart: TimeInterval) -> Value {
@@ -51,21 +59,24 @@ enum UsrTimeframe {
 
     static func parse(_ input: String) -> Value? {
         let value = input.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-        guard let match = value.range(of: #"^[1-9][0-9]*(S|D|W|M)?$"#,
+        guard let match = value.range(of: #"^([1-9][0-9]*)?(T|S|D|W|M)?$"#,
                                       options: .regularExpression) else { return nil }
         let canonical = String(value[match])
+        guard !canonical.isEmpty else { return nil }
         let suffix = canonical.last.map(String.init) ?? ""
-        let hasSuffix = ["S", "D", "W", "M"].contains(suffix)
+        let hasSuffix = ["T", "S", "D", "W", "M"].contains(suffix)
         let digits = hasSuffix ? String(canonical.dropLast()) : canonical
-        guard let amount = Int(digits) else { return nil }
+        guard let amount = Int(digits.isEmpty ? "1" : digits) else { return nil }
         switch hasSuffix ? suffix : "" {
+        case "T":
+            return [1, 10, 100, 1_000].contains(amount) ? fixedTicks(amount) : nil
         case "S":
             return [1, 5, 10, 15, 30, 45].contains(amount)
-                ? fixedSeconds(Double(amount), tag: canonical) : nil
+                ? fixedSeconds(Double(amount), tag: "\(amount)S") : nil
         case "D":
-            return amount <= 365 ? fixedSeconds(Double(amount) * day, tag: canonical) : nil
+            return amount <= 365 ? fixedSeconds(Double(amount) * day, tag: "\(amount)D") : nil
         case "W":
-            return amount <= 52 ? fixedSeconds(Double(amount) * week, tag: canonical) : nil
+            return amount <= 52 ? fixedSeconds(Double(amount) * week, tag: "\(amount)W") : nil
         case "M":
             return amount <= 12 ? fixedMonths(amount) : nil
         default:
@@ -73,9 +84,12 @@ enum UsrTimeframe {
         }
     }
 
-    private static func selected(_ settings: UsrSettings, chart: TimeInterval?) -> Value? {
+    private static func selected(
+        _ settings: UsrSettings,
+        chart: TimeInterval?
+    ) -> Value? {
         switch settings.analysisTimeframe {
-        case "chart": return chart.map { fixedSeconds($0) }
+        case "chart": return chart.map { fixedSeconds($0, tag: chartTag($0)) }
         case "auto": return chart.map(auto)
         case "4h": return fixedSeconds(14_400, tag: "240")
         case "1d": return fixedSeconds(day, tag: "1D")
@@ -142,20 +156,23 @@ enum UsrTimeframe {
         candles input: [Candle],
         settings: UsrSettings,
         chartSeconds: TimeInterval?,
+        continuousSession: Bool = false,
         now: Date,
         lastCandleIsOpen: Bool? = nil
     ) -> UsrPreparedHistory {
         var warnings: [String] = []
-        var seen = Set<Date>()
-        let sorted = input
-            .filter {
-                $0.open.isFinite && $0.high.isFinite && $0.low.isFinite && $0.close.isFinite
-                    && $0.volume.isFinite && $0.volume >= 0 && $0.high >= $0.low
-                    && $0.open >= $0.low && $0.open <= $0.high
-                    && $0.close >= $0.low && $0.close <= $0.high
-            }
-            .sorted { $0.time < $1.time }
-            .filter { seen.insert($0.time).inserted }
+        var candlesByTime: [Date: Candle] = [:]
+        for candle in input where candle.time.timeIntervalSince1970.isFinite
+            && candle.open.isFinite && candle.high.isFinite
+            && candle.low.isFinite && candle.close.isFinite && candle.volume.isFinite
+            && candle.volume >= 0 && candle.high >= candle.low
+            && candle.open >= candle.low && candle.open <= candle.high
+            && candle.close >= candle.low && candle.close <= candle.high {
+            // Prefer the last valid provider/live-stream correction for a
+            // timestamp instead of retaining stale OHLCV from the first copy.
+            candlesByTime[candle.time] = candle
+        }
+        let sorted = candlesByTime.values.sorted { $0.time < $1.time }
         if sorted.count != input.count { warnings.append("Invalid or duplicate candles were excluded before analysis.") }
         var confirmed = sorted
         let newestIsOpen = lastCandleIsOpen ?? confirmed.last.map {
@@ -178,10 +195,11 @@ enum UsrTimeframe {
         }
         let requestedIsChartClock = settings.analysisTimeframe == "chart"
             || requested?.tag == chartTag(chartSeconds)
-        if chartSeconds == nil || requested == nil || comparable == nil
-            || (comparable ?? 0) < (chartSeconds ?? 0)
-            || ((comparable ?? 0) == (chartSeconds ?? 0) && requestedIsChartClock) {
-            if settings.analysisTimeframe != "chart" {
+        let requestedIsLower = chartSeconds != nil && comparable != nil
+            && (comparable ?? 0) < (chartSeconds ?? 0)
+        if chartSeconds == nil || requested == nil || comparable == nil || requestedIsLower
+            || (comparable == chartSeconds && requestedIsChartClock) {
+            if requestedIsLower {
                 warnings.append("The selected analysis timeframe is not above the chart timeframe; chart bars are used.")
             }
             seconds = chartSeconds
@@ -220,7 +238,7 @@ enum UsrTimeframe {
                 eventChartIndex: eventChartIndex,
                 eventTime: confirmed[eventChartIndex].time.addingTimeInterval(chartSeconds ?? 0),
                 closeTime: confirmed[group.end].time.addingTimeInterval(chartSeconds ?? 0),
-                regularSession: regularSession(group.candle.time),
+                regularSession: continuousSession || regularSession(group.candle.time),
                 atr: nil,
                 volumeMean: nil,
                 volumeStd: nil
@@ -252,6 +270,7 @@ enum UsrTimeframe {
             else { extended.append(analysis[index].volume) }
         }
         return UsrPreparedHistory(
+            presentationCandles: sorted,
             chartCandles: confirmed,
             analysisCandles: analysis,
             analysisSeconds: seconds,

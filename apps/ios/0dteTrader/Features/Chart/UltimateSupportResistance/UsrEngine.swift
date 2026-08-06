@@ -76,6 +76,16 @@ enum UsrEngine {
         var parent: UsrZone? = nil
     }
 
+    struct PendingZoneDraft {
+        let draft: ZoneDraft
+        let sourceId: Int
+    }
+
+    struct PendingZoneQueues {
+        var support: [PendingZoneDraft] = []
+        var resistance: [PendingZoneDraft] = []
+    }
+
     static func above(_ runtime: Runtime, _ price: Double, _ boundary: Double) -> Bool {
         price >= boundary + runtime.settings.minimumTick * Double(runtime.settings.breakBufferTicks)
     }
@@ -164,38 +174,51 @@ enum UsrEngine {
         return false
     }
 
-    @discardableResult
-    static func createZone(_ runtime: Runtime, _ draft: ZoneDraft) -> Int? {
+    static func queueZone(_ runtime: Runtime, pending: inout PendingZoneQueues, _ draft: ZoneDraft) {
         guard draft.top.isFinite, draft.bottom.isFinite, draft.top >= draft.bottom,
+              runtime.analysis.indices.contains(draft.origin),
+              runtime.analysis.indices.contains(draft.detection),
               !broken(runtime, top: draft.top, bottom: draft.bottom, support: draft.support,
                       origin: draft.origin, detection: draft.detection)
-        else { return nil }
+        else { return }
         let source = runtime.analysis[draft.origin]
         let tick = runtime.settings.minimumTick
         let topKey = UsrMath.quantizedPriceKey(draft.top, minimumTick: tick)
         let bottomKey = UsrMath.quantizedPriceKey(draft.bottom, minimumTick: tick)
         let key = "\(runtime.timeframeTag)|\(source.chartEnd)|\(draft.support ? "S" : "R")|\(topKey)|\(bottomKey)"
-        if !draft.flipped {
-            guard runtime.processed.insert(key).inserted else { return nil }
-            runtime.processedOrder.append(key)
-            if runtime.processedOrder.count > Constants.maximumCandidateKeys {
-                runtime.processed.remove(runtime.processedOrder.removeFirst())
-            }
+        guard runtime.processed.insert(key).inserted else { return }
+        runtime.processedOrder.append(key)
+        if runtime.processedOrder.count > Constants.maximumCandidateKeys {
+            runtime.processed.remove(runtime.processedOrder.removeFirst())
         }
+        // Pine assigns the immutable setup identity when the candidate is queued.
+        // A distinct zone identity is assigned later when pending candidates commit.
+        runtime.identity += 1
+        let pendingDraft = PendingZoneDraft(draft: draft, sourceId: runtime.identity)
+        if draft.support { pending.support.append(pendingDraft) }
+        else { pending.resistance.append(pendingDraft) }
+    }
+
+    @discardableResult
+    static func materializeZone(_ runtime: Runtime, _ draft: ZoneDraft, sourceId: Int) -> Int? {
+        guard draft.top.isFinite, draft.bottom.isFinite, draft.top >= draft.bottom,
+              runtime.analysis.indices.contains(draft.origin),
+              runtime.analysis.indices.contains(draft.detection)
+        else { return nil }
+        let source = runtime.analysis[draft.origin]
+        let detection = runtime.analysis[draft.detection]
         runtime.identity += 1
         let zone = UsrZone(
             id: runtime.identity,
-            sourceId: draft.parent?.sourceId ?? runtime.identity,
+            sourceId: sourceId,
             analysisBirth: draft.detection,
             top: draft.top,
             bottom: draft.bottom,
-            startBar: draft.flipped ? runtime.analysis[draft.detection].chartEnd : source.chartEnd,
+            startBar: draft.flipped ? detection.chartEnd : source.chartEnd,
             sourceTime: draft.parent?.sourceTime ?? source.time,
-            detectedTime: runtime.analysis[draft.detection].closeTime,
-            activeTime: draft.flipped
-                ? runtime.analysis[draft.detection].closeTime
-                : runtime.analysis[draft.detection].eventTime,
-            activationBar: runtime.analysis[draft.detection].eventChartIndex,
+            detectedTime: detection.closeTime,
+            activeTime: draft.flipped ? detection.closeTime : detection.eventTime,
+            activationBar: detection.eventChartIndex,
             isSupport: draft.support,
             volumeRatio: max(draft.relativeVolume, 0),
             isFlipped: draft.flipped,
@@ -214,6 +237,17 @@ enum UsrEngine {
         return runtime.resistance.count - 1
     }
 
+    static func commitPending(_ runtime: Runtime, pending: PendingZoneQueues) {
+        // Pine drains each side from the end of its pending array. This restores
+        // chronological same-side ordering after the detector's newest-first scan.
+        for draft in pending.support.reversed() {
+            materializeZone(runtime, draft.draft, sourceId: draft.sourceId)
+        }
+        for draft in pending.resistance.reversed() {
+            materializeZone(runtime, draft.draft, sourceId: draft.sourceId)
+        }
+    }
+
     static func pivot(_ runtime: Runtime, index: Int, low: Bool) -> Bool {
         guard runtime.analysis.indices.contains(index) else { return false }
         let center = low ? runtime.analysis[index].low : runtime.analysis[index].high
@@ -230,7 +264,7 @@ enum UsrEngine {
         return true
     }
 
-    static func maturePivot(_ runtime: Runtime, detection: Int) {
+    static func maturePivot(_ runtime: Runtime, detection: Int, pending: inout PendingZoneQueues) {
         let origin = detection - runtime.settings.pivotRightBars
         guard runtime.analysis.indices.contains(origin),
               UsrMath.isVolumeAnomaly(runtime.analysis[origin], runtime.settings)
@@ -239,13 +273,15 @@ enum UsrEngine {
         let ratio = UsrMath.volumeRatio(candle)
         if pivot(runtime, index: origin, low: true) {
             let level = min(candle.open, candle.close)
-            createZone(runtime, ZoneDraft(top: level, bottom: level, origin: origin,
-                                         support: true, relativeVolume: ratio, detection: detection))
+            queueZone(runtime, pending: &pending,
+                      ZoneDraft(top: level, bottom: level, origin: origin,
+                                support: true, relativeVolume: ratio, detection: detection))
         }
         if pivot(runtime, index: origin, low: false) {
             let level = max(candle.open, candle.close)
-            createZone(runtime, ZoneDraft(top: level, bottom: level, origin: origin,
-                                         support: false, relativeVolume: ratio, detection: detection))
+            queueZone(runtime, pending: &pending,
+                      ZoneDraft(top: level, bottom: level, origin: origin,
+                                support: false, relativeVolume: ratio, detection: detection))
         }
     }
 
@@ -256,7 +292,12 @@ enum UsrEngine {
         return high ? values.max() : values.min()
     }
 
-    static func sequenceBar(_ runtime: Runtime, index: Int, detection: Int) {
+    static func sequenceBar(
+        _ runtime: Runtime,
+        index: Int,
+        detection: Int,
+        pending: inout PendingZoneQueues
+    ) {
         guard index > 0 else { return }
         let candle = runtime.analysis[index]
         let previous = runtime.analysis[index - 1]
@@ -274,14 +315,14 @@ enum UsrEngine {
                 && previous.close - candle.high >= threshold
         }
         if gapUp {
-            createZone(runtime, ZoneDraft(
+            queueZone(runtime, pending: &pending, ZoneDraft(
                 top: candle.low,
                 bottom: runtime.settings.requirePriceVoidGaps ? previous.high : previous.close,
                 origin: index, support: true, relativeVolume: ratio, detection: detection
             ))
         }
         if gapDown {
-            createZone(runtime, ZoneDraft(
+            queueZone(runtime, pending: &pending, ZoneDraft(
                 top: runtime.settings.requirePriceVoidGaps ? previous.low : previous.close,
                 bottom: candle.high, origin: index, support: false,
                 relativeVolume: ratio, detection: detection
@@ -296,7 +337,7 @@ enum UsrEngine {
            let high = structure(runtime, index: index, high: true),
            displacement(runtime, candle, bullish: true),
            above(runtime, candle.close, high), follow.close >= midpoint, above(runtime, follow.close, high) {
-            createZone(runtime, ZoneDraft(
+            queueZone(runtime, pending: &pending, ZoneDraft(
                 top: runtime.settings.orderBlockUseWicks ? previous.high : previous.open,
                 bottom: runtime.settings.orderBlockUseWicks ? previous.low : previous.close,
                 origin: index - 1, support: true, relativeVolume: ratio, detection: detection
@@ -306,7 +347,7 @@ enum UsrEngine {
            let low = structure(runtime, index: index, high: false),
            displacement(runtime, candle, bullish: false),
            below(runtime, candle.close, low), follow.close <= midpoint, below(runtime, follow.close, low) {
-            createZone(runtime, ZoneDraft(
+            queueZone(runtime, pending: &pending, ZoneDraft(
                 top: runtime.settings.orderBlockUseWicks ? previous.high : previous.close,
                 bottom: runtime.settings.orderBlockUseWicks ? previous.low : previous.open,
                 origin: index - 1, support: false, relativeVolume: ratio, detection: detection
@@ -314,13 +355,19 @@ enum UsrEngine {
         }
     }
 
-    static func sequence(_ runtime: Runtime, newest: Int, count: Int, detection: Int) {
+    static func sequence(
+        _ runtime: Runtime,
+        newest: Int,
+        count: Int,
+        detection: Int,
+        pending: inout PendingZoneQueues
+    ) {
         for scanned in 0..<count {
             let index = newest - scanned
             guard runtime.analysis.indices.contains(index),
                   UsrMath.isVolumeAnomaly(runtime.analysis[index], runtime.settings)
             else { break }
-            sequenceBar(runtime, index: index, detection: detection)
+            sequenceBar(runtime, index: index, detection: detection, pending: &pending)
         }
     }
 
@@ -383,11 +430,11 @@ enum UsrEngine {
                            support: true) {
                 let parent = runtime.support[position]
                 if runtime.settings.enableSrFlip,
-                   createZone(runtime, ZoneDraft(
+                   materializeZone(runtime, ZoneDraft(
                        top: parent.top, bottom: parent.bottom, origin: index,
                        support: false, relativeVolume: parent.volumeRatio, detection: index,
                        flipped: true, parent: parent
-                   )) != nil {
+                   ), sourceId: parent.sourceId) != nil {
                     markFlippedLineage(runtime, parent: parent, parentSupport: true, parentIndex: position)
                 }
                 runtime.support[position].isActive = false
@@ -408,11 +455,11 @@ enum UsrEngine {
                            support: false) {
                 let parent = runtime.resistance[position]
                 if runtime.settings.enableSrFlip,
-                   createZone(runtime, ZoneDraft(
+                   materializeZone(runtime, ZoneDraft(
                        top: parent.top, bottom: parent.bottom, origin: index,
                        support: true, relativeVolume: parent.volumeRatio, detection: index,
                        flipped: true, parent: parent
-                   )) != nil {
+                   ), sourceId: parent.sourceId) != nil {
                     markFlippedLineage(runtime, parent: parent, parentSupport: false, parentIndex: position)
                 }
                 runtime.resistance[position].isActive = false
@@ -462,21 +509,25 @@ enum UsrEngine {
     static func processZones(_ runtime: Runtime, index: Int) {
         runtime.analysisBarId = index
         runtime.zonesChanged = false
-        maturePivot(runtime, detection: index)
+        var pending = PendingZoneQueues()
+        maturePivot(runtime, detection: index, pending: &pending)
         let anomaly = UsrMath.isVolumeAnomaly(runtime.analysis[index], runtime.settings)
         if anomaly {
             runtime.sequenceLength += 1
             if runtime.sequenceLength >= runtime.settings.maxSequenceLength {
-                sequence(runtime, newest: index, count: runtime.sequenceLength, detection: index)
+                sequence(runtime, newest: index, count: runtime.sequenceLength,
+                         detection: index, pending: &pending)
                 runtime.sequenceLength = 1
             }
         } else {
             if index > 0, UsrMath.isVolumeAnomaly(runtime.analysis[index - 1], runtime.settings),
                runtime.sequenceLength > 0 {
-                sequence(runtime, newest: index - 1, count: runtime.sequenceLength, detection: index)
+                sequence(runtime, newest: index - 1, count: runtime.sequenceLength,
+                         detection: index, pending: &pending)
             }
             runtime.sequenceLength = 0
         }
+        commitPending(runtime, pending: pending)
         lifecycle(runtime, index: index)
         trim(runtime)
     }
@@ -485,12 +536,14 @@ enum UsrEngine {
         candles: [Candle],
         settings: UsrSettings,
         chartIntervalSeconds: TimeInterval?,
+        continuousSession: Bool = false,
         now: Date = Date(),
         lastCandleIsOpen: Bool? = nil
     ) -> UsrComputation? {
         guard settings.enabled, settings.isValid, !candles.isEmpty else { return nil }
         let prepared = UsrTimeframe.prepare(candles: candles, settings: settings,
-            chartSeconds: chartIntervalSeconds, now: now, lastCandleIsOpen: lastCandleIsOpen)
+            chartSeconds: chartIntervalSeconds, continuousSession: continuousSession,
+            now: now, lastCandleIsOpen: lastCandleIsOpen)
         let runtime = Runtime(settings: settings, analysis: prepared.analysisCandles,
             timeframeTag: prepared.timeframeTag)
         var events: [Int: [Int]] = [:]
@@ -508,8 +561,11 @@ enum UsrEngine {
             processSignals(runtime, candles: prepared.chartCandles, chartIndex: chartIndex,
                            chartAtr: chartAtr[chartIndex] ?? fallback)
         }
-        let last = max(0, prepared.chartCandles.count - 1)
-        let reference = prepared.chartCandles.indices.contains(last) ? prepared.chartCandles[last].close : 0
+        // Pine updates last-bar visuals and its rendering-only proximity
+        // window on the live bar while state transitions remain confirmed.
+        let last = max(0, prepared.presentationCandles.count - 1)
+        let reference = prepared.presentationCandles.indices.contains(last)
+            ? prepared.presentationCandles[last].close : 0
         return UsrComputation(
             renderModel: render(runtime, lastBar: last, reference: reference),
             supportZones: runtime.support,

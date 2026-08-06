@@ -94,6 +94,8 @@ export type UsrFvgLifecycle =
 
 export interface UsrFvg {
   id: string;
+  /** Mirrors whether Pine retained this record's sole FVG/IFVG box. */
+  visualVisible: boolean;
   top: number;
   bottom: number;
   ce: number;
@@ -154,6 +156,8 @@ export interface UsrComputation {
 
 export interface UsrComputeContext {
   chartIntervalSeconds: number | null;
+  /** True for 24/7 instruments whose exchange session has no RTH/ETH split. */
+  continuousSession?: boolean;
   /** Epoch seconds. Used only to decide whether the newest chart/HTF bar is closed. */
   now: number;
   /** Override interval-based inference (tick candles in the app are already closed). */

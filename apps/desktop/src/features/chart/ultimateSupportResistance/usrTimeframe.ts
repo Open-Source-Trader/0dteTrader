@@ -7,6 +7,9 @@ const DAY = 86_400;
 const WEEK = 604_800;
 
 export interface UsrPreparedHistory {
+  /** Canonical chart input, including the newest open candle for rendering. */
+  presentationCandles: UsrCandle[];
+  /** Fully closed chart candles used by every analytical state transition. */
   chartCandles: UsrCandle[];
   analysisCandles: UsrAnalysisCandle[];
   analysisSeconds: number | null;
@@ -18,15 +21,20 @@ export interface UsrPreparedHistory {
 interface TimeframeValue {
   seconds: number | null;
   months: number | null;
+  ticks: number | null;
   tag: string;
 }
 
 function fixedSeconds(seconds: number): TimeframeValue {
-  return { seconds, months: null, tag: String(seconds) };
+  return { seconds, months: null, ticks: null, tag: String(seconds) };
 }
 
 function fixedMonths(months: number): TimeframeValue {
-  return { seconds: null, months, tag: `${months}M` };
+  return { seconds: null, months, ticks: null, tag: `${months}M` };
+}
+
+function fixedTicks(ticks: number): TimeframeValue {
+  return { seconds: null, months: null, ticks, tag: `${ticks}T` };
 }
 
 function autoTimeframe(chartSeconds: number): TimeframeValue {
@@ -51,13 +59,19 @@ function autoTimeframe(chartSeconds: number): TimeframeValue {
 }
 
 export function parseUsrTimeframeValue(value: string): TimeframeValue | null {
-  const match = /^([1-9]\d*)(S|D|W|M)?$/.exec(value.trim().toUpperCase());
+  const match = /^([1-9]\d*)?(T|S|D|W|M)?$/.exec(value.trim().toUpperCase());
   if (!match) return null;
-  const amount = Number(match[1]);
+  const unit = match[2] ?? '';
+  if (!match[1] && unit.length === 0) return null;
+  const amount = Number(match[1] ?? 1);
   if (!Number.isSafeInteger(amount)) return null;
-  switch (match[2] ?? '') {
+  switch (unit) {
+    case 'T':
+      return [1, 10, 100, 1_000].includes(amount) ? fixedTicks(amount) : null;
     case 'S':
-      return [1, 5, 10, 15, 30, 45].includes(amount) ? fixedSeconds(amount) : null;
+      return [1, 5, 10, 15, 30, 45].includes(amount)
+        ? { ...fixedSeconds(amount), tag: `${amount}S` }
+        : null;
     case 'D':
       return amount <= 365 ? { ...fixedSeconds(amount * DAY), tag: `${amount}D` } : null;
     case 'W':
@@ -65,6 +79,7 @@ export function parseUsrTimeframeValue(value: string): TimeframeValue | null {
     case 'M':
       return amount <= 12 ? fixedMonths(amount) : null;
     default:
+      if (!match[1]) return null;
       return amount <= 1_440 ? { ...fixedSeconds(amount * 60), tag: String(amount) } : null;
   }
 }
@@ -75,7 +90,12 @@ function selectedTimeframe(
 ): TimeframeValue | null {
   switch (settings.analysisTimeframe) {
     case 'chart':
-      return chartSeconds === null ? null : fixedSeconds(chartSeconds);
+      return chartSeconds === null
+        ? null
+        : {
+            ...fixedSeconds(chartSeconds),
+            tag: chartTimeframeTag(chartSeconds) ?? String(chartSeconds),
+          };
     case 'auto':
       return chartSeconds === null ? null : autoTimeframe(chartSeconds);
     case '4h':
@@ -144,6 +164,7 @@ function aggregate(
   weekly: boolean,
   chartSeconds: number | null,
   useChartClock: boolean,
+  continuousSession: boolean,
 ): UsrAnalysisCandle[] {
   const groups: Array<{ key: string; start: number; end: number; candle: UsrCandle }> = [];
   candles.forEach((candle, chartIndex) => {
@@ -172,7 +193,7 @@ function aggregate(
       eventChartIndex,
       eventTime: candles[eventChartIndex].time + (chartSeconds ?? 0),
       closeTime: candles[group.end].time + (chartSeconds ?? 0),
-      regularSession: isRegularSession(group.candle.time),
+      regularSession: continuousSession || isRegularSession(group.candle.time),
       atr: null,
       volumeMean: null,
       volumeStd: null,
@@ -191,11 +212,13 @@ export function prepareUsrHistory(
   context: UsrComputeContext,
 ): UsrPreparedHistory {
   const warnings: string[] = [];
-  const sorted = input
-    .filter(isFiniteCandle)
-    .map((candle) => ({ ...candle }))
-    .sort((a, b) => a.time - b.time)
-    .filter((candle, index, array) => index === 0 || candle.time !== array[index - 1].time);
+  const candlesByTime = new Map<number, UsrCandle>();
+  for (const candle of input) {
+    if (isFiniteCandle(candle)) candlesByTime.set(candle.time, { ...candle });
+  }
+  // A later record at the same timestamp is the provider/live-stream
+  // correction. Keeping the first record would silently analyze stale OHLCV.
+  const sorted = [...candlesByTime.values()].sort((a, b) => a.time - b.time);
   if (sorted.length !== input.length) {
     warnings.push('Invalid or duplicate candles were excluded before analysis.');
   }
@@ -220,14 +243,18 @@ export function prepareUsrHistory(
   const requestedIsChartClock =
     settings.analysisTimeframe === 'chart' ||
     (requested !== null && requested.tag === chartTimeframeTag(context.chartIntervalSeconds));
+  const requestedIsLower =
+    context.chartIntervalSeconds !== null &&
+    requestedComparableSeconds !== null &&
+    requestedComparableSeconds < context.chartIntervalSeconds;
   if (
     context.chartIntervalSeconds === null ||
     requested === null ||
     requestedComparableSeconds === null ||
-    requestedComparableSeconds < context.chartIntervalSeconds ||
+    requestedIsLower ||
     (requestedComparableSeconds === context.chartIntervalSeconds && requestedIsChartClock)
   ) {
-    if (settings.analysisTimeframe !== 'chart') {
+    if (requestedIsLower) {
       warnings.push(
         'The selected analysis timeframe is not above the chart timeframe; chart bars are used.',
       );
@@ -246,6 +273,7 @@ export function prepareUsrHistory(
     !usedChartTimeframe && timeframeTag.endsWith('W'),
     context.chartIntervalSeconds,
     usedChartTimeframe,
+    context.continuousSession === true,
   );
   applyLaggedVolumeBaselines(
     analysisCandles,
@@ -254,6 +282,7 @@ export function prepareUsrHistory(
     analysisSeconds !== null && analysisSeconds < DAY,
   );
   return {
+    presentationCandles: sorted,
     chartCandles,
     analysisCandles,
     analysisSeconds,

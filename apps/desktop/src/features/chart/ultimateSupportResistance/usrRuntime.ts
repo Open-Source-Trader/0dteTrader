@@ -30,7 +30,6 @@ export interface UsrRuntime {
   zonesChanged: boolean;
   lastConfluenceBuild: number;
   lastPoolBuild: number;
-  poolGeneration: number;
   previousBullSignal: UsrSignal | null;
   previousBearSignal: UsrSignal | null;
 }
@@ -62,7 +61,6 @@ export function createUsrRuntime(
     zonesChanged: false,
     lastConfluenceBuild: -1,
     lastPoolBuild: -1,
-    poolGeneration: 0,
     previousBullSignal: null,
     previousBearSignal: null,
   };

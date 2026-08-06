@@ -8,7 +8,7 @@ import { Spinner } from '../../design/components/Spinner';
 import { Format } from '../../design/format';
 import { ChevronDownIcon, SlidersIcon, WarningFillIcon } from '../../design/icons';
 import type { ChartStore } from './ChartStore';
-import { CHART_INTERVALS, INTERVAL_HINTS, isTickInterval } from './ChartStore';
+import { CHART_INTERVALS, INTERVAL_HINTS, intervalSeconds, isTickInterval } from './ChartStore';
 import { CandleChart, type ChartTradingProps, type OverlaySeries } from './CandleChart';
 import { DrawToolsMenu, DrawToolsRail } from './DrawingToolbar';
 import type { DrawingsStore } from './drawings';
@@ -27,7 +27,7 @@ import { useOptionsAnalytics } from './optionsAnalytics/useOptionsAnalytics';
 import { computeTwc } from './twc/computeTwc';
 import { mergeScriptRenderModels } from './scriptOverlayTypes';
 import { computeUsr } from './ultimateSupportResistance/computeUsr';
-import { intervalSeconds } from './ChartStore';
+import { isContinuousMarketSymbol } from './symbolSections';
 import './chart.css';
 
 interface ChartViewProps {
@@ -226,11 +226,12 @@ export function ChartView({
       timed('ChartView.ultimateSupportResistance', () =>
         computeUsr(candles, usrSettings, {
           chartIntervalSeconds: isTickInterval(interval) ? null : intervalSeconds(interval),
+          continuousSession: isContinuousMarketSymbol(symbol),
           now: Math.floor(Date.now() / 1_000),
           lastCandleIsOpen: isTickInterval(interval) ? false : undefined,
         }),
       ),
-    [candles, usrSettings, interval],
+    [candles, usrSettings, interval, symbol],
   );
 
   const scriptModel = useMemo(

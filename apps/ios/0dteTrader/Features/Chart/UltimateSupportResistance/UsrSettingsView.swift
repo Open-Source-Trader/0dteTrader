@@ -2,9 +2,34 @@ import SwiftUI
 
 struct UsrSettingsView: View {
     @Binding var settings: UsrSettings
+    @State private var draft: UsrSettings
+
+    private static let colorFields: [WritableKeyPath<UsrSettings, String>] = [
+        \.fvgBullishColor, \.fvgBearishColor, \.fvgCeColor,
+        \.ifvgBullishColor, \.ifvgBearishColor
+    ]
+
+    init(settings: Binding<UsrSettings>) {
+        _settings = settings
+        _draft = State(initialValue: settings.wrappedValue)
+    }
+
+    /// Text fields must permit intermediate invalid input without disabling the
+    /// live indicator. Commit every independently valid change while retaining
+    /// the last persisted value for only the malformed text field.
+    private func commitValidFields(from candidate: UsrSettings) {
+        var committed = candidate
+        if UsrTimeframe.parse(candidate.customTimeframe) == nil {
+            committed.customTimeframe = settings.customTimeframe
+        }
+        for keyPath in Self.colorFields where !ScriptColor.isValid(candidate[keyPath: keyPath]) {
+            committed[keyPath: keyPath] = settings[keyPath: keyPath]
+        }
+        if committed.isValid { settings = committed }
+    }
 
     private func bool(_ keyPath: WritableKeyPath<UsrSettings, Bool>) -> Binding<Bool> {
-        Binding(get: { settings[keyPath: keyPath] }, set: { settings[keyPath: keyPath] = $0 })
+        Binding(get: { draft[keyPath: keyPath] }, set: { draft[keyPath: keyPath] = $0 })
     }
 
     private func int(
@@ -12,8 +37,8 @@ struct UsrSettingsView: View {
         _ range: ClosedRange<Int>
     ) -> Binding<Int> {
         Binding(
-            get: { settings[keyPath: keyPath] },
-            set: { settings[keyPath: keyPath] = min(range.upperBound, max(range.lowerBound, $0)) }
+            get: { draft[keyPath: keyPath] },
+            set: { draft[keyPath: keyPath] = min(range.upperBound, max(range.lowerBound, $0)) }
         )
     }
 
@@ -22,8 +47,8 @@ struct UsrSettingsView: View {
         _ range: ClosedRange<Double>
     ) -> Binding<Double> {
         Binding(
-            get: { settings[keyPath: keyPath] },
-            set: { settings[keyPath: keyPath] = min(range.upperBound, max(range.lowerBound, $0)) }
+            get: { draft[keyPath: keyPath] },
+            set: { draft[keyPath: keyPath] = min(range.upperBound, max(range.lowerBound, $0)) }
         )
     }
 
@@ -33,7 +58,7 @@ struct UsrSettingsView: View {
         _ range: ClosedRange<Int>,
         step: Int = 1
     ) -> some View {
-        Stepper("\(title): \(settings[keyPath: keyPath])", value: int(keyPath, range), in: range, step: step)
+        Stepper("\(title): \(draft[keyPath: keyPath])", value: int(keyPath, range), in: range, step: step)
     }
 
     private func decimal(
@@ -43,7 +68,7 @@ struct UsrSettingsView: View {
         step: Double
     ) -> some View {
         let format = step < 0.001 ? "%.6f" : step < 0.1 ? "%.2f" : "%.1f"
-        let formatted = String(format: format, settings[keyPath: keyPath])
+        let formatted = String(format: format, draft[keyPath: keyPath])
         return Stepper(
             "\(title): \(formatted)",
             value: double(keyPath, range), in: range, step: step
@@ -53,7 +78,7 @@ struct UsrSettingsView: View {
     var body: some View {
         Form {
             Section("Analysis") {
-                Picker("Timeframe", selection: $settings.analysisTimeframe) {
+                Picker("Timeframe", selection: $draft.analysisTimeframe) {
                     Text("Chart").tag("chart")
                     Text("Auto").tag("auto")
                     Text("4 hours").tag("4h")
@@ -64,70 +89,75 @@ struct UsrSettingsView: View {
                     Text("1 month").tag("1m")
                     Text("Custom").tag("custom")
                 }
-                if settings.analysisTimeframe == "custom" {
-                    TextField("Custom timeframe", text: $settings.customTimeframe)
+                if draft.analysisTimeframe == "custom" {
+                    TextField("Custom timeframe", text: $draft.customTimeframe)
                         .textInputAutocapitalization(.characters)
                         .autocorrectionDisabled()
                 }
                 Toggle("Session-aware Volume", isOn: bool(\.sessionAwareVolume))
-                stepper("Volume lookback", \.volumeLookback, 10...200)
-                decimal("Relative volume", \.minimumRelativeVolume, 1...5, step: 0.05)
-                decimal("Volume Z-score", \.minimumVolumeZScore, 0...5, step: 0.25)
-                stepper("Sequence maximum", \.maxSequenceLength, 2...50)
+                stepper("Volume lookback", \.volumeLookback, UsrSettingsBounds.volumeLookback)
+                decimal("Relative volume", \.minimumRelativeVolume, UsrSettingsBounds.minimumRelativeVolume, step: 0.05)
+                decimal("Volume Z-score", \.minimumVolumeZScore, UsrSettingsBounds.minimumVolumeZScore, step: 0.25)
+                stepper("Sequence maximum", \.maxSequenceLength, UsrSettingsBounds.maxSequenceLength)
             }
             Section("Structure") {
-                decimal("Displacement body %", \.displacementBodyPercent, 40...95, step: 5)
-                decimal("Displacement ATR", \.displacementAtrMultiplier, 0.2...3, step: 0.05)
-                stepper("Structure lookback", \.structureLookback, 2...20)
-                stepper("Pivot left", \.pivotLeftBars, 1...10)
-                stepper("Pivot right", \.pivotRightBars, 1...5)
+                decimal("Displacement body %", \.displacementBodyPercent, UsrSettingsBounds.displacementBodyPercent, step: 5)
+                decimal("Displacement ATR", \.displacementAtrMultiplier, UsrSettingsBounds.displacementAtrMultiplier, step: 0.05)
+                stepper("Structure lookback", \.structureLookback, UsrSettingsBounds.structureLookback)
+                stepper("Pivot left", \.pivotLeftBars, UsrSettingsBounds.pivotLeftBars)
+                stepper("Pivot right", \.pivotRightBars, UsrSettingsBounds.pivotRightBars)
                 Toggle("Order Blocks Use Wicks", isOn: bool(\.orderBlockUseWicks))
-                decimal("Gap ATR", \.gapAtrMultiplier, 0.05...3, step: 0.05)
+                decimal("Gap ATR", \.gapAtrMultiplier, UsrSettingsBounds.gapAtrMultiplier, step: 0.05)
                 Toggle("Require True Price Voids", isOn: bool(\.requirePriceVoidGaps))
-                stepper("Break buffer ticks", \.breakBufferTicks, 1...20)
-                decimal("Mitigation fraction", \.zoneMitigationPercent, 0.5...1, step: 0.05)
-                decimal("Instrument minimum tick", \.minimumTick, 0.000_001...100, step: 0.000_001)
+                stepper("Break buffer ticks", \.breakBufferTicks, UsrSettingsBounds.breakBufferTicks)
+                decimal("Mitigation fraction", \.zoneMitigationPercent, UsrSettingsBounds.zoneMitigationPercent, step: 0.05)
+                decimal("Instrument minimum tick", \.minimumTick, UsrSettingsBounds.minimumTick, step: 0.000_001)
             }
             Section("Levels & Derived Areas") {
                 Toggle("Price Proximity Filter", isOn: bool(\.enableProximityFilter))
-                decimal("Proximity %", \.proximityPercent, 1...50, step: 1)
-                stepper("Support retention", \.maxSupportLevels, 1...500)
-                stepper("Resistance retention", \.maxResistanceLevels, 1...500)
+                decimal("Proximity %", \.proximityPercent, UsrSettingsBounds.proximityPercent, step: 1)
+                stepper("Support retention", \.maxSupportLevels, UsrSettingsBounds.maxSupportLevels)
+                stepper("Resistance retention", \.maxResistanceLevels, UsrSettingsBounds.maxResistanceLevels)
                 Toggle("S/R Flips", isOn: bool(\.enableSrFlip))
                 Toggle("Show Flipped Origins", isOn: bool(\.showFlippedOrigins))
                 Toggle("Show All Broken", isOn: bool(\.showAllBrokenLevels))
                 Toggle("Confluence Areas", isOn: bool(\.showConfluence))
                 Toggle("Liquidity Pools", isOn: bool(\.showLiquidityPools))
                 Toggle("Hide Pooled Lines", isOn: bool(\.hidePooledLines))
-                stepper("Pool minimum levels", \.poolClusterThreshold, 2...10)
-                decimal("Pool ATR factor", \.poolAtrFactor, 1...5, step: 0.1)
-                stepper("Support pools", \.maxSupportPools, 1...60)
-                stepper("Resistance pools", \.maxResistancePools, 1...60)
+                stepper("Pool minimum levels", \.poolClusterThreshold, UsrSettingsBounds.poolClusterThreshold)
+                decimal("Pool ATR factor", \.poolAtrFactor, UsrSettingsBounds.poolAtrFactor, step: 0.1)
+                stepper("Support pools", \.maxSupportPools, UsrSettingsBounds.maxSupportPools)
+                stepper("Resistance pools", \.maxResistancePools, UsrSettingsBounds.maxResistancePools)
             }
             Section("Fair Value Gaps") {
                 Toggle("FVGs", isOn: bool(\.showFvg))
                 Toggle("Inverse FVGs", isOn: bool(\.showIfvg))
                 Toggle("Consequent Encroachment", isOn: bool(\.showFvgCe))
                 Toggle("Labels", isOn: bool(\.showFvgLabels))
-                Picker("Fill milestone", selection: $settings.fvgFillMode) {
+                Picker("Fill milestone", selection: $draft.fvgFillMode) {
                     Text("Touch").tag("touch")
                     Text("Close inside").tag("close")
                     Text("50% CE").tag("ce")
                     Text("Custom %").tag("percent")
                 }
-                decimal("Fill %", \.fvgFillPercent, 10...100, step: 5)
-                stepper("Body lookback", \.fvgLookback, 3...50)
-                decimal("Body factor", \.fvgBodyPercent, 0.05...3, step: 0.01)
-                decimal("Wick factor", \.fvgWickPercent, 0...2, step: 0.05)
-                stepper("Visible per side", \.maxVisibleFvgs, 1...15)
-                stepper("Maximum age", \.fvgMaxBarsActive, 10...500)
-                decimal("Minimum gap ATR", \.fvgMinGapAtr, 0...1, step: 0.01)
-                decimal("Minimum body ATR", \.fvgMinBodyAtr, 0...3, step: 0.05)
-                TextField("Bullish FVG color", text: $settings.fvgBullishColor)
-                TextField("Bearish FVG color", text: $settings.fvgBearishColor)
-                TextField("FVG CE color", text: $settings.fvgCeColor)
-                TextField("Bullish IFVG color", text: $settings.ifvgBullishColor)
-                TextField("Bearish IFVG color", text: $settings.ifvgBearishColor)
+                decimal("Fill %", \.fvgFillPercent, UsrSettingsBounds.fvgFillPercent, step: 5)
+                stepper("Body lookback", \.fvgLookback, UsrSettingsBounds.fvgLookback)
+                decimal("Body factor", \.fvgBodyPercent, UsrSettingsBounds.fvgBodyPercent, step: 0.01)
+                decimal("Wick factor", \.fvgWickPercent, UsrSettingsBounds.fvgWickPercent, step: 0.05)
+                stepper("Visible per side", \.maxVisibleFvgs, UsrSettingsBounds.maxVisibleFvgs)
+                stepper("Maximum age", \.fvgMaxBarsActive, UsrSettingsBounds.fvgMaxBarsActive)
+                decimal("Minimum gap ATR", \.fvgMinGapAtr, UsrSettingsBounds.fvgMinGapAtr, step: 0.01)
+                decimal("Minimum body ATR", \.fvgMinBodyAtr, UsrSettingsBounds.fvgMinBodyAtr, step: 0.05)
+                TextField("Bullish FVG color", text: $draft.fvgBullishColor)
+                TextField("Bearish FVG color", text: $draft.fvgBearishColor)
+                TextField("FVG CE color", text: $draft.fvgCeColor)
+                TextField("Bullish IFVG color", text: $draft.ifvgBullishColor)
+                TextField("Bearish IFVG color", text: $draft.ifvgBearishColor)
+                if !draft.isValid {
+                    Text("Invalid timeframe or color. The last valid value remains active.")
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
             }
             Section("Signals") {
                 Toggle("Bounce Signals", isOn: bool(\.showBounceSignals))
@@ -135,17 +165,20 @@ struct UsrSettingsView: View {
                 Toggle("Wick or Volume Qualification", isOn: bool(\.signalRequireQualification))
                 Toggle("Confirmation Direction", isOn: bool(\.requireConfirmationCandleDirection))
                 Toggle("Cancel Nearby Opposing", isOn: bool(\.cancelOpposingSignal))
-                stepper("Recent markers", \.maxRecentSignalsTotal, 5...100)
+                stepper("Recent markers", \.maxRecentSignalsTotal, UsrSettingsBounds.maxRecentSignalsTotal)
             }
             Section {
                 Button("Reset Ultimate S/R", role: .destructive) {
-                    let enabled = settings.enabled
-                    settings = .default
-                    settings.enabled = enabled
+                    let enabled = draft.enabled
+                    draft = .default
+                    draft.enabled = enabled
                 }
             }
         }
         .navigationTitle("Ultimate S/R")
         .navigationBarTitleDisplayMode(.inline)
+        .onChange(of: draft) { _, candidate in
+            commitValidFields(from: candidate)
+        }
     }
 }

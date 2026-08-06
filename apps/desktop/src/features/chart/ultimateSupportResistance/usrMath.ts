@@ -14,7 +14,15 @@ export function clamp(value: number, minimum: number, maximum: number): number {
 
 export function quantizedPriceKey(price: number, minimumTick: number): string {
   const scaled = Math.round(price / minimumTick);
-  return Number.isSafeInteger(scaled) ? String(scaled) : price.toPrecision(15);
+  if (Number.isSafeInteger(scaled)) return String(scaled);
+  // Preserve a deterministic *quantized* identity even when tick scaling
+  // exceeds the exact-integer range. Decimal formatting is locale/runtime
+  // dependent; the rounded scaled value's IEEE-754 bits are cross-platform.
+  const bytes = new DataView(new ArrayBuffer(8));
+  const overflowed = !Number.isFinite(scaled);
+  bytes.setFloat64(0, overflowed ? price : scaled, false);
+  const prefix = overflowed ? 'price-bits' : 'bits';
+  return `${prefix}:${bytes.getBigUint64(0, false).toString(16).padStart(16, '0')}`;
 }
 
 export function isFiniteCandle(candle: UsrCandle): boolean {
@@ -150,15 +158,4 @@ export function isDirectionalDisplacement(
     candle.atr > 0 &&
     body >= candle.atr * atrMultiplier
   );
-}
-
-export function rollingLaggedMean(values: readonly number[], length: number): Array<number | null> {
-  const result: Array<number | null> = Array.from({ length: values.length }, () => null);
-  let sum = 0;
-  for (let index = 0; index < values.length; index += 1) {
-    if (index > 0) sum += values[index - 1];
-    if (index > length) sum -= values[index - length - 1];
-    if (index >= length) result[index] = sum / length;
-  }
-  return result;
 }

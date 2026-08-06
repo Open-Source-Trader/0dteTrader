@@ -1,8 +1,39 @@
 import { USR } from './usrConstants';
-import { clamp, quantizedPriceKey, rollingLaggedMean } from './usrMath';
+import { clamp, quantizedPriceKey } from './usrMath';
 import type { UsrRuntime } from './usrRuntime';
 import type { UsrFvg, UsrFvgDirection } from './usrTypes';
 import { activeAnalysisAtr, isAbove, isBelow } from './usrZones';
+
+function visibleCount(owner: readonly UsrFvg[]): number {
+  return owner.reduce((count, fvg) => count + Number(fvg.visualVisible), 0);
+}
+
+/** Pine deletes drawings from the oldest retained record toward the newest. */
+function enforceVisualCap(runtime: UsrRuntime, owner: UsrFvg[]): void {
+  let count = visibleCount(owner);
+  for (
+    let index = owner.length - 1;
+    count > runtime.settings.maxVisibleFvgs && index >= 0;
+    index -= 1
+  ) {
+    if (!owner[index].visualVisible) continue;
+    owner[index].visualVisible = false;
+    count -= 1;
+  }
+}
+
+function reserveVisualSlot(runtime: UsrRuntime, owner: UsrFvg[]): void {
+  let count = visibleCount(owner);
+  for (
+    let index = owner.length - 1;
+    count >= runtime.settings.maxVisibleFvgs && index >= 0;
+    index -= 1
+  ) {
+    if (!owner[index].visualVisible) continue;
+    owner[index].visualVisible = false;
+    count -= 1;
+  }
+}
 
 function fvgId(
   runtime: UsrRuntime,
@@ -30,6 +61,7 @@ function createFvg(
   if (owner.some((fvg) => fvg.id === id)) return;
   const fvg: UsrFvg = {
     id,
+    visualVisible: true,
     top,
     bottom,
     ce: (top + bottom) / 2,
@@ -49,6 +81,7 @@ function createFvg(
     lastSweepSignalAnalysisBar: 0,
   };
   owner.unshift(fvg);
+  enforceVisualCap(runtime, owner);
   if (owner.length > USR.maximumStoredFvgsPerSide) owner.length = USR.maximumStoredFvgsPerSide;
 }
 
@@ -58,11 +91,20 @@ function detect(runtime: UsrRuntime): void {
   const first = runtime.analysis[index - 2];
   const displacement = runtime.analysis[index - 1];
   const third = runtime.analysis[index];
-  const bodies = runtime.analysis.map((candle) => Math.abs(candle.close - candle.open));
-  const averages = rollingLaggedMean(bodies, runtime.settings.fvgLookback);
-  const body = bodies[index - 1];
-  const average = averages[index - 1];
-  if (average === null) return;
+  const displacementIndex = index - 1;
+  const lookback = runtime.settings.fvgLookback;
+  if (displacementIndex < lookback) return;
+  let laggedBodyTotal = 0;
+  for (
+    let bodyIndex = displacementIndex - lookback;
+    bodyIndex < displacementIndex;
+    bodyIndex += 1
+  ) {
+    const candle = runtime.analysis[bodyIndex];
+    laggedBodyTotal += Math.abs(candle.close - candle.open);
+  }
+  const body = Math.abs(displacement.close - displacement.open);
+  const average = laggedBodyTotal / lookback;
   const wickTolerance = body * runtime.settings.fvgWickPercent;
   const displacementAtr =
     runtime.timeframeTag === 'chart' ? activeAnalysisAtr(runtime, displacement) : displacement.atr;
@@ -88,8 +130,14 @@ function detect(runtime: UsrRuntime): void {
   }
 }
 
-function activateInverse(runtime: UsrRuntime, fvg: UsrFvg): void {
+function activateInverse(runtime: UsrRuntime, owner: UsrFvg[], fvg: UsrFvg): void {
   if (!runtime.settings.showIfvg || fvg.ifvgActive) return;
+  // One record owns at most one drawing. Retire the original, reserve by Pine's
+  // oldest-record order, then materialize the inverse even when the original
+  // had already been hidden by the cap.
+  fvg.visualVisible = false;
+  reserveVisualSlot(runtime, owner);
+  fvg.visualVisible = true;
   fvg.ifvgActive = true;
   fvg.ifvgAnalysisBirth = runtime.analysisBarId;
   fvg.lifecycle = 'inverted';
@@ -111,7 +159,10 @@ function processSide(runtime: UsrRuntime, owner: UsrFvg[], bullishOriginal: bool
         runtime.analysisBarId - fvg.ifvgAnalysisBirth > runtime.settings.fvgMaxBarsActive;
       if (broken || expired) {
         fvg.ifvgActive = false;
-        fvg.ifvgEndBar = candle.chartEndIndex;
+        // Pine extends the box on the chart execution bar before retiring it.
+        // For HTF analysis that is the first chart bar after the HTF close,
+        // not the last constituent bar of the closed HTF candle.
+        fvg.ifvgEndBar = candle.eventChartIndex;
         fvg.lifecycle = expired ? 'expired' : 'invalidated';
       }
       continue;
@@ -120,7 +171,7 @@ function processSide(runtime: UsrRuntime, owner: UsrFvg[], bullishOriginal: bool
     const expired = runtime.analysisBarId - fvg.analysisBirth > runtime.settings.fvgMaxBarsActive;
     if (expired) {
       fvg.isActive = false;
-      fvg.endBar = candle.chartEndIndex;
+      fvg.endBar = candle.eventChartIndex;
       fvg.lifecycle = 'expired';
       continue;
     }
@@ -158,9 +209,9 @@ function processSide(runtime: UsrRuntime, owner: UsrFvg[], bullishOriginal: bool
     if (milestone) fvg.milestoneReached = true;
     if (farEdgeClosed) {
       fvg.isActive = false;
-      fvg.endBar = candle.chartEndIndex;
+      fvg.endBar = candle.eventChartIndex;
       fvg.lifecycle = runtime.settings.showIfvg ? 'inverted' : 'invalidated';
-      activateInverse(runtime, fvg);
+      activateInverse(runtime, owner, fvg);
     } else if (farEdgeWicked) {
       fvg.lifecycle = 'wick-filled';
     } else if (
@@ -172,6 +223,7 @@ function processSide(runtime: UsrRuntime, owner: UsrFvg[], bullishOriginal: bool
       fvg.lifecycle = 'partial';
     }
   }
+  enforceVisualCap(runtime, owner);
 }
 
 export function fvgStrength(runtime: UsrRuntime, fvg: UsrFvg, inverse: boolean): number {

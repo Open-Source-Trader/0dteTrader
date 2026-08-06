@@ -128,9 +128,9 @@ export const DEFAULT_USR_SETTINGS: UsrSettings = {
   ifvgBearishColor: 'rgba(156, 39, 176, 0.15)',
 };
 
-type NumberBounds = { minimum: number; maximum: number; integer?: boolean };
+export type UsrNumberBounds = { minimum: number; maximum: number; integer?: boolean };
 
-const NUMBER_BOUNDS: Record<keyof UsrSettings, NumberBounds | undefined> = {
+export const USR_NUMBER_BOUNDS: Record<keyof UsrSettings, UsrNumberBounds | undefined> = {
   enabled: undefined,
   enableProximityFilter: undefined,
   proximityPercent: { minimum: 1, maximum: 50 },
@@ -216,7 +216,7 @@ export function validateUsrSettings(candidate: unknown): UsrSettings {
   for (const key of expected as Array<keyof UsrSettings>) {
     const defaultValue = DEFAULT_USR_SETTINGS[key];
     const field = merged[key];
-    const bounds = NUMBER_BOUNDS[key];
+    const bounds = USR_NUMBER_BOUNDS[key];
     if (bounds) {
       if (
         typeof field !== 'number' ||

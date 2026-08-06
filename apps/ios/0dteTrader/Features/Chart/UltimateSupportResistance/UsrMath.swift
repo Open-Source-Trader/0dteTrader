@@ -6,11 +6,19 @@ enum UsrMath {
     }
 
     static func quantizedPriceKey(_ price: Double, minimumTick: Double) -> String {
-        let scaled = (price / minimumTick).rounded()
+        // Pine math.round() resolves exact halves upward (toward +infinity),
+        // unlike Swift's default toNearestOrAwayFromZero for negative values.
+        let scaled = floor(price / minimumTick + 0.5)
         if scaled.isFinite, abs(scaled) <= 9_007_199_254_740_991 {
             return String(Int64(scaled))
         }
-        return String(format: "%.15g", price)
+        // Use the quantized value, not the raw price, so identity continues to
+        // reflect the minimum-tick equivalence relation outside Int64 range.
+        // If division itself overflows, retain raw-price uniqueness explicitly.
+        let overflowed = !scaled.isFinite
+        let bits = String((overflowed ? price : scaled).bitPattern, radix: 16)
+        let prefix = overflowed ? "price-bits" : "bits"
+        return "\(prefix):\(String(repeating: "0", count: max(0, 16 - bits.count)))\(bits)"
     }
 
     static func trueRange(_ candle: Candle, _ previous: Candle?) -> Double {
@@ -63,14 +71,4 @@ enum UsrMath {
             && body >= (candle.atr ?? 0) * settings.displacementAtrMultiplier
     }
 
-    static func rollingLaggedMean(_ values: [Double], length: Int) -> [Double?] {
-        var result = Array<Double?>(repeating: nil, count: values.count)
-        var sum = 0.0
-        for index in values.indices {
-            if index > 0 { sum += values[index - 1] }
-            if index > length { sum -= values[index - length - 1] }
-            if index >= length { result[index] = sum / Double(length) }
-        }
-        return result
-    }
 }

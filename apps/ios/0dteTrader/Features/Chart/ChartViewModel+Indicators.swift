@@ -61,6 +61,11 @@ struct IndicatorRenderSnapshot: Equatable, Sendable {
     }
 }
 
+struct ChartScriptPresentation {
+    let renderModel: ScriptRenderModel?
+    let warning: String?
+}
+
 extension ChartViewModel {
     var indicatorRenderModel: IndicatorRenderModel {
         indicatorRenderSnapshot.renderModel
@@ -122,11 +127,18 @@ extension ChartViewModel {
             candles: candles,
             settings: usrSettings,
             chartIntervalSeconds: interval.isTick ? nil : interval.seconds,
+            continuousSession: ChartSymbolCatalog.isContinuousMarket(symbol),
             lastCandleIsOpen: interval.isTick ? false : nil
         )
     }
 
-    var scriptRenderModel: TwcRenderModel? {
-        TwcRenderModel.merging([twcRenderModel, usrComputation?.renderModel])
+    /// Computes each stateful script once for a chart presentation so the
+    /// renderer and diagnostic row cannot observe different snapshots.
+    var scriptPresentation: ChartScriptPresentation {
+        let usr = usrComputation
+        return ChartScriptPresentation(
+            renderModel: ScriptRenderModel.merging([twcRenderModel, usr?.renderModel]),
+            warning: usr?.warnings.first
+        )
     }
 }

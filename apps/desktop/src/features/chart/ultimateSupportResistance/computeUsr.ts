@@ -43,8 +43,10 @@ export function computeUsr(
       chartAtr[chartIndex] ?? fallbackAtr,
     );
   }
-  const lastBar = Math.max(0, prepared.chartCandles.length - 1);
-  const reference = prepared.chartCandles[lastBar]?.close ?? 0;
+  // Pine updates last-bar visuals and its rendering-only proximity window on
+  // the live bar, while all analytical transitions remain close-confirmed.
+  const lastBar = Math.max(0, prepared.presentationCandles.length - 1);
+  const reference = prepared.presentationCandles[lastBar]?.close ?? 0;
   return {
     renderModel: renderUsr(runtime, lastBar, reference),
     supportZones: runtime.supportZones,

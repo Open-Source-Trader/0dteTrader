@@ -124,15 +124,7 @@ function poolBands(
 }
 
 function visibleFvgs(runtime: UsrRuntime, records: UsrFvg[]): UsrFvg[] {
-  return records
-    .map((fvg, index) => ({ fvg, index }))
-    .sort((a, b) => {
-      const aBirth = a.fvg.ifvgAnalysisBirth || a.fvg.analysisBirth;
-      const bBirth = b.fvg.ifvgAnalysisBirth || b.fvg.analysisBirth;
-      return bBirth - aBirth || a.index - b.index;
-    })
-    .slice(0, runtime.settings.maxVisibleFvgs)
-    .map(({ fvg }) => fvg);
+  return records.filter((fvg) => fvg.visualVisible).slice(0, runtime.settings.maxVisibleFvgs);
 }
 
 function fvgGeometry(
@@ -205,7 +197,7 @@ function signalMarkers(runtime: UsrRuntime): ScriptRenderModel['markers'] {
     if (runtime.settings.showSweepSignals) sweepLimit = runtime.settings.maxRecentSignalsTotal;
   }
   const select = (kind: UsrSignal['kind'], limit: number): UsrSignal[] =>
-    runtime.signals.filter((signal) => signal.kind === kind).slice(-limit);
+    limit > 0 ? runtime.signals.filter((signal) => signal.kind === kind).slice(-limit) : [];
   return [...select('bounce', bounceLimit), ...select('sweep', sweepLimit)]
     .sort((a, b) => a.chartBarIndex - b.chartBarIndex)
     .map((signal) => ({
@@ -256,35 +248,36 @@ export function renderUsr(
   const segments = zoneSegments(runtime, lastBar, reference);
   const bands: ScriptBand[] = [];
   if (runtime.settings.showConfluence) {
-    const first = Math.floor(USR.maximumConfluences / 3);
-    const second = Math.floor((USR.maximumConfluences * 2) / 3) - first;
-    const third = USR.maximumConfluences - first - second;
+    const supportLimit = Math.floor(USR.maximumConfluences / 3);
+    const resistanceLimit = Math.floor((USR.maximumConfluences * 2) / 3);
+    const supportBands = confluenceBands(
+      runtime,
+      runtime.supportConfluences,
+      USR_COLORS.confluenceSupport,
+      USR_COLORS.confluenceSupportBorder,
+      reference,
+      supportLimit,
+      lastBar,
+    );
+    bands.push(...supportBands);
+    const resistanceBands = confluenceBands(
+      runtime,
+      runtime.resistanceConfluences,
+      USR_COLORS.confluenceResistance,
+      USR_COLORS.confluenceResistanceBorder,
+      reference,
+      Math.max(0, resistanceLimit - supportBands.length),
+      lastBar,
+    );
+    bands.push(...resistanceBands);
     bands.push(
-      ...confluenceBands(
-        runtime,
-        runtime.supportConfluences,
-        USR_COLORS.confluenceSupport,
-        USR_COLORS.confluenceSupportBorder,
-        reference,
-        first,
-        lastBar,
-      ),
-      ...confluenceBands(
-        runtime,
-        runtime.resistanceConfluences,
-        USR_COLORS.confluenceResistance,
-        USR_COLORS.confluenceResistanceBorder,
-        reference,
-        second,
-        lastBar,
-      ),
       ...confluenceBands(
         runtime,
         runtime.mixedConfluences,
         USR_COLORS.confluenceMixed,
         USR_COLORS.confluenceMixedBorder,
         reference,
-        third,
+        Math.max(0, USR.maximumConfluences - supportBands.length - resistanceBands.length),
         lastBar,
       ),
     );

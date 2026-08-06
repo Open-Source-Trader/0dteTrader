@@ -188,7 +188,9 @@ struct TradeScreenView: View {
                 spotPrice: chartViewModel.quote?.last ?? 0,
                 bid: chartViewModel.quote?.bid,
                 ask: chartViewModel.quote?.ask,
+                expirations: chainViewModel.expirations,
                 selectedExpiration: chainViewModel.selectedExpiration,
+                chartInterval: chartViewModel.interval,
                 apiClient: container.apiClient,
                 settingsStore: container.settingsStore
             )

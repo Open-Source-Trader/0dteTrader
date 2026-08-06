@@ -8,6 +8,27 @@ enum GexHeatmapAdapters {
         return date.formatted(date: .omitted, time: .shortened)
     }
 
+    /// Maps the chart's candle interval to the GEX time-series bucket size,
+    /// so a 5m chart shows 5-minute GEX columns instead of the raw 1-minute
+    /// capture cadence. GEX history has no tick-level granularity (it's
+    /// captured on a wall-clock cadence, not per-trade), so a tick interval
+    /// falls back to the finest bucket available. Desktop parity:
+    /// gexHeatmapAdapters.ts's gexBucketMinutes.
+    static func bucketMinutes(for interval: AnyChartInterval) -> Int {
+        switch interval {
+        case .tick:
+            return 1
+        case .candle(let candle):
+            switch candle {
+            case .m1: return 1
+            case .m5: return 5
+            case .m15: return 15
+            case .m30: return 30
+            case .h1, .h4, .d1, .w1: return 60
+            }
+        }
+    }
+
     /// Term structure: strike x expiration, columns labeled with the expiration date.
     static func columnsAndEntries(
         fromTermStructure snapshot: GexTermStructureSnapshotDTO

@@ -13,18 +13,34 @@ struct GexHeatmapView: View {
     let spotPrice: Double
     let bid: Double?
     let ask: Double?
-    /// Used only as the default expiration for the time-series view.
+    /// Every expiration for the current chain, for the time-series picker.
+    let expirations: [String]
+    /// Default expiration for the time-series view — the chain's current
+    /// selection — until the user picks a different one in the sheet.
     let selectedExpiration: String?
+    /// Downsamples the time-series columns to match the chart's candle size.
+    let chartInterval: AnyChartInterval
     let apiClient: APIClient
     let settingsStore: SettingsStore
 
     @Environment(\.dismiss) private var dismiss
     @State private var viewMode: GexHeatmapViewMode
+    /// Time series' own expiration choice, independent of term structure
+    /// (which always spans every near expiration).
+    @State private var timeSeriesExpiration: String?
     @State private var columns: [GexHeatmapColumn] = []
     @State private var entries: [GexHeatmapEntry] = []
     @State private var isLoading = false
     @State private var errorMessage: String?
     @State private var loadToken = UUID()
+    /// Set once per sheet-open the first time real rows load, so the initial
+    /// pan centers the spot strike without fighting the user's own scrolling
+    /// on every subsequent refresh.
+    @State private var hasCenteredOnSpot = false
+    /// The grid body's own viewport height (sheet height minus the pinned
+    /// header row), captured from `GeometryReader` so centering math can run
+    /// outside the view builder.
+    @State private var gridViewportHeight: CGFloat = 0
 
     /// Pinch-to-zoom scale and drag pan, each committed at gesture end so the
     /// next gesture starts from where the last one left off rather than
@@ -56,7 +72,9 @@ struct GexHeatmapView: View {
         spotPrice: Double,
         bid: Double?,
         ask: Double?,
+        expirations: [String],
         selectedExpiration: String?,
+        chartInterval: AnyChartInterval,
         apiClient: APIClient,
         settingsStore: SettingsStore
     ) {
@@ -64,10 +82,13 @@ struct GexHeatmapView: View {
         self.spotPrice = spotPrice
         self.bid = bid
         self.ask = ask
+        self.expirations = expirations
         self.selectedExpiration = selectedExpiration
+        self.chartInterval = chartInterval
         self.apiClient = apiClient
         self.settingsStore = settingsStore
         _viewMode = State(initialValue: settingsStore.gexHeatmapView)
+        _timeSeriesExpiration = State(initialValue: selectedExpiration)
     }
 
     private var sortedEntries: [GexHeatmapEntry] {
@@ -107,8 +128,14 @@ struct GexHeatmapView: View {
                 }
             }
         }
-        .task(id: "\(viewMode.rawValue)-\(loadToken.uuidString)") {
+        .task(id: "\(viewMode.rawValue)-\(timeSeriesExpiration ?? "")-\(loadToken.uuidString)") {
             await load()
+        }
+        // The grid, and therefore its measured height, may not exist yet the
+        // first time load() finishes (it's hidden behind the loading state
+        // until entries arrive) — retry centering once geometry is known.
+        .onChange(of: gridViewportHeight) { _, _ in
+            centerOnSpotIfNeeded()
         }
     }
 
@@ -129,13 +156,32 @@ struct GexHeatmapView: View {
             case .timeSeries:
                 let snapshot = try await apiClient.gexHeatmap(
                     symbol: symbol,
-                    expiration: selectedExpiration
+                    expiration: timeSeriesExpiration,
+                    bucketMinutes: GexHeatmapAdapters.bucketMinutes(for: chartInterval)
                 )
                 (columns, entries) = GexHeatmapAdapters.columnsAndEntries(fromHeatmap: snapshot)
             }
+            centerOnSpotIfNeeded()
         } catch {
             errorMessage = (error as? APIError)?.userMessage ?? error.localizedDescription
         }
+    }
+
+    /// Pans so the spot-price row lands vertically centered in the sheet —
+    /// once per open, using the pinch/pan committed offset (this grid has no
+    /// native scroll view to call scrollIntoView-equivalent on). Column
+    /// (horizontal) position is left alone; only the strike axis centers.
+    private func centerOnSpotIfNeeded() {
+        guard !hasCenteredOnSpot else { return }
+        let rows = GexHeatmapMath.sortedByStrikeDescending(entries)
+        guard !rows.isEmpty,
+              let closest = GexHeatmapMath.closestStrike(rows, spotPrice: spotPrice),
+              let index = rows.firstIndex(where: { $0.strike == closest })
+        else { return }
+        hasCenteredOnSpot = true
+        let viewportRows = max(1, Int(gridViewportHeight / gridRowHeight))
+        let targetTopRow = max(0, index - viewportRows / 2)
+        committedOffset.height = -CGFloat(targetTopRow) * gridRowHeight
     }
 
     private func selectViewMode(_ mode: GexHeatmapViewMode) {
@@ -154,6 +200,9 @@ struct GexHeatmapView: View {
                 statField(label: "Bid", value: bid.map { Format.price($0) } ?? "—")
                 statField(label: "Ask", value: ask.map { Format.price($0) } ?? "—")
                 Spacer()
+                if viewMode == .timeSeries, !expirations.isEmpty {
+                    expirationPicker
+                }
             }
             Picker("View", selection: Binding(get: { viewMode }, set: selectViewMode)) {
                 Text("Term Structure").tag(GexHeatmapViewMode.termStructure)
@@ -164,6 +213,27 @@ struct GexHeatmapView: View {
         .padding(.horizontal, AppSpacing.md)
         .padding(.vertical, AppSpacing.sm)
         .background(Color(white: 0.04))
+    }
+
+    private var expirationPicker: some View {
+        Menu {
+            ForEach(expirations, id: \.self) { expiration in
+                Button(expiration) {
+                    guard expiration != timeSeriesExpiration else { return }
+                    hasCenteredOnSpot = false
+                    timeSeriesExpiration = expiration
+                }
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Text(timeSeriesExpiration ?? "Expiration")
+                    .font(.system(.caption, design: .monospaced).weight(.semibold))
+                Image(systemName: "chevron.down")
+                    .font(.caption2)
+            }
+            .foregroundStyle(.white.opacity(0.85))
+        }
+        .accessibilityLabel("Expiration")
     }
 
     private func statField(label: String, value: String) -> some View {
@@ -195,6 +265,11 @@ struct GexHeatmapView: View {
             let clamped = clampedOffset(proposed: offset, viewport: proxy.size)
 
             ZStack(alignment: .topLeading) {
+                Color.clear
+                    .onAppear { gridViewportHeight = proxy.size.height }
+                    .onChange(of: proxy.size.height) { _, newValue in
+                        gridViewportHeight = newValue
+                    }
                 dataBody
                     .padding(.leading, strikeColumnWidth)
                     .padding(.top, gridRowHeight)

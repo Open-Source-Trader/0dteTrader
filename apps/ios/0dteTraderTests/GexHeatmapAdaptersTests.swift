@@ -133,4 +133,20 @@ final class GexHeatmapAdaptersTests: XCTestCase {
         XCTAssertEqual(byStrike[495]?.cells.first?.netGex, 50)
         XCTAssertEqual(byStrike[500]?.cells.first?.netGex, 500)
     }
+
+    func testBucketMinutes_matchesEachCandleIntervalToItsOwnMinuteCount() {
+        XCTAssertEqual(GexHeatmapAdapters.bucketMinutes(for: .candle(.m1)), 1)
+        XCTAssertEqual(GexHeatmapAdapters.bucketMinutes(for: .candle(.m5)), 5)
+        XCTAssertEqual(GexHeatmapAdapters.bucketMinutes(for: .candle(.m15)), 15)
+        XCTAssertEqual(GexHeatmapAdapters.bucketMinutes(for: .candle(.m30)), 30)
+        XCTAssertEqual(GexHeatmapAdapters.bucketMinutes(for: .candle(.h1)), 60)
+        XCTAssertEqual(GexHeatmapAdapters.bucketMinutes(for: .candle(.h4)), 60)
+        XCTAssertEqual(GexHeatmapAdapters.bucketMinutes(for: .candle(.d1)), 60)
+        XCTAssertEqual(GexHeatmapAdapters.bucketMinutes(for: .candle(.w1)), 60)
+    }
+
+    func testBucketMinutes_tickIntervalsFallBackToTheFinestBucket() {
+        XCTAssertEqual(GexHeatmapAdapters.bucketMinutes(for: .tick(.t10)), 1)
+        XCTAssertEqual(GexHeatmapAdapters.bucketMinutes(for: .tick(.t250)), 1)
+    }
 }

@@ -3,6 +3,7 @@ import type { ChartTradingSettings } from './chartTradingSettings';
 import { IndicatorSettingsBody } from './IndicatorSettingsView';
 import type { OptionsAnalyticsSettings } from './optionsAnalytics/optionsAnalyticsSettings';
 import type { TwcHeatmapSettings } from './twc/twcSettings';
+import type { UsrSettings } from './ultimateSupportResistance/usrSettings';
 
 interface IndicatorSettingsDesktopProps {
   settings: IndicatorSettingsState;
@@ -13,6 +14,8 @@ interface IndicatorSettingsDesktopProps {
   onToggleTwc: (on: boolean) => void;
   twcSettings: TwcHeatmapSettings;
   onChangeTwcSettings: (settings: TwcHeatmapSettings) => void;
+  usrSettings: UsrSettings;
+  onChangeUsrSettings: (settings: UsrSettings) => void;
   optionsAnalytics: OptionsAnalyticsSettings;
   onChangeOptionsAnalytics: (settings: OptionsAnalyticsSettings) => void;
   chartTrading: ChartTradingSettings;

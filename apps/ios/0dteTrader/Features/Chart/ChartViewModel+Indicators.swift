@@ -116,4 +116,17 @@ extension ChartViewModel {
             intervalSeconds: seconds
         )
     }
+
+    var usrComputation: UsrComputation? {
+        UsrEngine.compute(
+            candles: candles,
+            settings: usrSettings,
+            chartIntervalSeconds: interval.isTick ? nil : interval.seconds,
+            lastCandleIsOpen: interval.isTick ? false : nil
+        )
+    }
+
+    var scriptRenderModel: TwcRenderModel? {
+        TwcRenderModel.merging([twcRenderModel, usrComputation?.renderModel])
+    }
 }

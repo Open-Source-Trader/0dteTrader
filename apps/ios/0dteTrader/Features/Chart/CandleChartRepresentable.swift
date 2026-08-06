@@ -17,9 +17,8 @@ struct CandleChartRepresentable: UIViewRepresentable {
     var volumeWeightedCandleWidth: Bool = false
     var intervalSeconds: TimeInterval = 60
     var drawingsModel: ChartDrawingsModel?
-    /// TWC Heatmap render model: candle repaints, extra line series, and the
-    /// read-only geometry overlay (nil when the script indicator is off).
-    var twcModel: TwcRenderModel?
+    /// Merged stateful-script model: candle repaints, line series, and geometry.
+    var scriptModel: TwcRenderModel?
     /// Current options structure snapshot for the right-edge profile.
     var optionsAnalyticsSnapshot: OptionsAnalyticsSnapshotDTO?
     var optionsAnalyticsSettings: OptionsAnalyticsSettings = .default
@@ -378,7 +377,7 @@ extension CandleChartRepresentable {
         container.overlay.firstTime = candles.first?.time.timeIntervalSince1970 ?? 0
         container.overlay.intervalSeconds = intervalSeconds
         container.overlay.candles = candles
-        container.twcOverlay.model = twcModel
+        container.twcOverlay.model = scriptModel
         container.twcOverlay.candles = candles
         container.indicatorFillOverlay.plans = indicatorFillPlans
         container.indicatorProfileOverlay.rows = indicatorProfileRows
@@ -437,7 +436,7 @@ extension CandleChartRepresentable {
             )
         }
         let candleSet = CandleChartDataSet(entries: candleEntries, label: "Price")
-        if let regimeColors = twcModel?.candleColors {
+        if let regimeColors = scriptModel?.candleColors {
             // TWC regime candles: per-bar colors override the up/down palette.
             // DGCharts falls back to `colors[index]` when the increasing/
             // decreasing colors are nil; hidden (nil) bars keep the default.
@@ -524,7 +523,7 @@ extension CandleChartRepresentable {
         // separate datasets so gaps break the line (Pine linebr) instead of
         // bridging across them.
         var twcLineSets: [LineChartDataSet] = []
-        for line in twcModel?.lines ?? [] {
+        for line in scriptModel?.lines ?? [] {
             var runEntries: [ChartDataEntry] = []
             func flushRun() {
                 guard runEntries.count >= 1 else {

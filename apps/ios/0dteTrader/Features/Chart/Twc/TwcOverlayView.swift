@@ -1,9 +1,8 @@
 import DGCharts
 import UIKit
 
-/// Read-only CoreGraphics overlay for the TWC Heatmap render model: fib level
-/// lines, Gann fans/frames, profit-target bands, labels, signal markers and
-/// area fills (TwcOverlay.tsx analog). Sits between the chart and the
+/// Read-only CoreGraphics overlay for shared stateful-script geometry: lines,
+/// bands, labels, signal markers and area fills (TwcOverlay.tsx analog). Sits between the chart and the
 /// interactive DrawingOverlayView; bar indices map straight through the
 /// chart's left-axis transformer, including indices past the last bar
 /// (forward projection).
@@ -92,8 +91,12 @@ final class TwcOverlayView: UIView {
             context.fill(rect)
             if let border = band.borderColor {
                 context.setStrokeColor(UIColor(twcColor: border).cgColor)
-                context.setLineWidth(1)
-                context.setLineDash(phase: 0, lengths: [])
+                context.setLineWidth(CGFloat(band.borderWidth))
+                switch band.borderStyle {
+                case .dashed: context.setLineDash(phase: 0, lengths: [5, 4])
+                case .dotted: context.setLineDash(phase: 0, lengths: [2, 3])
+                case .solid: context.setLineDash(phase: 0, lengths: [])
+                }
                 context.stroke(rect)
             }
         }
@@ -172,7 +175,7 @@ final class TwcOverlayView: UIView {
                 let text = (marker.text ?? "") as NSString
                 let attributes: [NSAttributedString.Key: Any] = [
                     .font: labelFont,
-                    .foregroundColor: UIColor.white,
+                    .foregroundColor: UIColor(twcColor: marker.textColor ?? "#FFFFFF"),
                 ]
                 let size = text.size(withAttributes: attributes)
                 let w = size.width + 12

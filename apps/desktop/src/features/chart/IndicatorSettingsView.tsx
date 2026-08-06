@@ -17,6 +17,8 @@ import {
 import { TwcSettingsBody } from './TwcSettingsView';
 import type { TwcHeatmapSettings } from './twc/twcSettings';
 import { DEFAULT_CHART_DISPLAY, DEFAULT_INDICATOR_SETTINGS_STATE } from './indicatorRegistry';
+import { UsrSettingsBody } from './UsrSettingsView';
+import type { UsrSettings } from './ultimateSupportResistance/usrSettings';
 
 export interface IndicatorSettingsViewProps {
   settings: IndicatorSettingsState;
@@ -28,6 +30,8 @@ export interface IndicatorSettingsViewProps {
   onToggleTwc: (on: boolean) => void;
   twcSettings: TwcHeatmapSettings;
   onChangeTwcSettings: (settings: TwcHeatmapSettings) => void;
+  usrSettings: UsrSettings;
+  onChangeUsrSettings: (settings: UsrSettings) => void;
   optionsAnalytics: OptionsAnalyticsSettings;
   chartTrading: ChartTradingSettings;
   onChangeChartTrading: (settings: ChartTradingSettings) => void;
@@ -58,6 +62,16 @@ export function IndicatorSettingsBody(
         </div>
         {props.twcEnabled ? (
           <TwcSettingsBody settings={props.twcSettings} onChange={props.onChangeTwcSettings} />
+        ) : null}
+        <div className="settings-field settings-field--row">
+          <span>Ultimate Support &amp; Resistance</span>
+          <Toggle
+            on={props.usrSettings.enabled}
+            onChange={(enabled) => props.onChangeUsrSettings({ ...props.usrSettings, enabled })}
+          />
+        </div>
+        {props.usrSettings.enabled ? (
+          <UsrSettingsBody settings={props.usrSettings} onChange={props.onChangeUsrSettings} />
         ) : null}
       </section>
       <section className="grouped-section">

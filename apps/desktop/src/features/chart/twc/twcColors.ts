@@ -1,3 +1,5 @@
+import { withScriptColorOpacity } from '../scriptOverlayTypes';
+
 /**
  * Fixed colors for the TWC Heatmap V5 port — the Pine script's default
  * palette (TradingView built-ins are Material colors). No user color settings
@@ -66,9 +68,5 @@ export const TWC_COLORS = {
 
 /** rgba() for a hex color at the given opacity (0..1). */
 export function withOpacity(hex: string, opacity: number): string {
-  const raw = hex.replace('#', '');
-  const r = parseInt(raw.slice(0, 2), 16);
-  const g = parseInt(raw.slice(2, 4), 16);
-  const b = parseInt(raw.slice(4, 6), 16);
-  return `rgba(${r}, ${g}, ${b}, ${opacity})`;
+  return withScriptColorOpacity(hex, opacity);
 }

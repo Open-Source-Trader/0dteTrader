@@ -21,6 +21,7 @@ struct TwcMarker: Equatable, Sendable {
     let color: String
     let sizeTiny: Bool
     var text: String? = nil
+    var textColor: String? = nil
 }
 
 struct TwcLine: Equatable, Sendable {
@@ -60,6 +61,8 @@ struct TwcBand: Equatable, Sendable {
     let fillColor: String
     /// Optional stroked outline (swing order blocks).
     var borderColor: String? = nil
+    var borderWidth: Double = 1
+    var borderStyle: TwcSegmentStyle = .solid
 }
 
 enum TwcLabelAlign: String, Equatable, Sendable {
@@ -137,13 +140,7 @@ enum TwcColors {
 
     /// rgba() for a hex color at the given opacity (0...1).
     static func withOpacity(_ hex: String, _ opacity: Double) -> String {
-        let raw = hex.replacingOccurrences(of: "#", with: "")
-        guard raw.count >= 6,
-              let r = Int(raw.prefix(2), radix: 16),
-              let g = Int(raw.dropFirst(2).prefix(2), radix: 16),
-              let b = Int(raw.dropFirst(4).prefix(2), radix: 16)
-        else { return hex }
-        return "rgba(\(r), \(g), \(b), \(opacity))"
+        ScriptColor.withOpacity(hex, opacity)
     }
 }
 

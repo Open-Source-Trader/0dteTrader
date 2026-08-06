@@ -7,6 +7,7 @@ import { IndicatorSettingsBody, IndicatorSettingsView } from './IndicatorSetting
 import { DEFAULT_CHART_DISPLAY, DEFAULT_INDICATOR_SETTINGS_STATE } from './indicatorRegistry';
 import { DEFAULT_OPTIONS_ANALYTICS_SETTINGS } from './optionsAnalytics/optionsAnalyticsSettings';
 import { DEFAULT_TWC_SETTINGS } from './twc/twcSettings';
+import { DEFAULT_USR_SETTINGS } from './ultimateSupportResistance/usrSettings';
 
 function textContent(node: ReactNode): string {
   if (typeof node === 'string' || typeof node === 'number') return String(node);
@@ -58,6 +59,8 @@ describe('IndicatorSettingsView options structure controls', () => {
         onToggleTwc: vi.fn(),
         twcSettings: DEFAULT_TWC_SETTINGS,
         onChangeTwcSettings: vi.fn(),
+        usrSettings: DEFAULT_USR_SETTINGS,
+        onChangeUsrSettings: vi.fn(),
         optionsAnalytics: {
           enabled: true,
           showImpliedRange: true,
@@ -105,6 +108,8 @@ describe('IndicatorSettingsView options structure controls', () => {
       onToggleTwc: vi.fn(),
       twcSettings: DEFAULT_TWC_SETTINGS,
       onChangeTwcSettings: vi.fn(),
+      usrSettings: DEFAULT_USR_SETTINGS,
+      onChangeUsrSettings: vi.fn(),
       optionsAnalytics: DEFAULT_OPTIONS_ANALYTICS_SETTINGS,
       chartTrading: DEFAULT_CHART_TRADING_SETTINGS,
       onChangeChartTrading: vi.fn(),

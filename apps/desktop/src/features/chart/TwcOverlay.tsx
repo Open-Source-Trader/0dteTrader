@@ -1,12 +1,12 @@
 import { useEffect, useRef } from 'react';
 import type { IChartApi, ISeriesApi, Logical } from 'lightweight-charts';
 import type { ChartCandle } from './ChartStore';
-import type { TwcRenderModel, TwcSegment } from './twc/twcTypes';
+import type { ScriptRenderModel, ScriptSegment } from './scriptOverlayTypes';
 
 interface TwcOverlayProps {
   chart: IChartApi;
   series: ISeriesApi<'Candlestick'>;
-  model: TwcRenderModel | null;
+  model: ScriptRenderModel | null;
   /** Candle data version: live updates shift price→y geometry, so repaint. */
   candles: ChartCandle[];
 }
@@ -37,7 +37,7 @@ export function TwcOverlay({ chart, series, model, candles }: TwcOverlayProps) {
       chart.timeScale().logicalToCoordinate(barIndex as Logical);
     const yAt = (price: number): number | null => series.priceToCoordinate(price);
 
-    const applyStyle = (ctx: CanvasRenderingContext2D, segment: TwcSegment): void => {
+    const applyStyle = (ctx: CanvasRenderingContext2D, segment: ScriptSegment): void => {
       ctx.strokeStyle = segment.color;
       ctx.lineWidth = segment.width;
       let dash: number[] = [];
@@ -120,8 +120,11 @@ export function TwcOverlay({ chart, series, model, candles }: TwcOverlayProps) {
         ctx.fillRect(rx, ry, rw, rh);
         if (band.borderColor) {
           ctx.strokeStyle = band.borderColor;
-          ctx.lineWidth = 1;
-          ctx.setLineDash([]);
+          ctx.lineWidth = band.borderWidth ?? 1;
+          let dash: number[] = [];
+          if (band.borderStyle === 'dashed') dash = [5, 4];
+          if (band.borderStyle === 'dotted') dash = [2, 3];
+          ctx.setLineDash(dash);
           ctx.strokeRect(rx, ry, rw, rh);
         }
       }
@@ -212,7 +215,7 @@ export function TwcOverlay({ chart, series, model, candles }: TwcOverlayProps) {
           }
           ctx.closePath();
           ctx.fill();
-          ctx.fillStyle = '#FFFFFF';
+          ctx.fillStyle = marker.textColor ?? '#FFFFFF';
           ctx.fillText(text, x - textWidth / 2, pillY + h / 2 + 3.5);
           ctx.fillStyle = marker.color;
         }

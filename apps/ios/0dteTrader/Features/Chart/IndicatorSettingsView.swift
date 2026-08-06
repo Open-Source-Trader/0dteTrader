@@ -22,6 +22,7 @@ struct IndicatorSettingsView: View {
     @ObservedObject var chartTrading: ChartTradingCoordinator
     /// Closes this popup and raises the TWC script's own settings screen.
     let onOpenTwcSettings: () -> Void
+    let onOpenUsrSettings: () -> Void
     /// Closes the popup. The dropdown has no `dismiss` environment of its own:
     /// it is not presented by SwiftUI, it is drawn by `HudMenuLayer`.
     let onDismiss: () -> Void
@@ -346,6 +347,21 @@ struct IndicatorSettingsView: View {
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("TWC Heatmap V5 settings")
+                )
+            )
+            toggleRow(
+                "Ultimate Support & Resistance",
+                isOn: $chart.usrSettings.enabled,
+                accessory: AnyView(
+                    Button {
+                        onOpenUsrSettings()
+                    } label: {
+                        Image(systemName: "gearshape")
+                            .font(.caption)
+                            .foregroundStyle(Color.appAccent)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Ultimate Support and Resistance settings")
                 )
             )
 

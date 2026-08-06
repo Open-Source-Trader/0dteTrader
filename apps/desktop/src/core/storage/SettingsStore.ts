@@ -21,6 +21,11 @@ import {
 } from '../../features/chart/chartTradingSettings';
 import type { TwcHeatmapSettings } from '../../features/chart/twc/twcSettings';
 import { DEFAULT_TWC_SETTINGS } from '../../features/chart/twc/twcSettings';
+import type { UsrSettings } from '../../features/chart/ultimateSupportResistance/usrSettings';
+import {
+  decodeUsrSettings,
+  DEFAULT_USR_SETTINGS,
+} from '../../features/chart/ultimateSupportResistance/usrSettings';
 
 export type TradeLayout = 'fullscreen' | 'split';
 
@@ -32,6 +37,7 @@ export class SettingsStore {
     indicatorSettings: 'settings.indicatorSettings.v1',
     chartDisplay: 'settings.chartDisplay.v1',
     twcSettings: 'settings.twcSettings',
+    usrSettings: 'settings.ultimateSupportResistance.v1',
     optionsAnalytics: 'settings.optionsAnalytics.v1',
     chartTrading: 'settings.chartTrading.v1',
     riskDisclaimerAccepted: 'settings.riskDisclaimerAccepted',
@@ -260,6 +266,20 @@ export class SettingsStore {
 
   set twcSettings(value: TwcHeatmapSettings) {
     localStorage.setItem(SettingsStore.keys.twcSettings, JSON.stringify(value));
+  }
+
+  get usrSettings(): UsrSettings {
+    const raw = localStorage.getItem(SettingsStore.keys.usrSettings);
+    if (!raw) return { ...DEFAULT_USR_SETTINGS };
+    try {
+      return decodeUsrSettings(JSON.parse(raw));
+    } catch {
+      return { ...DEFAULT_USR_SETTINGS };
+    }
+  }
+
+  set usrSettings(value: UsrSettings) {
+    localStorage.setItem(SettingsStore.keys.usrSettings, JSON.stringify(decodeUsrSettings(value)));
   }
 
   get optionsAnalytics(): OptionsAnalyticsSettings {

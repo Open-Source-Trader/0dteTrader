@@ -113,6 +113,7 @@ struct ChartView: View {
     }
 
     var body: some View {
+        let scriptModel = viewModel.scriptRenderModel
         VStack(spacing: 0) {
             header
 
@@ -131,7 +132,7 @@ struct ChartView: View {
                     volumeWeightedCandleWidth: viewModel.chartDisplayPreferences.volumeWeightedCandleWidth,
                     intervalSeconds: viewModel.interval.seconds,
                     drawingsModel: drawings,
-                    twcModel: viewModel.twcRenderModel,
+                    scriptModel: scriptModel,
                     optionsAnalyticsSnapshot: viewModel.optionsAnalyticsSettings.enabled
                         ? viewModel.optionsAnalyticsSnapshot
                         : nil,
@@ -146,7 +147,7 @@ struct ChartView: View {
                     resetToken: chartResetToken
                 )
                 resetButton { chartResetToken += 1 }
-                if let banner = viewModel.twcRenderModel?.banner {
+                if let banner = scriptModel?.banner {
                     TwcBiasBannerView(banner: banner)
                 }
                 chartTopBar

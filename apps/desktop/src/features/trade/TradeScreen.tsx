@@ -817,6 +817,8 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
                   }
                   twcSettings={chart.twcSettings}
                   onChangeTwcSettings={(settings) => chartStore.setTwcSettings(settings)}
+                  usrSettings={chart.usrSettings}
+                  onChangeUsrSettings={(settings) => chartStore.setUsrSettings(settings)}
                   optionsAnalytics={chart.optionsAnalytics}
                   onChangeOptionsAnalytics={(settings) => chartStore.setOptionsAnalytics(settings)}
                   chartTrading={chartTradingSettings}
@@ -841,6 +843,8 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
           onToggleTwc={(on) => chartStore.setTwcSettings({ ...chart.twcSettings, enabled: on })}
           twcSettings={chart.twcSettings}
           onChangeTwcSettings={(settings) => chartStore.setTwcSettings(settings)}
+          usrSettings={chart.usrSettings}
+          onChangeUsrSettings={(settings) => chartStore.setUsrSettings(settings)}
           optionsAnalytics={chart.optionsAnalytics}
           onChangeOptionsAnalytics={(settings) => chartStore.setOptionsAnalytics(settings)}
           chartTrading={chartTradingSettings}

@@ -188,7 +188,9 @@ struct TradeScreenView: View {
                 spotPrice: chartViewModel.quote?.last ?? 0,
                 bid: chartViewModel.quote?.bid,
                 ask: chartViewModel.quote?.ask,
-                expirations: Array(chainViewModel.expirations.prefix(7))
+                selectedExpiration: chainViewModel.selectedExpiration,
+                apiClient: container.apiClient,
+                settingsStore: container.settingsStore
             )
         }
         .sheet(isPresented: $showAIAnalysis) {

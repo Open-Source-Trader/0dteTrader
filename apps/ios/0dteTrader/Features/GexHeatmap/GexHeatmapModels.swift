@@ -1,15 +1,24 @@
 import SwiftUI
 
-/// One strike's net GEX for a single expiration column. Nil renders as "-".
+/// One strike's net GEX for a single grid column. Nil renders as "-".
 struct GexHeatmapCell {
-    let expiration: String
+    /// Identifies which column this cell belongs to — an expiration date in
+    /// the term-structure view, an ISO timestamp in the time-series view.
+    let columnKey: String
     let netGex: Double?
 }
 
-/// One row of the grid: a strike and its GEX across every visible expiration.
+/// One row of the grid: a strike and its GEX across every visible column.
 struct GexHeatmapEntry {
     let strike: Double
     let cells: [GexHeatmapCell]
+}
+
+/// One column of the grid — its identity plus the label shown in the header.
+struct GexHeatmapColumn: Identifiable {
+    var id: String { key }
+    let key: String
+    let label: String
 }
 
 struct GexCellStyle {

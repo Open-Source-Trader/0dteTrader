@@ -1,30 +1,37 @@
 import SwiftUI
 
-/// GEX heatmap sheet: strike x expiration grid of net gamma exposure for the
-/// active symbol, with a header showing symbol, price, bid and ask.
-///
-/// No gamma-exposure feed exists in the API yet (see packages/shared-types —
-/// OptionsChain has no OI/gamma fields), so this shows an unavailable state
-/// rather than fabricated numbers. Wire `entries` up to a real feed when one
-/// exists; until then this view intentionally renders no GEX data at all.
+/// GEX heatmap sheet: strike x column grid of net gamma exposure for the
+/// active symbol, with a header showing symbol, price, bid, ask, and a
+/// toggle between two views:
+///  - Term Structure (default): strike x expiration, each expiration's own
+///    latest capture — a snapshot of GEX across the chain right now.
+///  - Time Series: strike x timestamp, one expiration over its capture
+///    history — how GEX at this strike has moved intraday.
 /// Desktop parity: apps/desktop/src/features/gexHeatmap/GexHeatmapModal.tsx.
 struct GexHeatmapView: View {
     let symbol: String
     let spotPrice: Double
     let bid: Double?
     let ask: Double?
-    let expirations: [String]
-
-    /// Always empty until a real GEX endpoint exists.
-    private let entries: [GexHeatmapEntry] = []
+    /// Used only as the default expiration for the time-series view.
+    let selectedExpiration: String?
+    let apiClient: APIClient
+    let settingsStore: SettingsStore
 
     @Environment(\.dismiss) private var dismiss
+    @State private var viewMode: GexHeatmapViewMode
+    @State private var columns: [GexHeatmapColumn] = []
+    @State private var entries: [GexHeatmapEntry] = []
+    @State private var isLoading = false
+    @State private var errorMessage: String?
+    @State private var loadToken = UUID()
+
     /// Pinch-to-zoom scale and drag pan, each committed at gesture end so the
     /// next gesture starts from where the last one left off rather than
     /// snapping back. The grid renders at its natural, fully-readable size
     /// (no shrink-to-fit, no value truncation) — zoom and pan are how you
     /// reach cells that don't fit the sheet at 1x, the same as Bullflow's
-    /// GEX map. The strike column and expiration row stay pinned to the
+    /// GEX map. The strike column and column-header row stay pinned to the
     /// sheet's edges and pan only along their own axis, so they always label
     /// whatever data cells are currently in view.
     @State private var committedScale: CGFloat = 1
@@ -44,12 +51,27 @@ struct GexHeatmapView: View {
     private let strikeColumnWidth: CGFloat = 68
     private let gridRowHeight: CGFloat = 38
 
-    private var visibleEntries: [GexHeatmapEntry] {
-        GexHeatmapMath.strikesAroundSpot(entries, spotPrice: spotPrice)
+    init(
+        symbol: String,
+        spotPrice: Double,
+        bid: Double?,
+        ask: Double?,
+        selectedExpiration: String?,
+        apiClient: APIClient,
+        settingsStore: SettingsStore
+    ) {
+        self.symbol = symbol
+        self.spotPrice = spotPrice
+        self.bid = bid
+        self.ask = ask
+        self.selectedExpiration = selectedExpiration
+        self.apiClient = apiClient
+        self.settingsStore = settingsStore
+        _viewMode = State(initialValue: settingsStore.gexHeatmapView)
     }
 
     private var sortedEntries: [GexHeatmapEntry] {
-        GexHeatmapMath.sortedByStrikeDescending(visibleEntries)
+        GexHeatmapMath.sortedByStrikeDescending(entries)
     }
 
     private var maxAbsoluteValue: Double {
@@ -60,7 +82,7 @@ struct GexHeatmapView: View {
         GexHeatmapMath.closestStrike(sortedEntries, spotPrice: spotPrice)
     }
 
-    private var bodyWidth: CGFloat { CGFloat(expirations.count) * cellWidth }
+    private var bodyWidth: CGFloat { CGFloat(columns.count) * cellWidth }
     private var bodyHeight: CGFloat { CGFloat(sortedEntries.count) * gridRowHeight }
 
     var body: some View {
@@ -68,8 +90,10 @@ struct GexHeatmapView: View {
             VStack(spacing: 0) {
                 header
                 Divider().overlay(Color.hudStroke.opacity(0.3))
-                if sortedEntries.isEmpty {
-                    unavailableState
+                if let errorMessage {
+                    unavailableState(message: "GEX data unavailable: \(errorMessage)")
+                } else if sortedEntries.isEmpty {
+                    unavailableState(message: isLoading ? "Loading GEX data…" : "GEX data unavailable")
                 } else {
                     grid
                 }
@@ -83,17 +107,59 @@ struct GexHeatmapView: View {
                 }
             }
         }
+        .task(id: "\(viewMode.rawValue)-\(loadToken.uuidString)") {
+            await load()
+        }
+    }
+
+    private func load() async {
+        errorMessage = nil
+        isLoading = true
+        committedScale = 1
+        committedOffset = .zero
+        defer { isLoading = false }
+        do {
+            switch viewMode {
+            case .termStructure:
+                let snapshot = try await apiClient.gexTermStructure(
+                    symbol: symbol,
+                    expiration: selectedExpiration
+                )
+                (columns, entries) = GexHeatmapAdapters.columnsAndEntries(fromTermStructure: snapshot)
+            case .timeSeries:
+                let snapshot = try await apiClient.gexHeatmap(
+                    symbol: symbol,
+                    expiration: selectedExpiration
+                )
+                (columns, entries) = GexHeatmapAdapters.columnsAndEntries(fromHeatmap: snapshot)
+            }
+        } catch {
+            errorMessage = (error as? APIError)?.userMessage ?? error.localizedDescription
+        }
+    }
+
+    private func selectViewMode(_ mode: GexHeatmapViewMode) {
+        guard mode != viewMode else { return }
+        settingsStore.gexHeatmapView = mode
+        viewMode = mode
     }
 
     private var header: some View {
-        HStack(alignment: .firstTextBaseline, spacing: AppSpacing.md) {
-            Text(symbol)
-                .font(.system(.body, design: .monospaced).weight(.bold))
-                .foregroundStyle(.white)
-            statField(label: "Price", value: Format.price(spotPrice))
-            statField(label: "Bid", value: bid.map { Format.price($0) } ?? "—")
-            statField(label: "Ask", value: ask.map { Format.price($0) } ?? "—")
-            Spacer()
+        VStack(alignment: .leading, spacing: AppSpacing.xs) {
+            HStack(alignment: .firstTextBaseline, spacing: AppSpacing.md) {
+                Text(symbol)
+                    .font(.system(.body, design: .monospaced).weight(.bold))
+                    .foregroundStyle(.white)
+                statField(label: "Price", value: Format.price(spotPrice))
+                statField(label: "Bid", value: bid.map { Format.price($0) } ?? "—")
+                statField(label: "Ask", value: ask.map { Format.price($0) } ?? "—")
+                Spacer()
+            }
+            Picker("View", selection: Binding(get: { viewMode }, set: selectViewMode)) {
+                Text("Term Structure").tag(GexHeatmapViewMode.termStructure)
+                Text("Time Series").tag(GexHeatmapViewMode.timeSeries)
+            }
+            .pickerStyle(.segmented)
         }
         .padding(.horizontal, AppSpacing.md)
         .padding(.vertical, AppSpacing.sm)
@@ -111,11 +177,10 @@ struct GexHeatmapView: View {
         }
     }
 
-    private var unavailableState: some View {
+    private func unavailableState(message: String) -> some View {
         ContentUnavailableView(
-            "GEX Data Unavailable",
-            systemImage: "square.grid.3x3.fill",
-            description: Text("No gamma-exposure feed is connected yet.")
+            message,
+            systemImage: "square.grid.3x3.fill"
         )
         .foregroundStyle(.white.opacity(0.7))
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -123,8 +188,8 @@ struct GexHeatmapView: View {
 
     /// Three layers sharing one scale/offset: the scrollable data body, a
     /// column of strikes pinned to the left edge (pans vertically only), and
-    /// a row of expirations pinned to the top edge (pans horizontally only),
-    /// with a fixed corner cell where the two headers meet.
+    /// a row of column headers pinned to the top edge (pans horizontally
+    /// only), with a fixed corner cell where the two headers meet.
     private var grid: some View {
         GeometryReader { proxy in
             let clamped = clampedOffset(proposed: offset, viewport: proxy.size)
@@ -138,7 +203,7 @@ struct GexHeatmapView: View {
                     .contentShape(Rectangle())
                     .clipped()
 
-                expirationHeaderRow
+                columnHeaderRow
                     .offset(x: clamped.width)
                     .padding(.leading, strikeColumnWidth)
                     .frame(width: proxy.size.width, height: gridRowHeight, alignment: .topLeading)
@@ -198,10 +263,10 @@ struct GexHeatmapView: View {
         )
     }
 
-    private var expirationHeaderRow: some View {
+    private var columnHeaderRow: some View {
         HStack(spacing: 0) {
-            ForEach(expirations, id: \.self) { expiration in
-                Text(expiration)
+            ForEach(columns) { column in
+                Text(column.label)
                     .lineLimit(1)
                     .frame(width: cellWidth)
             }
@@ -238,11 +303,11 @@ struct GexHeatmapView: View {
     }
 
     private func dataRow(_ entry: GexHeatmapEntry) -> some View {
-        let cellByExpiration = Dictionary(uniqueKeysWithValues: entry.cells.map { ($0.expiration, $0.netGex) })
+        let cellByColumn = Dictionary(uniqueKeysWithValues: entry.cells.map { ($0.columnKey, $0.netGex) })
 
         return HStack(spacing: 0) {
-            ForEach(expirations, id: \.self) { expiration in
-                let value = cellByExpiration[expiration] ?? nil
+            ForEach(columns) { column in
+                let value = cellByColumn[column.key] ?? nil
                 let style = GexHeatmapMath.cellStyle(value: value, maxAbsoluteValue: maxAbsoluteValue)
                 Text(GexHeatmapMath.formatGexValue(value))
                     .font(.system(.caption2, design: .monospaced).weight(.bold))

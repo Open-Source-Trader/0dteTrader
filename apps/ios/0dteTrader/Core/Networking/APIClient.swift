@@ -251,6 +251,52 @@ struct APIClient: @unchecked Sendable {
         }
     }
 
+    func gexHeatmap(
+        symbol: String,
+        expiration: String? = nil,
+        strikeRangeAboveSpot: Int? = nil,
+        strikeRangeBelowSpot: Int? = nil,
+        historyWindowMinutes: Int? = nil
+    ) async throws -> GexHeatmapSnapshotDTO {
+        var query = [URLQueryItem(name: "symbol", value: symbol)]
+        if let expiration { query.append(URLQueryItem(name: "expiration", value: expiration)) }
+        if let strikeRangeAboveSpot {
+            query.append(URLQueryItem(name: "strikeRangeAboveSpot", value: String(strikeRangeAboveSpot)))
+        }
+        if let strikeRangeBelowSpot {
+            query.append(URLQueryItem(name: "strikeRangeBelowSpot", value: String(strikeRangeBelowSpot)))
+        }
+        if let historyWindowMinutes {
+            query.append(URLQueryItem(name: "historyWindowMinutes", value: String(historyWindowMinutes)))
+        }
+        return try await request(
+            Endpoint(method: .get, path: "v1/market/options-analytics/gex-heatmap", query: query)
+        )
+    }
+
+    func gexTermStructure(
+        symbol: String,
+        expiration: String? = nil,
+        strikeRangeAboveSpot: Int? = nil,
+        strikeRangeBelowSpot: Int? = nil,
+        maxSnapshotAgeMinutes: Int? = nil
+    ) async throws -> GexTermStructureSnapshotDTO {
+        var query = [URLQueryItem(name: "symbol", value: symbol)]
+        if let expiration { query.append(URLQueryItem(name: "expiration", value: expiration)) }
+        if let strikeRangeAboveSpot {
+            query.append(URLQueryItem(name: "strikeRangeAboveSpot", value: String(strikeRangeAboveSpot)))
+        }
+        if let strikeRangeBelowSpot {
+            query.append(URLQueryItem(name: "strikeRangeBelowSpot", value: String(strikeRangeBelowSpot)))
+        }
+        if let maxSnapshotAgeMinutes {
+            query.append(URLQueryItem(name: "maxSnapshotAgeMinutes", value: String(maxSnapshotAgeMinutes)))
+        }
+        return try await request(
+            Endpoint(method: .get, path: "v1/market/options-analytics/gex-term-structure", query: query)
+        )
+    }
+
     func autoScoringPreferences() async throws -> AutoScoringPreferenceRecord {
         try await request(Endpoint(method: .get, path: "v1/auto-scoring/preferences"))
     }

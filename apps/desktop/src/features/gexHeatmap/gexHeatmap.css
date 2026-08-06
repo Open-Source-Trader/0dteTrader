@@ -7,10 +7,14 @@
   border: 8px solid transparent;
   border-image: var(--hud-src-accent) 28 fill / 24px / 6px stretch;
   box-shadow: var(--shadow-overlay);
-  overflow: auto;
+  /* The header stays fixed and the body below scrolls on its own — the
+     panel itself no longer scrolls, or position: sticky inside the grid
+     would have nothing to stick within (its containing block never moves). */
+  overflow: hidden;
 }
 
 .gex-heatmap-modal__header {
+  flex: none;
   display: flex;
   align-items: baseline;
   gap: 20px;
@@ -19,6 +23,12 @@
   border-bottom: var(--border-hairline) solid rgba(255, 255, 255, 0.12);
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
+}
+
+.gex-heatmap-modal__body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
 }
 
 .gex-heatmap-modal__symbol {
@@ -104,14 +114,8 @@
   min-width: 0;
 }
 
-.gex-heatmap__grid-scroll {
-  overflow-x: auto;
-}
-
 .gex-heatmap__grid {
-  width: 100%;
   border-collapse: collapse;
-  table-layout: fixed;
 }
 
 .gex-heatmap__col-heading {

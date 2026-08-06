@@ -115,25 +115,23 @@ export function GexHeatmap({ symbol, spotPrice, columns, entries, className }: G
       className={`gex-heatmap${className ? ` ${className}` : ''}`}
       aria-label={`${symbol} GEX heatmap`}
     >
-      <div className="gex-heatmap__grid-scroll">
-        <table className="gex-heatmap__grid">
-          <thead>
-            <GexHeatmapHeader columns={columns} />
-          </thead>
-          <tbody>
-            {sortedEntries.map((entry) => (
-              <GexHeatmapRow
-                key={entry.strike}
-                entry={entry}
-                columns={columns}
-                maxAbsoluteValue={maxAbsoluteValue}
-                isSpotRow={closestStrike === entry.strike}
-                spotRowRef={closestStrike === entry.strike ? spotRowRef : undefined}
-              />
-            ))}
-          </tbody>
-        </table>
-      </div>
+      <table className="gex-heatmap__grid">
+        <thead>
+          <GexHeatmapHeader columns={columns} />
+        </thead>
+        <tbody>
+          {sortedEntries.map((entry) => (
+            <GexHeatmapRow
+              key={entry.strike}
+              entry={entry}
+              columns={columns}
+              maxAbsoluteValue={maxAbsoluteValue}
+              isSpotRow={closestStrike === entry.strike}
+              spotRowRef={closestStrike === entry.strike ? spotRowRef : undefined}
+            />
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }

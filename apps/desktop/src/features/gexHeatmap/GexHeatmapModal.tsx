@@ -170,7 +170,7 @@ export function GexHeatmapModal({
           </button>
         </div>
       </div>
-      {renderBody()}
+      <div className="gex-heatmap-modal__body">{renderBody()}</div>
     </DesktopSheet>
   );
 }

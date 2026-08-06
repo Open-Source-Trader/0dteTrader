@@ -43,6 +43,14 @@
   color: rgba(255, 255, 255, 0.5);
 }
 
+.gex-heatmap-modal__unavailable {
+  padding: 48px 16px;
+  text-align: center;
+  font-family: var(--font-sans);
+  font-size: var(--fs-body-desktop);
+  color: rgba(255, 255, 255, 0.5);
+}
+
 /* GEX heatmap — dense strike x expiration matrix. Intentionally near-black
    with a compact spreadsheet-like grid; this is a self-contained analytics
    surface, not HUD chrome, so it doesn't follow the app's chamfered-corner

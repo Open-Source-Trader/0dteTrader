@@ -2,6 +2,11 @@ import SwiftUI
 
 /// GEX heatmap sheet: strike x expiration grid of net gamma exposure for the
 /// active symbol, with a header showing symbol, price, bid and ask.
+///
+/// No gamma-exposure feed exists in the API yet (see packages/shared-types —
+/// OptionsChain has no OI/gamma fields), so this shows an unavailable state
+/// rather than fabricated numbers. Wire `entries` up to a real feed when one
+/// exists; until then this view intentionally renders no GEX data at all.
 /// Desktop parity: apps/desktop/src/features/gexHeatmap/GexHeatmapModal.tsx.
 struct GexHeatmapView: View {
     let symbol: String
@@ -9,6 +14,9 @@ struct GexHeatmapView: View {
     let bid: Double?
     let ask: Double?
     let expirations: [String]
+
+    /// Always empty until a real GEX endpoint exists.
+    private let entries: [GexHeatmapEntry] = []
 
     @Environment(\.dismiss) private var dismiss
     /// Pinch-to-zoom scale and drag pan, each committed at gesture end so the
@@ -36,10 +44,6 @@ struct GexHeatmapView: View {
     private let strikeColumnWidth: CGFloat = 68
     private let gridRowHeight: CGFloat = 38
 
-    private var entries: [GexHeatmapEntry] {
-        GexHeatmapPlaceholderData.buildEntries(symbol: symbol, spotPrice: spotPrice, expirations: expirations)
-    }
-
     private var visibleEntries: [GexHeatmapEntry] {
         GexHeatmapMath.strikesAroundSpot(entries, spotPrice: spotPrice)
     }
@@ -64,7 +68,11 @@ struct GexHeatmapView: View {
             VStack(spacing: 0) {
                 header
                 Divider().overlay(Color.hudStroke.opacity(0.3))
-                grid
+                if sortedEntries.isEmpty {
+                    unavailableState
+                } else {
+                    grid
+                }
             }
             .background(Color.black)
             .navigationTitle("GEX Heatmap")
@@ -101,6 +109,16 @@ struct GexHeatmapView: View {
                 .font(.system(.subheadline, design: .monospaced).weight(.semibold))
                 .foregroundStyle(.white.opacity(0.85))
         }
+    }
+
+    private var unavailableState: some View {
+        ContentUnavailableView(
+            "GEX Data Unavailable",
+            systemImage: "square.grid.3x3.fill",
+            description: Text("No gamma-exposure feed is connected yet.")
+        )
+        .foregroundStyle(.white.opacity(0.7))
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     /// Three layers sharing one scale/offset: the scrollable data body, a

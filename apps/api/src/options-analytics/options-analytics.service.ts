@@ -75,7 +75,7 @@ function finiteConfig(value: unknown, fallback: number): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
 }
 
-function newYorkDate(now: Date): string {
+export function newYorkDate(now: Date): string {
   return new Intl.DateTimeFormat('en-CA', {
     timeZone: 'America/New_York',
     year: 'numeric',
@@ -153,6 +153,22 @@ export class OptionsAnalyticsService {
   get cacheEntryCount(): number {
     this.pruneExpiredCache(Date.now());
     return this.cache.size;
+  }
+
+  /** Every expiration Tradier lists for the symbol, ascending — the same
+   *  cached lookup getSnapshotResult uses internally, exposed for callers
+   *  (the GEX term-structure endpoint) that need to enumerate expirations
+   *  rather than resolve a single one. */
+  async listExpirations(symbol: string, userId?: string): Promise<string[]> {
+    const normalizedSymbol = symbol.trim().toUpperCase();
+    if (!/^[A-Z0-9.-]{1,12}$/.test(normalizedSymbol)) {
+      throw new BadRequestException({
+        code: 'VALIDATION_ERROR',
+        message: 'A valid symbol is required (for example, SPY)',
+      });
+    }
+    const { client: tradier, scope } = await this.clientFor(userId);
+    return this.getExpirations(normalizedSymbol, tradier, scope);
   }
 
   async getSnapshotResult(

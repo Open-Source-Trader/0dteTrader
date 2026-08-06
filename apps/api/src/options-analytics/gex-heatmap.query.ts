@@ -23,6 +23,12 @@ export interface GexHeatmapQuery {
    *  strike the stored snapshots contain. */
   strikeRangeAboveSpot?: number;
   strikeRangeBelowSpot?: number;
+  /** Downsamples the underlying 1-minute capture history to one column per
+   *  N minutes, matching the chart's selected candle interval. Each bucket
+   *  keeps its last (most recent) snapshot as the representative — same
+   *  "latest wins" rule the capture service's own 5-minute compaction uses.
+   *  Defaults to 1 (no downsampling). */
+  bucketMinutes?: number;
 }
 
 export interface GexTermStructureQuery {
@@ -52,7 +58,7 @@ export class GexHeatmapQueryService {
 
   /** Strike x timestamp, one expiration over its capture history. */
   async getHeatmap(query: GexHeatmapQuery, now = new Date()): Promise<GexHeatmapSnapshot> {
-    const rows = await this.prisma.optionsAnalyticsSnapshotRecord.findMany({
+    const allRows = await this.prisma.optionsAnalyticsSnapshotRecord.findMany({
       where: {
         symbol: query.symbol,
         expiration: query.expiration,
@@ -60,6 +66,7 @@ export class GexHeatmapQueryService {
       },
       orderBy: { bucket: 'asc' },
     });
+    const rows = downsample(allRows, query.bucketMinutes ?? 1);
 
     const timestamps: string[] = [];
     const spotSeries: number[] = [];
@@ -194,6 +201,25 @@ function buildCell(
   const putGex = putGexMagnitude === null ? null : -putGexMagnitude;
   const netGex = callGex === null && putGex === null ? null : (callGex ?? 0) + (putGex ?? 0);
   return { timestamp, strike: strikeRow.strike, callGex, putGex, netGex, dataQuality };
+}
+
+/** One representative row (the latest) per `bucketMinutes`-wide window,
+ *  ascending by bucket. `bucketMinutes <= 1` returns rows unchanged. */
+function downsample(
+  rows: OptionsAnalyticsSnapshotRecord[],
+  bucketMinutes: number,
+): OptionsAnalyticsSnapshotRecord[] {
+  if (bucketMinutes <= 1 || rows.length === 0) return rows;
+  const bucketMs = bucketMinutes * 60_000;
+  const representativeByBucket = new Map<number, OptionsAnalyticsSnapshotRecord>();
+  for (const row of rows) {
+    const bucketStart = Math.floor(row.observedAt.getTime() / bucketMs) * bucketMs;
+    const existing = representativeByBucket.get(bucketStart);
+    if (!existing || row.observedAt.getTime() > existing.observedAt.getTime()) {
+      representativeByBucket.set(bucketStart, row);
+    }
+  }
+  return [...representativeByBucket.entries()].sort(([a], [b]) => a - b).map(([, row]) => row);
 }
 
 function withinWindow(

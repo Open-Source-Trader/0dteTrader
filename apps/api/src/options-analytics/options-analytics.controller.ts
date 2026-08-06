@@ -10,6 +10,7 @@ import { AuthenticatedUser, CurrentUser } from '../common/current-user.decorator
 import { GexHeatmapQueryService } from './gex-heatmap.query';
 import { OptionsAnalyticsCaptureService } from './options-analytics.capture';
 import {
+  newYorkDate,
   OptionsAnalyticsService,
   type OptionsAnalyticsSnapshotResult,
 } from './options-analytics.service';
@@ -58,6 +59,15 @@ export class GexHeatmapQueryDto {
   @Min(1)
   @Max(24 * 60)
   historyWindowMinutes?: number;
+
+  /** Downsamples to one column per N minutes, matching the chart's selected
+   *  candle interval; omit (or 1) for the raw 1-minute capture cadence. */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(24 * 60)
+  bucketMinutes?: number;
 }
 
 export class GexTermStructureQueryDto {
@@ -96,10 +106,19 @@ export class GexTermStructureQueryDto {
   @Min(1)
   @Max(24 * 60)
   maxSnapshotAgeMinutes?: number;
+
+  /** How many of the nearest expirations to ensure are fresh. */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(12)
+  expirationCount?: number;
 }
 
 const DEFAULT_HISTORY_WINDOW_MINUTES = 60;
 const DEFAULT_TERM_STRUCTURE_MAX_AGE_MINUTES = 60;
+const DEFAULT_TERM_STRUCTURE_EXPIRATION_COUNT = 6;
 
 @Controller('market')
 export class OptionsAnalyticsController {
@@ -186,42 +205,59 @@ export class OptionsAnalyticsController {
       to,
       strikeRangeAboveSpot: query.strikeRangeAboveSpot,
       strikeRangeBelowSpot: query.strikeRangeBelowSpot,
+      bucketMinutes: query.bucketMinutes,
     });
   }
 
   /**
    * Term-structure GEX: strike x expiration, using each expiration's own
-   * latest capture. Triggers a live snapshot only for the one expiration the
-   * caller names (or the nearest 0DTE) — the same single ingestion call
-   * every other endpoint here uses — so opening this view does not fan out
-   * into one Tradier request per expiration. Other columns reflect whatever
-   * the core cron or a prior 'viewed' request already captured for them.
+   * latest capture. Ensures the nearest `expirationCount` expirations are
+   * fresh by fetching each one at most once (the same single-ingestion path
+   * every other endpoint here uses, just looped) — so opening this view
+   * shows a real term structure immediately rather than only whatever
+   * expirations happened to be captured by an earlier, unrelated request.
+   * Each expiration is still fetched once per view-open, not repeatedly:
+   * the underlying getSnapshotResult cache (freshCache) makes a second call
+   * for the same exact key within its TTL a no-op.
    */
   @Get('options-analytics/gex-term-structure')
   async getGexTermStructure(
     @CurrentUser() user: AuthenticatedUser,
     @Query() query: GexTermStructureQueryDto,
   ): Promise<GexTermStructureSnapshot> {
-    const result = await this.resolveSnapshot(query.symbol, query.expiration, user.userId);
-    if (result.scope === 'shared') {
-      try {
-        await this.capture.persist(result, 'viewed');
-      } catch (error) {
-        this.logger.error(
-          JSON.stringify({
-            event: 'options_analytics_viewed_capture_failed',
-            symbol: result.snapshot.scope.symbol,
-            expiration: result.snapshot.scope.expiration,
-            message: error instanceof Error ? error.message : String(error),
-          }),
-        );
-      }
-    }
+    const symbol = query.symbol.trim().toUpperCase();
+    const expirationCount = query.expirationCount ?? DEFAULT_TERM_STRUCTURE_EXPIRATION_COUNT;
+    const allExpirations = await this.analytics.listExpirations(symbol, user.userId);
+    const today = newYorkDate(new Date());
+    const anchor =
+      query.expiration ?? allExpirations.find((exp) => exp >= today) ?? allExpirations[0];
+    const targetExpirations = allExpirations
+      .filter((exp) => anchor === undefined || exp >= anchor)
+      .slice(0, expirationCount);
+
+    await Promise.all(
+      targetExpirations.map(async (exp) => {
+        try {
+          const result = await this.resolveSnapshot(symbol, exp, user.userId);
+          if (result.scope !== 'shared') return;
+          await this.capture.persist(result, 'viewed');
+        } catch (error) {
+          this.logger.warn(
+            JSON.stringify({
+              event: 'gex_term_structure_expiration_unavailable',
+              symbol,
+              expiration: exp,
+              message: error instanceof Error ? error.message : String(error),
+            }),
+          );
+        }
+      }),
+    );
 
     const maxSnapshotAgeMs =
       (query.maxSnapshotAgeMinutes ?? DEFAULT_TERM_STRUCTURE_MAX_AGE_MINUTES) * 60_000;
     return this.gexHeatmap.getTermStructure({
-      symbol: result.snapshot.scope.symbol,
+      symbol,
       maxSnapshotAgeMs,
       strikeRangeAboveSpot: query.strikeRangeAboveSpot,
       strikeRangeBelowSpot: query.strikeRangeBelowSpot,

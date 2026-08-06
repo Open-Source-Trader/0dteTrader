@@ -321,6 +321,77 @@ describe('GexHeatmapQueryService', () => {
 
     expect(heatmap.strikes).toEqual([100]);
   });
+
+  it('downsamples to one column per bucketMinutes, keeping the latest snapshot in each bucket', async () => {
+    const minute0 = new Date(NOW.getTime() - 4 * 60_000);
+    const minute1 = new Date(NOW.getTime() - 3 * 60_000);
+    const minute5 = new Date(NOW.getTime() - 0);
+    await capture.persist(
+      result('SPY', minute0, 100, [
+        strikeRow(100, leg({ gammaExposure: 100 }), leg({ gammaExposure: 100 })),
+      ]),
+      'viewed',
+      minute0,
+    );
+    await capture.persist(
+      result('SPY', minute1, 100, [
+        strikeRow(100, leg({ gammaExposure: 200 }), leg({ gammaExposure: 100 })),
+      ]),
+      'viewed',
+      minute1,
+    );
+    await capture.persist(
+      result('SPY', minute5, 100, [
+        strikeRow(100, leg({ gammaExposure: 999 }), leg({ gammaExposure: 100 })),
+      ]),
+      'viewed',
+      minute5,
+    );
+
+    const heatmap = await query.getHeatmap(
+      {
+        symbol: 'SPY',
+        expiration: '2026-07-20',
+        from: new Date(minute0.getTime() - 1),
+        to: new Date(NOW.getTime() + 1),
+        bucketMinutes: 5,
+      },
+      NOW,
+    );
+
+    // minute0 and minute1 fall in the same 5-minute bucket; minute1 (the
+    // later one) is the representative, so its callGex (200) wins over
+    // minute0's (100). minute5 is its own bucket.
+    expect(heatmap.timestamps).toHaveLength(2);
+    expect(heatmap.cells.map((c) => c.callGex)).toEqual([200, 999]);
+  });
+
+  it('bucketMinutes of 1 (or omitted) leaves every 1-minute snapshot as its own column', async () => {
+    const minuteA = new Date(NOW.getTime() - 60_000);
+    const minuteB = NOW;
+    await capture.persist(
+      result('SPY', minuteA, 100, [strikeRow(100, leg(), leg())]),
+      'viewed',
+      minuteA,
+    );
+    await capture.persist(
+      result('SPY', minuteB, 100, [strikeRow(100, leg(), leg())]),
+      'viewed',
+      minuteB,
+    );
+
+    const heatmap = await query.getHeatmap(
+      {
+        symbol: 'SPY',
+        expiration: '2026-07-20',
+        from: new Date(minuteA.getTime() - 1),
+        to: new Date(minuteB.getTime() + 1),
+      },
+      NOW,
+    );
+
+    expect(heatmap.timestamps).toHaveLength(2);
+  });
 });
 
 describe('GexHeatmapQueryService.getTermStructure', () => {

@@ -133,17 +133,23 @@ describe('OptionsAnalyticsController', () => {
     expect(capture.persist).not.toHaveBeenCalled();
   });
 
-  it('gex-term-structure reuses getSnapshotResult for one expiration and awaits the viewed capture before querying', async () => {
-    const result = {
-      snapshot: { scope: { symbol: 'SPY', expiration: '2026-07-20' } },
+  it('gex-term-structure fetches every near expiration once and awaits each viewed capture before querying', async () => {
+    const expirations = ['2026-07-20', '2026-07-21', '2026-07-22'];
+    const resultFor = (expiration: string) => ({
+      snapshot: { scope: { symbol: 'SPY', expiration } },
       input: {},
       scope: 'shared',
+    });
+    const analytics = {
+      listExpirations: jest.fn().mockResolvedValue(expirations),
+      getSnapshotResult: jest
+        .fn()
+        .mockImplementation((_symbol, expiration) => Promise.resolve(resultFor(expiration))),
     };
-    const analytics = { getSnapshotResult: jest.fn().mockResolvedValue(result) };
-    const events: string[] = [];
+    const persisted: string[] = [];
     const capture = {
-      persist: jest.fn().mockImplementation(async () => {
-        events.push('persist');
+      persist: jest.fn().mockImplementation(async (result) => {
+        persisted.push(result.snapshot.scope.expiration);
         return true;
       }),
     };
@@ -154,10 +160,7 @@ describe('OptionsAnalyticsController', () => {
       cells: [],
     };
     const gexHeatmap = {
-      getTermStructure: jest.fn().mockImplementation(async () => {
-        events.push('getTermStructure');
-        return termStructureSnapshot;
-      }),
+      getTermStructure: jest.fn().mockResolvedValue(termStructureSnapshot),
     };
     const controller = new OptionsAnalyticsController(
       analytics as never,
@@ -167,11 +170,15 @@ describe('OptionsAnalyticsController', () => {
 
     const response = await controller.getGexTermStructure(
       { userId: 'user-1' } as never,
-      { symbol: 'spy' } as never,
+      {
+        symbol: 'spy',
+        expiration: '2026-07-20',
+      } as never,
     );
 
-    expect(analytics.getSnapshotResult).toHaveBeenCalledTimes(1);
-    expect(events).toEqual(['persist', 'getTermStructure']);
+    expect(analytics.listExpirations).toHaveBeenCalledWith('SPY', 'user-1');
+    expect(analytics.getSnapshotResult).toHaveBeenCalledTimes(expirations.length);
+    expect(persisted.sort()).toEqual(expirations);
     expect(gexHeatmap.getTermStructure).toHaveBeenCalledWith(
       expect.objectContaining({ symbol: 'SPY' }),
     );
@@ -179,12 +186,14 @@ describe('OptionsAnalyticsController', () => {
   });
 
   it('gex-term-structure never persists a user-scoped snapshot into the shared capture history', async () => {
-    const result = {
-      snapshot: { scope: { symbol: 'SPY', expiration: '2026-07-20' } },
-      input: {},
-      scope: 'u-someone',
+    const analytics = {
+      listExpirations: jest.fn().mockResolvedValue(['2026-07-20']),
+      getSnapshotResult: jest.fn().mockResolvedValue({
+        snapshot: { scope: { symbol: 'SPY', expiration: '2026-07-20' } },
+        input: {},
+        scope: 'u-someone',
+      }),
     };
-    const analytics = { getSnapshotResult: jest.fn().mockResolvedValue(result) };
     const capture = { persist: jest.fn() };
     const gexHeatmap = { getTermStructure: jest.fn().mockResolvedValue({}) };
     const controller = new OptionsAnalyticsController(
@@ -200,6 +209,45 @@ describe('OptionsAnalyticsController', () => {
       } as never,
     );
     expect(capture.persist).not.toHaveBeenCalled();
+  });
+
+  it('gex-term-structure tolerates one expiration failing without failing the whole request', async () => {
+    const expirations = ['2026-07-20', '2026-07-21'];
+    const analytics = {
+      listExpirations: jest.fn().mockResolvedValue(expirations),
+      getSnapshotResult: jest.fn().mockImplementation((_symbol, expiration) => {
+        if (expiration === '2026-07-21') return Promise.reject(new Error('boom'));
+        return Promise.resolve({
+          snapshot: { scope: { symbol: 'SPY', expiration } },
+          input: {},
+          scope: 'shared',
+        });
+      }),
+    };
+    const capture = { persist: jest.fn().mockResolvedValue(true) };
+    const termStructureSnapshot = {
+      underlyingSymbol: 'SPY',
+      expirations: [],
+      strikes: [],
+      cells: [],
+    };
+    const gexHeatmap = { getTermStructure: jest.fn().mockResolvedValue(termStructureSnapshot) };
+    const controller = new OptionsAnalyticsController(
+      analytics as never,
+      capture as never,
+      gexHeatmap as never,
+    );
+
+    const response = await controller.getGexTermStructure(
+      { userId: 'user-1' } as never,
+      {
+        symbol: 'SPY',
+        expiration: '2026-07-20',
+      } as never,
+    );
+
+    expect(response).toBe(termStructureSnapshot);
+    expect(capture.persist).toHaveBeenCalledTimes(1);
   });
 
   it('gex-heatmap falls back to the default expiration when the requested one has settled', async () => {

@@ -34,6 +34,19 @@ interface LoadedGrid {
   entries: GexHeatmapEntry[];
 }
 
+/** Fraction of spot price to request above/below spot — an unbounded chain
+ *  can be 400+ strikes wide, and rendering that many rows (times up to 60
+ *  time-series columns) is what made the grid slow. strikeRangeAboveSpot/
+ *  BelowSpot are dollar distances, not strike counts, so this has to scale
+ *  with price rather than being a fixed constant (a fixed $10 window is way
+ *  too wide for a $50 stock with $1 strikes and returns nothing for a $1500
+ *  stock with $50 strikes). */
+const STRIKE_WINDOW_FRACTION = 0.08;
+
+function strikeWindow(spotPrice: number): number {
+  return Math.max(5, spotPrice * STRIKE_WINDOW_FRACTION);
+}
+
 /** Desktop modal wrapper around GexHeatmap, opened from the chart rail's heatmap icon. */
 export function GexHeatmapModal({
   symbol,
@@ -63,11 +76,14 @@ export function GexHeatmapModal({
     setGrid(null);
     setError(null);
     setIsLoading(true);
+    const window = strikeWindow(spotPrice);
     const request =
       viewMode === 'termStructure'
         ? apiClient
             .gexTermStructure(symbol, {
               expiration: selectedExpiration ?? undefined,
+              strikeRangeAboveSpot: window,
+              strikeRangeBelowSpot: window,
               signal: controller.signal,
             })
             .then(termStructureToEntries)
@@ -75,6 +91,8 @@ export function GexHeatmapModal({
             .gexHeatmap(symbol, {
               expiration: timeSeriesExpiration ?? undefined,
               bucketMinutes: gexBucketMinutes(chartInterval),
+              strikeRangeAboveSpot: window,
+              strikeRangeBelowSpot: window,
               signal: controller.signal,
             })
             .then(timeSeriesToEntries);
@@ -92,6 +110,10 @@ export function GexHeatmapModal({
       cancelled = true;
       controller.abort();
     };
+    // spotPrice is deliberately excluded: it ticks on every quote update, and
+    // a coarse strike window doesn't need to be refetched on every cent of
+    // movement — only when the sheet opens or the view/expiration changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [apiClient, symbol, selectedExpiration, timeSeriesExpiration, chartInterval, viewMode]);
 
   function selectViewMode(mode: GexHeatmapViewMode) {

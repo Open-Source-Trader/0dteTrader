@@ -10,6 +10,39 @@
   overflow: auto;
 }
 
+.gex-heatmap-modal__header {
+  display: flex;
+  align-items: baseline;
+  gap: 20px;
+  padding: 10px 14px;
+  background: #0a0a0a;
+  border-bottom: var(--border-hairline) solid rgba(255, 255, 255, 0.12);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.gex-heatmap-modal__symbol {
+  font-size: var(--fs-body-desktop);
+  font-weight: 700;
+  color: #ffffff;
+}
+
+.gex-heatmap-modal__stat {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: var(--fs-caption-desktop);
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.gex-heatmap-modal__stat-label {
+  font-family: var(--font-sans);
+  font-size: var(--fs-caption2-desktop);
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.5);
+}
+
 /* GEX heatmap — dense strike x expiration matrix. Intentionally near-black
    with a compact spreadsheet-like grid; this is a self-contained analytics
    surface, not HUD chrome, so it doesn't follow the app's chamfered-corner

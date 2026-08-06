@@ -11,6 +11,8 @@ describe('GexHeatmapModal', () => {
       createElement(GexHeatmapModal, {
         symbol: 'SPY',
         spotPrice: 500,
+        bid: 499.95,
+        ask: 500.05,
         expirations,
         onDismiss: () => {},
       }),
@@ -19,6 +21,8 @@ describe('GexHeatmapModal', () => {
       createElement(GexHeatmapModal, {
         symbol: 'NVDA',
         spotPrice: 500,
+        bid: 499.95,
+        ask: 500.05,
         expirations,
         onDismiss: () => {},
       }),
@@ -31,10 +35,42 @@ describe('GexHeatmapModal', () => {
       createElement(GexHeatmapModal, {
         symbol: 'QQQ',
         spotPrice: 480,
+        bid: 479.9,
+        ask: 480.1,
         expirations,
         onDismiss: () => {},
       }),
     );
     expect(html).toContain('QQQ GEX heatmap');
+  });
+
+  it('renders the header with symbol, price, bid, and ask', () => {
+    const html = renderToStaticMarkup(
+      createElement(GexHeatmapModal, {
+        symbol: 'QQQ',
+        spotPrice: 480,
+        bid: 479.9,
+        ask: 480.1,
+        expirations,
+        onDismiss: () => {},
+      }),
+    );
+    expect(html).toContain('gex-heatmap-modal__header');
+    expect(html).toContain('479.90');
+    expect(html).toContain('480.10');
+  });
+
+  it('shows a placeholder when bid/ask are unavailable', () => {
+    const html = renderToStaticMarkup(
+      createElement(GexHeatmapModal, {
+        symbol: 'QQQ',
+        spotPrice: 480,
+        bid: null,
+        ask: null,
+        expirations,
+        onDismiss: () => {},
+      }),
+    );
+    expect(html).toContain('—');
   });
 });

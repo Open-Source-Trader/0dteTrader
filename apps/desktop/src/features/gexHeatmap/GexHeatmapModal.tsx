@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import { DesktopSheet } from '../../design/components/DesktopSheet';
+import { Format } from '../../design/format';
 import { GexHeatmap } from './GexHeatmap';
 import { selectStrikesAroundSpot } from './gexHeatmapMath';
 import type { GexHeatmapEntry } from './types';
@@ -8,6 +9,8 @@ import './gexHeatmap.css';
 interface GexHeatmapModalProps {
   symbol: string;
   spotPrice: number;
+  bid: number | null;
+  ask: number | null;
   expirations: readonly string[];
   onDismiss: () => void;
 }
@@ -55,6 +58,8 @@ function buildPlaceholderEntries(
 export function GexHeatmapModal({
   symbol,
   spotPrice,
+  bid,
+  ask,
   expirations,
   onDismiss,
 }: GexHeatmapModalProps) {
@@ -69,6 +74,21 @@ export function GexHeatmapModal({
 
   return (
     <DesktopSheet onDismiss={onDismiss} panelClassName="gex-heatmap-modal-panel">
+      <div className="gex-heatmap-modal__header">
+        <span className="gex-heatmap-modal__symbol">{symbol}</span>
+        <span className="gex-heatmap-modal__stat">
+          <span className="gex-heatmap-modal__stat-label">Price</span>
+          {Format.price(spotPrice)}
+        </span>
+        <span className="gex-heatmap-modal__stat">
+          <span className="gex-heatmap-modal__stat-label">Bid</span>
+          {bid !== null ? Format.price(bid) : '—'}
+        </span>
+        <span className="gex-heatmap-modal__stat">
+          <span className="gex-heatmap-modal__stat-label">Ask</span>
+          {ask !== null ? Format.price(ask) : '—'}
+        </span>
+      </div>
       <GexHeatmap
         symbol={symbol}
         spotPrice={spotPrice}

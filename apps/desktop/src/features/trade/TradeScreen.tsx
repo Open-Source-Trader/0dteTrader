@@ -111,6 +111,7 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
   const [showProfile, setShowProfile] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [showGexHeatmap, setShowGexHeatmap] = useState(false);
+  const [underlyingQuote, setUnderlyingQuote] = useState<{ bid: number; ask: number } | null>(null);
   const [activeIvAlert, setActiveIvAlert] = useState<IVAlert | null>(null);
 
   // 'practice' is only the pre-fetch placeholder; the server value wins.
@@ -296,6 +297,7 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
       // Keep AUTO's reference price live instead of the chain-load snapshot.
       if (chainStore.getState().underlying === symbol) {
         chainStore.setUnderlyingLast(quote.last);
+        setUnderlyingQuote({ bid: quote.bid, ask: quote.ask });
       }
       if (prevSymbol !== symbol) {
         prevSymbol = symbol;
@@ -872,6 +874,8 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
         <GexHeatmapModal
           symbol={chain.chain?.underlying ?? chain.underlying}
           spotPrice={chain.underlyingLast ?? chain.chain?.underlyingPrice ?? 0}
+          bid={underlyingQuote?.bid ?? null}
+          ask={underlyingQuote?.ask ?? null}
           expirations={chain.chain?.expirations.slice(0, 7) ?? []}
           onDismiss={() => setShowGexHeatmap(false)}
         />

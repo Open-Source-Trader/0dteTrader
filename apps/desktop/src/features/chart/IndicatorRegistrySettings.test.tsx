@@ -41,9 +41,10 @@ describe('IndicatorRegistrySettings', () => {
     );
     const switches = markup.match(/<button[^>]*role="switch"[^>]*>/g) ?? [];
 
-    expect(switches).toHaveLength(INDICATOR_REGISTRY.indicators.length + 1);
+    expect(switches).toHaveLength(INDICATOR_REGISTRY.indicators.length + 2);
     expect(switches.every((toggle) => toggle.includes('aria-label='))).toBe(true);
     expect(markup).toContain('aria-label="Volume"');
+    expect(markup).toContain('aria-label="Volume-Weighted Width"');
     for (const descriptor of INDICATOR_REGISTRY.indicators) {
       expect(markup).toContain(`aria-label="${descriptor.displayName} enabled"`);
     }

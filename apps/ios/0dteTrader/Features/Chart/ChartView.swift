@@ -124,6 +124,7 @@ struct ChartView: View {
                     indicatorFillPlans: viewModel.overlayRenderPlans,
                     indicatorProfileRows: viewModel.priceProfileRows,
                     showVolume: viewModel.chartDisplayPreferences.volumeEnabled,
+                    volumeWeightedCandleWidth: viewModel.chartDisplayPreferences.volumeWeightedCandleWidth,
                     intervalSeconds: viewModel.interval.seconds,
                     drawingsModel: drawings,
                     twcModel: viewModel.twcRenderModel,

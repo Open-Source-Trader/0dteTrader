@@ -98,7 +98,7 @@ describe('IndicatorSettingsView options structure controls', () => {
     const onChangeOptionsAnalytics = vi.fn();
     const body = IndicatorSettingsBody({
       settings: DEFAULT_INDICATOR_SETTINGS_STATE,
-      chartDisplay: { volumeEnabled: false },
+      chartDisplay: { volumeEnabled: false, volumeWeightedCandleWidth: false },
       onChange,
       onChangeChartDisplay,
       twcEnabled: false,

@@ -286,6 +286,7 @@ export interface IndicatorSettingsState {
 
 export interface ChartDisplayPreferences {
   volumeEnabled: boolean;
+  volumeWeightedCandleWidth: boolean;
 }
 
 // ---------------------------------------------------------------------------

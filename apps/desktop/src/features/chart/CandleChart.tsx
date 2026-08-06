@@ -43,6 +43,7 @@ import { OptionsAnalyticsOverlay } from './optionsAnalytics/OptionsAnalyticsOver
 import { optionsAnalyticsRailWidth } from './optionsAnalytics/optionsAnalyticsGeometry';
 import type { OptionsAnalyticsSettings } from './optionsAnalytics/optionsAnalyticsSettings';
 import { TwcOverlay } from './TwcOverlay';
+import { VolumeWeightedCandleOverlay } from './VolumeWeightedCandleOverlay';
 import type { TwcRenderModel } from './twc/twcTypes';
 import { IndicatorDecorationLayer } from './IndicatorDecorationLayer';
 import type { IndicatorFill, IndicatorProfileDecorationRow } from './indicatorRenderModel';
@@ -73,6 +74,8 @@ interface CandleChartProps {
   symbol: string;
   interval: ChartInterval;
   showVolume: boolean;
+  /** TradingView-style volume-weighted candle body width; wick stays fixed. */
+  volumeWeightedCandleWidth: boolean;
   drawingsStore: DrawingsStore;
   /** Per-bar candle repaint colors (TWC regime candles); null = default. */
   candleColors?: (string | null)[] | null;
@@ -127,6 +130,7 @@ export function CandleChart({
   symbol,
   interval,
   showVolume,
+  volumeWeightedCandleWidth,
   drawingsStore,
   candleColors = null,
   twcModel = null,
@@ -293,6 +297,31 @@ export function CandleChart({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showVolume]);
+
+  // Volume-weighted candle width: hide the series' own fixed-width body so
+  // VolumeWeightedCandleOverlay can paint the variable-width body on top.
+  // The 1px wick stays exactly as the library draws it — unshifted, uncoupled
+  // from body width, per spec.
+  useEffect(() => {
+    const series = candleSeriesRef.current;
+    if (!series) return;
+    const colors = chartPalette();
+    if (volumeWeightedCandleWidth) {
+      series.applyOptions({
+        upColor: 'rgba(0, 0, 0, 0)',
+        downColor: 'rgba(0, 0, 0, 0)',
+        borderVisible: false,
+      });
+    } else {
+      series.applyOptions({
+        upColor: colors.candleUp,
+        downColor: colors.candleDown,
+        borderUpColor: colors.candleUp,
+        borderDownColor: colors.candleDown,
+        borderVisible: true,
+      });
+    }
+  }, [volumeWeightedCandleWidth]);
 
   // Live underlying bid/ask price lines pinned to the axis (TradingView
   // convention) — desktop grid only; null bid/ask (compact layout, no
@@ -712,6 +741,14 @@ export function CandleChart({
       ) : null}
       {apis && candles.length > 0 && twcModel ? (
         <TwcOverlay chart={apis.chart} series={apis.series} model={twcModel} candles={candles} />
+      ) : null}
+      {apis && candles.length > 0 && volumeWeightedCandleWidth ? (
+        <VolumeWeightedCandleOverlay
+          chart={apis.chart}
+          series={apis.series}
+          candles={candles}
+          candleColors={candleColors}
+        />
       ) : null}
       {apis &&
       candles.length > 0 &&

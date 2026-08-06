@@ -78,6 +78,9 @@ export class SettingsStore {
 
   set chartDisplay(value: ChartDisplayPreferences) {
     if (typeof value.volumeEnabled !== 'boolean') throw new Error('Volume display is invalid.');
+    if (typeof value.volumeWeightedCandleWidth !== 'boolean') {
+      throw new Error('Volume-weighted candle width display is invalid.');
+    }
     localStorage.setItem(SettingsStore.keys.chartDisplay, JSON.stringify(value));
   }
 
@@ -86,9 +89,14 @@ export class SettingsStore {
     if (!raw) return { ...DEFAULT_CHART_DISPLAY };
     try {
       const value = JSON.parse(raw) as Record<string, unknown>;
-      return typeof value.volumeEnabled === 'boolean'
-        ? { volumeEnabled: value.volumeEnabled }
-        : { ...DEFAULT_CHART_DISPLAY };
+      if (typeof value.volumeEnabled !== 'boolean') return { ...DEFAULT_CHART_DISPLAY };
+      return {
+        volumeEnabled: value.volumeEnabled,
+        volumeWeightedCandleWidth:
+          typeof value.volumeWeightedCandleWidth === 'boolean'
+            ? value.volumeWeightedCandleWidth
+            : DEFAULT_CHART_DISPLAY.volumeWeightedCandleWidth,
+      };
     } catch {
       return { ...DEFAULT_CHART_DISPLAY };
     }

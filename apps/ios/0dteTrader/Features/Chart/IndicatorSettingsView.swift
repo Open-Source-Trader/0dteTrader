@@ -99,6 +99,7 @@ struct IndicatorSettingsView: View {
                 Haptics.impact(.light)
                 chart.resetIndicatorSettings()
                 chart.setVolumeEnabled(ChartDisplayPreferences.default.volumeEnabled)
+                chart.setVolumeWeightedCandleWidth(ChartDisplayPreferences.default.volumeWeightedCandleWidth)
             }
             .font(.caption.weight(.semibold))
             .foregroundStyle(Color.appAccent)
@@ -232,6 +233,13 @@ struct IndicatorSettingsView: View {
                 isOn: Binding(
                     get: { chart.chartDisplayPreferences.volumeEnabled },
                     set: { chart.setVolumeEnabled($0) }
+                )
+            )
+            toggleRow(
+                "Volume-Weighted Width",
+                isOn: Binding(
+                    get: { chart.chartDisplayPreferences.volumeWeightedCandleWidth },
+                    set: { chart.setVolumeWeightedCandleWidth($0) }
                 )
             )
         }

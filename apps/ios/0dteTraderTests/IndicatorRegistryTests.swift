@@ -109,8 +109,28 @@ final class IndicatorRegistryTests: XCTestCase {
         )
 
         XCTAssertEqual(try store.loadIndicatorSettings(registry: registry), current)
-        XCTAssertEqual(try store.loadChartDisplayPreferences(), .init(volumeEnabled: false))
+        XCTAssertEqual(
+            try store.loadChartDisplayPreferences(),
+            .init(volumeEnabled: false, volumeWeightedCandleWidth: false)
+        )
         XCTAssertNil(defaults.data(forKey: "settings.indicatorSettings"))
+    }
+
+    func testChartDisplayPreferencesDecodesOldShapeRecordWithBackfilledDefault() throws {
+        let store = SettingsStore(defaults: defaults)
+        let oldShape = try JSONSerialization.data(withJSONObject: ["volumeEnabled": true])
+        defaults.set(oldShape, forKey: "settings.chartDisplay.v1")
+
+        let preferences = try store.loadChartDisplayPreferences()
+        XCTAssertEqual(preferences, .init(volumeEnabled: true, volumeWeightedCandleWidth: false))
+    }
+
+    func testUpdateChartDisplayPreferencesRoundTripsVolumeWeightedCandleWidth() throws {
+        let store = SettingsStore(defaults: defaults)
+        let candidate = ChartDisplayPreferences(volumeEnabled: true, volumeWeightedCandleWidth: true)
+        try store.updateChartDisplayPreferences(candidate)
+
+        XCTAssertEqual(try store.loadChartDisplayPreferences(), candidate)
     }
 
     func testFailedLegacyMigrationPreservesLegacyAndWritesNoPartialState() throws {

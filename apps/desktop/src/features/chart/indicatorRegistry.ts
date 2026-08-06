@@ -191,7 +191,10 @@ export const DEFAULT_INDICATOR_SETTINGS_STATE: IndicatorSettingsState = {
   ) as Record<IndicatorId, IndicatorSetting>,
 };
 
-export const DEFAULT_CHART_DISPLAY: ChartDisplayPreferences = { volumeEnabled: true };
+export const DEFAULT_CHART_DISPLAY: ChartDisplayPreferences = {
+  volumeEnabled: true,
+  volumeWeightedCandleWidth: false,
+};
 
 function validateCandidate(candidate: unknown): IndicatorSettingsState {
   const raw = record(candidate, 'indicator settings');

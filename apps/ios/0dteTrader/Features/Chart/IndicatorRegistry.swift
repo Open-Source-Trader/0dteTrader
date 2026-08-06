@@ -167,8 +167,26 @@ struct IndicatorSettingsState: Codable, Equatable, Sendable {
 
 struct ChartDisplayPreferences: Codable, Equatable, Sendable {
     var volumeEnabled: Bool
+    /// TradingView-style volume-weighted candle body width; wick stays fixed.
+    var volumeWeightedCandleWidth: Bool
 
-    static let `default` = ChartDisplayPreferences(volumeEnabled: true)
+    static let `default` = ChartDisplayPreferences(volumeEnabled: true, volumeWeightedCandleWidth: false)
+
+    init(volumeEnabled: Bool, volumeWeightedCandleWidth: Bool) {
+        self.volumeEnabled = volumeEnabled
+        self.volumeWeightedCandleWidth = volumeWeightedCandleWidth
+    }
+
+    /// A record persisted before `volumeWeightedCandleWidth` existed decodes
+    /// with the field defaulted to `false`, rather than failing with
+    /// `keyNotFound` and falling back to `.default` — which would also
+    /// silently reset `volumeEnabled` for anyone who had turned it off.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        volumeEnabled = try container.decode(Bool.self, forKey: .volumeEnabled)
+        volumeWeightedCandleWidth =
+            try container.decodeIfPresent(Bool.self, forKey: .volumeWeightedCandleWidth) ?? false
+    }
 }
 
 enum IndicatorSettingsValidationError: LocalizedError, Equatable {

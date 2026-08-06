@@ -1,3 +1,4 @@
+import { ServiceUnavailableException } from '@nestjs/common';
 import { OptionsAnalyticsController } from './options-analytics.controller';
 
 describe('OptionsAnalyticsController', () => {
@@ -199,5 +200,93 @@ describe('OptionsAnalyticsController', () => {
       } as never,
     );
     expect(capture.persist).not.toHaveBeenCalled();
+  });
+
+  it('gex-heatmap falls back to the default expiration when the requested one has settled', async () => {
+    const freshResult = {
+      snapshot: { scope: { symbol: 'SPY', expiration: '2026-08-07' } },
+      input: {},
+      scope: 'shared',
+    };
+    const analytics = {
+      getSnapshotResult: jest
+        .fn()
+        .mockImplementationOnce(() => {
+          throw new ServiceUnavailableException({
+            code: 'OPTIONS_ANALYTICS_UNAVAILABLE',
+            message: 'Options analytics are unavailable for SPY 2026-08-06',
+          });
+        })
+        .mockResolvedValueOnce(freshResult),
+    };
+    const capture = { persist: jest.fn().mockResolvedValue(true) };
+    const gexHeatmap = { getHeatmap: jest.fn().mockResolvedValue({}) };
+    const controller = new OptionsAnalyticsController(
+      analytics as never,
+      capture as never,
+      gexHeatmap as never,
+    );
+
+    await controller.getGexHeatmap(
+      { userId: 'user-1' } as never,
+      {
+        symbol: 'SPY',
+        expiration: '2026-08-06',
+      } as never,
+    );
+
+    expect(analytics.getSnapshotResult).toHaveBeenCalledTimes(2);
+    expect(analytics.getSnapshotResult).toHaveBeenNthCalledWith(1, 'SPY', '2026-08-06', 'user-1');
+    expect(analytics.getSnapshotResult).toHaveBeenNthCalledWith(2, 'SPY', undefined, 'user-1');
+    expect(gexHeatmap.getHeatmap).toHaveBeenCalledWith(
+      expect.objectContaining({ symbol: 'SPY', expiration: '2026-08-07' }),
+    );
+  });
+
+  it('gex-heatmap does not retry when no expiration was requested (nothing stale to fall back from)', async () => {
+    const analytics = {
+      getSnapshotResult: jest.fn().mockImplementation(() => {
+        throw new ServiceUnavailableException({
+          code: 'OPTIONS_ANALYTICS_UNAVAILABLE',
+          message: 'Options analytics are unavailable for SPY',
+        });
+      }),
+    };
+    const capture = { persist: jest.fn() };
+    const gexHeatmap = { getHeatmap: jest.fn() };
+    const controller = new OptionsAnalyticsController(
+      analytics as never,
+      capture as never,
+      gexHeatmap as never,
+    );
+
+    await expect(
+      controller.getGexHeatmap({ userId: 'user-1' } as never, { symbol: 'SPY' } as never),
+    ).rejects.toBeInstanceOf(ServiceUnavailableException);
+    expect(analytics.getSnapshotResult).toHaveBeenCalledTimes(1);
+  });
+
+  it('gex-heatmap does not retry other error types (e.g. symbol not found)', async () => {
+    const analytics = {
+      getSnapshotResult: jest.fn().mockRejectedValue(new Error('boom')),
+    };
+    const capture = { persist: jest.fn() };
+    const gexHeatmap = { getHeatmap: jest.fn() };
+    const controller = new OptionsAnalyticsController(
+      analytics as never,
+      capture as never,
+      gexHeatmap as never,
+    );
+
+    await expect(
+      controller.getGexHeatmap(
+        { userId: 'user-1' } as never,
+        {
+          symbol: 'SPY',
+          expiration: '2026-08-06',
+        } as never,
+      ),
+    ).rejects.toThrow('boom');
+    expect(analytics.getSnapshotResult).toHaveBeenCalledTimes(1);
   });
 });

@@ -193,7 +193,27 @@ export class OptionsAnalyticsService {
         selected = expiration;
       } else {
         const today = newYorkDate(new Date(Date.now()));
-        selected = expirations.includes(today) ? today : expirations[0];
+        // Tradier keeps a settled 0DTE in the expirations listing after its
+        // own close — it doesn't disappear just because trading on it has
+        // stopped — so "today is in the list" alone isn't enough to prefer
+        // it. Root/settlement-style aren't known yet (that requires the
+        // chain fetch below), but the standard PM/early-close time is a
+        // conservative floor: SPX's earlier AM settlement only moves this
+        // check earlier, never later, so it never keeps a truly-settled
+        // expiration in play. `expirations` is sorted ascending, so the
+        // next entry after today (if any) is the nearest future one —
+        // falling back to `expirations[0]` would just land back on today
+        // whenever it's still the earliest listed date.
+        const todayIsSettled =
+          expirations.includes(today) &&
+          optionSettlementAt(today, normalizedSymbol).getTime() <= Date.now();
+        if (expirations.includes(today) && !todayIsSettled) {
+          selected = today;
+        } else if (todayIsSettled) {
+          selected = expirations.find((exp) => exp > today) ?? '';
+        } else {
+          selected = expirations[0];
+        }
         if (!selected) {
           throw new NotFoundException({
             code: 'EXPIRATION_NOT_FOUND',

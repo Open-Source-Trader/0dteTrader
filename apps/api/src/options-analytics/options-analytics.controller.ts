@@ -1,4 +1,4 @@
-import { Controller, Get, Logger, Query } from '@nestjs/common';
+import { Controller, Get, Logger, Query, ServiceUnavailableException } from '@nestjs/common';
 import { Type } from 'class-transformer';
 import { IsDateString, IsInt, IsOptional, IsString, Matches, Max, Min } from 'class-validator';
 import type {
@@ -9,7 +9,10 @@ import type {
 import { AuthenticatedUser, CurrentUser } from '../common/current-user.decorator';
 import { GexHeatmapQueryService } from './gex-heatmap.query';
 import { OptionsAnalyticsCaptureService } from './options-analytics.capture';
-import { OptionsAnalyticsService } from './options-analytics.service';
+import {
+  OptionsAnalyticsService,
+  type OptionsAnalyticsSnapshotResult,
+} from './options-analytics.service';
 
 export class OptionsAnalyticsQueryDto {
   @IsString()
@@ -152,11 +155,7 @@ export class OptionsAnalyticsController {
     @CurrentUser() user: AuthenticatedUser,
     @Query() query: GexHeatmapQueryDto,
   ): Promise<GexHeatmapSnapshot> {
-    const result = await this.analytics.getSnapshotResult(
-      query.symbol,
-      query.expiration,
-      user.userId,
-    );
+    const result = await this.resolveSnapshot(query.symbol, query.expiration, user.userId);
     const expiration = result.snapshot.scope.expiration;
     if (result.scope === 'shared') {
       // Awaited (unlike /options-analytics' fire-and-forget) so the snapshot
@@ -203,11 +202,7 @@ export class OptionsAnalyticsController {
     @CurrentUser() user: AuthenticatedUser,
     @Query() query: GexTermStructureQueryDto,
   ): Promise<GexTermStructureSnapshot> {
-    const result = await this.analytics.getSnapshotResult(
-      query.symbol,
-      query.expiration,
-      user.userId,
-    );
+    const result = await this.resolveSnapshot(query.symbol, query.expiration, user.userId);
     if (result.scope === 'shared') {
       try {
         await this.capture.persist(result, 'viewed');
@@ -232,4 +227,45 @@ export class OptionsAnalyticsController {
       strikeRangeBelowSpot: query.strikeRangeBelowSpot,
     });
   }
+
+  /**
+   * Resolves a snapshot the same way /options-analytics does, except a
+   * caller-supplied expiration that has settled since it was selected (a
+   * 0DTE the client picked while the market was open, requested again
+   * after close) falls back to the service's own default instead of
+   * failing forever — that expiration can never succeed again today, so
+   * without this a stale client-cached expiration turns into a permanent
+   * error on every request until the next trading day.
+   */
+  private async resolveSnapshot(
+    symbol: string,
+    expiration: string | undefined,
+    userId: string,
+  ): Promise<OptionsAnalyticsSnapshotResult> {
+    try {
+      return await this.analytics.getSnapshotResult(symbol, expiration, userId);
+    } catch (error) {
+      if (expiration === undefined || !isOptionsAnalyticsUnavailable(error)) {
+        throw error;
+      }
+      this.logger.warn(
+        JSON.stringify({
+          event: 'gex_expiration_fallback',
+          symbol,
+          requestedExpiration: expiration,
+        }),
+      );
+      return this.analytics.getSnapshotResult(symbol, undefined, userId);
+    }
+  }
+}
+
+function isOptionsAnalyticsUnavailable(error: unknown): boolean {
+  if (!(error instanceof ServiceUnavailableException)) return false;
+  const response = error.getResponse();
+  return (
+    typeof response === 'object' &&
+    response !== null &&
+    (response as { code?: unknown }).code === 'OPTIONS_ANALYTICS_UNAVAILABLE'
+  );
 }

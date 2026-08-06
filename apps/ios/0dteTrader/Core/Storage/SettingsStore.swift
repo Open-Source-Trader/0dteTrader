@@ -26,6 +26,7 @@ final class SettingsStore: @unchecked Sendable {
         static let indicatorSettingsV1 = "settings.indicatorSettings.v1"
         static let chartDisplayV1 = "settings.chartDisplay.v1"
         static let twcSettings = "settings.twcSettings"
+        static let usrSettings = "settings.ultimateSupportResistance.v1"
         static let optionsAnalyticsSettings = "settings.optionsAnalytics.v1"
         static let chartTradingSettings = "settings.chartTrading.v1"
         static let riskDisclaimerAccepted = "settings.riskDisclaimerAccepted"
@@ -297,6 +298,20 @@ final class SettingsStore: @unchecked Sendable {
             if let data = try? encoder.encode(newValue) {
                 defaults.set(data, forKey: Keys.twcSettings)
             }
+        }
+    }
+
+    var usrSettings: UsrSettings {
+        get {
+            guard let data = defaults.data(forKey: Keys.usrSettings),
+                  let settings = try? decoder.decode(UsrSettings.self, from: data),
+                  settings.isValid
+            else { return .default }
+            return settings
+        }
+        set {
+            guard newValue.isValid, let data = try? encoder.encode(newValue) else { return }
+            defaults.set(data, forKey: Keys.usrSettings)
         }
     }
 

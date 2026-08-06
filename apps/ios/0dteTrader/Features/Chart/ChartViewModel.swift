@@ -155,6 +155,10 @@ final class ChartViewModel: ObservableObject {
         didSet { settingsStore.twcSettings = twcSettings }
     }
 
+    @Published var usrSettings: UsrSettings {
+        didSet { settingsStore.usrSettings = usrSettings }
+    }
+
     @Published var optionsAnalyticsSettings: OptionsAnalyticsSettings {
         didSet {
             settingsStore.optionsAnalyticsSettings = optionsAnalyticsSettings
@@ -238,6 +242,7 @@ final class ChartViewModel: ObservableObject {
         self.optionsAnalyticsNow = optionsAnalyticsNow
         self.symbol = settingsStore.lastSymbol ?? "SPY"
         self.twcSettings = settingsStore.twcSettings
+        self.usrSettings = settingsStore.usrSettings
         self.optionsAnalyticsSettings = settingsStore.optionsAnalyticsSettings
         drawings.setSymbol(self.symbol)
 

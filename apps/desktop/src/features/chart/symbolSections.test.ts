@@ -1,5 +1,25 @@
 import { describe, expect, it } from 'vitest';
-import { resolveEnterSelection } from './symbolSections';
+import {
+  CRYPTO_SYMBOLS,
+  SYMBOL_SECTIONS,
+  isContinuousMarketSymbol,
+  resolveEnterSelection,
+} from './symbolSections';
+
+describe('continuous-market classification', () => {
+  it('uses the same curated crypto collection exposed by the symbol picker', () => {
+    const cryptoSection = SYMBOL_SECTIONS.find(({ title }) => title === 'Crypto');
+    expect(cryptoSection?.symbols).toBe(CRYPTO_SYMBOLS);
+    expect(CRYPTO_SYMBOLS.every(isContinuousMarketSymbol)).toBe(true);
+  });
+
+  it('normalizes symbols without classifying equities or provider-specific pairs', () => {
+    expect(isContinuousMarketSymbol(' btc\n')).toBe(true);
+    expect(isContinuousMarketSymbol('ETH')).toBe(true);
+    expect(isContinuousMarketSymbol('SPY')).toBe(false);
+    expect(isContinuousMarketSymbol('BTCUSD')).toBe(false);
+  });
+});
 
 describe('resolveEnterSelection', () => {
   it('selects the highlighted row even with an empty query', () => {

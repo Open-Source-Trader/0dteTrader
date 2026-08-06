@@ -26,6 +26,8 @@ import {
 } from './indicatorRegistry';
 import type { OptionsAnalyticsSettings } from './optionsAnalytics/optionsAnalyticsSettings';
 import type { TwcHeatmapSettings } from './twc/twcSettings';
+import type { UsrSettings } from './ultimateSupportResistance/usrSettings';
+import { validateUsrSettings } from './ultimateSupportResistance/usrSettings';
 import {
   UNINITIALIZED_VISIBLE_CANDLE_VIEWPORT,
   type VisibleCandleViewport,
@@ -156,6 +158,7 @@ export interface ChartStoreState {
   indicatorSettings: IndicatorSettingsState;
   chartDisplay: ChartDisplayPreferences;
   twcSettings: TwcHeatmapSettings;
+  usrSettings: UsrSettings;
   optionsAnalytics: OptionsAnalyticsSettings;
   /** Price the chart is asked to keep in view ("Show on chart"); null = none.
    *  CandleChart's autoscale merges it into the range while it is set. */
@@ -183,6 +186,7 @@ export function chartChromeSlice(state: ChartStoreState) {
     indicatorSettings: state.indicatorSettings,
     chartDisplay: state.chartDisplay,
     twcSettings: state.twcSettings,
+    usrSettings: state.usrSettings,
     optionsAnalytics: state.optionsAnalytics,
     visiblePriceRange: state.visiblePriceRange,
   };
@@ -258,6 +262,7 @@ export class ChartStore extends Store<ChartStoreState> {
       indicatorSettings,
       chartDisplay,
       twcSettings: settingsStore.twcSettings,
+      usrSettings: settingsStore.usrSettings,
       optionsAnalytics: settingsStore.optionsAnalytics,
       revealPrice: null,
       visiblePriceRange: null,
@@ -415,6 +420,16 @@ export class ChartStore extends Store<ChartStoreState> {
   setTwcSettings(settings: TwcHeatmapSettings): void {
     this.settingsStore.twcSettings = settings;
     this.set({ twcSettings: settings });
+  }
+
+  setUsrSettings(candidate: UsrSettings): void {
+    try {
+      const settings = validateUsrSettings(candidate);
+      this.settingsStore.usrSettings = settings;
+      this.set({ usrSettings: settings });
+    } catch {
+      // Reject malformed persisted/UI state without destabilizing live charting.
+    }
   }
 
   setOptionsAnalytics(settings: OptionsAnalyticsSettings): void {

@@ -30,6 +30,7 @@ struct TradeScreenView: View {
     /// stack, so the gear closes the popup and raises this instead — the same
     /// arrangement the desktop already used.
     @State private var showTwcSettings = false
+    @State private var showUsrSettings = false
     @State private var showProfile = false
     @State private var showHistory = false
     @State private var showGexHeatmap = false
@@ -161,6 +162,16 @@ struct TradeScreenView: View {
             // tap/swipe keyboard dismissal does not reach them — each sheet
             // with a field carries its own.
             .dismissKeyboardOnInteraction()
+        }
+        .sheet(isPresented: $showUsrSettings) {
+            NavigationStack {
+                UsrSettingsView(settings: $chartViewModel.usrSettings)
+                    .toolbar {
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Button("Done") { showUsrSettings = false }
+                        }
+                    }
+            }
         }
         .sheet(isPresented: $showProfile, onDismiss: {
             Task { await refreshTradingContext() }
@@ -520,6 +531,10 @@ struct TradeScreenView: View {
                         onOpenTwcSettings: {
                             dismiss()
                             showTwcSettings = true
+                        },
+                        onOpenUsrSettings: {
+                            dismiss()
+                            showUsrSettings = true
                         },
                         onDismiss: dismiss
                     )

@@ -393,6 +393,7 @@ describe('chartChromeSlice', () => {
         'optionsAnalytics',
         'symbol',
         'twcSettings',
+        'usrSettings',
         'visiblePriceRange',
       ].sort(),
     );

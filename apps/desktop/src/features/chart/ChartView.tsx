@@ -8,7 +8,7 @@ import { Spinner } from '../../design/components/Spinner';
 import { Format } from '../../design/format';
 import { ChevronDownIcon, SlidersIcon, WarningFillIcon } from '../../design/icons';
 import type { ChartStore } from './ChartStore';
-import { CHART_INTERVALS, INTERVAL_HINTS } from './ChartStore';
+import { CHART_INTERVALS, INTERVAL_HINTS, intervalSeconds, isTickInterval } from './ChartStore';
 import { CandleChart, type ChartTradingProps, type OverlaySeries } from './CandleChart';
 import { DrawToolsMenu, DrawToolsRail } from './DrawingToolbar';
 import type { DrawingsStore } from './drawings';
@@ -25,7 +25,9 @@ import { buildIndicatorRenderModel, type IndicatorRenderModel } from './indicato
 import { indicatorPanePresentation } from './indicatorPresentation';
 import { useOptionsAnalytics } from './optionsAnalytics/useOptionsAnalytics';
 import { computeTwc } from './twc/computeTwc';
-import { intervalSeconds } from './ChartStore';
+import { mergeScriptRenderModels } from './scriptOverlayTypes';
+import { computeUsr } from './ultimateSupportResistance/computeUsr';
+import { isContinuousMarketSymbol } from './symbolSections';
 import './chart.css';
 
 interface ChartViewProps {
@@ -112,6 +114,7 @@ export function ChartView({
     indicatorSettings,
     chartDisplay,
     twcSettings,
+    usrSettings,
     optionsAnalytics,
     revealPrice,
     visibleCandleViewport,
@@ -218,27 +221,45 @@ export function ChartView({
     [candles, twcSettings, interval],
   );
 
+  const usrComputation = useMemo(
+    () =>
+      timed('ChartView.ultimateSupportResistance', () =>
+        computeUsr(candles, usrSettings, {
+          chartIntervalSeconds: isTickInterval(interval) ? null : intervalSeconds(interval),
+          continuousSession: isContinuousMarketSymbol(symbol),
+          now: Math.floor(Date.now() / 1_000),
+          lastCandleIsOpen: isTickInterval(interval) ? false : undefined,
+        }),
+      ),
+    [candles, usrSettings, interval, symbol],
+  );
+
+  const scriptModel = useMemo(
+    () => mergeScriptRenderModels([twcModel, usrComputation?.renderModel ?? null]),
+    [twcModel, usrComputation],
+  );
+
   const globalWarningText =
     indicatorModels.error ??
     (optionsAnalytics.enabled && optionsAnalyticsState.errorMessage
       ? `Options analytics unavailable: ${optionsAnalyticsState.errorMessage}`
-      : (twcModel?.banner?.text ?? null));
+      : (usrComputation?.diagnostics.warnings[0] ?? scriptModel?.banner?.text ?? null));
 
   useEffect(() => {
     onOptionsAnalyticsWarning?.(globalWarningText);
   }, [onOptionsAnalyticsWarning, globalWarningText]);
 
-  // TWC line series ride the price scale like regular overlays (gap-aware).
-  const twcLineOverlays = useMemo<OverlaySeries[]>(
+  // Stateful-script line series ride the price scale like regular overlays (gap-aware).
+  const scriptLineOverlays = useMemo<OverlaySeries[]>(
     () =>
-      (twcModel?.lines ?? []).map((line) => ({
-        id: `twc-${line.id}`,
+      (scriptModel?.lines ?? []).map((line) => ({
+        id: `script-${line.id}`,
         color: line.color,
         values: line.values,
         lineWidth: line.lineWidth,
         gaps: true,
       })),
-    [twcModel],
+    [scriptModel],
   );
 
   const subpaneModels = indicatorModels.models.filter(
@@ -393,7 +414,9 @@ export function ChartView({
           >
             <CandleChart
               candles={candles}
-              overlays={twcLineOverlays.length > 0 ? [...overlays, ...twcLineOverlays] : overlays}
+              overlays={
+                scriptLineOverlays.length > 0 ? [...overlays, ...scriptLineOverlays] : overlays
+              }
               indicatorFills={indicatorFills}
               indicatorProfileRows={indicatorProfileRows}
               symbol={symbol}
@@ -401,8 +424,8 @@ export function ChartView({
               showVolume={chartDisplay.volumeEnabled}
               volumeWeightedCandleWidth={chartDisplay.volumeWeightedCandleWidth}
               drawingsStore={drawingsStore}
-              candleColors={twcModel?.candleColors ?? null}
-              twcModel={twcModel}
+              candleColors={scriptModel?.candleColors ?? null}
+              scriptModel={scriptModel}
               optionsAnalyticsSnapshot={optionsAnalyticsSnapshot}
               optionsAnalyticsSettings={optionsAnalytics.enabled ? optionsAnalytics : null}
               optionsAnalyticsRetained={optionsAnalyticsState.retained}

@@ -44,7 +44,7 @@ import { optionsAnalyticsRailWidth } from './optionsAnalytics/optionsAnalyticsGe
 import type { OptionsAnalyticsSettings } from './optionsAnalytics/optionsAnalyticsSettings';
 import { TwcOverlay } from './TwcOverlay';
 import { VolumeWeightedCandleOverlay } from './VolumeWeightedCandleOverlay';
-import type { TwcRenderModel } from './twc/twcTypes';
+import type { ScriptRenderModel } from './scriptOverlayTypes';
 import { IndicatorDecorationLayer } from './IndicatorDecorationLayer';
 import type { IndicatorFill, IndicatorProfileDecorationRow } from './indicatorRenderModel';
 import {
@@ -79,8 +79,8 @@ interface CandleChartProps {
   drawingsStore: DrawingsStore;
   /** Per-bar candle repaint colors (TWC regime candles); null = default. */
   candleColors?: (string | null)[] | null;
-  /** TWC Heatmap render model for the read-only overlay canvas. */
-  twcModel?: TwcRenderModel | null;
+  /** Merged stateful-script geometry for the read-only overlay canvas. */
+  scriptModel?: ScriptRenderModel | null;
   /** Exact point-in-time options structure for the right-edge profile rail. */
   optionsAnalyticsSnapshot?: OptionsAnalyticsSnapshot | null;
   optionsAnalyticsSettings?: OptionsAnalyticsSettings | null;
@@ -133,7 +133,7 @@ export function CandleChart({
   volumeWeightedCandleWidth,
   drawingsStore,
   candleColors = null,
-  twcModel = null,
+  scriptModel = null,
   optionsAnalyticsSnapshot = null,
   optionsAnalyticsSettings = null,
   optionsAnalyticsRetained = false,
@@ -739,8 +739,8 @@ export function CandleChart({
           onVerticalScaleChange={verticalScaleChanges.emit}
         />
       ) : null}
-      {apis && candles.length > 0 && twcModel ? (
-        <TwcOverlay chart={apis.chart} series={apis.series} model={twcModel} candles={candles} />
+      {apis && candles.length > 0 && scriptModel ? (
+        <TwcOverlay chart={apis.chart} series={apis.series} model={scriptModel} candles={candles} />
       ) : null}
       {apis && candles.length > 0 && volumeWeightedCandleWidth ? (
         <VolumeWeightedCandleOverlay

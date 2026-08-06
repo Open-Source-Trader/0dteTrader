@@ -6,6 +6,7 @@ import type { ApiClient } from '../../core/api/ApiClient';
 import { DEFAULT_CHART_DISPLAY, DEFAULT_INDICATOR_SETTINGS_STATE } from './indicatorRegistry';
 import { DEFAULT_OPTIONS_ANALYTICS_SETTINGS } from './optionsAnalytics/optionsAnalyticsSettings';
 import { DEFAULT_TWC_SETTINGS } from './twc/twcSettings';
+import { DEFAULT_USR_SETTINGS } from './ultimateSupportResistance/usrSettings';
 import type { ChartCandle, ChartStore, ChartStoreState } from './ChartStore';
 import type { VisibleCandleViewport } from './candleViewport';
 import type { DrawingsStore } from './drawings';
@@ -109,6 +110,7 @@ function baseState(): ChartStoreState {
     },
     chartDisplay: { ...DEFAULT_CHART_DISPLAY, volumeEnabled: false },
     twcSettings: { ...DEFAULT_TWC_SETTINGS, enabled: false },
+    usrSettings: { ...DEFAULT_USR_SETTINGS, enabled: false },
     optionsAnalytics: { ...DEFAULT_OPTIONS_ANALYTICS_SETTINGS, enabled: false },
     tickProgress: null,
     revealPrice: null,

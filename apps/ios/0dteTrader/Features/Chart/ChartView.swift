@@ -113,11 +113,15 @@ struct ChartView: View {
     }
 
     var body: some View {
+        let scriptPresentation = viewModel.scriptPresentation
+        let scriptModel = scriptPresentation.renderModel
         VStack(spacing: 0) {
             header
 
             if let errorMessage = viewModel.errorMessage, !viewModel.candles.isEmpty {
                 staleDataBanner(errorMessage)
+            } else if let warning = scriptPresentation.warning {
+                scriptWarningBanner(warning)
             }
 
             ZStack(alignment: .topLeading) {
@@ -131,7 +135,7 @@ struct ChartView: View {
                     volumeWeightedCandleWidth: viewModel.chartDisplayPreferences.volumeWeightedCandleWidth,
                     intervalSeconds: viewModel.interval.seconds,
                     drawingsModel: drawings,
-                    twcModel: viewModel.twcRenderModel,
+                    scriptModel: scriptModel,
                     optionsAnalyticsSnapshot: viewModel.optionsAnalyticsSettings.enabled
                         ? viewModel.optionsAnalyticsSnapshot
                         : nil,
@@ -146,7 +150,7 @@ struct ChartView: View {
                     resetToken: chartResetToken
                 )
                 resetButton { chartResetToken += 1 }
-                if let banner = viewModel.twcRenderModel?.banner {
+                if let banner = scriptModel?.banner {
                     TwcBiasBannerView(banner: banner)
                 }
                 chartTopBar
@@ -199,6 +203,7 @@ struct ChartView: View {
         .background(Color.appBackground)
         .animation(reduceMotion ? nil : AppMotion.standard, value: viewModel.indicatorSettings)
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: viewModel.errorMessage)
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: scriptPresentation.warning)
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: viewModel.isLoading)
         .animation(reduceMotion ? nil : AppMotion.standard, value: drawings.tool)
         .animation(reduceMotion ? nil : AppMotion.standard, value: drawings.selectedId)
@@ -363,6 +368,29 @@ struct ChartView: View {
         .padding(.horizontal, AppSpacing.lg)
         .padding(.vertical, AppSpacing.xs)
         .background(Color.pnlNegative.opacity(0.12))
+        .transition(.move(edge: .top).combined(with: .opacity))
+    }
+
+    /// Non-blocking indicator diagnostic. It shares the desktop precedence:
+    /// stale-data failures win, otherwise the first actionable USR warning is
+    /// visible instead of being stranded in the compute result.
+    private func scriptWarningBanner(_ message: String) -> some View {
+        HStack(spacing: AppSpacing.sm) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.caption)
+                .accessibilityHidden(true)
+            Text(message)
+                .font(.caption)
+                .lineLimit(1)
+                .truncationMode(.tail)
+            Spacer()
+        }
+        .foregroundStyle(Color.appWarning)
+        .padding(.horizontal, AppSpacing.lg)
+        .padding(.vertical, AppSpacing.xs)
+        .background(Color.appWarning.opacity(0.12))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Indicator warning: \(message)")
         .transition(.move(edge: .top).combined(with: .opacity))
     }
 

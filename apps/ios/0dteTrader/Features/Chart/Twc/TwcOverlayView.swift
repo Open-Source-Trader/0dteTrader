@@ -1,15 +1,14 @@
 import DGCharts
 import UIKit
 
-/// Read-only CoreGraphics overlay for the TWC Heatmap render model: fib level
-/// lines, Gann fans/frames, profit-target bands, labels, signal markers and
-/// area fills (TwcOverlay.tsx analog). Sits between the chart and the
+/// Read-only CoreGraphics overlay for shared stateful-script geometry: lines,
+/// bands, labels, signal markers and area fills (TwcOverlay.tsx analog). Sits between the chart and the
 /// interactive DrawingOverlayView; bar indices map straight through the
 /// chart's left-axis transformer, including indices past the last bar
 /// (forward projection).
 final class TwcOverlayView: UIView {
     weak var chart: CombinedChartView?
-    var model: TwcRenderModel? {
+    var model: ScriptRenderModel? {
         didSet { if model != oldValue { setNeedsDisplay() } }
     }
     var candles: [Candle] = []
@@ -64,7 +63,8 @@ final class TwcOverlayView: UIView {
                 context.fillPath()
             }
             for i in 0..<candles.count {
-                guard let top = fill.top[i], let bottom = fill.bottom[i], let color = fill.colors[i] else {
+                guard fill.top.indices.contains(i), fill.bottom.indices.contains(i), fill.colors.indices.contains(i),
+                      let top = fill.top[i], let bottom = fill.bottom[i], let color = fill.colors[i] else {
                     flush()
                     continue
                 }
@@ -92,8 +92,12 @@ final class TwcOverlayView: UIView {
             context.fill(rect)
             if let border = band.borderColor {
                 context.setStrokeColor(UIColor(twcColor: border).cgColor)
-                context.setLineWidth(1)
-                context.setLineDash(phase: 0, lengths: [])
+                context.setLineWidth(CGFloat(band.borderWidth))
+                switch band.borderStyle {
+                case .dashed: context.setLineDash(phase: 0, lengths: [5, 4])
+                case .dotted: context.setLineDash(phase: 0, lengths: [2, 3])
+                case .solid: context.setLineDash(phase: 0, lengths: [])
+                }
                 context.stroke(rect)
             }
         }
@@ -172,7 +176,7 @@ final class TwcOverlayView: UIView {
                 let text = (marker.text ?? "") as NSString
                 let attributes: [NSAttributedString.Key: Any] = [
                     .font: labelFont,
-                    .foregroundColor: UIColor.white,
+                    .foregroundColor: UIColor(twcColor: marker.textColor ?? "#FFFFFF"),
                 ]
                 let size = text.size(withAttributes: attributes)
                 let w = size.width + 12
@@ -200,31 +204,15 @@ extension UIColor {
     /// Resolves the compute layer's color strings: "#RRGGBB",
     /// "rgb(r, g, b)" or "rgba(r, g, b, a)".
     convenience init(twcColor: String) {
-        let value = twcColor.trimmingCharacters(in: .whitespaces)
-        if value.hasPrefix("#"), value.count >= 7 {
-            let raw = String(value.dropFirst())
-            let r = Int(raw.prefix(2), radix: 16) ?? 255
-            let g = Int(raw.dropFirst(2).prefix(2), radix: 16) ?? 255
-            let b = Int(raw.dropFirst(4).prefix(2), radix: 16) ?? 255
-            self.init(red: CGFloat(r) / 255, green: CGFloat(g) / 255, blue: CGFloat(b) / 255, alpha: 1)
+        guard let color = ScriptColor.parse(twcColor) else {
+            self.init(white: 1, alpha: 1)
             return
         }
-        if value.hasPrefix("rgb") {
-            let numbers = value
-                .drop(while: { $0 != "(" })
-                .trimmingCharacters(in: CharacterSet(charactersIn: "()"))
-                .split(separator: ",")
-                .compactMap { Double($0.trimmingCharacters(in: .whitespaces)) }
-            if numbers.count >= 3 {
-                self.init(
-                    red: CGFloat(numbers[0]) / 255,
-                    green: CGFloat(numbers[1]) / 255,
-                    blue: CGFloat(numbers[2]) / 255,
-                    alpha: numbers.count >= 4 ? CGFloat(numbers[3]) : 1
-                )
-                return
-            }
-        }
-        self.init(white: 1, alpha: 1)
+        self.init(
+            red: CGFloat(color.red) / 255,
+            green: CGFloat(color.green) / 255,
+            blue: CGFloat(color.blue) / 255,
+            alpha: CGFloat(color.alpha)
+        )
     }
 }

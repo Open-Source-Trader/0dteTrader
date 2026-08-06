@@ -3,9 +3,12 @@ import type {
   GexDataQuality,
   GexHeatmapCell,
   GexHeatmapSnapshot,
+  GexTermStructureCell,
+  GexTermStructureSnapshot,
   OptionsAnalyticsSnapshot,
   OptionsAnalyticsStrike,
 } from '@0dtetrader/shared-types';
+import type { OptionsAnalyticsSnapshotRecord } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
 export interface GexHeatmapQuery {
@@ -22,11 +25,21 @@ export interface GexHeatmapQuery {
   strikeRangeBelowSpot?: number;
 }
 
+export interface GexTermStructureQuery {
+  symbol: string;
+  /** Only expirations with a stored snapshot are returned; this bounds how
+   *  far back "latest" is allowed to reach, so a long-dead expiration with
+   *  one stale row from weeks ago doesn't show up as current. */
+  maxSnapshotAgeMs: number;
+  strikeRangeAboveSpot?: number;
+  strikeRangeBelowSpot?: number;
+}
+
 /**
  * Reshapes already-persisted `OptionsAnalyticsSnapshotRecord` history
  * (written every minute by OptionsAnalyticsCaptureService for core symbols,
  * and on-demand via the 'viewed' capture path for any symbol a client
- * requests) into heatmap-ready {timestamps[], strikes[], cells[]}.
+ * requests) into heatmap-ready shapes.
  *
  * This performs no calculation and issues no Tradier requests — GEX is
  * already computed per-contract and aggregated per-strike by
@@ -37,6 +50,7 @@ export interface GexHeatmapQuery {
 export class GexHeatmapQueryService {
   constructor(private readonly prisma: PrismaService) {}
 
+  /** Strike x timestamp, one expiration over its capture history. */
   async getHeatmap(query: GexHeatmapQuery, now = new Date()): Promise<GexHeatmapSnapshot> {
     const rows = await this.prisma.optionsAnalyticsSnapshotRecord.findMany({
       where: {
@@ -80,18 +94,13 @@ export class GexHeatmapQueryService {
           continue;
         }
         strikeSet.add(strikeRow.strike);
-        const callGex = strikeRow.call?.gammaExposure ?? null;
-        const putGexMagnitude = strikeRow.put?.gammaExposure ?? null;
-        const putGex = putGexMagnitude === null ? null : -putGexMagnitude;
-        const netGex = callGex === null && putGex === null ? null : (callGex ?? 0) + (putGex ?? 0);
-        cells.push({
-          timestamp,
-          strike: strikeRow.strike,
-          callGex,
-          putGex,
-          netGex,
-          dataQuality: classifyCellQuality(strikeRow, output.scope.spot, isStale),
-        });
+        cells.push(
+          buildCell(
+            timestamp,
+            strikeRow,
+            classifyCellQuality(strikeRow, output.scope.spot, isStale),
+          ),
+        );
       }
     }
 
@@ -104,6 +113,87 @@ export class GexHeatmapQueryService {
       cells,
     };
   }
+
+  /**
+   * Strike x expiration: the single latest snapshot for each expiration that
+   * has one, giving a term-structure view of GEX across the chain at
+   * (approximately) one point in time. Every expiration's "latest" comes
+   * from its own most recent capture, so two columns are not guaranteed to
+   * share an exact timestamp — expirations don't all get viewed/captured on
+   * the same cadence.
+   */
+  async getTermStructure(
+    query: GexTermStructureQuery,
+    now = new Date(),
+  ): Promise<GexTermStructureSnapshot> {
+    const since = new Date(now.getTime() - query.maxSnapshotAgeMs);
+    // Upper bound is inclusive-of-now (+1ms) rather than `lt: now`, since a
+    // snapshot captured in this same request (moments before this query
+    // runs) can legitimately carry `observedAt === now`.
+    const rows = await this.prisma.optionsAnalyticsSnapshotRecord.findMany({
+      where: { symbol: query.symbol, observedAt: { gte: since, lt: new Date(now.getTime() + 1) } },
+      orderBy: { bucket: 'asc' },
+    });
+
+    const latestByExpiration = new Map<string, OptionsAnalyticsSnapshotRecord>();
+    for (const row of rows) {
+      const existing = latestByExpiration.get(row.expiration);
+      if (!existing || row.observedAt.getTime() > existing.observedAt.getTime()) {
+        latestByExpiration.set(row.expiration, row);
+      }
+    }
+
+    const expirations = [...latestByExpiration.keys()].sort();
+    const strikeSet = new Set<number>();
+    const cells: GexTermStructureCell[] = [];
+
+    for (const expiration of expirations) {
+      const row = latestByExpiration.get(expiration)!;
+      const output = row.output as unknown as OptionsAnalyticsSnapshot;
+      const isStale = now.getTime() - row.observedAt.getTime() > STALE_THRESHOLD_MS;
+
+      for (const strikeRow of output.strikes) {
+        if (
+          !withinWindow(
+            strikeRow.strike,
+            output.scope.spot,
+            query.strikeRangeBelowSpot,
+            query.strikeRangeAboveSpot,
+          )
+        ) {
+          continue;
+        }
+        strikeSet.add(strikeRow.strike);
+        cells.push({
+          ...buildCell(
+            output.scope.observedAt,
+            strikeRow,
+            classifyCellQuality(strikeRow, output.scope.spot, isStale),
+          ),
+          expiration,
+        });
+      }
+    }
+
+    return {
+      underlyingSymbol: query.symbol,
+      expirations,
+      strikes: [...strikeSet].sort((a, b) => a - b),
+      cells,
+    };
+  }
+}
+
+function buildCell(
+  timestamp: string,
+  strikeRow: OptionsAnalyticsStrike,
+  dataQuality: GexDataQuality,
+): GexHeatmapCell {
+  const callGex = strikeRow.call?.gammaExposure ?? null;
+  const putGexMagnitude = strikeRow.put?.gammaExposure ?? null;
+  const putGex = putGexMagnitude === null ? null : -putGexMagnitude;
+  const netGex = callGex === null && putGex === null ? null : (callGex ?? 0) + (putGex ?? 0);
+  return { timestamp, strike: strikeRow.strike, callGex, putGex, netGex, dataQuality };
 }
 
 function withinWindow(

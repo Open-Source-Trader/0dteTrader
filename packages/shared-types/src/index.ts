@@ -439,6 +439,25 @@ export interface GexHeatmapSnapshot {
   cells: GexHeatmapCell[];
 }
 
+/**
+ * One cell in the term-structure view: X-axis `expiration`, Y-axis `strike`.
+ * `timestamp` is that expiration's own latest capture — columns are not
+ * guaranteed to share an exact timestamp, since expirations don't all get
+ * viewed/captured on the same cadence.
+ */
+export interface GexTermStructureCell extends GexHeatmapCell {
+  expiration: string;
+}
+
+export interface GexTermStructureSnapshot {
+  underlyingSymbol: string;
+  /** YYYY-MM-DD, ascending; only expirations with a recent snapshot. */
+  expirations: string[];
+  /** Strikes present anywhere in the result, ascending. */
+  strikes: number[];
+  cells: GexTermStructureCell[];
+}
+
 export type IVAlertSymbol = 'SPX' | 'NDX' | 'RUT';
 export type IVAlertDirection = 'expansion' | 'crush';
 

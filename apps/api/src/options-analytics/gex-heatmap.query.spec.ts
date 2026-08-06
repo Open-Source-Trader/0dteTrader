@@ -322,3 +322,95 @@ describe('GexHeatmapQueryService', () => {
     expect(heatmap.strikes).toEqual([100]);
   });
 });
+
+describe('GexHeatmapQueryService.getTermStructure', () => {
+  let prisma: InMemoryPrismaService;
+  let capture: OptionsAnalyticsCaptureService;
+  let query: GexHeatmapQueryService;
+
+  beforeEach(() => {
+    prisma = new InMemoryPrismaService();
+    capture = new OptionsAnalyticsCaptureService(prisma as never, {} as never, config());
+    query = new GexHeatmapQueryService(prisma as never);
+    jest.spyOn(Logger.prototype, 'log').mockImplementation();
+    jest.spyOn(Logger.prototype, 'warn').mockImplementation();
+    jest.spyOn(Logger.prototype, 'error').mockImplementation();
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it('picks the single latest snapshot for each expiration, sorted ascending', async () => {
+    const near = result(
+      'SPY',
+      new Date(NOW.getTime() - 30_000),
+      100,
+      [strikeRow(100, leg({ gammaExposure: 1_000 }), leg({ gammaExposure: 500 }))],
+      '2026-07-21',
+    );
+    const nearOlder = result(
+      'SPY',
+      new Date(NOW.getTime() - 90_000),
+      100,
+      [strikeRow(100, leg({ gammaExposure: 1 }), leg({ gammaExposure: 1 }))],
+      '2026-07-21',
+    );
+    const far = result(
+      'SPY',
+      NOW,
+      100,
+      [strikeRow(100, leg({ gammaExposure: 2_000 }), leg({ gammaExposure: 1_000 }))],
+      '2026-08-21',
+    );
+    await capture.persist(nearOlder, 'viewed', new Date(NOW.getTime() - 90_000));
+    await capture.persist(near, 'viewed', new Date(NOW.getTime() - 30_000));
+    await capture.persist(far, 'viewed', NOW);
+
+    const termStructure = await query.getTermStructure(
+      { symbol: 'SPY', maxSnapshotAgeMs: 10 * 60_000 },
+      NOW,
+    );
+
+    expect(termStructure.expirations).toEqual(['2026-07-21', '2026-08-21']);
+    const byExpiration = new Map(termStructure.cells.map((cell) => [cell.expiration, cell]));
+    // The near expiration's LATEST row (gammaExposure 1000/500), not the older one (1/1).
+    expect(byExpiration.get('2026-07-21')).toMatchObject({ callGex: 1_000, putGex: -500 });
+    expect(byExpiration.get('2026-08-21')).toMatchObject({ callGex: 2_000, putGex: -1_000 });
+  });
+
+  it('excludes an expiration whose only snapshot is older than maxSnapshotAgeMs', async () => {
+    const stale = result(
+      'SPY',
+      new Date(NOW.getTime() - 20 * 60_000),
+      100,
+      [strikeRow(100, leg(), leg())],
+      '2026-07-21',
+    );
+    await capture.persist(stale, 'viewed', new Date(NOW.getTime() - 20 * 60_000));
+
+    const termStructure = await query.getTermStructure(
+      { symbol: 'SPY', maxSnapshotAgeMs: 5 * 60_000 },
+      NOW,
+    );
+
+    expect(termStructure.expirations).toEqual([]);
+    expect(termStructure.cells).toEqual([]);
+  });
+
+  it('is deterministic: repeated calls with identical stored inputs produce identical output', async () => {
+    const row = result(
+      'SPY',
+      NOW,
+      100,
+      [strikeRow(100, leg({ gammaExposure: 1_000 }), leg({ gammaExposure: 500 }))],
+      '2026-07-21',
+    );
+    await capture.persist(row, 'viewed', NOW);
+
+    const params = { symbol: 'SPY', maxSnapshotAgeMs: 10 * 60_000 };
+    const first = await query.getTermStructure(params, NOW);
+    const second = await query.getTermStructure(params, NOW);
+    expect(first).toEqual(second);
+  });
+});

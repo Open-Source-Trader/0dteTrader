@@ -13,6 +13,7 @@ import type {
   ChartOrder,
   ChartOrderDraft,
   ChartOrderPatch,
+  GexHeatmapSnapshot,
   Me,
   OptionsChain,
   OrderPreview,
@@ -255,6 +256,35 @@ export class ApiClient {
       query: { symbol: normalizedSymbol, expiration },
       signal,
     }).then((value) => validateOptionsAnalyticsSnapshot(value, normalizedSymbol, expiration));
+  }
+
+  gexHeatmap(
+    symbol: string,
+    options: {
+      expiration?: string;
+      strikeRangeAboveSpot?: number;
+      strikeRangeBelowSpot?: number;
+      historyWindowMinutes?: number;
+      signal?: AbortSignal;
+    } = {},
+  ): Promise<GexHeatmapSnapshot> {
+    const query: Record<string, string> = { symbol: symbol.toUpperCase().trim() };
+    if (options.expiration) query.expiration = options.expiration;
+    if (options.strikeRangeAboveSpot !== undefined) {
+      query.strikeRangeAboveSpot = String(options.strikeRangeAboveSpot);
+    }
+    if (options.strikeRangeBelowSpot !== undefined) {
+      query.strikeRangeBelowSpot = String(options.strikeRangeBelowSpot);
+    }
+    if (options.historyWindowMinutes !== undefined) {
+      query.historyWindowMinutes = String(options.historyWindowMinutes);
+    }
+    return this.request({
+      method: 'GET',
+      path: 'v1/market/options-analytics/gex-heatmap',
+      query,
+      signal: options.signal,
+    });
   }
 
   rankAutoContracts(input: {

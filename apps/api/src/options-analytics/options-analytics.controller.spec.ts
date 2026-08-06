@@ -131,4 +131,73 @@ describe('OptionsAnalyticsController', () => {
     await controller.getGexHeatmap({ userId: 'user-1' } as never, { symbol: 'SPY' } as never);
     expect(capture.persist).not.toHaveBeenCalled();
   });
+
+  it('gex-term-structure reuses getSnapshotResult for one expiration and awaits the viewed capture before querying', async () => {
+    const result = {
+      snapshot: { scope: { symbol: 'SPY', expiration: '2026-07-20' } },
+      input: {},
+      scope: 'shared',
+    };
+    const analytics = { getSnapshotResult: jest.fn().mockResolvedValue(result) };
+    const events: string[] = [];
+    const capture = {
+      persist: jest.fn().mockImplementation(async () => {
+        events.push('persist');
+        return true;
+      }),
+    };
+    const termStructureSnapshot = {
+      underlyingSymbol: 'SPY',
+      expirations: [],
+      strikes: [],
+      cells: [],
+    };
+    const gexHeatmap = {
+      getTermStructure: jest.fn().mockImplementation(async () => {
+        events.push('getTermStructure');
+        return termStructureSnapshot;
+      }),
+    };
+    const controller = new OptionsAnalyticsController(
+      analytics as never,
+      capture as never,
+      gexHeatmap as never,
+    );
+
+    const response = await controller.getGexTermStructure(
+      { userId: 'user-1' } as never,
+      { symbol: 'spy' } as never,
+    );
+
+    expect(analytics.getSnapshotResult).toHaveBeenCalledTimes(1);
+    expect(events).toEqual(['persist', 'getTermStructure']);
+    expect(gexHeatmap.getTermStructure).toHaveBeenCalledWith(
+      expect.objectContaining({ symbol: 'SPY' }),
+    );
+    expect(response).toBe(termStructureSnapshot);
+  });
+
+  it('gex-term-structure never persists a user-scoped snapshot into the shared capture history', async () => {
+    const result = {
+      snapshot: { scope: { symbol: 'SPY', expiration: '2026-07-20' } },
+      input: {},
+      scope: 'u-someone',
+    };
+    const analytics = { getSnapshotResult: jest.fn().mockResolvedValue(result) };
+    const capture = { persist: jest.fn() };
+    const gexHeatmap = { getTermStructure: jest.fn().mockResolvedValue({}) };
+    const controller = new OptionsAnalyticsController(
+      analytics as never,
+      capture as never,
+      gexHeatmap as never,
+    );
+
+    await controller.getGexTermStructure(
+      { userId: 'user-1' } as never,
+      {
+        symbol: 'SPY',
+      } as never,
+    );
+    expect(capture.persist).not.toHaveBeenCalled();
+  });
 });

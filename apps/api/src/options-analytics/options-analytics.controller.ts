@@ -1,7 +1,11 @@
 import { Controller, Get, Logger, Query } from '@nestjs/common';
 import { Type } from 'class-transformer';
 import { IsDateString, IsInt, IsOptional, IsString, Matches, Max, Min } from 'class-validator';
-import type { GexHeatmapSnapshot, OptionsAnalyticsSnapshot } from '@0dtetrader/shared-types';
+import type {
+  GexHeatmapSnapshot,
+  GexTermStructureSnapshot,
+  OptionsAnalyticsSnapshot,
+} from '@0dtetrader/shared-types';
 import { AuthenticatedUser, CurrentUser } from '../common/current-user.decorator';
 import { GexHeatmapQueryService } from './gex-heatmap.query';
 import { OptionsAnalyticsCaptureService } from './options-analytics.capture';
@@ -53,7 +57,46 @@ export class GexHeatmapQueryDto {
   historyWindowMinutes?: number;
 }
 
+export class GexTermStructureQueryDto {
+  @IsString()
+  @Matches(/^[A-Za-z0-9.-]{1,12}$/)
+  symbol!: string;
+
+  /** The expiration to guarantee is fresh (a live snapshot is triggered for
+   *  this one, same as gex-heatmap); omit for the nearest 0DTE. Other
+   *  expirations in the result use whatever their own history last captured. */
+  @IsOptional()
+  @IsString()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/)
+  @IsDateString({ strict: true })
+  expiration?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  @Max(500)
+  strikeRangeAboveSpot?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  @Max(500)
+  strikeRangeBelowSpot?: number;
+
+  /** How far back an expiration's own latest snapshot may be and still count
+   *  as "current" for the term-structure view. */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(24 * 60)
+  maxSnapshotAgeMinutes?: number;
+}
+
 const DEFAULT_HISTORY_WINDOW_MINUTES = 60;
+const DEFAULT_TERM_STRUCTURE_MAX_AGE_MINUTES = 60;
 
 @Controller('market')
 export class OptionsAnalyticsController {
@@ -142,6 +185,49 @@ export class OptionsAnalyticsController {
       expiration,
       from,
       to,
+      strikeRangeAboveSpot: query.strikeRangeAboveSpot,
+      strikeRangeBelowSpot: query.strikeRangeBelowSpot,
+    });
+  }
+
+  /**
+   * Term-structure GEX: strike x expiration, using each expiration's own
+   * latest capture. Triggers a live snapshot only for the one expiration the
+   * caller names (or the nearest 0DTE) — the same single ingestion call
+   * every other endpoint here uses — so opening this view does not fan out
+   * into one Tradier request per expiration. Other columns reflect whatever
+   * the core cron or a prior 'viewed' request already captured for them.
+   */
+  @Get('options-analytics/gex-term-structure')
+  async getGexTermStructure(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query: GexTermStructureQueryDto,
+  ): Promise<GexTermStructureSnapshot> {
+    const result = await this.analytics.getSnapshotResult(
+      query.symbol,
+      query.expiration,
+      user.userId,
+    );
+    if (result.scope === 'shared') {
+      try {
+        await this.capture.persist(result, 'viewed');
+      } catch (error) {
+        this.logger.error(
+          JSON.stringify({
+            event: 'options_analytics_viewed_capture_failed',
+            symbol: result.snapshot.scope.symbol,
+            expiration: result.snapshot.scope.expiration,
+            message: error instanceof Error ? error.message : String(error),
+          }),
+        );
+      }
+    }
+
+    const maxSnapshotAgeMs =
+      (query.maxSnapshotAgeMinutes ?? DEFAULT_TERM_STRUCTURE_MAX_AGE_MINUTES) * 60_000;
+    return this.gexHeatmap.getTermStructure({
+      symbol: result.snapshot.scope.symbol,
+      maxSnapshotAgeMs,
       strikeRangeAboveSpot: query.strikeRangeAboveSpot,
       strikeRangeBelowSpot: query.strikeRangeBelowSpot,
     });

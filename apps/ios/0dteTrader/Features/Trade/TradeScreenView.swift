@@ -32,6 +32,7 @@ struct TradeScreenView: View {
     @State private var showTwcSettings = false
     @State private var showProfile = false
     @State private var showHistory = false
+    @State private var showGexHeatmap = false
     @State private var showAIAnalysis = false
     // 'nil' until /v1/me answers; the server value wins (desktop parity).
     @State private var tradingMode: TradingMode?
@@ -169,6 +170,15 @@ struct TradeScreenView: View {
         }
         .sheet(isPresented: $showHistory) {
             HistoryView(apiClient: container.apiClient)
+        }
+        .sheet(isPresented: $showGexHeatmap) {
+            GexHeatmapView(
+                symbol: chartViewModel.symbol,
+                spotPrice: chartViewModel.quote?.last ?? 0,
+                bid: chartViewModel.quote?.bid,
+                ask: chartViewModel.quote?.ask,
+                expirations: Array(chainViewModel.expirations.prefix(7))
+            )
         }
         .sheet(isPresented: $showAIAnalysis) {
             #if canImport(FoundationModels)
@@ -517,6 +527,7 @@ struct TradeScreenView: View {
             },
             onShowProfile: { showProfile = true },
             onShowHistory: { showHistory = true },
+            onShowGexHeatmap: { showGexHeatmap = true },
             tradingMode: tradingMode,
             onToggleMode: { showModeConfirmation = true },
             chartOrders: chartOrdersModel,

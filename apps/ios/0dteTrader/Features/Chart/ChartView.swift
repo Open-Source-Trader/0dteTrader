@@ -45,6 +45,8 @@ struct ChartView: View {
     /// screen has no navigation bar of its own.
     var onShowProfile: () -> Void = {}
     var onShowHistory: () -> Void = {}
+    /// Opens the GEX heatmap sheet for the active symbol. Nil hides the button.
+    var onShowGexHeatmap: (() -> Void)?
     /// Practice/live badge state; nil hides the badge (pre-fetch).
     let tradingMode: TradingMode?
     let onToggleMode: () -> Void
@@ -81,6 +83,7 @@ struct ChartView: View {
         indicatorPopup: @escaping (@escaping () -> Void) -> AnyView,
         onShowProfile: @escaping () -> Void = {},
         onShowHistory: @escaping () -> Void = {},
+        onShowGexHeatmap: (() -> Void)? = nil,
         tradingMode: TradingMode? = nil,
         onToggleMode: @escaping () -> Void = {},
         chartOrders: ChartOrdersModel? = nil,
@@ -97,6 +100,7 @@ struct ChartView: View {
         self.indicatorPopup = indicatorPopup
         self.onShowProfile = onShowProfile
         self.onShowHistory = onShowHistory
+        self.onShowGexHeatmap = onShowGexHeatmap
         self.tradingMode = tradingMode
         self.onToggleMode = onToggleMode
         self.chartOrders = chartOrders
@@ -548,6 +552,17 @@ struct ChartView: View {
                         .headerGlyphChrome()
                 }
                 .accessibilityLabel("Trade history")
+
+                if let onShowGexHeatmap {
+                    Button {
+                        onShowGexHeatmap()
+                    } label: {
+                        Image(systemName: "square.grid.3x3.fill")
+                            .font(.subheadline)
+                            .headerGlyphChrome()
+                    }
+                    .accessibilityLabel("GEX heatmap")
+                }
 
                 Spacer(minLength: AppSpacing.sm)
 

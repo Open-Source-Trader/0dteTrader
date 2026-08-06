@@ -6,6 +6,10 @@ dist
 !.env.example
 *.md
 docs/
+!docs/
+docs/*
+!docs/legal/
+!docs/legal/**
 apps/ios/
 apps/desktop/
 coverage/

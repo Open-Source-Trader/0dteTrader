@@ -26,6 +26,28 @@ struct GexCellStyle {
     let borderColor: Color
 }
 
+/// A fully pre-formatted cell: text and colors resolved once, ahead of
+/// render. `NumberFormatter`/`String(format:)`/color interpolation are real
+/// CPU cost — cheap once per data load, ruinous once per gesture frame (a
+/// drag's `@GestureState` changes on every touch-move, and re-deriving these
+/// from `GexHeatmapCell` inside `body` reran that work on every frame).
+struct RenderedGexCell: Identifiable {
+    var id: String { columnKey }
+    let columnKey: String
+    let text: String
+    let background: Color
+    let borderColor: Color
+}
+
+/// A fully pre-sorted, pre-formatted row, built once per data load.
+struct RenderedGexRow: Identifiable {
+    var id: Double { strike }
+    let strike: Double
+    let strikeLabel: String
+    let isSpotRow: Bool
+    let cells: [RenderedGexCell]
+}
+
 /// Math and formatting shared by the GEX heatmap grid (desktop parity —
 /// apps/desktop/src/features/gexHeatmap/gexHeatmapMath.ts).
 enum GexHeatmapMath {
@@ -100,6 +122,40 @@ enum GexHeatmapMath {
     /// Returns entries sorted descending by strike (highest first).
     static func sortedByStrikeDescending(_ entries: [GexHeatmapEntry]) -> [GexHeatmapEntry] {
         entries.sorted { $0.strike > $1.strike }
+    }
+
+    /// Builds the fully pre-sorted, pre-formatted, pre-colored render model
+    /// in one pass — sort once, format once, interpolate color once. Call
+    /// this when `entries`/`columns`/`spotPrice` change; never from inside a
+    /// gesture-driven view body, or the formatting/color cost repeats on
+    /// every touch-move frame.
+    static func buildRenderedRows(
+        entries: [GexHeatmapEntry],
+        columns: [GexHeatmapColumn],
+        spotPrice: Double
+    ) -> [RenderedGexRow] {
+        let sorted = sortedByStrikeDescending(entries)
+        let maxAbs = maxAbsoluteValue(sorted)
+        let spot = closestStrike(sorted, spotPrice: spotPrice)
+        return sorted.map { entry in
+            let cellByColumn = Dictionary(uniqueKeysWithValues: entry.cells.map { ($0.columnKey, $0.netGex) })
+            let cells = columns.map { column -> RenderedGexCell in
+                let value = cellByColumn[column.key] ?? nil
+                let style = cellStyle(value: value, maxAbsoluteValue: maxAbs)
+                return RenderedGexCell(
+                    columnKey: column.key,
+                    text: formatGexValue(value),
+                    background: style.background,
+                    borderColor: style.borderColor
+                )
+            }
+            return RenderedGexRow(
+                strike: entry.strike,
+                strikeLabel: Format.strike(entry.strike),
+                isSpotRow: spot == entry.strike,
+                cells: cells
+            )
+        }
     }
 
     /// Largest absolute net-GEX value across every visible cell; 0 if none are numeric.

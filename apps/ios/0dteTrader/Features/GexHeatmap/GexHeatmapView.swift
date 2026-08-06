@@ -29,7 +29,13 @@ struct GexHeatmapView: View {
     /// (which always spans every near expiration).
     @State private var timeSeriesExpiration: String?
     @State private var columns: [GexHeatmapColumn] = []
-    @State private var entries: [GexHeatmapEntry] = []
+    /// Pre-sorted, pre-formatted, pre-colored — built once per data load by
+    /// `GexHeatmapMath.buildRenderedRows`, not derived inside `body`. Reading
+    /// `entries` directly from a gesture-driven view would re-sort, re-format
+    /// every cell's `NumberFormatter` string, and re-run color interpolation
+    /// on every touch-move frame of a drag; this is computed exactly once
+    /// per load instead.
+    @State private var renderedRows: [RenderedGexRow] = []
     @State private var isLoading = false
     @State private var errorMessage: String?
     @State private var loadToken = UUID()
@@ -91,20 +97,8 @@ struct GexHeatmapView: View {
         _timeSeriesExpiration = State(initialValue: selectedExpiration)
     }
 
-    private var sortedEntries: [GexHeatmapEntry] {
-        GexHeatmapMath.sortedByStrikeDescending(entries)
-    }
-
-    private var maxAbsoluteValue: Double {
-        GexHeatmapMath.maxAbsoluteValue(sortedEntries)
-    }
-
-    private var closestStrike: Double? {
-        GexHeatmapMath.closestStrike(sortedEntries, spotPrice: spotPrice)
-    }
-
     private var bodyWidth: CGFloat { CGFloat(columns.count) * cellWidth }
-    private var bodyHeight: CGFloat { CGFloat(sortedEntries.count) * gridRowHeight }
+    private var bodyHeight: CGFloat { CGFloat(renderedRows.count) * gridRowHeight }
 
     var body: some View {
         NavigationStack {
@@ -113,7 +107,7 @@ struct GexHeatmapView: View {
                 Divider().overlay(Color.hudStroke.opacity(0.3))
                 if let errorMessage {
                     unavailableState(message: "GEX data unavailable: \(errorMessage)")
-                } else if sortedEntries.isEmpty {
+                } else if renderedRows.isEmpty {
                     unavailableState(message: isLoading ? "Loading GEX data…" : "GEX data unavailable")
                 } else {
                     grid
@@ -147,6 +141,7 @@ struct GexHeatmapView: View {
         defer { isLoading = false }
         do {
             let window = GexHeatmapAdapters.strikeWindow(forSpotPrice: spotPrice)
+            let entries: [GexHeatmapEntry]
             switch viewMode {
             case .termStructure:
                 let snapshot = try await apiClient.gexTermStructure(
@@ -166,6 +161,13 @@ struct GexHeatmapView: View {
                 )
                 (columns, entries) = GexHeatmapAdapters.columnsAndEntries(fromHeatmap: snapshot)
             }
+            // Sort, format, and color every cell exactly once here — not on
+            // every gesture frame during a pinch/drag.
+            renderedRows = GexHeatmapMath.buildRenderedRows(
+                entries: entries,
+                columns: columns,
+                spotPrice: spotPrice
+            )
             centerOnSpotIfNeeded()
         } catch {
             errorMessage = (error as? APIError)?.userMessage ?? error.localizedDescription
@@ -178,10 +180,8 @@ struct GexHeatmapView: View {
     /// (horizontal) position is left alone; only the strike axis centers.
     private func centerOnSpotIfNeeded() {
         guard !hasCenteredOnSpot else { return }
-        let rows = GexHeatmapMath.sortedByStrikeDescending(entries)
-        guard !rows.isEmpty,
-              let closest = GexHeatmapMath.closestStrike(rows, spotPrice: spotPrice),
-              let index = rows.firstIndex(where: { $0.strike == closest })
+        guard !renderedRows.isEmpty,
+              let index = renderedRows.firstIndex(where: \.isSpotRow)
         else { return }
         hasCenteredOnSpot = true
         let viewportRows = max(1, Int(gridViewportHeight / gridRowHeight))
@@ -344,7 +344,7 @@ struct GexHeatmapView: View {
     }
 
     private var columnHeaderRow: some View {
-        HStack(spacing: 0) {
+        LazyHStack(spacing: 0) {
             ForEach(columns) { column in
                 Text(column.label)
                     .lineLimit(1)
@@ -359,43 +359,38 @@ struct GexHeatmapView: View {
     }
 
     private var strikeColumn: some View {
-        VStack(spacing: 0) {
-            ForEach(sortedEntries, id: \.strike) { entry in
-                let isSpotRow = closestStrike == entry.strike
-                Text(Format.strike(entry.strike))
+        LazyVStack(spacing: 0) {
+            ForEach(renderedRows) { row in
+                Text(row.strikeLabel)
                     .lineLimit(1)
                     .frame(width: strikeColumnWidth, height: gridRowHeight)
                     .font(.system(.caption, design: .monospaced).weight(.semibold))
-                    .foregroundStyle(isSpotRow ? .white : .white.opacity(0.85))
-                    .background(isSpotRow ? Color(red: 0.23, green: 0.36, blue: 0.82) : Color(white: 0.04))
+                    .foregroundStyle(row.isSpotRow ? .white : .white.opacity(0.85))
+                    .background(row.isSpotRow ? Color(red: 0.23, green: 0.36, blue: 0.82) : Color(white: 0.04))
             }
         }
         .scaleEffect(x: 1, y: scale, anchor: .topLeading)
     }
 
     private var dataBody: some View {
-        VStack(spacing: 0) {
-            ForEach(sortedEntries, id: \.strike) { entry in
-                dataRow(entry)
+        LazyVStack(spacing: 0) {
+            ForEach(renderedRows) { row in
+                dataRow(row)
             }
         }
         .scaleEffect(scale, anchor: .topLeading)
     }
 
-    private func dataRow(_ entry: GexHeatmapEntry) -> some View {
-        let cellByColumn = Dictionary(uniqueKeysWithValues: entry.cells.map { ($0.columnKey, $0.netGex) })
-
-        return HStack(spacing: 0) {
-            ForEach(columns) { column in
-                let value = cellByColumn[column.key] ?? nil
-                let style = GexHeatmapMath.cellStyle(value: value, maxAbsoluteValue: maxAbsoluteValue)
-                Text(GexHeatmapMath.formatGexValue(value))
+    private func dataRow(_ row: RenderedGexRow) -> some View {
+        LazyHStack(spacing: 0) {
+            ForEach(row.cells) { cell in
+                Text(cell.text)
                     .font(.system(.caption2, design: .monospaced).weight(.bold))
                     .foregroundStyle(.white)
                     .lineLimit(1)
                     .frame(width: cellWidth, height: gridRowHeight)
-                    .background(style.background)
-                    .overlay(Rectangle().stroke(style.borderColor, lineWidth: 1))
+                    .background(cell.background)
+                    .overlay(Rectangle().stroke(cell.borderColor, lineWidth: 1))
             }
         }
     }

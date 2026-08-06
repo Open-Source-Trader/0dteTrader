@@ -2,25 +2,29 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { GexHeatmap } from './GexHeatmap';
-import type { GexHeatmapEntry } from './types';
+import type { GexHeatmapColumn, GexHeatmapEntry } from './types';
 
-const expirations = ['2026-08-21', '2026-09-18', '2026-10-16'];
+const columns: readonly GexHeatmapColumn[] = [
+  { key: '2026-08-21', label: '2026-08-21' },
+  { key: '2026-09-18', label: '2026-09-18' },
+  { key: '2026-10-16', label: '2026-10-16' },
+];
 
 const sampleEntries: readonly GexHeatmapEntry[] = [
   {
     strike: 750,
     cells: [
-      { expiration: '2026-08-21', netGex: 50_500_000 },
-      { expiration: '2026-09-18', netGex: -8_400_000 },
-      { expiration: '2026-10-16', netGex: 42_100_000 },
+      { columnKey: '2026-08-21', netGex: 50_500_000 },
+      { columnKey: '2026-09-18', netGex: -8_400_000 },
+      { columnKey: '2026-10-16', netGex: 42_100_000 },
     ],
   },
   {
     strike: 770,
     cells: [
-      { expiration: '2026-08-21', netGex: 54_700_000 },
-      { expiration: '2026-09-18', netGex: -100_000 },
-      { expiration: '2026-10-16', netGex: 54_600_000 },
+      { columnKey: '2026-08-21', netGex: 54_700_000 },
+      { columnKey: '2026-09-18', netGex: -100_000 },
+      { columnKey: '2026-10-16', netGex: 54_600_000 },
     ],
   },
 ];
@@ -30,17 +34,17 @@ function render(entries: readonly GexHeatmapEntry[] = sampleEntries) {
     createElement(GexHeatmap, {
       symbol: 'SPY',
       spotPrice: 771.7,
-      expirations,
+      columns,
       entries,
     }),
   );
 }
 
 describe('GexHeatmap', () => {
-  it('renders every expiration as a column heading', () => {
+  it('renders every column as a heading', () => {
     const html = render();
-    for (const expiration of expirations) {
-      expect(html).toContain(expiration);
+    for (const column of columns) {
+      expect(html).toContain(column.label);
     }
   });
 
@@ -49,8 +53,8 @@ describe('GexHeatmap', () => {
       createElement(GexHeatmap, {
         symbol: 'TSLA',
         spotPrice: 245.3,
-        expirations: ['2026-09-19'],
-        entries: [{ strike: 240, cells: [{ expiration: '2026-09-19', netGex: 10_000_000 }] }],
+        columns: [{ key: '2026-09-19', label: '2026-09-19' }],
+        entries: [{ strike: 240, cells: [{ columnKey: '2026-09-19', netGex: 10_000_000 }] }],
       }),
     );
     expect(html).toContain('TSLA GEX heatmap');

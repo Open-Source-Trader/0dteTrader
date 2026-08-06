@@ -7,32 +7,31 @@ import {
   getMaxAbsoluteValue,
   sortEntriesByStrikeDescending,
 } from './gexHeatmapMath';
-import type { GexHeatmapEntry, GexHeatmapProps } from './types';
+import type { GexHeatmapColumn, GexHeatmapEntry, GexHeatmapProps } from './types';
 
-function gexAriaLabel(strike: number, expiration: string, value: number | null): string {
-  if (value === null)
-    return `Strike ${strike}, expiration ${expiration}, gamma exposure unavailable`;
+function gexAriaLabel(strike: number, columnLabel: string, value: number | null): string {
+  if (value === null) return `Strike ${strike}, ${columnLabel}, gamma exposure unavailable`;
   const normalized = value === 0 ? 0 : value;
   let polarity: 'positive' | 'negative' | 'zero' = 'zero';
   if (normalized > 0) polarity = 'positive';
   else if (normalized < 0) polarity = 'negative';
-  return `Strike ${strike}, expiration ${expiration}, gamma exposure ${polarity} $${Math.abs(normalized).toLocaleString('en-US')}`;
+  return `Strike ${strike}, ${columnLabel}, gamma exposure ${polarity} $${Math.abs(normalized).toLocaleString('en-US')}`;
 }
 
 interface ExposureCellProps {
   strike: number;
-  expiration: string;
+  columnLabel: string;
   value: number | null;
   maxAbsoluteValue: number;
 }
 
-function ExposureCell({ strike, expiration, value, maxAbsoluteValue }: ExposureCellProps) {
+function ExposureCell({ strike, columnLabel, value, maxAbsoluteValue }: ExposureCellProps) {
   const style = getGexCellStyle(value, maxAbsoluteValue);
   return (
     <td
       className="gex-heatmap__exposure-cell"
       style={{ background: style.background, borderColor: style.borderColor }}
-      aria-label={gexAriaLabel(strike, expiration, value)}
+      aria-label={gexAriaLabel(strike, columnLabel, value)}
     >
       <span className="gex-heatmap__exposure-value">{formatGexValue(value)}</span>
     </td>
@@ -41,24 +40,24 @@ function ExposureCell({ strike, expiration, value, maxAbsoluteValue }: ExposureC
 
 interface GexHeatmapRowProps {
   entry: GexHeatmapEntry;
-  expirations: readonly string[];
+  columns: readonly GexHeatmapColumn[];
   maxAbsoluteValue: number;
   isSpotRow: boolean;
 }
 
-function GexHeatmapRow({ entry, expirations, maxAbsoluteValue, isSpotRow }: GexHeatmapRowProps) {
-  const cellByExpiration = new Map(entry.cells.map((cell) => [cell.expiration, cell.netGex]));
+function GexHeatmapRow({ entry, columns, maxAbsoluteValue, isSpotRow }: GexHeatmapRowProps) {
+  const cellByColumn = new Map(entry.cells.map((cell) => [cell.columnKey, cell.netGex]));
   return (
     <tr className={`gex-heatmap__row${isSpotRow ? ' gex-heatmap__row--spot' : ''}`}>
       <th scope="row" className="gex-heatmap__strike-cell">
         {Format.strike(entry.strike)}
       </th>
-      {expirations.map((expiration) => (
+      {columns.map((column) => (
         <ExposureCell
-          key={expiration}
+          key={column.key}
           strike={entry.strike}
-          expiration={expiration}
-          value={cellByExpiration.get(expiration) ?? null}
+          columnLabel={column.label}
+          value={cellByColumn.get(column.key) ?? null}
           maxAbsoluteValue={maxAbsoluteValue}
         />
       ))}
@@ -66,28 +65,22 @@ function GexHeatmapRow({ entry, expirations, maxAbsoluteValue, isSpotRow }: GexH
   );
 }
 
-function GexHeatmapHeader({ expirations }: { expirations: readonly string[] }) {
+function GexHeatmapHeader({ columns }: { columns: readonly GexHeatmapColumn[] }) {
   return (
     <tr>
       <th scope="col" className="gex-heatmap__strike-cell gex-heatmap__col-heading">
         GEX
       </th>
-      {expirations.map((expiration) => (
-        <th key={expiration} scope="col" className="gex-heatmap__col-heading">
-          {expiration}
+      {columns.map((column) => (
+        <th key={column.key} scope="col" className="gex-heatmap__col-heading">
+          {column.label}
         </th>
       ))}
     </tr>
   );
 }
 
-export function GexHeatmap({
-  symbol,
-  spotPrice,
-  expirations,
-  entries,
-  className,
-}: GexHeatmapProps) {
+export function GexHeatmap({ symbol, spotPrice, columns, entries, className }: GexHeatmapProps) {
   const sortedEntries = useMemo(() => sortEntriesByStrikeDescending(entries), [entries]);
   const maxAbsoluteValue = useMemo(() => getMaxAbsoluteValue(sortedEntries), [sortedEntries]);
   const closestStrike = useMemo(
@@ -103,14 +96,14 @@ export function GexHeatmap({
       <div className="gex-heatmap__grid-scroll">
         <table className="gex-heatmap__grid">
           <thead>
-            <GexHeatmapHeader expirations={expirations} />
+            <GexHeatmapHeader columns={columns} />
           </thead>
           <tbody>
             {sortedEntries.map((entry) => (
               <GexHeatmapRow
                 key={entry.strike}
                 entry={entry}
-                expirations={expirations}
+                columns={columns}
                 maxAbsoluteValue={maxAbsoluteValue}
                 isSpotRow={closestStrike === entry.strike}
               />

@@ -14,6 +14,7 @@ import type {
   ChartOrderDraft,
   ChartOrderPatch,
   GexHeatmapSnapshot,
+  GexTermStructureSnapshot,
   Me,
   OptionsChain,
   OrderPreview,
@@ -282,6 +283,35 @@ export class ApiClient {
     return this.request({
       method: 'GET',
       path: 'v1/market/options-analytics/gex-heatmap',
+      query,
+      signal: options.signal,
+    });
+  }
+
+  gexTermStructure(
+    symbol: string,
+    options: {
+      expiration?: string;
+      strikeRangeAboveSpot?: number;
+      strikeRangeBelowSpot?: number;
+      maxSnapshotAgeMinutes?: number;
+      signal?: AbortSignal;
+    } = {},
+  ): Promise<GexTermStructureSnapshot> {
+    const query: Record<string, string> = { symbol: symbol.toUpperCase().trim() };
+    if (options.expiration) query.expiration = options.expiration;
+    if (options.strikeRangeAboveSpot !== undefined) {
+      query.strikeRangeAboveSpot = String(options.strikeRangeAboveSpot);
+    }
+    if (options.strikeRangeBelowSpot !== undefined) {
+      query.strikeRangeBelowSpot = String(options.strikeRangeBelowSpot);
+    }
+    if (options.maxSnapshotAgeMinutes !== undefined) {
+      query.maxSnapshotAgeMinutes = String(options.maxSnapshotAgeMinutes);
+    }
+    return this.request({
+      method: 'GET',
+      path: 'v1/market/options-analytics/gex-term-structure',
       query,
       signal: options.signal,
     });

@@ -43,6 +43,29 @@
   color: rgba(255, 255, 255, 0.5);
 }
 
+.gex-heatmap-modal__view-toggle {
+  display: flex;
+  gap: 2px;
+  margin-left: auto;
+  font-family: var(--font-sans);
+}
+
+.gex-heatmap-modal__view-button {
+  padding: 4px 10px;
+  background: transparent;
+  border: var(--border-hairline) solid rgba(255, 255, 255, 0.2);
+  color: rgba(255, 255, 255, 0.6);
+  font-size: var(--fs-caption2-desktop);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.gex-heatmap-modal__view-button--active {
+  background: rgba(59, 91, 219, 0.35);
+  border-color: #3b5bdb;
+  color: #ffffff;
+}
+
 .gex-heatmap-modal__unavailable {
   padding: 48px 16px;
   text-align: center;

@@ -43,10 +43,27 @@
   color: rgba(255, 255, 255, 0.5);
 }
 
+.gex-heatmap-modal__expiration-picker {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.gex-heatmap-modal__expiration-picker select {
+  background: rgba(255, 255, 255, 0.06);
+  border: var(--border-hairline) solid rgba(255, 255, 255, 0.2);
+  color: #ffffff;
+  font-family: var(--font-mono);
+  font-size: var(--fs-caption-desktop);
+  font-weight: 600;
+  padding: 3px 6px;
+}
+
 .gex-heatmap-modal__view-toggle {
   display: flex;
   gap: 2px;
-  margin-left: auto;
+  margin-left: 12px;
   font-family: var(--font-sans);
 }
 

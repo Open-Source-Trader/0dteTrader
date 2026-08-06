@@ -266,6 +266,7 @@ export class ApiClient {
       strikeRangeAboveSpot?: number;
       strikeRangeBelowSpot?: number;
       historyWindowMinutes?: number;
+      bucketMinutes?: number;
       signal?: AbortSignal;
     } = {},
   ): Promise<GexHeatmapSnapshot> {
@@ -279,6 +280,9 @@ export class ApiClient {
     }
     if (options.historyWindowMinutes !== undefined) {
       query.historyWindowMinutes = String(options.historyWindowMinutes);
+    }
+    if (options.bucketMinutes !== undefined) {
+      query.bucketMinutes = String(options.bucketMinutes);
     }
     return this.request({
       method: 'GET',

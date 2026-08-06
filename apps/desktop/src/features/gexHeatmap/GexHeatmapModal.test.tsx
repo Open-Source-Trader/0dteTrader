@@ -58,7 +58,9 @@ function renderModal(apiClient: {
         spotPrice: 500,
         bid: 499.95,
         ask: 500.05,
+        expirations: ['2026-08-21', '2026-08-22'],
         selectedExpiration: '2026-08-21',
+        chartInterval: '5m',
         onDismiss: () => {},
       }),
     ),
@@ -97,6 +99,46 @@ describe('GexHeatmapModal', () => {
     screen.getByText('Time Series').click();
 
     await waitFor(() => expect(apiClient.gexHeatmap).toHaveBeenCalled());
+  });
+
+  it('time series requests the chain-selected expiration by default and the chart-matched bucket size', async () => {
+    const apiClient = {
+      gexTermStructure: vi.fn().mockResolvedValue(termStructureSnapshot),
+      gexHeatmap: vi.fn().mockResolvedValue(timeSeriesSnapshot),
+    };
+    renderModal(apiClient);
+    await waitFor(() => expect(apiClient.gexTermStructure).toHaveBeenCalled());
+
+    screen.getByText('Time Series').click();
+
+    await waitFor(() =>
+      expect(apiClient.gexHeatmap).toHaveBeenCalledWith(
+        'SPY',
+        expect.objectContaining({ expiration: '2026-08-21', bucketMinutes: 5 }),
+      ),
+    );
+  });
+
+  it('changing the expiration picker refetches the time series for that expiration', async () => {
+    const apiClient = {
+      gexTermStructure: vi.fn().mockResolvedValue(termStructureSnapshot),
+      gexHeatmap: vi.fn().mockResolvedValue(timeSeriesSnapshot),
+    };
+    renderModal(apiClient);
+    await waitFor(() => expect(apiClient.gexTermStructure).toHaveBeenCalled());
+    screen.getByText('Time Series').click();
+    await waitFor(() => expect(apiClient.gexHeatmap).toHaveBeenCalledTimes(1));
+
+    const select = screen.getByLabelText('Expiration') as HTMLSelectElement;
+    select.value = '2026-08-22';
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+
+    await waitFor(() =>
+      expect(apiClient.gexHeatmap).toHaveBeenLastCalledWith(
+        'SPY',
+        expect.objectContaining({ expiration: '2026-08-22' }),
+      ),
+    );
   });
 
   it('persists the selected view mode to settings', async () => {

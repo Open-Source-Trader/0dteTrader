@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { Format } from '../../design/format';
 import {
   formatGexValue,
@@ -43,12 +43,22 @@ interface GexHeatmapRowProps {
   columns: readonly GexHeatmapColumn[];
   maxAbsoluteValue: number;
   isSpotRow: boolean;
+  spotRowRef?: React.RefObject<HTMLTableRowElement | null>;
 }
 
-function GexHeatmapRow({ entry, columns, maxAbsoluteValue, isSpotRow }: GexHeatmapRowProps) {
+function GexHeatmapRow({
+  entry,
+  columns,
+  maxAbsoluteValue,
+  isSpotRow,
+  spotRowRef,
+}: GexHeatmapRowProps) {
   const cellByColumn = new Map(entry.cells.map((cell) => [cell.columnKey, cell.netGex]));
   return (
-    <tr className={`gex-heatmap__row${isSpotRow ? ' gex-heatmap__row--spot' : ''}`}>
+    <tr
+      ref={isSpotRow ? spotRowRef : undefined}
+      className={`gex-heatmap__row${isSpotRow ? ' gex-heatmap__row--spot' : ''}`}
+    >
       <th scope="row" className="gex-heatmap__strike-cell">
         {Format.strike(entry.strike)}
       </th>
@@ -87,6 +97,18 @@ export function GexHeatmap({ symbol, spotPrice, columns, entries, className }: G
     () => getClosestStrike(sortedEntries, spotPrice),
     [sortedEntries, spotPrice],
   );
+  const spotRowRef = useRef<HTMLTableRowElement>(null);
+  const centeredOnce = useRef(false);
+
+  // Centers the spot-price row in the sheet's scroll container the first
+  // time real rows render — once only, so scrolling to look around the grid
+  // isn't fought on every re-render (e.g. a live-refreshing time series).
+  useEffect(() => {
+    if (centeredOnce.current || sortedEntries.length === 0 || !spotRowRef.current) return;
+    centeredOnce.current = true;
+    // jsdom (unit tests) doesn't implement scrollIntoView.
+    spotRowRef.current.scrollIntoView?.({ block: 'center' });
+  }, [sortedEntries]);
 
   return (
     <div
@@ -106,6 +128,7 @@ export function GexHeatmap({ symbol, spotPrice, columns, entries, className }: G
                 columns={columns}
                 maxAbsoluteValue={maxAbsoluteValue}
                 isSpotRow={closestStrike === entry.strike}
+                spotRowRef={closestStrike === entry.strike ? spotRowRef : undefined}
               />
             ))}
           </tbody>

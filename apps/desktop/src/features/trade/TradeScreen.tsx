@@ -876,7 +876,9 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
           spotPrice={chain.underlyingLast ?? chain.chain?.underlyingPrice ?? 0}
           bid={underlyingQuote?.bid ?? null}
           ask={underlyingQuote?.ask ?? null}
+          expirations={chain.chain?.expirations ?? []}
           selectedExpiration={chain.selectedExpiration}
+          chartInterval={chartStore.getState().interval}
           onDismiss={() => setShowGexHeatmap(false)}
         />
       ) : null}

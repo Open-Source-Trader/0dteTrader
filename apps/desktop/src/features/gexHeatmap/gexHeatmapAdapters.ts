@@ -1,5 +1,36 @@
-import type { GexHeatmapSnapshot, GexTermStructureSnapshot } from '@0dtetrader/shared-types';
+import type {
+  ChartInterval,
+  GexHeatmapSnapshot,
+  GexTermStructureSnapshot,
+} from '@0dtetrader/shared-types';
 import type { GexHeatmapColumn, GexHeatmapEntry } from './types';
+
+/** Maps the chart's candle interval to the GEX time-series bucket size, so a
+ *  5m chart shows 5-minute GEX columns instead of the raw 1-minute capture
+ *  cadence. GEX history has no tick-level granularity (it's captured on a
+ *  wall-clock cadence, not per-trade), so a tick interval falls back to the
+ *  finest bucket available. Capped at 60 — beyond that, term structure over
+ *  hours already reads better as a daily view than a time series. */
+export function gexBucketMinutes(interval: ChartInterval): number {
+  switch (interval) {
+    case '1m':
+      return 1;
+    case '5m':
+      return 5;
+    case '15m':
+      return 15;
+    case '30m':
+      return 30;
+    case '1h':
+      return 60;
+    case '4h':
+    case '1d':
+    case '1w':
+      return 60;
+    default:
+      return 1;
+  }
+}
 
 function timeLabel(iso: string): string {
   const parsed = new Date(iso);

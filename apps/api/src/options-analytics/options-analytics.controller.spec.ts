@@ -114,6 +114,59 @@ describe('OptionsAnalyticsController', () => {
     expect(response).toBe(heatmapSnapshot);
   });
 
+  it('gex-heatmap uses the requested `to` as the window end, for paging into older history', async () => {
+    const result = {
+      snapshot: { scope: { symbol: 'SPY', expiration: '2026-07-20' } },
+      input: {},
+      scope: 'shared',
+    };
+    const analytics = { getSnapshotResult: jest.fn().mockResolvedValue(result) };
+    const capture = { persist: jest.fn().mockResolvedValue(true) };
+    const gexHeatmap = { getHeatmap: jest.fn().mockResolvedValue({}) };
+    const controller = new OptionsAnalyticsController(
+      analytics as never,
+      capture as never,
+      gexHeatmap as never,
+    );
+    const to = '2026-07-20T14:00:00.000Z';
+
+    await controller.getGexHeatmap(
+      { userId: 'user-1' } as never,
+      { symbol: 'SPY', historyWindowMinutes: 30, to } as never,
+    );
+
+    expect(gexHeatmap.getHeatmap).toHaveBeenCalledWith(
+      expect.objectContaining({
+        to: new Date(to),
+        from: new Date(new Date(to).getTime() - 30 * 60_000),
+      }),
+    );
+  });
+
+  it('gex-heatmap defaults `to` to now when omitted', async () => {
+    const result = {
+      snapshot: { scope: { symbol: 'SPY', expiration: '2026-07-20' } },
+      input: {},
+      scope: 'shared',
+    };
+    const analytics = { getSnapshotResult: jest.fn().mockResolvedValue(result) };
+    const capture = { persist: jest.fn().mockResolvedValue(true) };
+    const gexHeatmap = { getHeatmap: jest.fn().mockResolvedValue({}) };
+    const controller = new OptionsAnalyticsController(
+      analytics as never,
+      capture as never,
+      gexHeatmap as never,
+    );
+
+    const before = Date.now();
+    await controller.getGexHeatmap({ userId: 'user-1' } as never, { symbol: 'SPY' } as never);
+    const after = Date.now();
+
+    const passedTo = (gexHeatmap.getHeatmap.mock.calls[0][0] as { to: Date }).to;
+    expect(passedTo.getTime()).toBeGreaterThanOrEqual(before);
+    expect(passedTo.getTime()).toBeLessThanOrEqual(after);
+  });
+
   it('gex-heatmap never persists a user-scoped snapshot into the shared capture history', async () => {
     const result = {
       snapshot: { scope: { symbol: 'SPY', expiration: '2026-07-20' } },

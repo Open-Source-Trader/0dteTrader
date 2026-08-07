@@ -52,7 +52,7 @@ export class GexHeatmapQueryDto {
   @Max(500)
   strikeRangeBelowSpot?: number;
 
-  /** Minutes of history to return, ending now. */
+  /** Minutes of history to return, ending at `to` (or now, if omitted). */
   @IsOptional()
   @Type(() => Number)
   @IsInt()
@@ -68,6 +68,15 @@ export class GexHeatmapQueryDto {
   @Min(1)
   @Max(24 * 60)
   bucketMinutes?: number;
+
+  /** End of the requested window; omit for now. Lets a client already
+   *  holding a recent window page further back in history (e.g. "give me
+   *  the 12 columns before the oldest one I already have") without
+   *  re-fetching or duplicating what it already has. */
+  @IsOptional()
+  @IsString()
+  @IsDateString()
+  to?: string;
 }
 
 export class GexTermStructureQueryDto {
@@ -196,7 +205,7 @@ export class OptionsAnalyticsController {
     }
 
     const historyWindowMinutes = query.historyWindowMinutes ?? DEFAULT_HISTORY_WINDOW_MINUTES;
-    const to = new Date();
+    const to = query.to ? new Date(query.to) : new Date();
     const from = new Date(to.getTime() - historyWindowMinutes * 60_000);
     return this.gexHeatmap.getHeatmap({
       symbol: result.snapshot.scope.symbol,

@@ -43,10 +43,13 @@ const timeSeriesSnapshot: GexHeatmapSnapshot = {
   ],
 };
 
-function renderModal(apiClient: {
-  gexTermStructure: ReturnType<typeof vi.fn>;
-  gexHeatmap: ReturnType<typeof vi.fn>;
-}) {
+function renderModal(
+  apiClient: {
+    gexTermStructure: ReturnType<typeof vi.fn>;
+    gexHeatmap: ReturnType<typeof vi.fn>;
+  },
+  spotPrice = 500,
+) {
   const settingsStore = new SettingsStore();
   const container = { apiClient, settingsStore } as never;
   return render(
@@ -55,7 +58,7 @@ function renderModal(apiClient: {
       { value: container },
       createElement(GexHeatmapModal, {
         symbol: 'SPY',
-        spotPrice: 500,
+        spotPrice,
         bid: 499.95,
         ask: 500.05,
         expirations: ['2026-08-21', '2026-08-22'],
@@ -74,6 +77,25 @@ describe('GexHeatmapModal', () => {
 
   afterEach(() => {
     cleanup();
+  });
+
+  it('requests an integer strike range even for a fractional spot price', async () => {
+    // The API rejects non-integer strikeRangeAboveSpot/BelowSpot ("must be
+    // an integer number") — a fractional spot price (e.g. 587.32) times the
+    // 0.08 window fraction produces a fractional value unless it's rounded.
+    const apiClient = {
+      gexTermStructure: vi.fn().mockResolvedValue(termStructureSnapshot),
+      gexHeatmap: vi.fn().mockResolvedValue(timeSeriesSnapshot),
+    };
+    renderModal(apiClient, 587.32);
+
+    await waitFor(() => expect(apiClient.gexTermStructure).toHaveBeenCalled());
+    const [, options] = apiClient.gexTermStructure.mock.calls[0] as [
+      string,
+      Record<string, unknown>,
+    ];
+    expect(Number.isInteger(options.strikeRangeAboveSpot)).toBe(true);
+    expect(Number.isInteger(options.strikeRangeBelowSpot)).toBe(true);
   });
 
   it('defaults to the term-structure view and renders its data', async () => {

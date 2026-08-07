@@ -44,7 +44,7 @@ interface LoadedGrid {
 const STRIKE_WINDOW_FRACTION = 0.08;
 
 function strikeWindow(spotPrice: number): number {
-  return Math.max(5, spotPrice * STRIKE_WINDOW_FRACTION);
+  return Math.ceil(Math.max(5, spotPrice * STRIKE_WINDOW_FRACTION));
 }
 
 /** Desktop modal wrapper around GexHeatmap, opened from the chart rail's heatmap icon. */

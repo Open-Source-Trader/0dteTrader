@@ -134,6 +134,50 @@ final class GexHeatmapAdaptersTests: XCTestCase {
         XCTAssertEqual(byStrike[500]?.cells.first?.netGex, 500)
     }
 
+    func testPrepend_putsOlderColumnsBeforeCurrentOnes() {
+        let older = (
+            columns: [GexHeatmapColumn(key: "t1", label: "1:00")],
+            entries: [GexHeatmapEntry(strike: 500, cells: [GexHeatmapCell(columnKey: "t1", netGex: 10)])]
+        )
+        let current = (
+            columns: [GexHeatmapColumn(key: "t2", label: "2:00")],
+            entries: [GexHeatmapEntry(strike: 500, cells: [GexHeatmapCell(columnKey: "t2", netGex: 20)])]
+        )
+
+        let merged = GexHeatmapAdapters.prepend(older: older, before: current)
+
+        XCTAssertEqual(merged.columns.map(\.key), ["t1", "t2"])
+        let cellsByColumn = Dictionary(
+            uniqueKeysWithValues: merged.entries[0].cells.map { ($0.columnKey, $0.netGex) }
+        )
+        XCTAssertEqual(cellsByColumn["t1"] ?? nil, 10)
+        XCTAssertEqual(cellsByColumn["t2"] ?? nil, 20)
+    }
+
+    func testPrepend_aStrikePresentInOnlyOnePageGetsUnavailableCellsForTheOtherPagesColumns() {
+        // Strike sets can differ between pages (a different window of the
+        // chain may have been captured) — this must never coerce a missing
+        // combination to 0, only to nil ("-" on screen).
+        let older = (
+            columns: [GexHeatmapColumn(key: "t1", label: "1:00")],
+            entries: [GexHeatmapEntry(strike: 495, cells: [GexHeatmapCell(columnKey: "t1", netGex: 10)])]
+        )
+        let current = (
+            columns: [GexHeatmapColumn(key: "t2", label: "2:00")],
+            entries: [GexHeatmapEntry(strike: 500, cells: [GexHeatmapCell(columnKey: "t2", netGex: 20)])]
+        )
+
+        let merged = GexHeatmapAdapters.prepend(older: older, before: current)
+
+        let byStrike = Dictionary(uniqueKeysWithValues: merged.entries.map { ($0.strike, $0) })
+        let strike495Cells = Dictionary(uniqueKeysWithValues: byStrike[495]!.cells.map { ($0.columnKey, $0.netGex) })
+        XCTAssertEqual(strike495Cells["t1"] ?? nil, 10)
+        XCTAssertNil(strike495Cells["t2"] ?? nil)
+        let strike500Cells = Dictionary(uniqueKeysWithValues: byStrike[500]!.cells.map { ($0.columnKey, $0.netGex) })
+        XCTAssertNil(strike500Cells["t1"] ?? nil)
+        XCTAssertEqual(strike500Cells["t2"] ?? nil, 20)
+    }
+
     func testBucketMinutes_matchesEachCandleIntervalToItsOwnMinuteCount() {
         XCTAssertEqual(GexHeatmapAdapters.bucketMinutes(for: .candle(.m1)), 1)
         XCTAssertEqual(GexHeatmapAdapters.bucketMinutes(for: .candle(.m5)), 5)
@@ -151,19 +195,19 @@ final class GexHeatmapAdaptersTests: XCTestCase {
     }
 
     func testHistoryWindowMinutes_scalesWithBucketSizeToCapColumnCount() {
-        // Column count should stay bounded (30) regardless of chart
-        // granularity — the backend gap-fills every bucket in the window, so
-        // an unbounded window at a fine bucket size renders too many columns
-        // for the grid's non-virtualized VStack/HStack to handle smoothly.
-        XCTAssertEqual(GexHeatmapAdapters.historyWindowMinutes(for: 1), 30)
-        XCTAssertEqual(GexHeatmapAdapters.historyWindowMinutes(for: 5), 150)
-        XCTAssertEqual(GexHeatmapAdapters.historyWindowMinutes(for: 15), 450)
+        // Column count per page should stay bounded (timeSeriesPageSize)
+        // regardless of chart granularity — the backend gap-fills every
+        // bucket in the window, so an unbounded window at a fine bucket size
+        // renders too many columns at once.
+        XCTAssertEqual(GexHeatmapAdapters.historyWindowMinutes(for: 1), 12)
+        XCTAssertEqual(GexHeatmapAdapters.historyWindowMinutes(for: 5), 60)
+        XCTAssertEqual(GexHeatmapAdapters.historyWindowMinutes(for: 15), 180)
     }
 
     func testHistoryWindowMinutes_clampsToTheAPIsOwnCeiling() {
-        // bucketMinutes(for:) tops out at 60, which alone would request 1800
-        // minutes — above the API's 1440-minute (24h) maximum.
-        XCTAssertEqual(GexHeatmapAdapters.historyWindowMinutes(for: 60), 24 * 60)
+        // A bucket size large enough that pageSize * bucketMinutes exceeds
+        // the API's 1440-minute (24h) maximum must still clamp to it.
+        XCTAssertEqual(GexHeatmapAdapters.historyWindowMinutes(for: 200), 24 * 60)
     }
 
     func testStrikeWindow_scalesWithSpotPriceRatherThanBeingFixed() {

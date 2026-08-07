@@ -257,7 +257,8 @@ struct APIClient: @unchecked Sendable {
         strikeRangeAboveSpot: Int? = nil,
         strikeRangeBelowSpot: Int? = nil,
         historyWindowMinutes: Int? = nil,
-        bucketMinutes: Int? = nil
+        bucketMinutes: Int? = nil,
+        to: Date? = nil
     ) async throws -> GexHeatmapSnapshotDTO {
         var query = [URLQueryItem(name: "symbol", value: symbol)]
         if let expiration { query.append(URLQueryItem(name: "expiration", value: expiration)) }
@@ -272,6 +273,9 @@ struct APIClient: @unchecked Sendable {
         }
         if let bucketMinutes {
             query.append(URLQueryItem(name: "bucketMinutes", value: String(bucketMinutes)))
+        }
+        if let to {
+            query.append(URLQueryItem(name: "to", value: ISO8601DateFormatter().string(from: to)))
         }
         return try await request(
             Endpoint(method: .get, path: "v1/market/options-analytics/gex-heatmap", query: query)

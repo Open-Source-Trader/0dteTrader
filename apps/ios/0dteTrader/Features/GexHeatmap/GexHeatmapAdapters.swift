@@ -29,24 +29,20 @@ enum GexHeatmapAdapters {
         }
     }
 
-    /// Caps how many time-series columns a single load can produce. The
-    /// backend gap-fills every bucket in the requested window — including
-    /// buckets with no capture — so a 1-minute chart interval (bucketMinutes
-    /// = 1) against the default 60-minute window would render 60 real
-    /// columns with no virtualization underneath (the grid is a plain
-    /// VStack/HStack, not a lazy/scrolling one), which froze the sheet after
-    /// the initial load. Bounding the requested window by the bucket size
-    /// keeps the column count constant regardless of chart granularity.
-    private static let maxTimeSeriesColumns = 30
+    /// How many time-series columns a single page loads. Older history isn't
+    /// as interesting as recent data, so the initial load — and each
+    /// subsequent page fetched as the user scrolls toward older time —
+    /// stays small rather than front-loading a large window upfront.
+    static let timeSeriesPageSize = 12
 
     /// The API's own ceiling on `historyWindowMinutes` (24h) — matched here
     /// so this never requests a window the backend would reject.
     private static let maxHistoryWindowMinutes = 24 * 60
 
-    /// The history window to request for a given bucket size, small enough
-    /// that gap-filled columns stay within `maxTimeSeriesColumns`.
+    /// The history window to request for one page at a given bucket size,
+    /// small enough that gap-filled columns stay within `timeSeriesPageSize`.
     static func historyWindowMinutes(for bucketMinutes: Int) -> Int {
-        min(maxHistoryWindowMinutes, max(1, bucketMinutes) * maxTimeSeriesColumns)
+        min(maxHistoryWindowMinutes, max(1, bucketMinutes) * timeSeriesPageSize)
     }
 
     /// Fraction of spot price to request above/below spot when querying the
@@ -95,5 +91,41 @@ enum GexHeatmapAdapters {
             return GexHeatmapEntry(strike: strike, cells: cells)
         }
         return (columns, entries)
+    }
+
+    /// Prepends an older page's columns/entries in front of the currently
+    /// loaded ones, for scroll-triggered time-series pagination. Rows are
+    /// matched by strike; a strike present in one page but not the other
+    /// still gets a cell for every column (missing as an unavailable "-",
+    /// never coerced to zero — same missing-data convention the rest of the
+    /// heatmap follows). Assumes `older`'s columns are all chronologically
+    /// before `current`'s (the caller fetches with `to` = the timestamp of
+    /// `current`'s first column), so no de-duplication or re-sorting is
+    /// needed — this only concatenates.
+    static func prepend(
+        older: (columns: [GexHeatmapColumn], entries: [GexHeatmapEntry]),
+        before current: (columns: [GexHeatmapColumn], entries: [GexHeatmapEntry])
+    ) -> (columns: [GexHeatmapColumn], entries: [GexHeatmapEntry]) {
+        let mergedColumns = older.columns + current.columns
+        var cellsByStrike: [Double: [String: Double?]] = [:]
+        for entry in older.entries {
+            for cell in entry.cells {
+                cellsByStrike[entry.strike, default: [:]][cell.columnKey] = cell.netGex
+            }
+        }
+        for entry in current.entries {
+            for cell in entry.cells {
+                cellsByStrike[entry.strike, default: [:]][cell.columnKey] = cell.netGex
+            }
+        }
+        let strikes = Set(older.entries.map(\.strike)).union(current.entries.map(\.strike))
+        let mergedEntries = strikes.map { strike -> GexHeatmapEntry in
+            let byColumn = cellsByStrike[strike] ?? [:]
+            let cells = mergedColumns.map { column in
+                GexHeatmapCell(columnKey: column.key, netGex: byColumn[column.key] ?? nil)
+            }
+            return GexHeatmapEntry(strike: strike, cells: cells)
+        }
+        return (mergedColumns, mergedEntries)
     }
 }

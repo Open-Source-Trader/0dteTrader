@@ -29,6 +29,11 @@ struct GexHeatmapView: View {
     /// (which always spans every near expiration).
     @State private var timeSeriesExpiration: String?
     @State private var columns: [GexHeatmapColumn] = []
+    /// The raw (strike, netGex-per-column) data behind `renderedRows`, kept
+    /// alongside it so `loadOlderPage` can merge a newly-fetched page in
+    /// without re-deriving it from `renderedRows`'s display-only text/color —
+    /// `RenderedGexCell` doesn't carry the numeric value back out.
+    @State private var loadedEntries: [GexHeatmapEntry] = []
     /// Pre-sorted, pre-formatted, pre-colored — built once per data load by
     /// `GexHeatmapMath.buildRenderedRows`, not derived inside `body`. Reading
     /// `entries` directly from a gesture-driven view would re-sort, re-format
@@ -43,10 +48,24 @@ struct GexHeatmapView: View {
     /// pan centers the spot strike without fighting the user's own scrolling
     /// on every subsequent refresh.
     @State private var hasCenteredOnSpot = false
-    /// The grid body's own viewport height (sheet height minus the pinned
-    /// header row), captured from `GeometryReader` so centering math can run
-    /// outside the view builder.
+    /// Time series only: set once per load sequence the first time columns
+    /// arrive, so the initial pan horizontally centers the current/latest
+    /// time column without fighting the user's own scrolling on every
+    /// subsequent page load.
+    @State private var hasCenteredOnNow = false
+    /// The grid body's own viewport height/width (sheet size minus the
+    /// pinned header row/strike column), captured from `GeometryReader` so
+    /// centering math can run outside the view builder.
     @State private var gridViewportHeight: CGFloat = 0
+    @State private var gridViewportWidth: CGFloat = 0
+    /// Time series only: whether an older page is currently being fetched,
+    /// to avoid firing a duplicate request while one is already in flight.
+    @State private var isLoadingOlderPage = false
+    /// Time series only: false once a page comes back with fewer buckets
+    /// than a full page (or empty) — the backend's floor on this
+    /// expiration's capture history has been reached, so further left-edge
+    /// scrolling stops requesting more.
+    @State private var hasMoreHistory = true
 
     /// Pinch-to-zoom scale and drag pan, each committed at gesture end so the
     /// next gesture starts from where the last one left off rather than
@@ -125,12 +144,19 @@ struct GexHeatmapView: View {
         .task(id: "\(viewMode.rawValue)-\(timeSeriesExpiration ?? "")-\(loadToken.uuidString)") {
             await load()
         }
-        // The grid, and therefore its measured height, may not exist yet the
+        // The grid, and therefore its measured size, may not exist yet the
         // first time load() finishes (it's hidden behind the loading state
         // until entries arrive) — retry centering once geometry is known.
         .onChange(of: gridViewportHeight) { _, _ in
             centerOnSpotIfNeeded()
         }
+        .onChange(of: gridViewportWidth) { _, _ in
+            centerOnNowIfNeeded()
+        }
+    }
+
+    private var timeSeriesBucketMinutes: Int {
+        GexHeatmapAdapters.bucketMinutes(for: chartInterval)
     }
 
     private func load() async {
@@ -138,6 +164,8 @@ struct GexHeatmapView: View {
         isLoading = true
         committedScale = 1
         committedOffset = .zero
+        hasCenteredOnNow = false
+        hasMoreHistory = true
         defer { isLoading = false }
         do {
             let window = GexHeatmapAdapters.strikeWindow(forSpotPrice: spotPrice)
@@ -152,17 +180,17 @@ struct GexHeatmapView: View {
                 )
                 (columns, entries) = GexHeatmapAdapters.columnsAndEntries(fromTermStructure: snapshot)
             case .timeSeries:
-                let bucketMinutes = GexHeatmapAdapters.bucketMinutes(for: chartInterval)
                 let snapshot = try await apiClient.gexHeatmap(
                     symbol: symbol,
                     expiration: timeSeriesExpiration,
                     strikeRangeAboveSpot: window,
                     strikeRangeBelowSpot: window,
-                    historyWindowMinutes: GexHeatmapAdapters.historyWindowMinutes(for: bucketMinutes),
-                    bucketMinutes: bucketMinutes
+                    historyWindowMinutes: GexHeatmapAdapters.historyWindowMinutes(for: timeSeriesBucketMinutes),
+                    bucketMinutes: timeSeriesBucketMinutes
                 )
                 (columns, entries) = GexHeatmapAdapters.columnsAndEntries(fromHeatmap: snapshot)
             }
+            loadedEntries = entries
             // Sort, format, and color every cell exactly once here — not on
             // every gesture frame during a pinch/drag.
             renderedRows = GexHeatmapMath.buildRenderedRows(
@@ -171,8 +199,61 @@ struct GexHeatmapView: View {
                 spotPrice: spotPrice
             )
             centerOnSpotIfNeeded()
+            centerOnNowIfNeeded()
         } catch {
             errorMessage = (error as? APIError)?.userMessage ?? error.localizedDescription
+        }
+    }
+
+    /// Fetches the page of time-series history immediately before what's
+    /// currently loaded and prepends it, for scroll-triggered pagination.
+    /// Older history matters less than recent data, so pages stay small
+    /// (`GexHeatmapAdapters.timeSeriesPageSize`) rather than front-loading a
+    /// large window — this is what backs it in as the user scrolls left
+    /// instead of fetching it all upfront.
+    private func loadOlderPage() async {
+        guard viewMode == .timeSeries, !isLoadingOlderPage, hasMoreHistory,
+              let oldestLoadedTimestamp = columns.first.flatMap({ DateParsing.dateTime($0.key) })
+        else { return }
+        isLoadingOlderPage = true
+        defer { isLoadingOlderPage = false }
+        do {
+            let window = GexHeatmapAdapters.strikeWindow(forSpotPrice: spotPrice)
+            let bucketMinutes = timeSeriesBucketMinutes
+            let snapshot = try await apiClient.gexHeatmap(
+                symbol: symbol,
+                expiration: timeSeriesExpiration,
+                strikeRangeAboveSpot: window,
+                strikeRangeBelowSpot: window,
+                historyWindowMinutes: GexHeatmapAdapters.historyWindowMinutes(for: bucketMinutes),
+                bucketMinutes: bucketMinutes,
+                to: oldestLoadedTimestamp
+            )
+            let older = GexHeatmapAdapters.columnsAndEntries(fromHeatmap: snapshot)
+            guard !older.columns.isEmpty else {
+                hasMoreHistory = false
+                return
+            }
+            if older.columns.count < GexHeatmapAdapters.timeSeriesPageSize {
+                hasMoreHistory = false
+            }
+            let merged = GexHeatmapAdapters.prepend(older: older, before: (columns, loadedEntries))
+            columns = merged.columns
+            loadedEntries = merged.entries
+            renderedRows = GexHeatmapMath.buildRenderedRows(
+                entries: merged.entries,
+                columns: merged.columns,
+                spotPrice: spotPrice
+            )
+            // Prepending shifts every existing column's index right by
+            // `older.columns.count` — hold the user's visual scroll position
+            // steady by shifting the committed offset left by exactly the
+            // width just inserted, rather than letting the view jump.
+            let prependedWidth = CGFloat(older.columns.count) * cellWidth * scale
+            committedOffset.width -= prependedWidth
+        } catch {
+            // A failed page fetch leaves existing data as-is; the user can
+            // scroll away and the next left-edge crossing retries.
         }
     }
 
@@ -191,6 +272,21 @@ struct GexHeatmapView: View {
         committedOffset.height = -CGFloat(targetTopRow) * gridRowHeight
     }
 
+    /// Time series only: pans so the most recent (rightmost, "now") time
+    /// column lands horizontally centered in the sheet — once per load
+    /// sequence, same one-shot pattern as `centerOnSpotIfNeeded`. Older
+    /// history is reachable by scrolling left, but isn't as immediately
+    /// interesting as the current moment, so it starts offscreen rather than
+    /// occupying half the initial view.
+    private func centerOnNowIfNeeded() {
+        guard viewMode == .timeSeries, !hasCenteredOnNow else { return }
+        guard !columns.isEmpty else { return }
+        hasCenteredOnNow = true
+        let viewportColumns = max(1, Int(gridViewportWidth / cellWidth))
+        let targetLeadingColumn = max(0, columns.count - 1 - viewportColumns / 2)
+        committedOffset.width = -CGFloat(targetLeadingColumn) * cellWidth
+    }
+
     private func selectViewMode(_ mode: GexHeatmapViewMode) {
         guard mode != viewMode else { return }
         settingsStore.gexHeatmapView = mode
@@ -202,6 +298,7 @@ struct GexHeatmapView: View {
         // reusing (or silently skipping, since `hasCenteredOnSpot` was
         // already flipped by whichever mode loaded first) a stale pan.
         hasCenteredOnSpot = false
+        hasCenteredOnNow = false
     }
 
     private var header: some View {
@@ -291,9 +388,15 @@ struct GexHeatmapView: View {
 
             ZStack(alignment: .topLeading) {
                 Color.clear
-                    .onAppear { gridViewportHeight = proxy.size.height }
+                    .onAppear {
+                        gridViewportHeight = proxy.size.height
+                        gridViewportWidth = proxy.size.width
+                    }
                     .onChange(of: proxy.size.height) { _, newValue in
                         gridViewportHeight = newValue
+                    }
+                    .onChange(of: proxy.size.width) { _, newValue in
+                        gridViewportWidth = newValue
                     }
                 GexDataBody(
                     rows: Array(renderedRows[window.rows]).map { row in
@@ -355,6 +458,7 @@ struct GexHeatmapView: View {
                         .onEnded { value in
                             committedScale = min(max(committedScale * value, 1), 4)
                             committedOffset = clampedOffset(proposed: committedOffset, viewport: proxy.size)
+                            maybeLoadOlderPage(clamped: committedOffset, viewport: proxy.size)
                         },
                     DragGesture()
                         .updating($dragOffset) { value, state, _ in
@@ -364,10 +468,22 @@ struct GexHeatmapView: View {
                             committedOffset.width += value.translation.width
                             committedOffset.height += value.translation.height
                             committedOffset = clampedOffset(proposed: committedOffset, viewport: proxy.size)
+                            maybeLoadOlderPage(clamped: committedOffset, viewport: proxy.size)
                         }
                 )
             )
         }
+    }
+
+    /// Fires a background fetch of the next older time-series page once the
+    /// user has scrolled near the left (oldest-loaded) edge — checked after
+    /// each gesture settles rather than every frame, since it only needs to
+    /// happen once per approach, not continuously during the drag itself.
+    private func maybeLoadOlderPage(clamped: CGSize, viewport: CGSize) {
+        guard viewMode == .timeSeries, hasMoreHistory, !isLoadingOlderPage else { return }
+        let window = visibleWindow(clamped: clamped, viewport: viewport)
+        guard window.columns.lowerBound <= 1 else { return }
+        Task { await loadOlderPage() }
     }
 
     private func visibleWindow(

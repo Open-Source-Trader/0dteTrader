@@ -52,6 +52,24 @@ describe('buildAnalysisSnapshot', () => {
     expect(second.identity.snapshotSequence).toBeGreaterThan(first.identity.snapshotSequence);
   });
 
+  it('reports candlesFreshAsOf as capturedAt when candles are present', () => {
+    const snapshot = buildAnalysisSnapshot({
+      chart: { symbol: 'SPY', interval: '5m', candles: [candle()], quote: null, isStale: false },
+      positions: [],
+      now: FIXED_NOW,
+    });
+    expect(snapshot.quality.candlesFreshAsOf).toBe(snapshot.quality.capturedAt);
+  });
+
+  it('reports candlesFreshAsOf as null when there are zero candles', () => {
+    const snapshot = buildAnalysisSnapshot({
+      chart: { symbol: 'SPY', interval: '5m', candles: [], quote: null, isStale: false },
+      positions: [],
+      now: FIXED_NOW,
+    });
+    expect(snapshot.quality.candlesFreshAsOf).toBeNull();
+  });
+
   it('defaults to a manual trigger when none is supplied', () => {
     const snapshot = buildAnalysisSnapshot({
       chart: { symbol: 'SPY', interval: '5m', candles: [], quote: null, isStale: false },

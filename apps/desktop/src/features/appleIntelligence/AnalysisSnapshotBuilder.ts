@@ -168,7 +168,7 @@ export function buildAnalysisSnapshot(input: BuildSnapshotInput): AnalysisSnapsh
       : undefined,
     quality: {
       capturedAt,
-      candlesFreshAsOf: capturedAt,
+      candlesFreshAsOf: candles.length > 0 ? capturedAt : null,
       isChainStale: false,
     },
     omissions,

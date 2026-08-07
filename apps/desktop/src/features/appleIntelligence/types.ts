@@ -28,7 +28,9 @@ export interface CandidateLevel {
 
 export interface DataQuality {
   capturedAt: string;
-  candlesFreshAsOf: string;
+  /** `null` when there are zero candles — no candle data exists to be
+   * "fresh as of" anything. */
+  candlesFreshAsOf: string | null;
   optionsFreshAsOf?: string;
   isChainStale: boolean;
 }

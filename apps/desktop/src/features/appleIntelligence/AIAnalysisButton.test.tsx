@@ -1,6 +1,8 @@
+// @vitest-environment jsdom
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { describe, expect, it } from 'vitest';
+import { act, cleanup, render } from '@testing-library/react';
+import { afterEach, describe, expect, it } from 'vitest';
 import type { ApiClient } from '../../core/api/ApiClient';
 import { TradeStore } from '../trade/TradeStore';
 import { AIAnalysisButton } from './AIAnalysisButton';
@@ -47,6 +49,47 @@ function noopBridge(): AppleIntelligenceBridge {
 }
 
 describe('AIAnalysisButton', () => {
+  afterEach(cleanup);
+
+  it('does not re-render on a store field it does not read (focused selector)', () => {
+    const store = new AnalysisStore(noopBridge());
+    let renderCount = 0;
+    // renderCount must be bumped from inside AIAnalysisButton's own render,
+    // not a wrapping component — a wrapper's render count wouldn't move
+    // just because only the child re-renders.
+    function CountingButton(props: Parameters<typeof AIAnalysisButton>[0]) {
+      renderCount += 1;
+      return AIAnalysisButton(props);
+    }
+    render(
+      createElement(CountingButton, {
+        analysisStore: store,
+        tradeStore: makeTradeStore(),
+        selectedContract: null,
+        buildSnapshot: makeSnapshot,
+      }),
+    );
+    const afterMount = renderCount;
+
+    // queueDepth is set() on the store but never read by AIAnalysisButton —
+    // a full-state (selector-less) useStore would re-render on every set(),
+    // including this one.
+    act(() => {
+      (store as unknown as { set: (patch: Record<string, unknown>) => void }).set({
+        queueDepth: 1,
+      });
+    });
+    expect(renderCount).toBe(afterMount);
+
+    // A field it DOES read must still trigger a re-render.
+    act(() => {
+      (store as unknown as { set: (patch: Record<string, unknown>) => void }).set({
+        isAnalyzing: true,
+      });
+    });
+    expect(renderCount).toBe(afterMount + 1);
+  });
+
   it('renders without a bridge (feature absent) without throwing', () => {
     const store = new AnalysisStore(null);
     const markup = renderToStaticMarkup(

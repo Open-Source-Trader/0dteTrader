@@ -157,6 +157,16 @@ export class AnalysisStore extends Store<AnalysisStoreState> {
     this.unsubscribeEvents?.();
     this.unsubscribeEvents = null;
     this.scheduler.clear();
+    // Without this, a late event for a request that started before stop()
+    // could still match a stale activeRequestId after a later start()
+    // re-subscribes, and submitWork would see isAnalyzing: true and queue
+    // instead of running immediately post-remount.
+    this.set({
+      isAnalyzing: false,
+      activeRequestId: null,
+      activePriority: null,
+      queueDepth: 0,
+    });
   }
 
   /** Manual (or position-critical, in a later phase) request: runs
@@ -165,7 +175,14 @@ export class AnalysisStore extends Store<AnalysisStoreState> {
     await this.submitWork({
       snapshot,
       priority,
-      dedupeKey: snapshot.identity.snapshotId,
+      // A content fingerprint, not snapshot.identity.snapshotId — the
+      // snapshotId is `${symbol}-${capturedAt}-${counter}`, unique per
+      // buildAnalysisSnapshot call, so it can never equal a previously
+      // queued item's dedupeKey even when nothing about the snapshot's
+      // actual content changed (e.g. two rapid manual Refresh clicks). The
+      // scheduler's exact-dedup check needs a key that's stable across
+      // content-identical snapshots to enforce "at most once per gesture".
+      dedupeKey: computeSnapshotFingerprint(snapshot),
     });
   }
 
@@ -175,7 +192,7 @@ export class AnalysisStore extends Store<AnalysisStoreState> {
     await this.submitWork({
       snapshot,
       priority: 'candle-close',
-      dedupeKey: snapshot.identity.snapshotId,
+      dedupeKey: computeSnapshotFingerprint(snapshot),
       replaceKey: `${snapshot.identity.symbol}:${snapshot.identity.timeframe}`,
     });
   }
@@ -313,6 +330,15 @@ export class AnalysisStore extends Store<AnalysisStoreState> {
       // (cancel() then runNow()) must still start the new work even when
       // cancelling the old, likely-orphaned request failed.
     }
+    // Clear single-flight state unconditionally, regardless of whether the
+    // native cancel() call succeeded: a `cancelled` event may never arrive
+    // (sidecar gone, IPC failure), and leaving isAnalyzing/activeRequestId
+    // set would strand the store. Clearing activeRequestId here also stops
+    // submitWork's preemption path (cancel() -> runNow()) from racing itself
+    // — a late completed/cancelled event for this now-superseded requestId
+    // can no longer match `event.requestId === activeRequestId` in
+    // handleEvent once runNow assigns a new one.
+    this.set({ isAnalyzing: false, activeRequestId: null, activePriority: null });
   }
 
   /** Drops queued background work that can no longer affect the current

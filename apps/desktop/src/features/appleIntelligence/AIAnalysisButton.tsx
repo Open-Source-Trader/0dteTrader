@@ -40,7 +40,18 @@ export function AIAnalysisButton({
   selectedContract,
   buildSnapshot,
 }: AIAnalysisButtonProps) {
-  const state = useStore(analysisStore);
+  const state = useStore(
+    analysisStore,
+    (s) => ({
+      availability: s.availability,
+      isAnalyzing: s.isAnalyzing,
+      latestResult: s.latestResult,
+      latestTriggerKind: s.latestTriggerKind,
+      lastDiscard: s.lastDiscard,
+      pendingActionChange: s.pendingActionChange,
+    }),
+    shallowEqual,
+  );
   const trade = useStore(tradeStore, (s) => ({ positions: s.positions }), shallowEqual);
   const [isOpen, setIsOpen] = useState(false);
 

@@ -16,6 +16,7 @@ const { loadWindowState, saveWindowState } = require('./windowState.cjs');
 const { NativeProcessSupervisor } = require('./appleIntelligence/supervisor.cjs');
 const { RequestRegistry } = require('./appleIntelligence/requestRegistry.cjs');
 const { emitTelemetryEvent } = require('./appleIntelligence/telemetry.cjs');
+const { analysisSnapshotPayloadSchema } = require('./appleIntelligence/protocol.cjs');
 
 const APP_NAME = '0dteTrader';
 const APP_PROTOCOL = 'odtetrader';
@@ -658,6 +659,16 @@ ipcMain.handle('apple-intelligence:availability', () => {
 ipcMain.handle('apple-intelligence:analyze', (event, request) => {
   if (typeof request?.requestId !== 'string' || request.requestId.length === 0) {
     throw new Error('apple-intelligence:analyze requires a string requestId');
+  }
+  // The one piece of payload shape main enforces (protocol.md "Electron
+  // main runtime-validates renderer payloads before translating them into
+  // native requests"): the schema version and identity fields, so a
+  // malformed or version-mismatched snapshot is rejected here instead of
+  // only surfacing as a Swift-side parse failure or silent model
+  // degradation. Everything else about the payload stays opaque below.
+  const payloadCheck = analysisSnapshotPayloadSchema.safeParse(request.payload);
+  if (!payloadCheck.success) {
+    throw new Error('apple-intelligence:analyze payload failed AnalysisSnapshot validation');
   }
   // Main validates, creates the registry entry, and assigns the deadline
   // before anything is sent to Swift — main is authoritative for the

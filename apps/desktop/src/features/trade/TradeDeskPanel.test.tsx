@@ -130,7 +130,16 @@ function makeStores(
     underlyingLast: 746.7,
   };
   const tradeStore = new TradeStore(apiClient);
-  const snapshot = { identity: { snapshotId: 'snap-1' } } as AnalysisSnapshot;
+  const snapshot = {
+    identity: {
+      snapshotId: 'snap-1',
+      symbol: 'SPY',
+      timeframe: '1m',
+      snapshotSequence: 1,
+      positionVersion: 0,
+      selectedContractSymbol: contract.symbol,
+    },
+  } as AnalysisSnapshot;
   return { analysisStore, chainStore, tradeStore, snapshot };
 }
 
@@ -139,13 +148,29 @@ function markup({
   isQuoteStreamStale = false,
   hasPosition = false,
   ineligibility = null,
+  snapshotIdentityOverrides = {},
+  isArmed = false,
 }: {
   result?: AnalysisResult | null;
   isQuoteStreamStale?: boolean;
   hasPosition?: boolean;
   ineligibility?: { reason: string; userMessage: string } | null;
+  snapshotIdentityOverrides?: Partial<AnalysisSnapshot['identity']>;
+  isArmed?: boolean;
 } = {}) {
   const stores = makeStores(result, ineligibility);
+  stores.snapshot = {
+    identity: { ...stores.snapshot.identity, ...snapshotIdentityOverrides },
+  } as AnalysisSnapshot;
+  if (isArmed) {
+    (stores.tradeStore as unknown as { state: { armedTicket: unknown } }).state.armedTicket = {
+      id: 1,
+      request: {},
+      idempotencyKey: 'key-1',
+      side: 'buy',
+      summary: 'armed',
+    };
+  }
   if (hasPosition) {
     (stores.tradeStore as unknown as { state: unknown }).state = {
       ...stores.tradeStore.getState(),
@@ -222,6 +247,28 @@ describe('TradeDeskPanel', () => {
     expect(html).not.toContain('USE');
   });
 
+  it('marks stale guidance when the live timeframe no longer matches the result context', () => {
+    // currentContext must come from the live snapshot identity, not from
+    // latestResult.context echoed back at itself — otherwise a timeframe
+    // change while a result is showing would never be detected as stale.
+    const html = markup({ snapshotIdentityOverrides: { timeframe: '5m' } });
+    expect(html).toContain('STALE');
+  });
+
+  it('marks stale guidance when the live snapshot sequence has advanced', () => {
+    const html = markup({ snapshotIdentityOverrides: { snapshotSequence: 2 } });
+    expect(html).toContain('STALE');
+  });
+
+  it('disables the apply-suggested-price button while a ticket is armed', () => {
+    // ArmedOrderTicket.request is a frozen snapshot — applying a new
+    // suggested price here would update the store's live price without
+    // updating what confirmArmedOrder actually submits, desyncing the
+    // confirm popup from the armed ticket.
+    const html = markup({ isArmed: true });
+    expect(html).toContain('class="trade-desk__apply" disabled=""');
+  });
+
   it('shows LIVE during regular trading hours with a fresh quote stream', () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-07-29T15:00:00.000Z')); // Wed 11:00 ET
@@ -264,6 +311,30 @@ describe('TradeDeskPanel', () => {
     );
     expect(html).toContain('Bullish pullback');
     expect(html).toContain('trade-desk__analyzing-dot');
+  });
+
+  it('shows a Cancel affordance for in-flight analysis, absent when not generating', () => {
+    // The desktop grid has no other abort path for an in-flight analysis —
+    // AIAnalysisButton (which owns Cancel) is only mounted in compact/split
+    // layouts, not on the grid. TradeDeskPanel must offer its own.
+    const generating = makeStores(makeResult());
+    (generating.analysisStore as unknown as { state: unknown }).state = {
+      ...generating.analysisStore.getState(),
+      isAnalyzing: true,
+    };
+    const generatingHtml = renderToStaticMarkup(
+      createElement(TradeDeskPanel, {
+        analysisStore: generating.analysisStore,
+        chainStore: generating.chainStore,
+        tradeStore: generating.tradeStore,
+        selectedContract: contract,
+        buildSnapshot: () => generating.snapshot,
+      }),
+    );
+    expect(generatingHtml).toContain('Cancel AI trade analysis');
+
+    const idleHtml = markup();
+    expect(idleHtml).not.toContain('Cancel AI trade analysis');
   });
 
   it('shows the specific bounded unavailable grid, not a raw error, when analysis fails with no prior result', () => {

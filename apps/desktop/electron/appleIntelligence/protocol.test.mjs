@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
 const require = createRequire(import.meta.url);
-const { parseNativeEventLine } = require('./protocol.cjs');
+const { parseNativeEventLine, nativeRequestSchema } = require('./protocol.cjs');
 const { LineFramer } = require('./lineFramer.cjs');
 const { SequenceGuard } = require('./sequenceGuard.cjs');
 
@@ -33,6 +33,70 @@ describe('parseNativeEventLine — golden fixtures', () => {
   it('rejects an oversized line before allocating a JSON parse', () => {
     const huge = `{"protocolVersion":1,"requestId":"req-1","event":"accepted","payload":"${'x'.repeat(300)}"}`;
     expect(parseNativeEventLine(huge, 32)).toBeNull();
+  });
+});
+
+describe('nativeRequestSchema — analysis.run payload validation', () => {
+  const validSnapshotPayload = {
+    snapshotSchemaVersion: 1,
+    identity: {
+      snapshotId: 's1',
+      capturedAt: '2026-07-31T00:00:00.000Z',
+      symbol: 'SPY',
+      timeframe: '5m',
+      snapshotSequence: 1,
+      positionVersion: 0,
+    },
+  };
+
+  it('accepts an analysis.run request with a valid snapshot identity', () => {
+    const result = nativeRequestSchema.safeParse({
+      protocolVersion: 1,
+      requestId: 'req-1',
+      method: 'analysis.run',
+      payload: validSnapshotPayload,
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects an analysis.run request with the wrong schema version', () => {
+    const result = nativeRequestSchema.safeParse({
+      protocolVersion: 1,
+      requestId: 'req-1',
+      method: 'analysis.run',
+      payload: { ...validSnapshotPayload, snapshotSchemaVersion: 2 },
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects an analysis.run request missing identity fields', () => {
+    const result = nativeRequestSchema.safeParse({
+      protocolVersion: 1,
+      requestId: 'req-1',
+      method: 'analysis.run',
+      payload: { snapshotSchemaVersion: 1 },
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects an analysis.run request with a non-object payload', () => {
+    const result = nativeRequestSchema.safeParse({
+      protocolVersion: 1,
+      requestId: 'req-1',
+      method: 'analysis.run',
+      payload: 'not-a-snapshot',
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('does not require snapshot identity for non-analysis.run methods', () => {
+    const result = nativeRequestSchema.safeParse({
+      protocolVersion: 1,
+      requestId: 'req-1',
+      method: 'runtime.hello',
+      payload: {},
+    });
+    expect(result.success).toBe(true);
   });
 });
 
@@ -108,7 +172,7 @@ describe('LineFramer — fragmented stdout chunks', () => {
     const framer = new LineFramer({
       maxLineBytes: 16,
       onLine: (l) => lines.push(l),
-      onOversized: () => oversizedCount += 1,
+      onOversized: () => (oversizedCount += 1),
     });
     framer.push(`{"a":"${'x'.repeat(100)}"}\n{"a":2}\n`);
     expect(oversizedCount).toBe(1);
@@ -121,7 +185,7 @@ describe('LineFramer — fragmented stdout chunks', () => {
     const framer = new LineFramer({
       maxLineBytes: 8,
       onLine: (l) => lines.push(l),
-      onOversized: () => oversizedCount += 1,
+      onOversized: () => (oversizedCount += 1),
     });
     framer.push('{"a":"'); // 6 bytes, under limit yet
     framer.push('x'.repeat(50)); // pushes buffer over maxLineBytes without a newline

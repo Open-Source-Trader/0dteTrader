@@ -56,7 +56,7 @@ export type ApplyTradeDeskPriceResult =
   | {
       ok: false;
       error: string;
-      reason: 'stale' | 'contract' | 'position' | 'price' | 'submitting';
+      reason: 'stale' | 'contract' | 'position' | 'price' | 'submitting' | 'armed';
     };
 
 interface TradeStoreState {
@@ -182,6 +182,14 @@ export class TradeStore extends Store<TradeStoreState> {
     const state = this.getState();
     if (state.isSubmitting) {
       return { ok: false, reason: 'submitting', error: 'Ticket is submitting.' };
+    }
+    if (state.armedTicket) {
+      // ArmedOrderTicket.request is a frozen snapshot captured at arm time
+      // — confirmArmedOrder submits ticket.request, not live store state.
+      // Updating orderType/customLimitPrice here would change what the
+      // confirm popup displays without changing what actually submits,
+      // silently desyncing the two. Reject and let the trader disarm first.
+      return { ok: false, reason: 'armed', error: 'Disarm the current ticket before applying.' };
     }
     const selectedContract = chainStore.selectedContract;
     if (!selectedContract || selectedContract.symbol !== command.suggestion.contractIdentity) {

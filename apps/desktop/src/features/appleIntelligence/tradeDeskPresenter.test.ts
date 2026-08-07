@@ -231,6 +231,23 @@ describe('buildTradeDeskViewState', () => {
     ).toBe('SCALE OUT');
   });
 
+  it('defaults an unsatisfied scale action (no scaleAdvice) to WAIT, never SCALE OUT', () => {
+    // enforceTradeDeskInvariants normally downgrades this before the
+    // presenter sees it, but normalizeAction itself must not assume 'out'
+    // just because scaleAdvice is missing — that would silently surface the
+    // opposite of a scale-in recommendation if this path is ever reached
+    // through validation being bypassed or a different code path.
+    const { tradeDeskPlan, ...rest } = result();
+    expect(
+      current({
+        latestResult: {
+          ...rest,
+          tradeDeskPlan: { ...tradeDeskPlan!, action: 'scale', scaleAdvice: undefined },
+        },
+      }).presentation?.actionLabel,
+    ).toBe('WAIT');
+  });
+
   it('keeps underlying and contract price domains separated', () => {
     const presentation = current().presentation!;
     expect(presentation.entry?.underlying?.value).toBe('SPY 746.55–746.65');

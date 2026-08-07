@@ -14,7 +14,15 @@ const NATIVE_METHODS = [
   'runtime.shutdown',
 ];
 
-const NATIVE_EVENTS = ['ready', 'accepted', 'progress', 'partial', 'completed', 'cancelled', 'failed'];
+const NATIVE_EVENTS = [
+  'ready',
+  'accepted',
+  'progress',
+  'partial',
+  'completed',
+  'cancelled',
+  'failed',
+];
 
 const ERROR_CODES = [
   'runtime_unavailable',
@@ -44,13 +52,44 @@ const nativeErrorSchema = z.object({
   message: z.string().max(2000),
 });
 
-const nativeRequestSchema = z.object({
-  protocolVersion: z.literal(PROTOCOL_VERSION),
-  requestId: z.string().min(1).max(200),
-  method: z.enum(NATIVE_METHODS),
-  deadlineAt: z.string().datetime({ offset: true }).optional(),
-  payload: z.unknown(),
+// Minimum-viable validation of an analysis.run payload: the version
+// literal and identity fields the native side keys everything off of. Not a
+// full AnalysisSnapshot schema (that's data-contracts.md's job on the
+// TypeScript side, and duplicating it here would be a second source of
+// truth) — just enough that a malformed or version-mismatched snapshot is
+// rejected at the main-process boundary (protocol.md "Electron main
+// runtime-validates renderer payloads") instead of only surfacing as a
+// Swift-side parse failure or silent model degradation.
+const analysisSnapshotPayloadSchema = z.object({
+  snapshotSchemaVersion: z.literal(1),
+  identity: z.object({
+    snapshotId: z.string().min(1),
+    capturedAt: z.string(),
+    symbol: z.string().min(1),
+    timeframe: z.string().min(1),
+    snapshotSequence: finiteNumber,
+    positionVersion: finiteNumber,
+  }),
 });
+
+const nativeRequestSchema = z
+  .object({
+    protocolVersion: z.literal(PROTOCOL_VERSION),
+    requestId: z.string().min(1).max(200),
+    method: z.enum(NATIVE_METHODS),
+    deadlineAt: z.string().datetime({ offset: true }).optional(),
+    payload: z.unknown(),
+  })
+  .superRefine((request, ctx) => {
+    if (request.method !== 'analysis.run') return;
+    const result = analysisSnapshotPayloadSchema.safeParse(request.payload);
+    if (result.success) return;
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['payload'],
+      message: 'analysis.run payload failed AnalysisSnapshot identity validation.',
+    });
+  });
 
 const nativeEventSchema = z.object({
   protocolVersion: z.literal(PROTOCOL_VERSION),
@@ -98,5 +137,6 @@ module.exports = {
   nativeRequestSchema,
   nativeEventSchema,
   runtimeReadyPayloadSchema,
+  analysisSnapshotPayloadSchema,
   parseNativeEventLine,
 };

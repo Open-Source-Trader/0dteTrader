@@ -394,6 +394,104 @@ describe('AnalysisStore', () => {
       expect(store.getState().activePriority).toBe('manual');
       expect(store.getState().isAnalyzing).toBe(true);
     });
+
+    it('cancel() clears single-flight state even when no cancelled event ever arrives', async () => {
+      const bridge: AppleIntelligenceBridge = {
+        getAvailability: vi.fn(async () => ({ state: 'ready' })),
+        analyze: vi.fn(async ({ requestId }: { requestId: string }) => ({ requestId })),
+        cancel: vi.fn(async () => {
+          throw new Error('sidecar gone');
+        }),
+        // No event subscription at all — simulates the cancelled event
+        // being lost (sidecar crash, IPC failure). If cancel() relied on
+        // the event to clear state, isAnalyzing would be stuck true.
+        subscribe: () => () => undefined,
+      };
+      const store = new AnalysisStore(bridge);
+
+      await store.analyze(makeSnapshot());
+      expect(store.getState().isAnalyzing).toBe(true);
+
+      await store.cancel();
+
+      expect(store.getState().isAnalyzing).toBe(false);
+      expect(store.getState().activeRequestId).toBeNull();
+      expect(store.getState().activePriority).toBeNull();
+    });
+
+    it('a late event for a preempted request cannot clobber the preempting request', async () => {
+      const { bridge, emit, analyzeMock } = makeFakeBridge();
+      const store = new AnalysisStore(bridge);
+      store.start();
+
+      await store.analyze(makeSnapshot({ snapshotId: 'background-1' }), 'background');
+      const firstRequestId = analyzeMock.mock.results[0].value.requestId;
+
+      await store.analyze(makeSnapshot({ snapshotId: 'manual-1' }), 'manual');
+      const secondRequestId = store.getState().activeRequestId;
+      expect(secondRequestId).not.toBe(firstRequestId);
+
+      // A late 'completed' event for the preempted first request arrives
+      // after the second request has already taken over activeRequestId.
+      // Because cancel() cleared activeRequestId before runNow assigned the
+      // new one, this event no longer matches and must be ignored.
+      emit({
+        protocolVersion: 1,
+        event: 'completed',
+        requestId: firstRequestId,
+        payload: validResultPayload({ context: { symbol: 'SPY', timeframe: '5m' } }),
+      });
+
+      expect(store.getState().activeRequestId).toBe(secondRequestId);
+      expect(store.getState().isAnalyzing).toBe(true);
+      expect(store.getState().latestResult).toBeNull();
+    });
+  });
+
+  describe('stop()', () => {
+    it('resets in-flight state so a re-subscribe via start() runs immediately', async () => {
+      const { bridge, analyzeMock } = makeFakeBridge();
+      const store = new AnalysisStore(bridge);
+      store.start();
+
+      await store.analyze(makeSnapshot());
+      expect(store.getState().isAnalyzing).toBe(true);
+
+      store.stop();
+      expect(store.getState().isAnalyzing).toBe(false);
+      expect(store.getState().activeRequestId).toBeNull();
+      expect(store.getState().activePriority).toBeNull();
+
+      store.start();
+      await store.analyze(makeSnapshot({ snapshotId: 'post-remount' }));
+
+      // Must run immediately, not get queued behind stale isAnalyzing state.
+      expect(analyzeMock).toHaveBeenCalledTimes(2);
+      expect(store.getState().isAnalyzing).toBe(true);
+      expect(store.getState().queueDepth).toBe(0);
+    });
+
+    it('a late event for a request that started before stop() is ignored after re-subscribe', async () => {
+      const { bridge, emit, analyzeMock } = makeFakeBridge();
+      const store = new AnalysisStore(bridge);
+      store.start();
+
+      await store.analyze(makeSnapshot());
+      const staleRequestId = analyzeMock.mock.results[0].value.requestId;
+
+      store.stop();
+      store.start();
+
+      emit({
+        protocolVersion: 1,
+        event: 'completed',
+        requestId: staleRequestId,
+        payload: validResultPayload(),
+      });
+
+      expect(store.getState().latestResult).toBeNull();
+      expect(store.getState().isAnalyzing).toBe(false);
+    });
   });
 
   describe('scheduling (Phase 4)', () => {
@@ -405,6 +503,29 @@ describe('AnalysisStore', () => {
 
       expect(analyzeMock).toHaveBeenCalledTimes(1);
       expect(store.getState().queueDepth).toBe(1);
+    });
+
+    it('drops a second content-identical manual request instead of double-queueing it', async () => {
+      // dedupeKey must be a content fingerprint, not snapshot.identity
+      // .snapshotId — snapshotId is unique per buildAnalysisSnapshot call
+      // (includes an incrementing counter and capturedAt), so it can never
+      // equal a previously queued item's key even when nothing about the
+      // snapshot's actual content changed, e.g. two rapid manual Refresh
+      // clicks. Different snapshotId, same market/candles/position content
+      // here — the scheduler's exact-dedup check must still catch it.
+      const { bridge, analyzeMock } = makeFakeBridge();
+      const store = new AnalysisStore(bridge);
+      // Occupy the single-flight slot with a manual request first — manual
+      // does not preempt manual, so the next two manual submissions queue
+      // instead of running immediately or preempting.
+      await store.analyze(makeSnapshot({ snapshotId: 'occupier' }), 'manual');
+
+      await store.analyze(makeSnapshot({ snapshotId: 'manual-1' }), 'manual');
+      expect(store.getState().queueDepth).toBe(1);
+
+      await store.analyze(makeSnapshot({ snapshotId: 'manual-2' }), 'manual');
+      expect(store.getState().queueDepth).toBe(1);
+      expect(analyzeMock).toHaveBeenCalledTimes(1);
     });
 
     it('runs the next queued request automatically once the active one completes', async () => {

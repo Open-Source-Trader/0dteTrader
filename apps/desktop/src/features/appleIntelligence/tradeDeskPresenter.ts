@@ -587,7 +587,16 @@ function normalizeAction(
   scaleAdvice?: { direction: 'in' | 'out' },
 ): TradeDeskPresentationAction {
   if (action !== 'scale') return action;
-  return scaleAdvice?.direction === 'in' ? 'scale_in' : 'scale_out';
+  // enforceTradeDeskInvariants downgrades an unsatisfied scale to `wait`
+  // before the presenter normally sees it, but normalizeAction has no such
+  // guarantee itself — if validation is ever bypassed, or a result reaches
+  // the presenter through a different path, a scale with no scaleAdvice (or
+  // a direction other than 'in') must never silently become "SCALE OUT",
+  // the opposite of the only other directional meaning ('in'). `wait` is
+  // the safe default; only an explicit 'in' or 'out' picks a scale action.
+  if (scaleAdvice?.direction === 'in') return 'scale_in';
+  if (scaleAdvice?.direction === 'out') return 'scale_out';
+  return 'wait';
 }
 
 function legacyAction(

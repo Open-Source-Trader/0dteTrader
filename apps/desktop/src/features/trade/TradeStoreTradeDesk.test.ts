@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ApiClient } from '../../core/api/ApiClient';
+import type { OrderRequest } from '@0dtetrader/shared-types';
 import { ChainStore } from './ChainStore';
 import { TradeStore } from './TradeStore';
 import type { ApplicablePriceSuggestion } from '../appleIntelligence/tradeDeskPresenter';
@@ -88,5 +89,32 @@ describe('TradeStore.applyTradeDeskPrice', () => {
       ),
     ).toMatchObject({ ok: false, reason: 'submitting' });
     expect(tradeStore.getState()).toMatchObject({ orderType: 'mid', customLimitPrice: null });
+  });
+
+  it('rejects applying a suggested price while a ticket is armed, without updating the frozen ticket', () => {
+    // ArmedOrderTicket.request is a frozen snapshot captured at arm time —
+    // confirmArmedOrder submits ticket.request, not live store state. If
+    // applyTradeDeskPrice updated orderType/customLimitPrice here, the
+    // confirm popup would show the new price while still submitting the old
+    // frozen one.
+    const { tradeStore, chainStore } = stores();
+    const armedTicket = {
+      id: 1,
+      request: { symbol: contract.symbol } as unknown as OrderRequest,
+      idempotencyKey: 'key-1',
+      side: 'buy' as const,
+      summary: 'Buy 1 SPY 746C @ 1.80',
+    };
+    (tradeStore as unknown as { state: { armedTicket: typeof armedTicket } }).state.armedTicket =
+      armedTicket;
+
+    const result = tradeStore.applyTradeDeskPrice(
+      { type: 'apply-trade-desk-price', suggestion: suggestion({ price: 1.9 }) },
+      chainStore,
+    );
+
+    expect(result).toMatchObject({ ok: false, reason: 'armed' });
+    expect(tradeStore.getState()).toMatchObject({ orderType: 'mid', customLimitPrice: null });
+    expect(tradeStore.getState().armedTicket).toBe(armedTicket);
   });
 });

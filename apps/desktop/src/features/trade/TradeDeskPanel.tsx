@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { OptionContract, Position } from '@0dtetrader/shared-types';
 import { useStore, shallowEqual } from '../../core/observable';
-import { RefreshIcon } from '../../design/icons';
+import { RefreshIcon, XCircleFillIcon } from '../../design/icons';
 import type { AnalysisSnapshot } from '../appleIntelligence/types';
 import type { AnalysisStore } from '../appleIntelligence/AnalysisStore';
 import { hashPositionVersion } from '../appleIntelligence/AnalysisSnapshotBuilder';
@@ -63,7 +63,7 @@ export function TradeDeskPanel({
   );
   const trade = useStore(
     tradeStore,
-    (state) => ({ positions: state.positions, isSubmitting: state.isSubmitting }),
+    (state) => ({ positions: state.positions, isArmed: state.armedTicket !== null }),
     shallowEqual,
   );
   const [applyError, setApplyError] = useState<string | null>(null);
@@ -83,14 +83,15 @@ export function TradeDeskPanel({
   );
 
   const currentContext = useMemo(() => {
-    const latest = analysis.latestResult?.context;
-    if (!latest) return null;
-    return {
-      ...latest,
-      selectedContractSymbol: selectedContract?.symbol,
-      positionVersion: currentPositionVersion,
-    };
-  }, [analysis.latestResult, selectedContract, currentPositionVersion]);
+    if (!analysis.latestResult) return null;
+    // Must come from the live snapshot identity, not latestResult.context —
+    // deriving from the result's own context made isResultCurrent compare
+    // symbol/timeframe/snapshotSequence/strategyPolicyVersion against
+    // themselves (always equal), so the staleness gate could never detect a
+    // timeframe change, a newer candle closing, or a strategy-policy version
+    // change while an analysis was in flight.
+    return buildSnapshot().identity;
+  }, [analysis.latestResult, buildSnapshot]);
 
   // isChainStale isn't tracked yet (AnalysisSnapshotBuilder always supplies
   // false for it — see its own comment); once it is, thread the same value
@@ -131,12 +132,21 @@ export function TradeDeskPanel({
     void analysisStore.analyze(buildSnapshot());
   };
 
+  const cancel = () => {
+    if (viewState.status !== 'generating') return;
+    void analysisStore.cancel();
+  };
+
   const applySuggestedPrice = () => {
     setApplyError(null);
     if (viewState.status !== 'current' || !viewState.canApplySuggestedPrice) {
       setApplyError(
         viewState.status === 'stale' ? 'Refresh before applying.' : 'No current entry price.',
       );
+      return;
+    }
+    if (trade.isArmed) {
+      setApplyError('Disarm the current ticket before applying.');
       return;
     }
     const suggestion = viewState.presentation?.applicablePriceSuggestion;
@@ -159,7 +169,7 @@ export function TradeDeskPanel({
 
   return (
     <section className={`trade-desk trade-desk--${viewState.status}`} aria-label="AI Trade Desk">
-      <TradeDeskHeader viewState={viewState} onRefresh={refresh} />
+      <TradeDeskHeader viewState={viewState} onRefresh={refresh} onCancel={cancel} />
       <TradeDeskBody
         viewState={viewState}
         selectedContract={selectedContract}
@@ -167,6 +177,7 @@ export function TradeDeskPanel({
         underlyingLast={underlyingLast}
         onApply={applySuggestedPrice}
         applyError={applyError}
+        isArmed={trade.isArmed}
       />
     </section>
   );
@@ -175,9 +186,11 @@ export function TradeDeskPanel({
 function TradeDeskHeader({
   viewState,
   onRefresh,
+  onCancel,
 }: {
   viewState: TradeDeskViewState;
   onRefresh: () => void;
+  onCancel: () => void;
 }) {
   const age = useRelativeAge(viewState.generatedAt);
   const presentation = viewState.presentation;
@@ -208,6 +221,16 @@ function TradeDeskHeader({
       <span className="trade-desk__status" role="status" aria-live="polite">
         {freshnessLabel}
       </span>
+      {viewState.status === 'generating' ? (
+        <button
+          type="button"
+          className="trade-desk__header-action"
+          onClick={onCancel}
+          aria-label="Cancel AI trade analysis"
+        >
+          <XCircleFillIcon size={12} />
+        </button>
+      ) : null}
       <button
         type="button"
         className="trade-desk__header-action"
@@ -228,6 +251,7 @@ function TradeDeskBody({
   underlyingLast,
   onApply,
   applyError,
+  isArmed,
 }: {
   viewState: TradeDeskViewState;
   selectedContract: OptionContract | null;
@@ -235,6 +259,7 @@ function TradeDeskBody({
   underlyingLast: number | null;
   onApply: () => void;
   applyError: string | null;
+  isArmed: boolean;
 }) {
   const presentation = viewState.presentation;
 
@@ -288,6 +313,7 @@ function TradeDeskBody({
         viewState={viewState}
         onApply={onApply}
         applyError={applyError}
+        isArmed={isArmed}
       />
     );
   }
@@ -299,6 +325,7 @@ function TradeDeskBody({
       viewState={viewState}
       onApply={onApply}
       applyError={applyError}
+      isArmed={isArmed}
     />
   );
 }
@@ -311,10 +338,12 @@ function TradeDeskGridFooter({
   viewState,
   onApply,
   applyError,
+  isArmed,
 }: {
   viewState: TradeDeskViewState;
   onApply: () => void;
   applyError: string | null;
+  isArmed: boolean;
 }) {
   const presentation = viewState.presentation;
   if (!presentation?.applicablePriceSuggestion) return null;
@@ -324,7 +353,7 @@ function TradeDeskGridFooter({
         type="button"
         className="trade-desk__apply"
         onClick={onApply}
-        disabled={!viewState.canApplySuggestedPrice || viewState.status !== 'current'}
+        disabled={!viewState.canApplySuggestedPrice || viewState.status !== 'current' || isArmed}
         aria-label={`Apply suggested contract price of ${presentation.entry?.preferredContractPrice?.value}`}
       >
         USE {presentation.entry?.preferredContractPrice?.value} ENTRY
@@ -343,11 +372,13 @@ function FlatTradeDeskGrid({
   viewState,
   onApply,
   applyError,
+  isArmed,
 }: {
   analysis: FlatTradeDeskAnalysis;
   viewState: TradeDeskViewState;
   onApply: () => void;
   applyError: string | null;
+  isArmed: boolean;
 }) {
   return (
     <div className="trade-desk__body">
@@ -361,7 +392,12 @@ function FlatTradeDeskGrid({
         <TradeDeskCell cell={analysis.execution} />
         <TradeDeskCell cell={analysis.runner} />
       </div>
-      <TradeDeskGridFooter viewState={viewState} onApply={onApply} applyError={applyError} />
+      <TradeDeskGridFooter
+        viewState={viewState}
+        onApply={onApply}
+        applyError={applyError}
+        isArmed={isArmed}
+      />
     </div>
   );
 }
@@ -371,11 +407,13 @@ function PositionTradeDeskGrid({
   viewState,
   onApply,
   applyError,
+  isArmed,
 }: {
   analysis: PositionTradeDeskAnalysis;
   viewState: TradeDeskViewState;
   onApply: () => void;
   applyError: string | null;
+  isArmed: boolean;
 }) {
   return (
     <div className="trade-desk__body">
@@ -389,7 +427,12 @@ function PositionTradeDeskGrid({
         <TradeDeskCell cell={analysis.underlying} />
         <TradeDeskCell cell={analysis.runner} />
       </div>
-      <TradeDeskGridFooter viewState={viewState} onApply={onApply} applyError={applyError} />
+      <TradeDeskGridFooter
+        viewState={viewState}
+        onApply={onApply}
+        applyError={applyError}
+        isArmed={isArmed}
+      />
     </div>
   );
 }

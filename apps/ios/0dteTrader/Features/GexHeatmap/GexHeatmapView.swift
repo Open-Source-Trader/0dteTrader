@@ -195,6 +195,13 @@ struct GexHeatmapView: View {
         guard mode != viewMode else { return }
         settingsStore.gexHeatmapView = mode
         viewMode = mode
+        // Term structure and time series load independent row sets (a
+        // strike's row index isn't stable across the switch), so the other
+        // mode's committed offset doesn't correspond to the same visual
+        // position here — recenter on this mode's own spot row instead of
+        // reusing (or silently skipping, since `hasCenteredOnSpot` was
+        // already flipped by whichever mode loaded first) a stale pan.
+        hasCenteredOnSpot = false
     }
 
     private var header: some View {

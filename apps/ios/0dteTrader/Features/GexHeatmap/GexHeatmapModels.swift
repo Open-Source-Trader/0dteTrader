@@ -15,7 +15,7 @@ struct GexHeatmapEntry {
 }
 
 /// One column of the grid — its identity plus the label shown in the header.
-struct GexHeatmapColumn: Identifiable {
+struct GexHeatmapColumn: Identifiable, Equatable {
     var id: String { key }
     let key: String
     let label: String
@@ -31,7 +31,7 @@ struct GexCellStyle {
 /// CPU cost — cheap once per data load, ruinous once per gesture frame (a
 /// drag's `@GestureState` changes on every touch-move, and re-deriving these
 /// from `GexHeatmapCell` inside `body` reran that work on every frame).
-struct RenderedGexCell: Identifiable {
+struct RenderedGexCell: Identifiable, Equatable {
     var id: String { columnKey }
     let columnKey: String
     let text: String
@@ -40,7 +40,7 @@ struct RenderedGexCell: Identifiable {
 }
 
 /// A fully pre-sorted, pre-formatted row, built once per data load.
-struct RenderedGexRow: Identifiable {
+struct RenderedGexRow: Identifiable, Equatable {
     var id: Double { strike }
     let strike: Double
     let strikeLabel: String

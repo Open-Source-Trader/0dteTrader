@@ -354,16 +354,19 @@ struct GexHeatmapView: View {
 
     private var columnHeaderRow: some View {
         GexColumnHeaderRow(columns: columns, cellWidth: cellWidth, gridRowHeight: gridRowHeight)
+            .equatable()
             .scaleEffect(x: scale, y: 1, anchor: .topLeading)
     }
 
     private var strikeColumn: some View {
         GexStrikeColumn(rows: renderedRows, strikeColumnWidth: strikeColumnWidth, gridRowHeight: gridRowHeight)
+            .equatable()
             .scaleEffect(x: 1, y: scale, anchor: .topLeading)
     }
 
     private var dataBody: some View {
         GexDataBody(rows: renderedRows, cellWidth: cellWidth, gridRowHeight: gridRowHeight)
+            .equatable()
             .scaleEffect(scale, anchor: .topLeading)
     }
 }
@@ -374,9 +377,12 @@ struct GexHeatmapView: View {
 /// previously re-diffed this row's entire `ForEach` — a real cost distinct
 /// from `RenderedGexRow`'s formatting/color precomputation, since here the
 /// values were already precomputed and the cost was pure view-tree
-/// re-evaluation. A dedicated `View` with `Equatable`-stable inputs lets
-/// SwiftUI skip re-diffing it when only the parent's transform changes.
-private struct GexColumnHeaderRow: View {
+/// re-evaluation. `Equatable` conformance plus `.equatable()` at the call
+/// site lets SwiftUI compare inputs memberwise and skip re-invoking `body`
+/// (and therefore re-rasterizing the `.drawingGroup()` layer below) entirely
+/// when a gesture frame changes only the parent's transform, not this view's
+/// actual content.
+private struct GexColumnHeaderRow: View, Equatable {
     let columns: [GexHeatmapColumn]
     let cellWidth: CGFloat
     let gridRowHeight: CGFloat
@@ -402,7 +408,7 @@ private struct GexColumnHeaderRow: View {
 }
 
 /// Strike column, extracted for the same reason as `GexColumnHeaderRow`.
-private struct GexStrikeColumn: View {
+private struct GexStrikeColumn: View, Equatable {
     let rows: [RenderedGexRow]
     let strikeColumnWidth: CGFloat
     let gridRowHeight: CGFloat
@@ -425,7 +431,7 @@ private struct GexStrikeColumn: View {
 /// The data grid itself, extracted for the same reason as
 /// `GexColumnHeaderRow` — this is the largest subtree (rows x columns) and
 /// the most expensive one to re-diff per gesture frame.
-private struct GexDataBody: View {
+private struct GexDataBody: View, Equatable {
     let rows: [RenderedGexRow]
     let cellWidth: CGFloat
     let gridRowHeight: CGFloat

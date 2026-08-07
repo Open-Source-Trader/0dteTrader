@@ -82,16 +82,16 @@ function makeFakeClient() {
           calls.push({ method: 'submit', input });
           return {
             id: 'ord-server-1',
-            client_order_id: input.clientOrderId,
+            clientOrderId: input.clientOrderId,
             status: 'new',
             symbol: input.symbol,
             side: input.side,
             type: input.type,
             qty: String(input.qty),
-            filled_qty: '0',
-            filled_avg_price: null,
-            limit_price: input.limitPrice != null ? String(input.limitPrice) : null,
-            submitted_at: '2024-01-01T15:00:00Z',
+            filledQty: '0',
+            filledAvgPrice: null,
+            limitPrice: input.limitPrice != null ? String(input.limitPrice) : null,
+            submittedAt: '2024-01-01T15:00:00Z',
           };
         },
         getAllOrders: async (params) => {
@@ -99,16 +99,16 @@ function makeFakeClient() {
           return [
             {
               id: 'ord-server-1',
-              client_order_id: 'abc',
+              clientOrderId: 'abc',
               status: 'new',
               symbol: EXPECTED_OCC,
               side: 'buy',
               type: 'limit',
               qty: '1',
-              filled_qty: '0',
-              filled_avg_price: null,
-              limit_price: '4.25',
-              submitted_at: '2024-01-01T15:00:00Z',
+              filledQty: '0',
+              filledAvgPrice: null,
+              limitPrice: '4.25',
+              submittedAt: '2024-01-01T15:00:00Z',
             },
           ];
         },
@@ -116,16 +116,16 @@ function makeFakeClient() {
           calls.push({ method: 'getOrderByClientOrderId', params });
           return {
             id: 'ord-server-1',
-            client_order_id: params.clientOrderId,
+            clientOrderId: params.clientOrderId,
             status: 'new',
             symbol: EXPECTED_OCC,
             side: 'buy',
             type: 'limit',
             qty: '1',
-            filled_qty: '0',
-            filled_avg_price: null,
-            limit_price: '4.25',
-            submitted_at: '2024-01-01T15:00:00Z',
+            filledQty: '0',
+            filledAvgPrice: null,
+            limitPrice: '4.25',
+            submittedAt: '2024-01-01T15:00:00Z',
           };
         },
         deleteOrderByOrderID: async (params) => {
@@ -137,12 +137,12 @@ function makeFakeClient() {
           calls.push({ method: 'getAllOpenPositions' });
           return [
             {
-              asset_class: 'us_option',
+              assetClass: 'us_option',
               symbol: EXPECTED_OCC,
               qty: '2',
-              avg_entry_price: '4',
-              current_price: '4.5',
-              unrealized_pl: '1',
+              avgEntryPrice: '4',
+              currentPrice: '4.5',
+              unrealizedPl: '1',
             },
           ];
         },
@@ -323,22 +323,22 @@ describe('AlpacaBrokerGateway (SDK-backed)', () => {
     jest.useFakeTimers();
     try {
       const res = await env.gateway.placeOrder('user-1', ORDER, 'poll-fill-key');
-      // The placement-time result reports filled_qty '0'. The poll's detail
+      // The placement-time result reports filledQty '0'. The poll's detail
       // is the only source of the executed amount — an emit spreading the
       // placement result would report a fill of 0, which fill accounting
       // rightly ignores, and the fill would never be recorded.
       env.client.trading.orders.getOrderByClientOrderId = async () => ({
         id: 'ord-server-1',
-        client_order_id: res.orderId,
+        clientOrderId: res.orderId,
         status: 'filled',
         symbol: EXPECTED_OCC,
         side: 'buy',
         type: 'limit',
         qty: '1',
-        filled_qty: '1',
-        filled_avg_price: '4.10',
-        limit_price: null,
-        submitted_at: '2024-01-01T15:00:00Z',
+        filledQty: '1',
+        filledAvgPrice: '4.10',
+        limitPrice: null,
+        submittedAt: '2024-01-01T15:00:00Z',
       });
       await jest.advanceTimersByTimeAsync(2500);
 

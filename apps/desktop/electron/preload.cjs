@@ -12,3 +12,23 @@ contextBridge.exposeInMainWorld('desktopShell', {
     return () => ipcRenderer.removeListener('desktop-command', listener);
   },
 });
+
+// Apple Intelligence: narrow, explicit methods only — no generic invoke and
+// no direct ipcRenderer exposure (docs/apple-intelligence/protocol.md).
+contextBridge.exposeInMainWorld('appleIntelligence', {
+  getAvailability() {
+    return ipcRenderer.invoke('apple-intelligence:availability');
+  },
+  analyze(request) {
+    return ipcRenderer.invoke('apple-intelligence:analyze', request);
+  },
+  cancel(requestId) {
+    return ipcRenderer.invoke('apple-intelligence:cancel', requestId);
+  },
+  subscribe(listener) {
+    if (typeof listener !== 'function') return () => {};
+    const wrapped = (_event, nativeEvent) => listener(nativeEvent);
+    ipcRenderer.on('apple-intelligence:event', wrapped);
+    return () => ipcRenderer.removeListener('apple-intelligence:event', wrapped);
+  },
+});

@@ -124,7 +124,7 @@ function mapOrderStatus(status: string | undefined): OrderStatus {
 }
 
 export function toOrderResult(order: SdkOrder, orderId?: string): OrderResult {
-  const id = order.client_order_id ?? order.id ?? orderId ?? '';
+  const id = order.clientOrderId ?? order.id ?? orderId ?? '';
   const rawType = (order.type ?? 'limit').toLowerCase();
   const orderType: OrderType = rawType === 'market' ? 'market' : 'mid';
   return {
@@ -135,33 +135,32 @@ export function toOrderResult(order: SdkOrder, orderId?: string): OrderResult {
     quantity: num(order.qty),
     orderType,
     limitPrice:
-      order.limit_price !== null && order.limit_price !== undefined
-        ? num(order.limit_price)
+      order.limitPrice !== null && order.limitPrice !== undefined
+        ? num(order.limitPrice)
         : undefined,
     filledPrice:
-      order.filled_avg_price !== null && order.filled_avg_price !== undefined
-        ? num(order.filled_avg_price)
+      order.filledAvgPrice !== null && order.filledAvgPrice !== undefined
+        ? num(order.filledAvgPrice)
         : undefined,
-    filledQuantity: num(order.filled_qty),
+    filledQuantity:
+      order.filledQty !== null && order.filledQty !== undefined ? num(order.filledQty) : undefined,
     filledAt:
-      order.filled_at !== null && order.filled_at !== undefined
-        ? isoFrom(order.filled_at)
-        : undefined,
-    timestamp: isoFrom(order.submitted_at),
+      order.filledAt !== null && order.filledAt !== undefined ? isoFrom(order.filledAt) : undefined,
+    timestamp: isoFrom(order.submittedAt),
   };
 }
 
 export function toPosition(pos: SdkPosition): Position | null {
-  const assetClass = (pos.asset_class ?? '').toUpperCase();
+  const assetClass = (pos.assetClass ?? '').toUpperCase();
   // The shared contract is options-only; equity/crypto positions are out of scope.
   if (assetClass !== 'OPT' && assetClass !== 'US_OPTION') return null;
   return {
     symbol: pos.symbol ?? '',
     assetClass: 'option',
     quantity: num(pos.qty),
-    avgPrice: num(pos.avg_entry_price),
-    markPrice: num(pos.current_price),
-    unrealizedPnl: num(pos.unrealized_pl),
+    avgPrice: num(pos.avgEntryPrice),
+    markPrice: num(pos.currentPrice),
+    unrealizedPnl: num(pos.unrealizedPl),
     multiplier: OPTION_MULTIPLIER,
   };
 }

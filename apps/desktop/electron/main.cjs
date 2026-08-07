@@ -13,6 +13,10 @@ const path = require('node:path');
 const http = require('node:http');
 const fs = require('node:fs');
 const { loadWindowState, saveWindowState } = require('./windowState.cjs');
+const { NativeProcessSupervisor } = require('./appleIntelligence/supervisor.cjs');
+const { RequestRegistry } = require('./appleIntelligence/requestRegistry.cjs');
+const { emitTelemetryEvent } = require('./appleIntelligence/telemetry.cjs');
+const { analysisSnapshotPayloadSchema } = require('./appleIntelligence/protocol.cjs');
 
 const APP_NAME = '0dteTrader';
 const APP_PROTOCOL = 'odtetrader';
@@ -180,6 +184,75 @@ function stopBackend() {
       // already gone
     }
   }, 3000).unref();
+}
+
+/**
+ * Apple Intelligence sidecar lifecycle: one supervisor for the app session,
+ * started best-effort alongside the backend and stopped on quit. Analysis
+ * remains fully optional — a failed/unavailable start never blocks the
+ * window or backend (docs/apple-intelligence/acceptance-criteria.md).
+ */
+const appleIntelligence = new NativeProcessSupervisor();
+
+/**
+ * Electron main is authoritative for native analysis-request lifecycle and
+ * deadlines (docs/apple-intelligence/lifecycle-and-concurrency.md "Request
+ * ownership"). The registry tracks one entry per in-flight `analysis.run`,
+ * assigns a bounded deadline, and is the sole router from a native event to
+ * a specific renderer's webContents — never a broadcast.
+ */
+const appleIntelligenceRequests = new RequestRegistry({
+  send: (request) => appleIntelligence.send(request),
+  dispatch: (webContentsId, payload) => {
+    const contents = webContentsForId(webContentsId);
+    if (!contents || contents.isDestroyed()) return;
+    contents.send('apple-intelligence:event', payload);
+  },
+});
+
+function webContentsForId(id) {
+  // Single-window today, but resolved by ID rather than assumed to be
+  // mainWindow — cross-window isolation must hold even though only one
+  // window exists in practice (security-boundary.md "Cross-window leakage").
+  return BrowserWindow.getAllWindows().find(
+    (win) => !win.isDestroyed() && win.webContents.id === id,
+  )?.webContents;
+}
+
+// requestIds the supervisor itself owns outside the analysis registry
+// (runtime.hello's handshake response, runtime.shutdown's ack) — expected
+// to never appear in the registry, not a protocol anomaly worth logging.
+const SUPERVISOR_OWNED_REQUEST_IDS = new Set(['runtime', 'shutdown']);
+
+appleIntelligence.onEvent((event) => {
+  if (event.type === 'native-event') {
+    if (SUPERVISOR_OWNED_REQUEST_IDS.has(event.payload.requestId)) return;
+    const result = appleIntelligenceRequests.handleNativeEvent(event.payload);
+    if (!result.routed && result.reason === 'unknown-request') {
+      console.error(
+        `[desktop] apple-intelligence: event for unknown requestId "${event.payload.requestId}" (${event.payload.event})`,
+      );
+      emitTelemetryEvent('protocol_violation', { protocolViolationCode: 'unknown_request_id' });
+    }
+    return;
+  }
+  if (event.type === 'exit') {
+    // Sidecar exited: every pending request is unreachable and must be
+    // rejected deterministically (lifecycle-and-concurrency.md "Crashed").
+    appleIntelligenceRequests.rejectAll('native_process_exited');
+  }
+});
+
+async function startAppleIntelligence() {
+  try {
+    await appleIntelligence.start({
+      appRoot: path.resolve(path.join(__dirname, '..')),
+      isPackaged: app.isPackaged,
+      resourcesPath: process.resourcesPath,
+    });
+  } catch (error) {
+    console.error('[desktop] apple-intelligence sidecar failed to start:', error);
+  }
 }
 
 function isSafeInternalUrl(url) {
@@ -459,6 +532,13 @@ async function createWindow() {
   win.on('closed', () => {
     if (mainWindow === win) mainWindow = null;
   });
+  // A destroyed renderer can no longer receive results — cancel whatever it
+  // had in flight rather than let it run to a terminal event nobody reads
+  // (lifecycle-and-concurrency.md "cancel requests when the owning window is
+  // destroyed").
+  win.webContents.on('destroyed', () => {
+    appleIntelligenceRequests.cancelForWebContents(win.webContents.id);
+  });
 
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (isSafeInternalUrl(url)) {
@@ -516,8 +596,10 @@ app.whenReady().then(async () => {
   // before giving up, and createWindow doesn't need the backend up to show
   // the renderer — the app already handles a not-yet-ready API gracefully
   // (inline login errors, QuoteSocket's own reconnect-with-backoff). Cold
-  // start no longer looks frozen for the length of that poll.
-  await Promise.all([ensureBackend(), createWindow()]);
+  // start no longer looks frozen for the length of that poll. The Apple
+  // Intelligence sidecar is best-effort and optional — its promise never
+  // blocks window creation.
+  await Promise.all([ensureBackend(), createWindow(), startAppleIntelligence()]);
   const protocolUrl = extractProtocolArg(process.argv);
   if (protocolUrl) handleProtocolUrl(protocolUrl);
 });
@@ -534,6 +616,11 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
 });
 app.on('will-quit', stopBackend);
+// Clear all pending-request timers before the sidecar itself stops — no
+// renderer or child process will be around to receive further events, and
+// an uncleared timer would otherwise still fire after shutdown.
+app.on('will-quit', () => appleIntelligenceRequests.clear());
+app.on('will-quit', () => void appleIntelligence.stop());
 // Terminal kills and session logouts must also take the backend down.
 for (const signal of ['SIGTERM', 'SIGINT', 'SIGHUP']) {
   process.on(signal, () => app.quit());
@@ -547,7 +634,73 @@ process.on('exit', () => {
       // already gone
     }
   }
+  if (appleIntelligence.child) {
+    try {
+      appleIntelligence.child.kill('SIGKILL');
+    } catch {
+      // already gone
+    }
+  }
 });
 
 // Open external URLs (SnapTrade Connection Portal, etc.) in the system browser.
 ipcMain.handle('open-external', (_event, url) => shell.openExternal(url));
+
+// Apple Intelligence: narrow, feature-scoped IPC surface only (no generic
+// invoke). Runtime-validates renderer payloads before translating them into
+// native requests (docs/apple-intelligence/architecture-enforcement.md).
+ipcMain.handle('apple-intelligence:availability', () => {
+  if (appleIntelligence.state !== 'ready') {
+    return { state: 'unavailable', reason: appleIntelligence.state };
+  }
+  return { state: 'ready' };
+});
+
+ipcMain.handle('apple-intelligence:analyze', (event, request) => {
+  if (typeof request?.requestId !== 'string' || request.requestId.length === 0) {
+    throw new Error('apple-intelligence:analyze requires a string requestId');
+  }
+  // The one piece of payload shape main enforces (protocol.md "Electron
+  // main runtime-validates renderer payloads before translating them into
+  // native requests"): the schema version and identity fields, so a
+  // malformed or version-mismatched snapshot is rejected here instead of
+  // only surfacing as a Swift-side parse failure or silent model
+  // degradation. Everything else about the payload stays opaque below.
+  const payloadCheck = analysisSnapshotPayloadSchema.safeParse(request.payload);
+  if (!payloadCheck.success) {
+    throw new Error('apple-intelligence:analyze payload failed AnalysisSnapshot validation');
+  }
+  // Main validates, creates the registry entry, and assigns the deadline
+  // before anything is sent to Swift — main is authoritative for the
+  // request's existence and lifetime, not merely a passthrough. `trigger.kind`
+  // is read here purely as a short enum tag for telemetry (testing-and-
+  // observability.md "analysis_trigger_kind") — main does not otherwise
+  // interpret the payload, which stays opaque and is forwarded as-is.
+  const entry = appleIntelligenceRequests.register({
+    requestId: request.requestId,
+    originatingWebContentsId: event.sender.id,
+    triggerKind: request.payload?.trigger?.kind,
+  });
+  appleIntelligence.send({
+    protocolVersion: 1,
+    requestId: request.requestId,
+    method: 'analysis.run',
+    deadlineAt: entry.deadlineAt,
+    payload: request.payload ?? {},
+  });
+  return { requestId: request.requestId };
+});
+
+ipcMain.handle('apple-intelligence:cancel', (event, requestId) => {
+  if (typeof requestId !== 'string' || requestId.length === 0) return;
+  // Cross-window isolation: a renderer may only cancel a request it owns.
+  // Silently ignore otherwise rather than let one window affect another's
+  // in-flight analysis (security-boundary.md "Cross-window leakage").
+  if (!appleIntelligenceRequests.isOwnedBy(requestId, event.sender.id)) return;
+  appleIntelligence.send({
+    protocolVersion: 1,
+    requestId,
+    method: 'analysis.cancel',
+    payload: {},
+  });
+});

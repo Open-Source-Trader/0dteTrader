@@ -42,11 +42,16 @@ import { ProfileView } from '../profile/ProfileView';
 import { DesktopTradeTicket } from './DesktopTradeTicket';
 import { FloatingTradeButtons } from './FloatingTradeButtons';
 import { GexHeatmapModal } from '../gexHeatmap/GexHeatmapModal';
+import { TradeDeskPanel } from './TradeDeskPanel';
 import { TradeManagementWorkspace } from './TradeManagementWorkspace';
 import {
   desktopTradeWorkspaceHeight,
   StopTargetEditorStore,
 } from './TradeManagementWorkspaceModel';
+import { AIAnalysisButton } from '../appleIntelligence/AIAnalysisButton';
+import { buildAnalysisSnapshot } from '../appleIntelligence/AnalysisSnapshotBuilder';
+import { connectCandleCloseAnalysis } from '../appleIntelligence/candleCloseWiring';
+import { connectPositionAnalysis } from '../appleIntelligence/positionWiring';
 import { HistoryView } from './HistoryView';
 import { IvAlertBanner } from './IvAlertBanner';
 import { OrderConfirmPopup } from './OrderConfirmPopup';
@@ -93,6 +98,7 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
     quoteSocket,
     drawingsStore,
     chartOrdersStore,
+    analysisStore,
   } = container;
 
   // Chrome-only slice: this screen never reads candles/quote/tickProgress,
@@ -100,6 +106,11 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
   // store snapshot would (ChartView, the other chartStore subscriber, still
   // gets those).
   const chart = useStore(chartStore, chartChromeSlice, shallowEqual);
+  const isQuoteStreamStale = useStore(
+    chartStore,
+    (state) => state.isStale,
+    (a, b) => a === b,
+  );
   const trade = useStore(tradeStore);
   const chain = useStore(chainStore); // Chain selection supplies the exact analytics expiration.
   const chartOrders = useStore(chartOrdersStore);
@@ -174,6 +185,46 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
       cancelled = true;
     };
   }, [apiClient, chartStore]);
+
+  // Apple Intelligence event subscription: must be active for the screen's
+  // full lifetime, independent of which layout renders the Trade Desk UI.
+  // Previously only AIAnalysisButton (compact/split layouts only) called
+  // start()/refreshAvailability() — on the desktop grid, where TradeDeskPanel
+  // renders instead of AIAnalysisButton, no native completion/failure event
+  // was ever subscribed to, so a request's `completed` terminal event had
+  // nowhere to arrive and the panel stayed on "Analyzing" indefinitely.
+  useEffect(() => {
+    analysisStore.start();
+    void analysisStore.refreshAvailability();
+    return () => analysisStore.stop();
+  }, [analysisStore]);
+
+  // Automatic candle-close analysis: connected for the screen's lifetime.
+  // The wiring's trigger policy dedupes per candle close, so a remount
+  // cannot double-fire on the same candle.
+  useEffect(
+    () =>
+      connectCandleCloseAnalysis({
+        chartStore,
+        analysisStore,
+        getPositions: () => tradeStore.getState().positions,
+        getSelectedContract: () => chainStore.selectedContract,
+      }),
+    [chartStore, analysisStore, tradeStore, chainStore],
+  );
+
+  // Position lifecycle analysis (open/scale/close/material P&L change):
+  // position-critical priority, advisory only — never touches orders.
+  useEffect(
+    () =>
+      connectPositionAnalysis({
+        tradeStore,
+        chartStore,
+        analysisStore,
+        getSelectedContract: () => chainStore.selectedContract,
+      }),
+    [tradeStore, chartStore, analysisStore, chainStore],
+  );
 
   const confirmModeSwitch = async () => {
     await apiClient.updateTradingMode(nextMode);
@@ -463,6 +514,16 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
   });
 
   // Desktop grid: state-aware trade-management workspace instead of a fixed empty table.
+  const buildCurrentAnalysisSnapshot = useCallback(
+    () =>
+      buildAnalysisSnapshot({
+        chart: chartStore.getState(),
+        positions: tradeStore.getState().positions,
+        selectedContract: chainStore.selectedContract,
+      }),
+    [chartStore, tradeStore, chainStore],
+  );
+
   const desktopPositionsPanel = (
     <TradeManagementWorkspace
       positions={trade.positions}
@@ -497,24 +558,48 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
     contentArea = (
       <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column' }}>
         <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
-          <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
-            <ChartView
-              store={chartStore}
-              drawingsStore={drawingsStore}
-              apiClient={apiClient}
-              onSymbolSearch={() => setShowSymbolSearch(true)}
-              onIndicatorSettings={() => setShowIndicatorSettings(true)}
-              tradingMode={tradingMode}
-              onToggleMode={() => setShowModeConfirmation(true)}
-              onToggleFullscreen={toggleLayout}
-              optionsAnalyticsExpiration={optionsAnalyticsExpiration}
-              chartTrading={chartTrading}
-              dense
-              positionsLocked={locked}
-              onToggleLock={toggleLock}
-              onShowHistory={() => setShowHistory(true)}
-              onShowProfile={() => setShowProfile(true)}
-              onShowGexHeatmap={() => setShowGexHeatmap(true)}
+          {/* Main workspace: chart takes all remaining vertical space above
+              a fixed-height AI Trade Desk band — the chart stays the
+              dominant surface and the band never resizes with model text. */}
+          <div
+            style={{
+              flex: 1,
+              minWidth: 0,
+              minHeight: 0,
+              display: 'flex',
+              flexDirection: 'column',
+              overflow: 'hidden',
+            }}
+          >
+            <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+              <ChartView
+                store={chartStore}
+                drawingsStore={drawingsStore}
+                apiClient={apiClient}
+                onSymbolSearch={() => setShowSymbolSearch(true)}
+                onIndicatorSettings={() => setShowIndicatorSettings(true)}
+                tradingMode={tradingMode}
+                onToggleMode={() => setShowModeConfirmation(true)}
+                onToggleFullscreen={toggleLayout}
+                optionsAnalyticsExpiration={optionsAnalyticsExpiration}
+                chartTrading={chartTrading}
+                dense
+                positionsLocked={locked}
+                onToggleLock={toggleLock}
+                onShowHistory={() => setShowHistory(true)}
+                onShowProfile={() => setShowProfile(true)}
+                onShowGexHeatmap={() => setShowGexHeatmap(true)}
+              />
+            </div>
+
+            <TradeDeskPanel
+              analysisStore={analysisStore}
+              tradeStore={tradeStore}
+              chainStore={chainStore}
+              selectedContract={chainStore.selectedContract}
+              buildSnapshot={buildCurrentAnalysisSnapshot}
+              locked={locked}
+              isQuoteStreamStale={isQuoteStreamStale}
             />
           </div>
 
@@ -532,10 +617,11 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
           <div
             style={{
               flex: `0 0 ${breakpoint === 'wide' ? '22%' : '30%'}`,
-              minWidth: 320,
+              minWidth: 380,
               minHeight: 0,
               display: 'flex',
               flexDirection: 'column',
+              overflow: 'hidden',
             }}
           >
             <DesktopTradeTicket
@@ -668,6 +754,15 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
         position: 'relative',
       }}
     >
+      {isDesktopGrid ? null : (
+        <AIAnalysisButton
+          analysisStore={analysisStore}
+          tradeStore={tradeStore}
+          selectedContract={chainStore.selectedContract}
+          buildSnapshot={buildCurrentAnalysisSnapshot}
+        />
+      )}
+
       {activeIvAlert ? (
         <IvAlertBanner alert={activeIvAlert} onDismiss={() => setActiveIvAlert(null)} />
       ) : null}

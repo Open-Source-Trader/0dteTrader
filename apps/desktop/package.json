@@ -8,19 +8,23 @@
   "main": "electron/main.cjs",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -p tsconfig.json --noEmit && vite build",
+    "build": "npm run build:shim && tsc -p tsconfig.json --noEmit && vite build",
+    "build:shim": "swift build -c release --package-path native/apple-intelligence-shim",
     "test": "vitest run",
     "lint": "eslint \"src/**/*.{ts,tsx}\"",
     "preview": "vite preview",
     "electron": "ELECTRON_START_URL=${ELECTRON_START_URL:-http://localhost:5173} electron electron/main.cjs",
     "electron:dist": "electron electron/main.cjs",
-    "dist:mac": "electron-builder --mac dmg --publish never"
+    "dist:mac": "npm run build:shim && electron-builder --mac dmg --publish never && node scripts/verify-packaged-shim.mjs",
+    "verify:shim": "node scripts/verify-packaged-shim.mjs",
+    "smoke:shim": "node scripts/packaged-shim-smoke.mjs"
   },
   "dependencies": {
     "@0dtetrader/shared-types": "*",
     "lightweight-charts": "^5.2.0",
     "react": "^19.2.8",
-    "react-dom": "^19.2.8"
+    "react-dom": "^19.2.8",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@testing-library/jest-dom": "^6.9.1",
@@ -61,6 +65,12 @@
       "dist/**/*",
       "electron/**/*",
       "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "native/apple-intelligence-shim/.build/release/AppleIntelligenceShim",
+        "to": "native/apple-intelligence-shim/AppleIntelligenceShim"
+      }
     ],
     "mac": {
       "category": "public.app-category.finance",

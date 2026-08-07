@@ -328,9 +328,16 @@ export function ChartView({
           <button
             className={tradingMode === 'live' ? 'hud-badge hud-badge--live' : 'hud-badge'}
             onClick={onToggleMode}
-            aria-label={`Trading mode ${tradingMode === 'live' ? 'LIVE' : 'PRACTICE'}. Switch mode`}
+            aria-label={`Trading mode ${tradingMode === 'live' ? 'LIVE TRADING' : 'PRACTICE'}. Switch mode`}
           >
-            {tradingMode === 'live' ? 'LIVE' : 'PRACTICE'}
+            {/* This badge is brokerage account mode (real money vs. paper),
+                never market-data liveness — the AI Trade Desk header has its
+                own, separate LIVE/DELAYED/MARKET CLOSED label for that. The
+                bare word "LIVE" here previously read as a market-data claim
+                sitting right next to "MARKET CLOSED" in the Trade Desk band;
+                spelling it out avoids that misreading without introducing a
+                second state source. */}
+            {tradingMode === 'live' ? 'LIVE TRADING' : 'PRACTICE'}
           </button>
           <Menu
             trigger={

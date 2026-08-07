@@ -17,6 +17,8 @@ packages:
     # v5 renames the module to DGCharts and compiles under current Swift;
     # v4.x fails to build on newer toolchains.
     majorVersion: 5.1.0
+  CandleEncoding:
+    path: ../../packages/swift-shared
 
 targets:
   0dteTrader:
@@ -33,6 +35,7 @@ targets:
     dependencies:
       - package: Charts
         product: DGCharts
+      - package: CandleEncoding
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.0dtetrader.app

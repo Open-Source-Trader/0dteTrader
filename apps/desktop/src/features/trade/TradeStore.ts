@@ -17,6 +17,9 @@ import { errorMessage } from '../../core/api/ApiError';
 import { quotesPending, orderStatusDisplayName, sideDisplayName } from '../../core/models/domain';
 import { parseOccSymbol } from '../../core/models/occSymbol';
 import { roundToTick } from '../../core/models/priceInput';
+import type { ApplicablePriceSuggestion } from '../appleIntelligence/tradeDeskPresenter';
+import { isValidContractPremium } from '../appleIntelligence/tradeDeskPresenter';
+import { hashPositionVersion } from '../appleIntelligence/AnalysisSnapshotBuilder';
 import { Store } from '../../core/observable';
 import { Format } from '../../design/format';
 import type { ChainStore } from './ChainStore';
@@ -42,6 +45,19 @@ export interface ArmedOrderTicket {
   side: OrderSide;
   summary: string;
 }
+
+export interface ApplyTradeDeskPriceCommand {
+  type: 'apply-trade-desk-price';
+  suggestion: ApplicablePriceSuggestion;
+}
+
+export type ApplyTradeDeskPriceResult =
+  | { ok: true }
+  | {
+      ok: false;
+      error: string;
+      reason: 'stale' | 'contract' | 'position' | 'price' | 'submitting' | 'armed';
+    };
 
 interface TradeStoreState {
   quantity: number;
@@ -154,6 +170,46 @@ export class TradeStore extends Store<TradeStoreState> {
       customLimitPrice: null,
       orderType: orderType === 'custom' ? 'mid' : orderType,
     });
+  }
+
+  /** Applies an explicit user command from the Trade Desk to the local ticket only.
+   * Repeats the safety-critical guards before switching to Custom. It never
+   * arms, previews, submits, changes quantity, or selects another contract. */
+  applyTradeDeskPrice(
+    command: ApplyTradeDeskPriceCommand,
+    chainStore: ChainStore,
+  ): ApplyTradeDeskPriceResult {
+    const state = this.getState();
+    if (state.isSubmitting) {
+      return { ok: false, reason: 'submitting', error: 'Ticket is submitting.' };
+    }
+    if (state.armedTicket) {
+      // ArmedOrderTicket.request is a frozen snapshot captured at arm time
+      // — confirmArmedOrder submits ticket.request, not live store state.
+      // Updating orderType/customLimitPrice here would change what the
+      // confirm popup displays without changing what actually submits,
+      // silently desyncing the two. Reject and let the trader disarm first.
+      return { ok: false, reason: 'armed', error: 'Disarm the current ticket before applying.' };
+    }
+    const selectedContract = chainStore.selectedContract;
+    if (!selectedContract || selectedContract.symbol !== command.suggestion.contractIdentity) {
+      return { ok: false, reason: 'contract', error: 'Selected contract changed.' };
+    }
+    const matchingPosition = state.positions.find(
+      (position) => position.symbol === selectedContract.symbol,
+    );
+    const currentPositionVersion = matchingPosition ? hashPositionVersion(matchingPosition) : 0;
+    if (currentPositionVersion !== command.suggestion.positionVersion) {
+      return { ok: false, reason: 'position', error: 'Position changed. Refresh Trade Desk.' };
+    }
+    if (
+      command.suggestion.priceDomain !== 'contract-premium' ||
+      !isValidContractPremium(command.suggestion.price, selectedContract)
+    ) {
+      return { ok: false, reason: 'price', error: 'Suggested price is no longer valid.' };
+    }
+    this.set({ orderType: 'custom', customLimitPrice: roundToTick(command.suggestion.price) });
+    return { ok: true };
   }
 
   /** Whether the current pricing selection is complete enough to arm. */

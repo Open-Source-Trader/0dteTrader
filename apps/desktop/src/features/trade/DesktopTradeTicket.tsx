@@ -68,6 +68,17 @@ function dteLabel(expiration: string | null): string {
   return expiration === dayString() ? '0DTE / Expiry' : expiration;
 }
 
+function buyButtonTitle({
+  isSubmitting,
+  hasOpenLong,
+}: {
+  isSubmitting: boolean;
+  hasOpenLong: boolean;
+}): string {
+  if (isSubmitting) return 'Working…';
+  return hasOpenLong ? 'ADD TO POSITION' : 'BUY TO OPEN';
+}
+
 /** Desktop-grid execution rail: chain first, then configuration, selected
  *  contract, sizing/pricing, and finally the safety-critical BUY/SELL row. */
 export function DesktopTradeTicket({
@@ -128,6 +139,14 @@ export function DesktopTradeTicket({
   const hasSellableLeg =
     tradeStore.sellableHeldLegs(chain.underlying, chain.selectedExpiration, chain.optionType)
       .length > 0;
+  // Narrower than hasSellableLeg (exact contract, not underlying+expiration+
+  // right): the buy button's label distinguishes adding to an existing
+  // position in THIS contract from opening a new one.
+  const hasOpenLong = selectedContract
+    ? trade.positions.some(
+        (position) => position.symbol === selectedContract.symbol && position.quantity > 0,
+      )
+    : false;
   // `premium !== null` alone does not cover the Custom mode: a typed price
   // supplies a premium even when the leg itself has no quotes yet, so the
   // zero-quote CURR gate needs its own term here.
@@ -447,9 +466,10 @@ export function DesktopTradeTicket({
             onClick={() => onArm('sell')}
           />
           <TradeActionButton
-            title={trade.isSubmitting ? 'Working…' : 'BUY TO OPEN'}
+            title={buyButtonTitle({ isSubmitting: trade.isSubmitting, hasOpenLong })}
             color="var(--buy-green)"
             isEnabled={canBuy}
+            secondary={hasOpenLong}
             onClick={() => onArm('buy')}
           />
         </div>

@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="zeroFace" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#62d7ff"/>
+      <stop offset="0.28" stop-color="#168cff"/>
+      <stop offset="0.68" stop-color="#0750c7"/>
+      <stop offset="1" stop-color="#031c66"/>
+    </linearGradient>
+    <linearGradient id="zeroEdge" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#b9f4ff"/>
+      <stop offset="0.32" stop-color="#19c7ff"/>
+      <stop offset="1" stop-color="#0568ff"/>
+    </linearGradient>
+    <filter id="glow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="11" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <path d="M512 190c-194 0-318 132-318 322s124 322 318 322 318-132 318-322S706 190 512 190Zm0 130c103 0 174 75 174 192s-71 192-174 192-174-75-174-192 71-192 174-192Z"
+        fill="url(#zeroFace)" stroke="url(#zeroEdge)" stroke-width="18" filter="url(#glow)"/>
+  <path d="M512 210c-181 0-292 121-292 302s111 302 292 302 292-121 292-302S693 210 512 210Z"
+        fill="none" stroke="#bdf5ff" stroke-opacity="0.44" stroke-width="6"/>
+</svg>

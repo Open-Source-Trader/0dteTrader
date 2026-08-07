@@ -1,0 +1,225 @@
+import XCTest
+@testable import ShimCore
+
+final class AnalysisRunnerTests: XCTestCase {
+    func testDecodesAWellFormedSnapshotPayload() {
+        let payload = JSONValue.object([
+            "snapshotSchemaVersion": .number(1),
+            "identity": .object([
+                "snapshotId": .string("s1"),
+                "capturedAt": .string("2026-07-31T00:00:00Z"),
+                "symbol": .string("SPY"),
+                "timeframe": .string("5m"),
+                "snapshotSequence": .number(1),
+                "positionVersion": .number(0),
+            ]),
+            "trigger": .object([
+                "kind": .string("manual"),
+                "priority": .string("manual"),
+                "reason": .string("user requested"),
+            ]),
+            "market": .object([:]),
+            "candles": .object([:]),
+            "indicators": .object([:]),
+            "levels": .array([]),
+            "quality": .object([:]),
+            "omissions": .array([]),
+        ])
+
+        let snapshot = AnalysisRunner.decodeSnapshot(from: payload)
+        XCTAssertNotNil(snapshot)
+        XCTAssertEqual(snapshot?.identity.symbol, "SPY")
+    }
+
+    func testRejectsAMissingPayload() {
+        XCTAssertNil(AnalysisRunner.decodeSnapshot(from: nil))
+    }
+
+    func testRejectsAPayloadMissingRequiredFields() {
+        let payload = JSONValue.object(["identity": .object([:])])
+        XCTAssertNil(AnalysisRunner.decodeSnapshot(from: payload))
+    }
+
+    func testRejectsAPayloadWithWrongFieldTypes() {
+        let payload = JSONValue.object([
+            "snapshotSchemaVersion": .string("not-a-number"),
+            "identity": .object([:]),
+            "trigger": .object([:]),
+            "market": .object([:]),
+            "candles": .object([:]),
+            "indicators": .object([:]),
+            "levels": .array([]),
+            "quality": .object([:]),
+            "omissions": .array([]),
+        ])
+        XCTAssertNil(AnalysisRunner.decodeSnapshot(from: payload))
+    }
+
+    /// Real-model smoke test (testing-and-observability.md: "Real native
+    /// smoke: Supported macOS Foundation Models path"). Skips cleanly when
+    /// Foundation Models isn't available — CI and non-macOS-26 machines
+    /// exercise the deterministic tests above instead.
+    func testLiveGenerationProducesAWireIdentityCompleteResult() async throws {
+        guard case .ready = AvailabilityService.current() else {
+            throw XCTSkip("Foundation Models unavailable on this machine")
+        }
+
+        let snapshot = AnalysisSnapshotInput(
+            snapshotSchemaVersion: 1,
+            identity: .init(
+                snapshotId: "s1",
+                capturedAt: "2026-07-31T00:00:00Z",
+                symbol: "SPY",
+                timeframe: "5m",
+                candleCloseTime: nil,
+                snapshotSequence: 7,
+                positionVersion: 2,
+                strategyPolicyVersion: nil
+            ),
+            trigger: .init(kind: "manual", priority: "manual", reason: "smoke test"),
+            market: .object(["last": .number(580.25)]),
+            candles: .array([.object(["o": .number(579), "h": .number(580), "l": .number(578.5), "c": .number(579.8), "v": .number(120000)])]),
+            indicators: .object(["rsi": .number(58.2)]),
+            levels: [
+                CandidateLevelInput(
+                    id: "lvl-1",
+                    kind: "pivot",
+                    role: "support",
+                    price: 578.5,
+                    evidence: "tested twice today",
+                    testCount: 2,
+                    recency: "today",
+                    strength: 0.7,
+                    source: "pivot-low"
+                ),
+            ],
+            options: nil,
+            position: nil,
+            strategyPolicy: nil,
+            quality: .object(["stale": .bool(false)]),
+            omissions: []
+        )
+
+        let resultPayload = try await AnalysisRunner.run(snapshot: snapshot, analysisId: "smoke-1") { false }
+
+        guard case let .object(fields) = resultPayload else {
+            return XCTFail("expected an object payload")
+        }
+        XCTAssertEqual(fields["resultSchemaVersion"], .number(1))
+        XCTAssertEqual(fields["analysisId"], .string("smoke-1"))
+        guard case let .object(context)? = fields["context"] else {
+            return XCTFail("expected a context object")
+        }
+        XCTAssertEqual(context["symbol"], .string("SPY"))
+        XCTAssertEqual(context["snapshotSequence"], .number(7))
+        XCTAssertNotNil(fields["generatedAt"])
+        XCTAssertNotNil(fields["summary"])
+
+        // tradeDeskPlan is optional on the wire (omitted when generation
+        // didn't produce one, or when downgraded to observation-only) but
+        // if present every price must carry the grounding metadata
+        // AnalysisRunner attaches (snapshotId/priceDomain/evidenceId) —
+        // never a bare number the model could have invented.
+        if case let .object(plan)? = fields["tradeDeskPlan"] {
+            XCTAssertNotNil(plan["action"])
+            if case let .object(entry)? = plan["entry"], case let .object(preferred)? = entry["preferredContractPrice"] {
+                XCTAssertEqual(preferred["priceDomain"], .string("contract-premium"))
+                XCTAssertEqual(preferred["snapshotId"], .string("s1"))
+            }
+        }
+    }
+
+    /// Telemetry coverage (testing-and-observability.md "Required metrics":
+    /// analysis_duration_ms, snapshot_bytes, prompt_chars, omission_codes).
+    /// Runs regardless of Foundation Models availability — the telemetry
+    /// `defer` in `AnalysisRunner.run` fires before the availability guard,
+    /// so this is deterministic everywhere, unlike the live-generation
+    /// smoke test above.
+    func testEmitsAnalysisContextTelemetryWithMetadataOnlyFields() async {
+        let snapshot = AnalysisSnapshotInput(
+            snapshotSchemaVersion: 1,
+            identity: .init(
+                snapshotId: "s1",
+                capturedAt: "2026-07-31T00:00:00Z",
+                symbol: "SPY",
+                timeframe: "5m",
+                candleCloseTime: nil,
+                snapshotSequence: 7,
+                positionVersion: 2,
+                strategyPolicyVersion: nil
+            ),
+            trigger: .init(kind: "manual", priority: "manual", reason: "telemetry test"),
+            market: .object(["last": .number(580.25)]),
+            candles: .array([]),
+            indicators: .object([:]),
+            levels: [],
+            options: nil,
+            position: nil,
+            strategyPolicy: nil,
+            quality: .object(["stale": .bool(false)]),
+            omissions: []
+        )
+
+        let box = EventBox()
+        _ = try? await AnalysisRunner.run(
+            snapshot: snapshot,
+            analysisId: "telemetry-req-1",
+            isCancelled: { false },
+            telemetry: { box.appendTelemetry($0) }
+        )
+
+        let events = box.telemetryEvents
+        XCTAssertEqual(events.count, 1)
+        let event = events[0]
+        XCTAssertEqual(event.name, "analysis_context")
+        XCTAssertEqual(event.requestId, "telemetry-req-1")
+        XCTAssertNotNil(event.analysisDurationMs)
+        XCTAssertGreaterThanOrEqual(event.analysisDurationMs ?? -1, 0)
+        XCTAssertNotNil(event.snapshotBytes)
+        XCTAssertGreaterThan(event.snapshotBytes ?? 0, 0)
+        XCTAssertNotNil(event.promptChars)
+        XCTAssertGreaterThan(event.promptChars ?? 0, 0)
+    }
+
+    /// Negative assertion mirroring the Node-side log-safety tests: a
+    /// prompt/snapshot/position-shaped sentinel planted in the snapshot must
+    /// never appear in the rendered telemetry line.
+    func testTelemetryNeverContainsSensitiveSnapshotOrPromptContent() async {
+        let sensitiveMarker = "SENSITIVE-ACCT-4429-POS-17-SHORT"
+        let snapshot = AnalysisSnapshotInput(
+            snapshotSchemaVersion: 1,
+            identity: .init(
+                snapshotId: "snap-\(sensitiveMarker)",
+                capturedAt: "2026-07-31T00:00:00Z",
+                symbol: "SPY",
+                timeframe: "1m",
+                candleCloseTime: nil,
+                snapshotSequence: 1,
+                positionVersion: 7,
+                strategyPolicyVersion: nil
+            ),
+            trigger: .init(kind: "manual", priority: "manual", reason: sensitiveMarker),
+            market: .object(["accountNote": .string(sensitiveMarker)]),
+            candles: .array([]),
+            indicators: .object([:]),
+            levels: [],
+            options: nil,
+            position: .object(["detail": .string(sensitiveMarker)]),
+            strategyPolicy: nil,
+            quality: .object([:]),
+            omissions: []
+        )
+
+        let box = EventBox()
+        _ = try? await AnalysisRunner.run(
+            snapshot: snapshot,
+            analysisId: "telemetry-req-2",
+            isCancelled: { false },
+            telemetry: { box.appendTelemetry($0) }
+        )
+
+        for event in box.telemetryEvents {
+            XCTAssertFalse(event.describe().contains(sensitiveMarker))
+        }
+    }
+}

@@ -7,6 +7,10 @@ coverage/
 # Electron packaging output
 apps/desktop/release/
 
+# Swift Package Manager build output
+apps/desktop/native/apple-intelligence-shim/.build/
+packages/swift-shared/.build/
+
 # Env / secrets
 .env
 .env.local

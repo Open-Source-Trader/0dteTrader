@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { SettingsStore } from './SettingsStore';
+import {
+  DEFAULT_CHART_DISPLAY,
+  DEFAULT_INDICATOR_SETTINGS_STATE,
+} from '../../features/chart/indicatorRegistry';
 
 class MemoryStorage implements Storage {
   private readonly values = new Map<string, string>();
@@ -28,6 +32,156 @@ class MemoryStorage implements Storage {
     this.values.set(key, value);
   }
 }
+
+describe('SettingsStore indicator registry migration', () => {
+  beforeEach(() => {
+    Object.defineProperty(globalThis, 'localStorage', {
+      configurable: true,
+      value: new MemoryStorage(),
+    });
+  });
+
+  it('maps the exact legacy flat fields, separates volume, and removes residue', () => {
+    localStorage.setItem(
+      'settings.indicatorSettings',
+      JSON.stringify({
+        smaEnabled: true,
+        smaPeriod: 7,
+        emaEnabled: false,
+        vwapEnabled: false,
+        rsiPeriod: 9,
+        macdFastPeriod: 4,
+        macdSlowPeriod: 8,
+        macdSignalPeriod: 3,
+        bollingerMultiplier: 2.5,
+        stochKPeriod: 10,
+        stochKSmooth: 2,
+        stochDPeriod: 4,
+        atrEnabled: true,
+        atrPeriod: 5,
+        volumeEnabled: false,
+        discardedDesktopField: 99,
+      }),
+    );
+
+    const store = new SettingsStore();
+    expect(store.indicatorSettings.indicators.sma).toEqual({
+      enabled: true,
+      parameters: { period: 7 },
+    });
+    expect(store.indicatorSettings.indicators.anchored_vwap).toEqual({
+      enabled: false,
+      parameters: { anchorTimestamp: 0 },
+    });
+    expect(store.indicatorSettings.indicators.macd.parameters).toEqual({
+      fastPeriod: 4,
+      slowPeriod: 8,
+      signalPeriod: 3,
+    });
+    expect(store.indicatorSettings.indicators.atr).toEqual({
+      enabled: true,
+      parameters: { period: 5 },
+    });
+    expect(store.chartDisplay).toEqual({ volumeEnabled: false, volumeWeightedCandleWidth: false });
+    expect(localStorage.getItem('settings.indicatorSettings')).toBeNull();
+    expect(localStorage.getItem('settings.indicatorSettings.v1')).not.toContain(
+      'discardedDesktopField',
+    );
+  });
+
+  it('is idempotent and removes legacy residue after re-reading valid new records', () => {
+    const store = new SettingsStore();
+    store.indicatorSettings = DEFAULT_INDICATOR_SETTINGS_STATE;
+    store.chartDisplay = { volumeEnabled: false, volumeWeightedCandleWidth: false };
+    localStorage.setItem('settings.indicatorSettings', JSON.stringify({ emaEnabled: false }));
+
+    expect(new SettingsStore().indicatorSettings).toEqual(DEFAULT_INDICATOR_SETTINGS_STATE);
+    expect(new SettingsStore().chartDisplay).toEqual({
+      volumeEnabled: false,
+      volumeWeightedCandleWidth: false,
+    });
+    expect(localStorage.getItem('settings.indicatorSettings')).toBeNull();
+  });
+
+  it('round-trips volumeWeightedCandleWidth through get/set chartDisplay', () => {
+    const store = new SettingsStore();
+    store.chartDisplay = { volumeEnabled: true, volumeWeightedCandleWidth: true };
+    expect(store.chartDisplay).toEqual({ volumeEnabled: true, volumeWeightedCandleWidth: true });
+    expect(new SettingsStore().chartDisplay).toEqual({
+      volumeEnabled: true,
+      volumeWeightedCandleWidth: true,
+    });
+  });
+
+  it('backfills volumeWeightedCandleWidth to the default when reading an old-shape stored record', () => {
+    localStorage.setItem(
+      'settings.indicatorSettings.v1',
+      JSON.stringify(DEFAULT_INDICATOR_SETTINGS_STATE),
+    );
+    localStorage.setItem('settings.chartDisplay.v1', JSON.stringify({ volumeEnabled: false }));
+
+    const store = new SettingsStore();
+    expect(store.chartDisplay).toEqual({ volumeEnabled: false, volumeWeightedCandleWidth: false });
+  });
+
+  it.each([
+    ['missing', null],
+    ['corrupt', JSON.stringify({ volumeEnabled: 'yes' })],
+  ])(
+    'preserves valid keyed settings and repairs a %s display record after an interrupted migration',
+    (_state, displayRecord) => {
+      const keyed = structuredClone(DEFAULT_INDICATOR_SETTINGS_STATE);
+      keyed.indicators.sma = { enabled: true, parameters: { period: 7 } };
+      localStorage.setItem('settings.indicatorSettings.v1', JSON.stringify(keyed));
+      if (displayRecord !== null) {
+        localStorage.setItem('settings.chartDisplay.v1', displayRecord);
+      }
+      localStorage.setItem(
+        'settings.indicatorSettings',
+        JSON.stringify({ smaEnabled: false, smaPeriod: 99, volumeEnabled: false }),
+      );
+
+      const store = new SettingsStore();
+      expect(store.indicatorSettings).toEqual(keyed);
+      expect(store.chartDisplay).toEqual(DEFAULT_CHART_DISPLAY);
+      expect(localStorage.getItem('settings.indicatorSettings')).toBeNull();
+      expect(localStorage.getItem('settings.chartDisplay.v1')).toBe(
+        JSON.stringify(DEFAULT_CHART_DISPLAY),
+      );
+    },
+  );
+
+  it('keeps the legacy key when a verified migration write cannot complete', () => {
+    class FailingStorage extends MemoryStorage {
+      override setItem(key: string, value: string): void {
+        if (key === 'settings.chartDisplay.v1') throw new Error('disk full');
+        super.setItem(key, value);
+      }
+    }
+    const storage = new FailingStorage();
+    storage.setItem('settings.indicatorSettings', JSON.stringify({ smaEnabled: true }));
+    Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: storage });
+
+    expect(new SettingsStore().indicatorSettings).toEqual(DEFAULT_INDICATOR_SETTINGS_STATE);
+    expect(localStorage.getItem('settings.indicatorSettings')).not.toBeNull();
+    expect(localStorage.getItem('settings.indicatorSettings.v1')).toBeNull();
+  });
+
+  it('rejects corrupt keyed settings and keeps the last valid default', () => {
+    localStorage.setItem(
+      'settings.indicatorSettings.v1',
+      JSON.stringify({
+        ...DEFAULT_INDICATOR_SETTINGS_STATE,
+        indicators: {
+          ...DEFAULT_INDICATOR_SETTINGS_STATE.indicators,
+          sma: { enabled: true, parameters: { period: Number.POSITIVE_INFINITY } },
+        },
+      }),
+    );
+
+    expect(new SettingsStore().indicatorSettings).toEqual(DEFAULT_INDICATOR_SETTINGS_STATE);
+  });
+});
 
 interface ExpectedOptionsAnalyticsSettings {
   enabled: boolean;
@@ -191,36 +345,5 @@ describe('SettingsStore boolean device preferences', () => {
     expect(new SettingsStore().toastsEnabled).toBe(false);
     new SettingsStore().systemNotificationsEnabled = false;
     expect(new SettingsStore().systemNotificationsEnabled).toBe(false);
-  });
-});
-
-describe('SettingsStore AUTO OTM offset', () => {
-  beforeEach(() => {
-    Object.defineProperty(globalThis, 'localStorage', {
-      configurable: true,
-      value: new MemoryStorage(),
-    });
-  });
-
-  it('defaults to +1 OTM', () => {
-    expect(new SettingsStore().autoOtmOffset).toBe(1);
-  });
-
-  it('round-trips through localStorage, including 0 (ATM)', () => {
-    new SettingsStore().autoOtmOffset = 3;
-    expect(new SettingsStore().autoOtmOffset).toBe(3);
-    new SettingsStore().autoOtmOffset = 0;
-    expect(new SettingsStore().autoOtmOffset).toBe(0);
-  });
-
-  it('clamps out-of-range values and rejects garbage on read', () => {
-    localStorage.setItem('settings.autoOtmOffset', '99');
-    expect(new SettingsStore().autoOtmOffset).toBe(10);
-    localStorage.setItem('settings.autoOtmOffset', '-2');
-    expect(new SettingsStore().autoOtmOffset).toBe(0);
-    localStorage.setItem('settings.autoOtmOffset', '1.5');
-    expect(new SettingsStore().autoOtmOffset).toBe(1);
-    localStorage.setItem('settings.autoOtmOffset', 'wide');
-    expect(new SettingsStore().autoOtmOffset).toBe(1);
   });
 });

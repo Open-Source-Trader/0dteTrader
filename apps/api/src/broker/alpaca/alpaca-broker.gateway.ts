@@ -29,7 +29,12 @@ import {
   resolveAutoOtm,
 } from '../contract-resolution';
 import { customPriceWarning, resolveLimitPrice } from '../order-pricing';
-import { BrokerGateway, MarketDataProvider } from '../broker-gateway.interface';
+import {
+  BrokerExecutionScope,
+  BrokerGateway,
+  MarketDataProvider,
+  ResolvedContractHint,
+} from '../broker-gateway.interface';
 import { OrderEventsService } from '../order-events.service';
 import { optionExpirations } from '../expiration-calendar';
 import {
@@ -64,6 +69,8 @@ interface ResolvedContract {
 
 const STATUS_POLL_INTERVAL_MS = 2500;
 const STATUS_POLL_MAX_ATTEMPTS = 90;
+const STATUS_EVENT_INGEST_ATTEMPTS = 3;
+const STATUS_EVENT_INGEST_RETRY_MS = 100;
 /** Keep quote ticks responsive: the SDK's own retry/timeout protects GETs, but
  *  we bound it so a stalled option snapshot can't hang a streaming tick. */
 const SDK_TIMEOUT_MS = 10_000;
@@ -107,6 +114,16 @@ export class AlpacaBrokerGateway implements BrokerGateway, MarketDataProvider {
     return user?.tradingMode === 'practice' ? 'practice' : 'live';
   }
 
+  async executionScope(userId: string, expectedMode?: TradingMode): Promise<BrokerExecutionScope> {
+    const environment = await this.tradingModeFor(userId);
+    if (expectedMode && environment !== expectedMode) {
+      throw brokerErrors.orderRejected(
+        `Account switched to ${environment} while this ${expectedMode} order was being placed — nothing was sent`,
+      );
+    }
+    return { provider: 'alpaca', environment, accountId: 'default' };
+  }
+
   private async credentialsFor(userId: string, mode: TradingMode): Promise<AlpacaSecrets> {
     const stored = await this.credentials.getDecrypted(userId, 'alpaca', mode);
     if (!stored) {
@@ -122,8 +139,8 @@ export class AlpacaBrokerGateway implements BrokerGateway, MarketDataProvider {
     return { apiKey: stored.apiKey, apiSecret: stored.apiSecret };
   }
 
-  private async clientFor(userId: string): Promise<AlpacaClientLike> {
-    const mode = await this.tradingModeFor(userId);
+  private async clientFor(userId: string, requestedMode?: TradingMode): Promise<AlpacaClientLike> {
+    const mode = requestedMode ?? (await this.tradingModeFor(userId));
     const secrets = await this.credentialsFor(userId, mode);
     const fingerprint = `${secrets.apiKey}:${secrets.apiSecret}:${mode}`;
     const existing = this.clients.get(userId);
@@ -277,6 +294,8 @@ export class AlpacaBrokerGateway implements BrokerGateway, MarketDataProvider {
     // this gateway never needs the held quantity — accepted only to satisfy
     // the shared BrokerGateway signature.
     _heldQuantity?: number,
+    _resolvedContract?: ResolvedContractHint,
+    expectedScope?: BrokerExecutionScope,
   ): Promise<OrderResult> {
     // See the Webull gateway: the mode read here selects paper vs live, so it
     // must agree with the one the caller validated against.
@@ -286,7 +305,17 @@ export class AlpacaBrokerGateway implements BrokerGateway, MarketDataProvider {
         `Account switched to ${mode} while this ${expectedMode} order was being placed — nothing was sent`,
       );
     }
-    const client = await this.clientFor(userId);
+    if (
+      expectedScope &&
+      (expectedScope.provider !== 'alpaca' ||
+        expectedScope.environment !== mode ||
+        expectedScope.accountId !== 'default')
+    ) {
+      throw brokerErrors.orderRejected(
+        'Alpaca account selection changed while this bracket was armed — nothing was sent',
+      );
+    }
+    const client = await this.clientFor(userId, mode);
     const resolved = await this.resolveContract(userId, order);
     const limitPrice = resolveLimitPrice(order.orderType, resolved, order.limitPrice);
     const clientOrderId = alpacaClientOrderId(userId, idempotencyKey);
@@ -305,12 +334,18 @@ export class AlpacaBrokerGateway implements BrokerGateway, MarketDataProvider {
       ...toOrderResult(placed),
       orderId: placed.clientOrderId ?? clientOrderId,
     };
-    this.events.emit(userId, result);
-    this.startStatusPoll(userId, client, result);
+    this.events.emit(userId, result, mode, {
+      provider: 'alpaca',
+      accountId: 'default',
+      clientOrderId: result.orderId,
+      brokerOrderId: placed.id,
+    });
+    this.startStatusPoll(userId, client, result, mode, placed.id);
     return result;
   }
 
   async cancelOrder(userId: string, orderId: string): Promise<void> {
+    const mode = await this.tradingModeFor(userId);
     const client = await this.clientFor(userId);
     let ord;
     try {
@@ -323,11 +358,27 @@ export class AlpacaBrokerGateway implements BrokerGateway, MarketDataProvider {
     const target = toOrderResult(ord);
     await this.guard(() => client.trading.orders.deleteOrderByOrderID({ orderId: ord.id! }));
     this.stopStatusPoll(userId, orderId);
-    this.events.emit(userId, { ...target, status: 'cancelled' });
+    this.events.emit(userId, { ...target, status: 'cancelled' }, mode, {
+      provider: 'alpaca',
+      accountId: 'default',
+      clientOrderId: orderId,
+      brokerOrderId: ord.id,
+    });
   }
 
-  async getPositions(userId: string): Promise<Position[]> {
-    const client = await this.clientFor(userId);
+  async getPositions(userId: string, expectedScope?: BrokerExecutionScope): Promise<Position[]> {
+    const mode = await this.tradingModeFor(userId);
+    if (
+      expectedScope &&
+      (expectedScope.provider !== 'alpaca' ||
+        expectedScope.environment !== mode ||
+        expectedScope.accountId !== 'default')
+    ) {
+      throw brokerErrors.orderRejected(
+        'Alpaca account selection changed while this bracket was armed — positions were not read',
+      );
+    }
+    const client = await this.clientFor(userId, mode);
     const raw = await this.guard(() => client.trading.positions.getAllOpenPositions());
     return raw.map(toPosition).filter((p): p is Position => p !== null);
   }
@@ -344,8 +395,23 @@ export class AlpacaBrokerGateway implements BrokerGateway, MarketDataProvider {
 
   /** Every order on file (any status) — backs history reconciliation for
    *  orders placed directly on Alpaca rather than through this app. */
-  async getRecentOrders(userId: string, since?: Date): Promise<OrderResult[]> {
-    const client = await this.clientFor(userId);
+  async getRecentOrders(
+    userId: string,
+    since?: Date,
+    expectedScope?: BrokerExecutionScope,
+  ): Promise<OrderResult[]> {
+    const mode = await this.tradingModeFor(userId);
+    if (
+      expectedScope &&
+      (expectedScope.provider !== 'alpaca' ||
+        expectedScope.environment !== mode ||
+        expectedScope.accountId !== 'default')
+    ) {
+      throw brokerErrors.orderRejected(
+        'Alpaca account selection changed while the interrupted order was being reconciled',
+      );
+    }
+    const client = await this.clientFor(userId, mode);
     const raw = await this.guard(() =>
       client.trading.orders.getAllOrders({
         status: 'all',
@@ -403,12 +469,7 @@ export class AlpacaBrokerGateway implements BrokerGateway, MarketDataProvider {
       );
       const contract =
         order.selection.mode === 'auto_otm'
-          ? resolveAutoOtm(
-              chain.contracts,
-              optionType,
-              chain.underlyingPrice,
-              order.selection.otmOffset,
-            )
+          ? resolveAutoOtm(chain.contracts, optionType, chain.underlyingPrice)
           : chain.contracts.find(
               (c) => c.optionType === optionType && c.strike === order.selection.strike,
             );
@@ -454,7 +515,13 @@ export class AlpacaBrokerGateway implements BrokerGateway, MarketDataProvider {
     };
   }
 
-  private startStatusPoll(userId: string, client: AlpacaClientLike, result: OrderResult): void {
+  private startStatusPoll(
+    userId: string,
+    client: AlpacaClientLike,
+    result: OrderResult,
+    environment: TradingMode,
+    brokerOrderId?: string,
+  ): void {
     const key = `${userId}:${result.orderId}`;
     let attempts = 0;
     const tick = async (): Promise<void> => {
@@ -470,15 +537,29 @@ export class AlpacaBrokerGateway implements BrokerGateway, MarketDataProvider {
           detail.status === 'cancelled' ||
           detail.status === 'rejected'
         ) {
-          this.events.emit(userId, {
-            ...result,
-            status: detail.status,
-            filledPrice: detail.filledPrice ?? result.filledPrice,
-            // The placement-time result reports filledQuantity 0; without the
-            // poll's value a poll-detected fill would never be accounted.
-            filledQuantity: detail.filledQuantity ?? result.filledQuantity,
-            filledAt: detail.filledAt,
-          });
+          await this.ingestTerminalStatus(
+            () =>
+              this.events.ingest(
+                userId,
+                {
+                  ...result,
+                  status: detail.status,
+                  filledPrice: detail.filledPrice ?? result.filledPrice,
+                  // The placement-time result reports filledQuantity 0; without the
+                  // poll's value a poll-detected fill would never be accounted.
+                  filledQuantity: detail.filledQuantity ?? result.filledQuantity,
+                  filledAt: detail.filledAt,
+                },
+                environment,
+                {
+                  provider: 'alpaca',
+                  accountId: 'default',
+                  clientOrderId: result.orderId,
+                  brokerOrderId: detail.orderId === result.orderId ? brokerOrderId : detail.orderId,
+                },
+              ),
+            result.orderId,
+          );
           return;
         }
       } catch (err) {
@@ -487,6 +568,28 @@ export class AlpacaBrokerGateway implements BrokerGateway, MarketDataProvider {
       if (attempts < STATUS_POLL_MAX_ATTEMPTS) this.schedulePoll(key, tick);
     };
     this.schedulePoll(key, tick);
+  }
+
+  /** A terminal broker observation stops polling only after every ingestor —
+   * including the durable user-event append — confirms it. These retries are
+   * independent of the broker-query budget, so the final poll still gets a
+   * bounded chance to survive a transient database failure. */
+  private async ingestTerminalStatus(ingest: () => Promise<void>, orderId: string): Promise<void> {
+    let lastError: unknown;
+    for (let attempt = 1; attempt <= STATUS_EVENT_INGEST_ATTEMPTS; attempt += 1) {
+      try {
+        await ingest();
+        return;
+      } catch (error) {
+        lastError = error;
+        if (attempt < STATUS_EVENT_INGEST_ATTEMPTS) {
+          await new Promise((resolve) => setTimeout(resolve, STATUS_EVENT_INGEST_RETRY_MS));
+        }
+      }
+    }
+    throw lastError instanceof Error
+      ? lastError
+      : new Error(`terminal status ingestion failed for ${orderId}`);
   }
 
   private schedulePoll(key: string, tick: () => void): void {

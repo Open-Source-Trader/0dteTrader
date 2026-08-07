@@ -11,6 +11,10 @@ export interface AppConfig {
     refreshTtl: number;
   };
   credEncryptionKey?: string;
+  redis: {
+    url: string;
+    operationTimeoutMs: number;
+  };
   webull: {
     /** Practice (sandbox) overrides; default to the sandbox hosts. */
     apiBaseUrl: string;
@@ -26,6 +30,11 @@ export interface AppConfig {
     practiceAppSecret: string;
     practiceAccountId: string;
     practiceApplicationId: string;
+    l2Enabled: boolean;
+    l2CapabilityProven: boolean;
+    l2AppKey: string;
+    l2AppSecret: string;
+    l2MaxDepth: number;
   };
   tradier: {
     /** Personal Tradier API token (brokerage or paper account). */
@@ -116,6 +125,10 @@ export default (): AppConfig => ({
     refreshTtl: int(process.env.JWT_REFRESH_TTL, 1209600),
   },
   credEncryptionKey: process.env.CRED_ENCRYPTION_KEY,
+  redis: {
+    url: process.env.REDIS_URL ?? '',
+    operationTimeoutMs: int(process.env.REDIS_OPERATION_TIMEOUT_MS, 2_000),
+  },
   webull: {
     apiBaseUrl: process.env.WEBULL_API_BASE_URL || 'https://api.sandbox.webull.com',
     marketDataBaseUrl:
@@ -129,6 +142,11 @@ export default (): AppConfig => ({
     practiceAppSecret: process.env.WEBULL_PRACTICE_APP_SECRET ?? '',
     practiceAccountId: process.env.WEBULL_PRACTICE_ACCOUNT_ID ?? '',
     practiceApplicationId: process.env.WEBULL_PRACTICE_APPLICATION_ID ?? '',
+    l2Enabled: enabled(process.env.WEBULL_L2_ENABLED, false),
+    l2CapabilityProven: enabled(process.env.WEBULL_L2_CAPABILITY_PROVEN, false),
+    l2AppKey: process.env.WEBULL_L2_APP_KEY ?? '',
+    l2AppSecret: process.env.WEBULL_L2_APP_SECRET ?? '',
+    l2MaxDepth: int(process.env.WEBULL_L2_MAX_DEPTH, 50),
   },
   tradier: {
     token: process.env.TRADIER_API_TOKEN ?? '',
@@ -155,7 +173,7 @@ export default (): AppConfig => ({
       process.env.OPTIONS_ANALYTICS_CAPTURE_ENABLED,
       (process.env.NODE_ENV ?? 'development') !== 'test',
     ),
-    coreSymbols: (process.env.OPTIONS_ANALYTICS_CORE_SYMBOLS ?? 'SPY,QQQ,IWM,SPX')
+    coreSymbols: (process.env.OPTIONS_ANALYTICS_CORE_SYMBOLS ?? 'SPY,QQQ,IWM,SPX,NDX,RUT')
       .split(',')
       .map((symbol) => symbol.trim().toUpperCase())
       .filter((symbol) => symbol !== ''),
@@ -233,6 +251,27 @@ export function validateEnv(config: Record<string, unknown>): Record<string, unk
     }
     if (!process.env.APNS_KEY && !process.env.APNS_KEY_PATH) {
       throw new Error('APNS_ENABLED requires the .p8 key via APNS_KEY or APNS_KEY_PATH');
+    }
+  }
+
+  if (enabled(process.env.WEBULL_L2_ENABLED, false)) {
+    if (!enabled(process.env.WEBULL_L2_CAPABILITY_PROVEN, false)) {
+      throw new Error(
+        'WEBULL_L2_ENABLED requires WEBULL_L2_CAPABILITY_PROVEN=true after a verified entitlement probe',
+      );
+    }
+    for (const name of ['WEBULL_L2_APP_KEY', 'WEBULL_L2_APP_SECRET', 'REDIS_URL']) {
+      if (!process.env[name]?.trim()) throw new Error(`WEBULL_L2_ENABLED requires ${name}`);
+    }
+    const depth = Number(process.env.WEBULL_L2_MAX_DEPTH ?? '50');
+    if (!Number.isInteger(depth) || depth < 1 || depth > 50) {
+      throw new Error('WEBULL_L2_MAX_DEPTH must be an integer from 1 to 50');
+    }
+    try {
+      const redisUrl = new URL(process.env.REDIS_URL!);
+      if (redisUrl.protocol !== 'redis:' && redisUrl.protocol !== 'rediss:') throw new Error();
+    } catch {
+      throw new Error('REDIS_URL must be a valid redis:// or rediss:// URL for Level 2');
     }
   }
 

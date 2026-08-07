@@ -1,9 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import type { OptionContract, OptionsChain, Position } from '@0dtetrader/shared-types';
+import type {
+  AutoScoringPreferenceRecord,
+  AutoScoringResult,
+  OptionContract,
+  OptionsChain,
+  Position,
+} from '@0dtetrader/shared-types';
 import type { ApiClient } from '../../core/api/ApiClient';
 import { ChainStore } from './ChainStore';
 
 const EXPIRATION = '2099-01-15';
+const FAR_EXPIRATION = '2099-01-22';
 
 function contract(underlying: string, strike: number): OptionContract {
   return {
@@ -27,12 +34,79 @@ function chainDto(underlying: string, strikes: number[], underlyingPrice = 500):
   };
 }
 
+function contractAt(
+  underlying: string,
+  expiration: string,
+  optionType: 'call' | 'put',
+  strike: number,
+): OptionContract {
+  return {
+    ...contract(underlying, strike),
+    symbol: `${underlying}-${expiration}-${optionType}-${strike}`,
+    expiration,
+    optionType,
+  };
+}
+
+const autoPreference: AutoScoringPreferenceRecord = {
+  schemaVersion: 1,
+  preset: 'conservative',
+  targetAbsDelta: 0.25,
+  strikeRungs: 5,
+  maxSpreadBps: 500,
+  maxPremiumDollars: 250,
+  minOpenInterest: 100,
+  gammaMode: 'avoid',
+  deltaWeight: 0.3,
+  spreadWeight: 0.25,
+  openInterestWeight: 0.2,
+  gammaWeight: 0.1,
+  ivWeight: 0.15,
+  createdAt: '2026-08-05T14:00:00.000Z',
+  updatedAt: '2026-08-05T14:00:00.000Z',
+};
+
+function scoredResult(winner: OptionContract): AutoScoringResult {
+  return {
+    selectedSymbol: winner.symbol,
+    noPass: false,
+    requiresConfirmation: true,
+    rankedAt: '2026-08-05T14:30:00.000Z',
+    exclusions: [],
+    rankings: [
+      {
+        rank: 1,
+        candidate: {
+          ...winner,
+          delta: 0.25,
+          gamma: 0.02,
+          impliedVolatility: 0.3,
+          openInterest: 500,
+          quoteProvider: 'webull',
+          quoteTimestamp: '2026-08-05T14:29:59.000Z',
+          analyticsTimestamp: '2026-08-05T14:29:30.000Z',
+        },
+        score: 0.9,
+        rationale: {
+          summary: 'winner',
+          mid: 1.24,
+          spreadBps: 645,
+          premiumDollars: 124,
+          atmDistance: 1,
+          normalized: { delta: 1, spread: 1, openInterest: 1, gamma: 1, iv: 1 },
+          weighted: { delta: 0.3, spread: 0.25, openInterest: 0.2, gamma: 0.1, iv: 0.15 },
+        },
+      },
+    ],
+  };
+}
+
 interface Deferred {
   resolve: (dto: OptionsChain) => void;
 }
 
 /** ChainStore with an optionsChain stub that resolves only on command. */
-function makeDeferredStore(settings?: { autoOtmOffset: number }): {
+function makeDeferredStore(): {
   store: ChainStore;
   pending: Map<string, Deferred>;
 } {
@@ -43,7 +117,7 @@ function makeDeferredStore(settings?: { autoOtmOffset: number }): {
         pending.set(underlying, { resolve });
       }),
   } as unknown as ApiClient;
-  return { store: new ChainStore(apiClient, settings), pending };
+  return { store: new ChainStore(apiClient), pending };
 }
 
 async function flushMicrotasks(): Promise<void> {
@@ -51,6 +125,209 @@ async function flushMicrotasks(): Promise<void> {
 }
 
 describe('ChainStore.load', () => {
+  it('invalidates a scored winner immediately when expiration changes and hides winners while loading', async () => {
+    const nearCall = contractAt('SPY', EXPIRATION, 'call', 501);
+    const farCall = contractAt('SPY', FAR_EXPIRATION, 'call', 502);
+    const dto: OptionsChain = {
+      underlying: 'SPY',
+      underlyingPrice: 500,
+      expirations: [EXPIRATION, FAR_EXPIRATION],
+      contracts: [nearCall, farCall],
+    };
+    let nextResult = scoredResult(nearCall);
+    let resolvePreference: ((value: AutoScoringPreferenceRecord) => void) | null = null;
+    let holdPreference = false;
+    const apiClient = {
+      optionsChain: async () => dto,
+      autoScoringPreferences: () =>
+        holdPreference
+          ? new Promise<AutoScoringPreferenceRecord>((resolve) => {
+              resolvePreference = resolve;
+            })
+          : Promise.resolve(autoPreference),
+      rankAutoContracts: async () => nextResult,
+    } as unknown as ApiClient;
+    const store = new ChainStore(apiClient);
+    await store.load('SPY');
+    store.setAutoSelectionStrategy('scored');
+    await store.refreshAutoScoring();
+    expect(store.autoContract?.symbol).toBe(nearCall.symbol);
+
+    holdPreference = true;
+    const refreshing = store.refreshAutoScoring();
+    expect(store.getState().isAutoScoringLoading).toBe(true);
+    expect(store.getState().autoScoringResult).toBeNull();
+    expect(store.getState().autoScoringPreferences).toBeNull();
+    expect(store.autoContract).toBeNull();
+    resolvePreference!(autoPreference);
+    await refreshing;
+
+    nextResult = scoredResult(farCall);
+    store.selectExpiration(FAR_EXPIRATION);
+    expect(store.getState().autoScoringResult).toBeNull();
+    expect(store.autoContract).toBeNull();
+  });
+
+  it('never exposes a scored winner with the wrong selected option right', async () => {
+    const call = contractAt('SPY', EXPIRATION, 'call', 501);
+    const put = contractAt('SPY', EXPIRATION, 'put', 499);
+    const dto: OptionsChain = {
+      underlying: 'SPY',
+      underlyingPrice: 500,
+      expirations: [EXPIRATION],
+      contracts: [call, put],
+    };
+    const apiClient = {
+      optionsChain: async () => dto,
+      autoScoringPreferences: async () => autoPreference,
+      rankAutoContracts: async () => scoredResult(call),
+    } as unknown as ApiClient;
+    const store = new ChainStore(apiClient);
+    await store.load('SPY');
+    store.setAutoSelectionStrategy('scored');
+    await store.refreshAutoScoring();
+
+    store.setOptionType('put');
+    await store.refreshAutoScoring();
+
+    expect(store.getState().optionType).toBe('put');
+    expect(store.autoContract).toBeNull();
+  });
+
+  it('invalidates an in-flight scored request immediately when the underlying changes', async () => {
+    const spyWinner = contractAt('SPY', EXPIRATION, 'call', 501);
+    const qqqWinner = contractAt('QQQ', EXPIRATION, 'call', 401);
+    const spyDto: OptionsChain = {
+      underlying: 'SPY',
+      underlyingPrice: 500,
+      expirations: [EXPIRATION],
+      contracts: [spyWinner],
+    };
+    const qqqDto: OptionsChain = {
+      underlying: 'QQQ',
+      underlyingPrice: 400,
+      expirations: [EXPIRATION],
+      contracts: [qqqWinner],
+    };
+    let holdRank = false;
+    let resolveRank: ((value: AutoScoringResult) => void) | null = null;
+    let resolveQqq: ((value: OptionsChain) => void) | null = null;
+    const apiClient = {
+      optionsChain: (underlying: string) =>
+        underlying === 'QQQ'
+          ? new Promise<OptionsChain>((resolve) => {
+              resolveQqq = resolve;
+            })
+          : Promise.resolve(spyDto),
+      autoScoringPreferences: async () => autoPreference,
+      rankAutoContracts: () =>
+        holdRank
+          ? new Promise<AutoScoringResult>((resolve) => {
+              resolveRank = resolve;
+            })
+          : Promise.resolve(scoredResult(spyWinner)),
+    } as unknown as ApiClient;
+    const store = new ChainStore(apiClient);
+    await store.load('SPY');
+    store.setAutoSelectionStrategy('scored');
+    await store.refreshAutoScoring();
+
+    holdRank = true;
+    const staleRefresh = store.refreshAutoScoring();
+    await Promise.resolve();
+    const qqqLoad = store.load('QQQ');
+    expect(store.getState().autoScoringResult).toBeNull();
+    expect(store.autoContract).toBeNull();
+
+    resolveRank!(scoredResult(spyWinner));
+    await staleRefresh;
+    expect(store.getState().autoScoringResult).toBeNull();
+
+    holdRank = false;
+    resolveQqq!(qqqDto);
+    await qqqLoad;
+  });
+
+  it('uses the authenticated server winner and exposes explicit no-pass fallback state', async () => {
+    const dto = chainDto('SPY', [499, 501, 503], 500);
+    const preference: AutoScoringPreferenceRecord = {
+      schemaVersion: 1,
+      preset: 'conservative',
+      targetAbsDelta: 0.25,
+      strikeRungs: 5,
+      maxSpreadBps: 500,
+      maxPremiumDollars: 250,
+      minOpenInterest: 100,
+      gammaMode: 'avoid',
+      deltaWeight: 0.3,
+      spreadWeight: 0.25,
+      openInterestWeight: 0.2,
+      gammaWeight: 0.1,
+      ivWeight: 0.15,
+      createdAt: '2026-08-05T14:00:00.000Z',
+      updatedAt: '2026-08-05T14:00:00.000Z',
+    };
+    const winner = dto.contracts[0];
+    const result: AutoScoringResult = {
+      selectedSymbol: winner.symbol,
+      noPass: false,
+      requiresConfirmation: true,
+      rankedAt: '2026-08-05T14:30:00.000Z',
+      exclusions: [],
+      rankings: [
+        {
+          rank: 1,
+          candidate: {
+            ...winner,
+            delta: 0.25,
+            gamma: 0.02,
+            impliedVolatility: 0.3,
+            openInterest: 500,
+            quoteProvider: 'webull',
+            quoteTimestamp: '2026-08-05T14:29:59.000Z',
+            analyticsTimestamp: '2026-08-05T14:29:30.000Z',
+          },
+          score: 0.9,
+          rationale: {
+            summary: 'winner',
+            mid: 1.24,
+            spreadBps: 645,
+            premiumDollars: 124,
+            atmDistance: 1,
+            normalized: { delta: 1, spread: 1, openInterest: 1, gamma: 1, iv: 1 },
+            weighted: { delta: 0.3, spread: 0.25, openInterest: 0.2, gamma: 0.1, iv: 0.15 },
+          },
+        },
+      ],
+    };
+    let nextResult: AutoScoringResult = result;
+    const apiClient = {
+      optionsChain: async () => dto,
+      autoScoringPreferences: async () => preference,
+      rankAutoContracts: async () => nextResult,
+    } as unknown as ApiClient;
+    const store = new ChainStore(apiClient);
+    await store.load('SPY');
+    store.setAutoSelectionStrategy('scored');
+    await store.refreshAutoScoring();
+
+    expect(store.autoContract?.symbol).toBe(winner.symbol);
+    expect(store.getState().autoScoringPreferences?.weights.delta).toBe(0.3);
+
+    nextResult = {
+      selectedSymbol: null,
+      rankings: [],
+      exclusions: [],
+      noPass: true,
+      requiresConfirmation: true,
+      rankedAt: result.rankedAt,
+    };
+    await store.refreshAutoScoring();
+    expect(store.autoContract).toBeNull();
+    store.acknowledgeClassicFallback();
+    expect(store.autoContract?.strike).toBe(503);
+  });
+
   it('a slow earlier load cannot clobber a newer symbol change', async () => {
     const { store, pending } = makeDeferredStore();
 
@@ -85,17 +362,16 @@ describe('ChainStore.load', () => {
     expect(store.autoContract?.strike).toBe(505);
   });
 
-  it('autoContract honors the injected AUTO-offset preference', async () => {
-    const { store, pending } = makeDeferredStore({ autoOtmOffset: 2 });
+  it('autoContract always uses the fixed Classic +1 rung', async () => {
+    const { store, pending } = makeDeferredStore();
     const loading = store.load('SPY');
     await flushMicrotasks();
     pending.get('SPY')!.resolve(chainDto('SPY', [499, 501, 503, 505], 500));
     await loading;
     store.setUnderlyingLast(500.4);
 
-    // ATM 501 → +2 rungs up the call ladder.
-    expect(store.autoOtmOffset).toBe(2);
-    expect(store.autoContract?.strike).toBe(505);
+    // ATM 501 → fixed +1 rung up the call ladder.
+    expect(store.autoContract?.strike).toBe(503);
   });
 
   it('refresh() updates quotes and underlying price without touching selections', async () => {

@@ -1,98 +1,5 @@
 import Foundation
 
-// MARK: - Render model (twcTypes.ts port, 1:1)
-// Everything is in (barIndex, price) space; barIndex may exceed the last
-// candle (forward projection — the overlay maps it via the chart transformer).
-// Colors are hex/rgba strings resolved by the renderer so the compute layer
-// stays UIKit-free and testable.
-
-enum TwcMarkerShape: String, Equatable, Sendable {
-    case diamond, triangleUp, triangleDown, labelUp, labelDown
-}
-
-enum TwcMarkerPlacement: String, Equatable, Sendable {
-    case aboveBar, belowBar
-}
-
-struct TwcMarker: Equatable, Sendable {
-    let barIndex: Int
-    let placement: TwcMarkerPlacement
-    let shape: TwcMarkerShape
-    let color: String
-    let sizeTiny: Bool
-    var text: String? = nil
-}
-
-struct TwcLine: Equatable, Sendable {
-    let id: String
-    let values: [Double?] // aligned to candles; nil = line break
-    let color: String
-    let lineWidth: Double
-}
-
-struct TwcAreaFill: Equatable, Sendable {
-    let id: String
-    let top: [Double?]
-    let bottom: [Double?]
-    /// Per-bar fill color (CTF highlight flips with direction).
-    let colors: [String?]
-}
-
-enum TwcSegmentStyle: String, Equatable, Sendable {
-    case solid, dashed, dotted
-}
-
-struct TwcSegment: Equatable, Sendable {
-    let x1: Double
-    let y1: Double
-    let x2: Double
-    let y2: Double
-    let color: String
-    let width: Double
-    let style: TwcSegmentStyle
-}
-
-struct TwcBand: Equatable, Sendable {
-    let x1: Double
-    let x2: Double
-    let yTop: Double
-    let yBottom: Double
-    let fillColor: String
-    /// Optional stroked outline (swing order blocks).
-    var borderColor: String? = nil
-}
-
-enum TwcLabelAlign: String, Equatable, Sendable {
-    case left, center, right
-}
-
-struct TwcLabel: Equatable, Sendable {
-    let barIndex: Double
-    let price: Double
-    let text: String
-    let textColor: String
-    var bgColor: String? = nil
-    let align: TwcLabelAlign
-}
-
-struct TwcBanner: Equatable, Sendable {
-    let text: String
-    let color: String
-    let position: String
-    let size: String
-}
-
-struct TwcRenderModel: Equatable, Sendable {
-    let candleColors: [String?]?
-    let markers: [TwcMarker]
-    let lines: [TwcLine]
-    let fills: [TwcAreaFill]
-    let segments: [TwcSegment]
-    let bands: [TwcBand]
-    let labels: [TwcLabel]
-    let banner: TwcBanner?
-}
-
 // MARK: - Fixed colors (twcColors.ts port; Pine defaults, Material palette)
 
 enum TwcColors {
@@ -137,13 +44,7 @@ enum TwcColors {
 
     /// rgba() for a hex color at the given opacity (0...1).
     static func withOpacity(_ hex: String, _ opacity: Double) -> String {
-        let raw = hex.replacingOccurrences(of: "#", with: "")
-        guard raw.count >= 6,
-              let r = Int(raw.prefix(2), radix: 16),
-              let g = Int(raw.dropFirst(2).prefix(2), radix: 16),
-              let b = Int(raw.dropFirst(4).prefix(2), radix: 16)
-        else { return hex }
-        return "rgba(\(r), \(g), \(b), \(opacity))"
+        ScriptColor.withOpacity(hex, opacity)
     }
 }
 

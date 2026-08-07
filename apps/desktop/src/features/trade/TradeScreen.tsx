@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type {
   ChartOrder,
+  IVAlert,
   Me,
   OptionContract,
   OrderSide,
@@ -28,7 +29,7 @@ import {
 } from '../../design/icons';
 import { DesktopSettingsPanel } from '../../design/components/DesktopSettingsPanel';
 import type { TradeLayout } from '../../core/storage/SettingsStore';
-import { enabledSubPanes } from '../chart/indicatorSettings';
+import { enabledSubPaneIds } from '../chart/indicatorRegistry';
 import type { ChartTradingProps } from '../chart/CandleChart';
 import { chartChromeSlice } from '../chart/ChartStore';
 import { ChartView } from '../chart/ChartView';
@@ -52,6 +53,7 @@ import { buildAnalysisSnapshot } from '../appleIntelligence/AnalysisSnapshotBuil
 import { connectCandleCloseAnalysis } from '../appleIntelligence/candleCloseWiring';
 import { connectPositionAnalysis } from '../appleIntelligence/positionWiring';
 import { HistoryView } from './HistoryView';
+import { IvAlertBanner } from './IvAlertBanner';
 import { OrderConfirmPopup } from './OrderConfirmPopup';
 import { PositionsStrip } from './PositionsStrip';
 import { ToastView } from './ToastView';
@@ -120,6 +122,8 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
   const [showProfile, setShowProfile] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [showGexHeatmap, setShowGexHeatmap] = useState(false);
+  const [underlyingQuote, setUnderlyingQuote] = useState<{ bid: number; ask: number } | null>(null);
+  const [activeIvAlert, setActiveIvAlert] = useState<IVAlert | null>(null);
 
   // 'practice' is only the pre-fetch placeholder; the server value wins.
   const [tradingMode, setTradingMode] = useState<TradingMode>('practice');
@@ -247,7 +251,6 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
       chainStore
         .getState()
         .chain?.contracts.find((contract: OptionContract) => contract.symbol === symbol);
-    tradeStore.isSocketConnected = () => quoteSocket.getState().connectionState === 'connected';
     void chartOrdersStore.load();
     // OS notifications while the window is unfocused (the toast covers the
     // focused case); the preference is read at fire time.
@@ -269,8 +272,9 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
       // entry line appears without waiting for the next poll.
       void tradeStore.refreshTradingData();
     });
-    // Pushes that landed while the socket was down are gone; re-read on the
-    // way back rather than drawing a bracket that already fired.
+    // Re-read after replay catch-up as a cheap consistency check; refreshes
+    // coalesce with any durable order/chart callbacks delivered just before
+    // this reconnect signal.
     const offReconnect = quoteSocket.onReconnect(() => {
       void chartOrdersStore.load();
       void tradeStore.refreshTradingData();
@@ -322,6 +326,8 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
     [quoteSocket, chainStore, tradeStore],
   );
 
+  useEffect(() => quoteSocket.onIvAlert(setActiveIvAlert), [quoteSocket]);
+
   // Keep indicative chain quotes fresh; paused while the confirm
   // sheet is open so the armed ticket's context doesn't shift underneath it.
   useEffect(() => {
@@ -342,6 +348,7 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
       // Keep AUTO's reference price live instead of the chain-load snapshot.
       if (chainStore.getState().underlying === symbol) {
         chainStore.setUnderlyingLast(quote.last);
+        setUnderlyingQuote({ bid: quote.bid, ask: quote.ask });
       }
       if (prevSymbol !== symbol) {
         prevSymbol = symbol;
@@ -448,7 +455,7 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
   // panel never scrolls (see TradePanel density).
   // No pixel floor: at the phone frame's height the fraction lands under the
   // old 300px floor and would never switch.
-  const paneCount = enabledSubPanes(chart.indicatorSettings).length;
+  const paneCount = enabledSubPaneIds(chart.indicatorSettings).length;
   const PANEL_FRACTIONS = [1 / 3, 0.3, 0.27] as const;
   const PANEL_DENSITIES = ['roomy', 'compact', 'dense'] as const;
   const panelHeight = Math.round(contentHeight * PANEL_FRACTIONS[paneCount]);
@@ -756,6 +763,9 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
         />
       )}
 
+      {activeIvAlert ? (
+        <IvAlertBanner alert={activeIvAlert} onDismiss={() => setActiveIvAlert(null)} />
+      ) : null}
       {/* Desktop grid renders chart controls inside ChartView's chart shell;
           compact layouts keep the app NavBar above content. */}
       {isDesktopGrid ? null : (
@@ -878,6 +888,7 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
               content: (
                 <ProfileView
                   onLogout={onLogout}
+                  onAutoScoringPreferencesSaved={() => chainStore.refreshAutoScoring()}
                   onDismiss={() => {
                     setShowProfile(false);
                     quoteSocket.reconnect();
@@ -894,13 +905,17 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
               content: (
                 <IndicatorSettingsDesktop
                   settings={chart.indicatorSettings}
+                  chartDisplay={chart.chartDisplay}
                   onChange={(settings) => chartStore.setIndicatorSettings(settings)}
+                  onChangeChartDisplay={(preferences) => chartStore.setChartDisplay(preferences)}
                   twcEnabled={chart.twcSettings.enabled}
                   onToggleTwc={(on) =>
                     chartStore.setTwcSettings({ ...chart.twcSettings, enabled: on })
                   }
                   twcSettings={chart.twcSettings}
                   onChangeTwcSettings={(settings) => chartStore.setTwcSettings(settings)}
+                  usrSettings={chart.usrSettings}
+                  onChangeUsrSettings={(settings) => chartStore.setUsrSettings(settings)}
                   optionsAnalytics={chart.optionsAnalytics}
                   onChangeOptionsAnalytics={(settings) => chartStore.setOptionsAnalytics(settings)}
                   chartTrading={chartTradingSettings}
@@ -917,12 +932,16 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
       {!isDesktopGrid && showIndicatorSettings ? (
         <IndicatorSettingsView
           settings={chart.indicatorSettings}
+          chartDisplay={chart.chartDisplay}
           onChange={(settings) => chartStore.setIndicatorSettings(settings)}
+          onChangeChartDisplay={(preferences) => chartStore.setChartDisplay(preferences)}
           onDismiss={() => setShowIndicatorSettings(false)}
           twcEnabled={chart.twcSettings.enabled}
           onToggleTwc={(on) => chartStore.setTwcSettings({ ...chart.twcSettings, enabled: on })}
           twcSettings={chart.twcSettings}
           onChangeTwcSettings={(settings) => chartStore.setTwcSettings(settings)}
+          usrSettings={chart.usrSettings}
+          onChangeUsrSettings={(settings) => chartStore.setUsrSettings(settings)}
           optionsAnalytics={chart.optionsAnalytics}
           onChangeOptionsAnalytics={(settings) => chartStore.setOptionsAnalytics(settings)}
           chartTrading={chartTradingSettings}
@@ -935,6 +954,7 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
       {!isDesktopGrid && showProfile ? (
         <ProfileView
           onLogout={onLogout}
+          onAutoScoringPreferencesSaved={() => chainStore.refreshAutoScoring()}
           onDismiss={() => {
             setShowProfile(false);
             quoteSocket.reconnect();
@@ -949,7 +969,11 @@ export function TradeScreen({ onLogout }: { onLogout: () => Promise<void> }) {
         <GexHeatmapModal
           symbol={chain.chain?.underlying ?? chain.underlying}
           spotPrice={chain.underlyingLast ?? chain.chain?.underlyingPrice ?? 0}
-          expirations={chain.chain?.expirations.slice(0, 7) ?? []}
+          bid={underlyingQuote?.bid ?? null}
+          ask={underlyingQuote?.ask ?? null}
+          expirations={chain.chain?.expirations ?? []}
+          selectedExpiration={chain.selectedExpiration}
+          chartInterval={chartStore.getState().interval}
           onDismiss={() => setShowGexHeatmap(false)}
         />
       ) : null}

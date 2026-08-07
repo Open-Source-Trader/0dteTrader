@@ -30,6 +30,8 @@ targets:
         excludes:
           - 0dteTrader.entitlements
           - 0dteTrader-production.entitlements
+      - path: ../../packages/shared-types/indicator-registry.json
+        buildPhase: resources
     dependencies:
       - package: Charts
         product: DGCharts
@@ -51,9 +53,20 @@ targets:
       # ones — and the server's APNS_HOST must pair with them (sandbox host for
       # Debug, api.push.apple.com for Staging/Release). One committed
       # entitlements file per environment; simulator builds ignore it.
+      #
+      # Debug has no aps-environment entitlement and signs with a personal
+      # team: Push Notifications requires a paid Apple Developer Program
+      # membership, so local/simulator builds on a free team can't provision
+      # it. Staging/Release keep the production entitlement and paid team ID
+      # for CI/TestFlight.
       configs:
         Debug:
           CODE_SIGN_ENTITLEMENTS: 0dteTrader/0dteTrader.entitlements
+          DEVELOPMENT_TEAM: NLRBN5Y446
+          # com.0dtetrader.app is already registered to the paid team above;
+          # a personal team can't claim someone else's bundle ID, so local
+          # Debug builds use a distinct one.
+          PRODUCT_BUNDLE_IDENTIFIER: com.0dtetrader.app.dev
         Staging:
           CODE_SIGN_ENTITLEMENTS: 0dteTrader/0dteTrader-production.entitlements
         Release:
@@ -89,6 +102,8 @@ targets:
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
         NSFaceIDUsageDescription: 0dteTrader uses Face ID to unlock the app.
+        # Fail closed by default. Entitled builds can set L2_CAPABILITY_ENABLED=YES.
+        L2CapabilityEnabled: $(L2_CAPABILITY_ENABLED)
         # Resources are copied flat into the bundle, so bare filenames here.
         UIAppFonts:
           - Orbitron-Medium.ttf

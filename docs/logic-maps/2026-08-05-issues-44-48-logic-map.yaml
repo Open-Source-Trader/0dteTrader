@@ -1,0 +1,1208 @@
+schema_version: 1
+template_id: event_driven_logic_map.v1
+title: issues-44-45-47-48-event-driven-logic-map
+owner: Codex implementation team
+date: '2026-08-05'
+status: approved
+system: cross-platform-chart-market-data-alerts-and-auto-selection
+source_plan: docs/plans/2026-08-05-issues-44-48.yaml
+source_spec_sheet: docs/specs/2026-08-05-issues-44-48-spec.md
+source_flow_chart: docs/flow-charts/2026-08-05-issues-44-48-flow-chart.yaml
+
+objective:
+  restated:
+    - Define deterministic states and guarded transitions for shared indicators, L2 lifecycle, ATM IV alerts, and scored Auto orders.
+    - Cover every major validation, failure, teardown, persistence, restart, and completion gate.
+    - Exclude deleted issue 46 as withdrawn.
+
+required_context_files_read_first:
+  - AGENTS.md
+  - docs/plans/plan-template.yaml
+  - docs/plans/checking_plan_plan-template.yaml
+  - docs/specs/2026-08-05-issues-44-48-spec.md
+  - docs/flow-charts/2026-08-05-issues-44-48-flow-chart.yaml
+  - packages/shared-types/src/index.ts
+  - apps/api/prisma/schema.prisma
+  - apps/api/src/market-data/stream.gateway.ts
+  - apps/api/src/options-analytics/options-analytics.capture.ts
+  - apps/api/src/broker/contract-resolution.ts
+
+artifact_discovery:
+  existing_scope_specific_artifact_found: false
+  current_state_brief: Existing logic maps address only the prior options-analytics snapshot suite; indicator settings, L2, IV alerts, and scored Auto have no unified state contract.
+  target_state_detailed: This map makes the four implementations explicit, deterministic, bounded, restart-safe, user-scoped, and independently testable across API, desktop, and iOS.
+
+scope:
+  in_scope:
+    - packages/shared-types registry fixtures and public messages
+    - apps/api market-data options-analytics trading persistence and observability
+    - apps/desktop chart socket alert Auto settings and confirmation surfaces
+    - apps/ios chart socket alert Auto settings and confirmation surfaces
+  out_of_scope:
+    - deleted issue 46
+    - TWC behavior changes
+    - Tradier Level 2
+    - IV chart markers
+    - silent Auto fallback
+
+event_inputs:
+  external_events:
+    - {
+        name: chart_started,
+        source: desktop or iOS user,
+        payload_shape: symbol plus persisted chart preferences,
+      }
+    - {
+        name: indicator_settings_changed,
+        source: desktop or iOS settings UI,
+        payload_shape: registry id enabled flag and validated parameter values,
+      }
+    - {
+        name: l2_subscribe,
+        source: authenticated websocket client,
+        payload_shape: symbol and requested depth,
+      }
+    - {
+        name: l2_unsubscribe_or_disconnect,
+        source: websocket lifecycle,
+        payload_shape: connection id and symbol,
+      }
+    - {
+        name: webull_depth_response,
+        source: Webull stock or ETF depth API,
+        payload_shape: bids asks timestamps and capability result,
+      }
+    - {
+        name: analytics_capture,
+        source: capture scheduler,
+        payload_shape: symbol expiration spot contracts and capture timestamp,
+      }
+    - {
+        name: iv_alert_configure,
+        source: authenticated client,
+        payload_shape: enabled symbols lookback k streak warmup cooldown,
+      }
+    - {
+        name: auto_rank_request,
+        source: authenticated client,
+        payload_shape: selected symbol expiration type preferences and preset,
+      }
+    - {
+        name: auto_order_submit,
+        source: authenticated client,
+        payload_shape: selected contract symbol preferences fallback acknowledgment and explicit confirmation,
+      }
+  internal_events:
+    - {
+        name: registry_validated,
+        source: shared registry loader,
+        payload_shape: descriptor map and version,
+      }
+    - {
+        name: l2_refresh_due,
+        source: per-symbol lifecycle,
+        payload_shape: symbol dueAt and subscriber count,
+      }
+    - {
+        name: l2_retry_due,
+        source: per-symbol retry scheduler,
+        payload_shape: symbol generation retry reason and dueAt,
+      }
+    - {
+        name: ny_session_changed,
+        source: session clock,
+        payload_shape: prior session and current session,
+      }
+    - {
+        name: atm_iv_computed,
+        source: options analytics engine,
+        payload_shape: nullable atmIv and calculation version,
+      }
+    - {
+        name: detector_advanced,
+        source: IV alert service,
+        payload_shape: state decision score direction and cooldown,
+      }
+    - {
+        name: candidates_assembled,
+        source: Auto candidate service,
+        payload_shape: candidates exclusions and freshness,
+      }
+    - {
+        name: fresh_rerank_completed,
+        source: trading service,
+        payload_shape: ranking validity and changed reason,
+      }
+    - {
+        name: migration_write_completed,
+        source: settings persistence adapter,
+        payload_shape: keyed settings version and atomic write result,
+      }
+    - {
+        name: capability_probe_completed,
+        source: Webull order-book provider,
+        payload_shape: entitlement status and reason,
+      }
+    - {
+        name: five_second_stale_deadline,
+        source: per-symbol L2 stale timer,
+        payload_shape: symbol snapshot generation and due time,
+      }
+    - {
+        name: teardown_requested,
+        source: unsubscribe disconnect provider failure shutdown or NY reset,
+        payload_shape: symbol reason and generation,
+      }
+    - {
+        name: teardown_completed,
+        source: order-book lifecycle service,
+        payload_shape: symbol released resource counts and reason,
+      }
+    - {
+        name: user_selects_ranked_winner,
+        source: trade UI,
+        payload_shape: contract symbol ranking id and scored confirmation,
+      }
+    - {
+        name: user_requests_classic_fallback,
+        source: trade UI,
+        payload_shape: fallback acknowledgment and Classic option type,
+      }
+    - {
+        name: completion_review,
+        source: implementation controller,
+        payload_shape: automated manual and external evidence index,
+      }
+
+state_model:
+  concurrency_model: Four orthogonal domain machines run independently; a fifth delivery gate observes their evidence and never owns their runtime state.
+  machines:
+    indicator_machine:
+      states: [registry_unloaded, registry_ready, settings_migrating, chart_ready, chart_rejected]
+      initial_state: registry_unloaded
+      terminal_states: [chart_rejected]
+    l2_machine:
+      states:
+        [
+          l2_idle,
+          l2_capability_checking,
+          l2_waiting_rate_slot,
+          l2_fetching,
+          l2_fresh,
+          l2_stale_or_unavailable,
+          l2_tearing_down,
+        ]
+      initial_state: l2_idle
+      terminal_states: []
+    iv_alert_machine:
+      states:
+        [
+          capture_unprocessed,
+          capture_persisted,
+          detector_suppressed,
+          detector_tracking,
+          alert_emitted,
+        ]
+      initial_state: capture_unprocessed
+      terminal_states: []
+    auto_machine:
+      states:
+        [
+          auto_preferences_ready,
+          auto_assembling,
+          auto_no_pass,
+          auto_ranked,
+          auto_awaiting_confirmation,
+          auto_revalidating,
+          classic_revalidating,
+          order_accepted,
+          order_rejected,
+        ]
+      initial_state: auto_preferences_ready
+      terminal_states: [order_accepted, order_rejected]
+    delivery_gate:
+      states: [verification_incomplete, complete]
+      initial_state: verification_incomplete
+      terminal_states: [complete]
+  transition_ownership:
+    indicator_machine: [IND-1, IND-2, IND-2D, IND-3, IND-4, IND-5]
+    l2_machine:
+      [
+        L2-1,
+        L2-2,
+        L2-3,
+        L2-4,
+        L2-5,
+        L2-6,
+        L2-6L,
+        L2-7,
+        L2-8,
+        L2-9,
+        L2-10,
+        L2-11,
+        L2-12C,
+        L2-12W,
+        L2-12F,
+        L2-12S,
+        L2-13,
+        L2-14C,
+        L2-14W,
+        L2-14F,
+        L2-14R,
+        L2-14S,
+      ]
+    iv_alert_machine: [IV-1, IV-2, IV-3, IV-4U, IV-4P, IV-4S, IV-4T, IV-4E]
+    auto_machine: [AUTO-1, AUTO-2, AUTO-3, AUTO-4, AUTO-5, AUTO-6, AUTO-7, AUTO-8]
+    delivery_gate: [GATE-1]
+
+transitions:
+  - id: IND-1
+    from_state: registry_unloaded
+    trigger_event: chart_started
+    guard_conditions: [registry JSON exists, schema version supported, descriptors unique]
+    transformations: [decode and validate registry, build descriptor lookup]
+    to_state: registry_ready
+    outputs: [registry_validated]
+    side_effects: [registry validation metric]
+    failure_paths:
+      - {
+          failure: missing invalid or duplicate registry data,
+          handling: reject load without partial registry,
+          resulting_state: chart_rejected,
+        }
+  - id: IND-2
+    from_state: registry_ready
+    trigger_event: registry_validated
+    guard_conditions: [persisted keyed settings absent and recognized flat settings present]
+    transformations:
+      [
+        map legacy fields to registry ids,
+        extract volumeEnabled to chart-display preferences,
+        validate result,
+      ]
+    to_state: settings_migrating
+    outputs: [validated keyed settings]
+    side_effects: [atomically write new settings then delete legacy key]
+    failure_paths:
+      - {
+          failure: migration validation or write fails,
+          handling: preserve legacy key and do not apply partial settings,
+          resulting_state: chart_rejected,
+        }
+  - id: IND-2D
+    from_state: registry_ready
+    trigger_event: registry_validated
+    guard_conditions: [no valid keyed settings and no recognized flat legacy settings]
+    transformations:
+      [create registry defaults, validate every parameter, enable no more than two default subpanes]
+    to_state: chart_ready
+    outputs: [generic controls and default geometry requests]
+    side_effects:
+      [atomically persist current-version keyed defaults and separate chart-display preferences]
+    failure_paths:
+      - {
+          failure: default contains unknown invalid or non-finite value,
+          handling: reject registry and persist nothing,
+          resulting_state: chart_rejected,
+        }
+  - id: IND-3
+    from_state: registry_ready
+    trigger_event: registry_validated
+    guard_conditions: [valid keyed settings already present]
+    transformations: [validate parameter bounds styles and enabled pane set]
+    to_state: chart_ready
+    outputs: [generic controls and geometry requests]
+    side_effects: []
+    failure_paths:
+      - {
+          failure: more than two subpanes or invalid parameter,
+          handling: reject mutation with shared message and retain last valid settings,
+          resulting_state: chart_rejected,
+        }
+  - id: IND-4
+    from_state: settings_migrating
+    trigger_event: migration_write_completed
+    guard_conditions: [new settings reread and valid, pane count at most two]
+    transformations:
+      [
+        dispatch descriptor geometry including anchored VWAP Supertrend Keltner VPVR ADX DMI OBV CCI Williams percent R and Ichimoku,
+      ]
+    to_state: chart_ready
+    outputs: [line multi-line band cloud histogram segmented-line or price-profile geometry]
+    side_effects: [render on desktop and iOS]
+    failure_paths:
+      - {
+          failure: non-finite geometry or unknown kind,
+          handling: omit invalid series and surface calculation error,
+          resulting_state: chart_rejected,
+        }
+  - id: IND-5
+    from_state: chart_ready
+    trigger_event: indicator_settings_changed
+    guard_conditions:
+      [
+        registry id exists,
+        parameter types and normative bounds pass,
+        resulting enabled subpane count is at most two,
+      ]
+    transformations:
+      [
+        compute complete candidate keyed settings,
+        run its descriptor engine,
+        validate all finite geometry,
+        atomically persist only after all validation passes,
+      ]
+    to_state: chart_ready
+    outputs: [updated generic controls and geometry]
+    side_effects: [replace prior rendering on desktop or iOS]
+    failure_paths:
+      - {
+          failure: unknown id invalid parameter third subpane non-finite geometry or persistence failure,
+          handling: show stable error and retain the prior valid settings and rendering,
+          resulting_state: chart_ready,
+        }
+  - id: L2-1
+    from_state: l2_idle
+    trigger_event: l2_subscribe
+    guard_conditions:
+      [authenticated connection, valid stock or ETF symbol, requested depth within cap]
+    transformations: [register connection once, begin capability probe when first subscriber]
+    to_state: l2_capability_checking
+    outputs: [subscriber status]
+    side_effects: [subscriber gauge increment]
+    failure_paths:
+      - {
+          failure: unauthorized invalid or unsupported instrument,
+          handling: send No L2 data reason without registering a subscriber or calling the provider,
+          resulting_state: l2_idle,
+        }
+  - id: L2-2
+    from_state: l2_capability_checking
+    trigger_event: capability_probe_completed
+    guard_conditions:
+      [Webull provider configured, Nasdaq TotalView non-display entitlement confirmed]
+    transformations:
+      [coalesce same-symbol subscribers, schedule refresh through global app-key limiter]
+    to_state: l2_waiting_rate_slot
+    outputs: [l2_refresh_due]
+    side_effects: [capability and coalescing metrics]
+    failure_paths:
+      - {
+          failure: missing entitlement or retryable probe error,
+          handling: publish No L2 data reason and schedule a bounded l2_retry_due while subscribers remain,
+          resulting_state: l2_stale_or_unavailable,
+        }
+      - {
+          failure: provider unconfigured invalid credentials or other terminal capability failure,
+          handling: publish reason atomically clear subscriber registrations and gauges invalidate the generation cancel local work and begin teardown,
+          resulting_state: l2_tearing_down,
+        }
+  - id: L2-3
+    from_state: l2_waiting_rate_slot
+    trigger_event: l2_refresh_due
+    guard_conditions:
+      [
+        subscriber count greater than zero,
+        no same-symbol request inflight,
+        Redis atomic app-key lease grants a slot whose prior grant is at least one second old,
+      ]
+    transformations:
+      [
+        coalesce local symbol work,
+        atomically acquire distributed Redis app-key slot,
+        start one depth request,
+      ]
+    to_state: l2_fetching
+    outputs: []
+    side_effects:
+      [
+        Redis lease/token-bucket write with expiry,
+        provider request,
+        throttle-delay and request metrics,
+      ]
+    failure_paths:
+      - {
+          failure: no subscribers before grant,
+          handling: cancel pending work,
+          resulting_state: l2_tearing_down,
+        }
+      - {
+          failure: Redis slot denied because another replica acquired the app-key grant within the prior second,
+          handling: read the next eligible time and schedule one coalesced l2_refresh_due without provider work,
+          resulting_state: l2_waiting_rate_slot,
+        }
+      - {
+          failure: Redis unavailable,
+          handling: fail closed without a Webull request publish No L2 data and schedule bounded retry,
+          resulting_state: l2_stale_or_unavailable,
+        }
+  - id: L2-4
+    from_state: l2_fetching
+    trigger_event: webull_depth_response
+    guard_conditions:
+      [
+        response symbol matches,
+        levels finite positive sorted,
+        both sides present,
+        request still current,
+      ]
+    transformations:
+      [
+        deduplicate sort cap levels,
+        reject crossed or non-finite book,
+        reset state on NY day change,
+        append at most 23400 valid one-second same-session samples,
+        apply normative formulas/ties/windows from the source spec,
+      ]
+    to_state: l2_fresh
+    outputs: [shared OrderBookSnapshot and derived indicators]
+    side_effects:
+      [
+        fanout to current subscribers,
+        payload bytes decoder time latency metrics,
+        arm one generation-bound next-refresh timer and one five-second stale deadline,
+      ]
+    failure_paths:
+      - {
+          failure: timeout transient provider error invalid crossed or one-sided response,
+          handling: publish No L2 data reason record error and schedule one bounded l2_retry_due while subscribers remain,
+          resulting_state: l2_stale_or_unavailable,
+        }
+      - {
+          failure: terminal provider or credential failure,
+          handling: publish reason atomically clear subscriber registrations and gauges invalidate the generation cancel local work and begin teardown,
+          resulting_state: l2_tearing_down,
+        }
+      - {
+          failure: response generation is superseded while the current lifecycle remains fetching,
+          handling: discard idempotently without changing subscribers timers history or the current generation; a response arriving after unsubscribe is ignored because teardown is already owned by the unsubscribe transition,
+          resulting_state: l2_fetching,
+        }
+  - id: L2-5
+    from_state: l2_fresh
+    trigger_event: five_second_stale_deadline
+    guard_conditions: [no newer valid book]
+    transformations: [mark snapshot stale without changing its market values]
+    to_state: l2_stale_or_unavailable
+    outputs: [No L2 data with stale reason]
+    side_effects: [stale counter, schedule one bounded l2_retry_due while subscribers remain]
+    failure_paths: []
+  - id: L2-6
+    from_state: l2_fresh
+    trigger_event: l2_unsubscribe_or_disconnect
+    guard_conditions:
+      [connection registration exists, at least one subscriber remains after removal]
+    transformations:
+      [
+        remove only that subscriber and preserve the current generation timers inflight work and bounded history,
+      ]
+    to_state: l2_fresh
+    outputs: []
+    side_effects: [decrement subscriber gauge only]
+    failure_paths:
+      - {
+          failure: duplicate unsubscribe,
+          handling: idempotent no-op with debug metric,
+          resulting_state: l2_fresh,
+        }
+  - id: L2-6L
+    from_state: l2_fresh
+    trigger_event: l2_unsubscribe_or_disconnect
+    guard_conditions: [connection registration exists, no subscribers remain after removal]
+    transformations: [remove final subscriber and invalidate the symbol generation]
+    to_state: l2_tearing_down
+    outputs: []
+    side_effects: [cancel timers abort pending work when supported and decrement gauges]
+    failure_paths: []
+  - id: L2-7
+    from_state: l2_tearing_down
+    trigger_event: teardown_completed
+    guard_conditions: [no subscriber timer inflight request or retained unbounded history]
+    transformations: [release per-symbol state or initialize new NY session]
+    to_state: l2_idle
+    outputs: []
+    side_effects: [resource-count metric]
+    failure_paths:
+      - {
+          failure: resource remains,
+          handling: remain in teardown schedule another bounded cleanup attempt fail lifecycle tests and alert on the leak metric,
+          resulting_state: l2_tearing_down,
+        }
+  - id: L2-8
+    from_state:
+      [l2_capability_checking, l2_waiting_rate_slot, l2_fetching, l2_fresh, l2_stale_or_unavailable]
+    trigger_event: teardown_requested
+    guard_conditions:
+      [
+        last subscriber disconnected or unsubscribed,
+        terminal provider failure,
+        application shutdown,
+        or explicit lifecycle cancellation,
+      ]
+    transformations:
+      [
+        invalidate generation,
+        cancel local wait and timers,
+        abort inflight request when supported,
+        prevent late response mutation,
+        atomically clear all subscriber registrations and gauges for terminal failure or shutdown while preserving already-removed final-unsubscribe accounting,
+      ]
+    to_state: l2_tearing_down
+    outputs: []
+    side_effects:
+      [
+        release per-symbol work and gauges; retain no distributed slot beyond its bounded Redis expiry,
+      ]
+    failure_paths:
+      - {
+          failure: duplicate teardown,
+          handling: idempotently reuse teardown completion,
+          resulting_state: l2_tearing_down,
+        }
+  - id: L2-9
+    from_state: l2_fresh
+    trigger_event: l2_refresh_due
+    guard_conditions: [subscriber count greater than zero and refresh generation current]
+    transformations: [enqueue one coalesced refresh]
+    to_state: l2_waiting_rate_slot
+    outputs: [rate-wait status when delayed]
+    side_effects: [schedule next refresh only after this cycle settles]
+    failure_paths:
+      - {
+          failure: subscriber count reaches zero,
+          handling: emit teardown_requested,
+          resulting_state: l2_tearing_down,
+        }
+  - id: L2-10
+    from_state:
+      [l2_capability_checking, l2_waiting_rate_slot, l2_fetching, l2_fresh, l2_stale_or_unavailable]
+    trigger_event: ny_session_changed
+    guard_conditions: [new New York session id differs from stored session id]
+    transformations:
+      [
+        invalidate generation,
+        clear quote book and derived histories,
+        mark prior snapshot unavailable,
+        preserve subscriber registrations,
+      ]
+    to_state: l2_capability_checking
+    outputs: [No L2 data with session-reset reason, new capability probe]
+    side_effects:
+      [
+        cancel old timers and inflight mutation rights,
+        reset metrics window,
+        restart only for active subscribers,
+      ]
+    failure_paths:
+      - {
+          failure: no active subscriber after reset,
+          handling: emit teardown_requested instead of restart,
+          resulting_state: l2_tearing_down,
+        }
+  - id: L2-11
+    from_state: l2_stale_or_unavailable
+    trigger_event: l2_retry_due
+    guard_conditions:
+      [subscriber count greater than zero, retry generation current, failure classified retryable]
+    transformations: [recheck capability before requesting another distributed rate slot]
+    to_state: l2_capability_checking
+    outputs: [subscriber retry status]
+    side_effects: [bounded exponential retry metric capped at 30 seconds]
+    failure_paths:
+      - {
+          failure: no subscribers,
+          handling: retain no polling timer and begin teardown with already-empty registration state,
+          resulting_state: l2_tearing_down,
+        }
+      - {
+          failure: failure became terminal,
+          handling: publish reason atomically clear subscriber registrations and gauges invalidate the generation cancel local work and begin teardown,
+          resulting_state: l2_tearing_down,
+        }
+  - id: L2-12C
+    from_state: l2_capability_checking
+    trigger_event: l2_unsubscribe_or_disconnect
+    guard_conditions:
+      [connection registration exists, at least one subscriber remains after removal]
+    transformations: [remove only that subscriber and preserve the current generation]
+    to_state: l2_capability_checking
+    outputs: []
+    side_effects: [decrement subscriber gauge only]
+    failure_paths: []
+  - id: L2-12W
+    from_state: l2_waiting_rate_slot
+    trigger_event: l2_unsubscribe_or_disconnect
+    guard_conditions:
+      [connection registration exists, at least one subscriber remains after removal]
+    transformations: [remove only that subscriber and retain one coalesced rate wait]
+    to_state: l2_waiting_rate_slot
+    outputs: []
+    side_effects: [decrement subscriber gauge only]
+    failure_paths: []
+  - id: L2-12F
+    from_state: l2_fetching
+    trigger_event: l2_unsubscribe_or_disconnect
+    guard_conditions:
+      [connection registration exists, at least one subscriber remains after removal]
+    transformations:
+      [remove only that subscriber and preserve the inflight generation for remaining subscribers]
+    to_state: l2_fetching
+    outputs: []
+    side_effects: [decrement subscriber gauge only]
+    failure_paths: []
+  - id: L2-12S
+    from_state: l2_stale_or_unavailable
+    trigger_event: l2_unsubscribe_or_disconnect
+    guard_conditions:
+      [connection registration exists, at least one subscriber remains after removal]
+    transformations: [remove only that subscriber and retain one bounded retry timer]
+    to_state: l2_stale_or_unavailable
+    outputs: []
+    side_effects: [decrement subscriber gauge only]
+    failure_paths: []
+  - id: L2-13
+    from_state: [l2_capability_checking, l2_waiting_rate_slot, l2_fetching, l2_stale_or_unavailable]
+    trigger_event: l2_unsubscribe_or_disconnect
+    guard_conditions: [connection registration exists, no subscribers remain after removal]
+    transformations:
+      [
+        remove final subscriber invalidate generation cancel waits timers and late response mutation rights,
+      ]
+    to_state: l2_tearing_down
+    outputs: []
+    side_effects: [abort inflight work when supported and decrement gauges]
+    failure_paths: []
+  - id: L2-14C
+    from_state: l2_capability_checking
+    trigger_event: l2_subscribe
+    guard_conditions:
+      [authenticated connection, valid matching stock or ETF symbol, requested depth within cap]
+    transformations:
+      [register the connection idempotently and coalesce it into the existing symbol lifecycle]
+    to_state: l2_capability_checking
+    outputs: [subscriber status]
+    side_effects: [increment subscriber gauge only for a new registration]
+    failure_paths:
+      - {
+          failure: unauthorized invalid unsupported or mismatched symbol,
+          handling: send No L2 data reason without mutating the active lifecycle,
+          resulting_state: l2_capability_checking,
+        }
+  - id: L2-14W
+    from_state: l2_waiting_rate_slot
+    trigger_event: l2_subscribe
+    guard_conditions:
+      [authenticated connection, valid matching stock or ETF symbol, requested depth within cap]
+    transformations: [register the connection idempotently and retain the one coalesced rate wait]
+    to_state: l2_waiting_rate_slot
+    outputs: [subscriber status]
+    side_effects: [increment subscriber gauge only for a new registration]
+    failure_paths:
+      - {
+          failure: unauthorized invalid unsupported or mismatched symbol,
+          handling: send No L2 data reason without mutating the active lifecycle,
+          resulting_state: l2_waiting_rate_slot,
+        }
+  - id: L2-14F
+    from_state: l2_fetching
+    trigger_event: l2_subscribe
+    guard_conditions:
+      [authenticated connection, valid matching stock or ETF symbol, requested depth within cap]
+    transformations: [register the connection idempotently and attach it to the current generation]
+    to_state: l2_fetching
+    outputs: [subscriber status]
+    side_effects: [increment subscriber gauge only for a new registration]
+    failure_paths:
+      - {
+          failure: unauthorized invalid unsupported or mismatched symbol,
+          handling: send No L2 data reason without mutating the active lifecycle,
+          resulting_state: l2_fetching,
+        }
+  - id: L2-14R
+    from_state: l2_fresh
+    trigger_event: l2_subscribe
+    guard_conditions:
+      [authenticated connection, valid matching stock or ETF symbol, requested depth within cap]
+    transformations: [register the connection idempotently and attach it to the current generation]
+    to_state: l2_fresh
+    outputs: [current fresh snapshot and subscriber status]
+    side_effects: [increment subscriber gauge only for a new registration]
+    failure_paths:
+      - {
+          failure: unauthorized invalid unsupported or mismatched symbol,
+          handling: send No L2 data reason without mutating the active lifecycle,
+          resulting_state: l2_fresh,
+        }
+  - id: L2-14S
+    from_state: l2_stale_or_unavailable
+    trigger_event: l2_subscribe
+    guard_conditions:
+      [authenticated connection, valid matching stock or ETF symbol, requested depth within cap]
+    transformations: [register the connection idempotently and retain the one bounded retry timer]
+    to_state: l2_stale_or_unavailable
+    outputs: [current No L2 data reason and subscriber status]
+    side_effects: [increment subscriber gauge only for a new registration]
+    failure_paths:
+      - {
+          failure: unauthorized invalid unsupported or mismatched symbol,
+          handling: send No L2 data reason without mutating the active lifecycle,
+          resulting_state: l2_stale_or_unavailable,
+        }
+  - id: IV-1
+    from_state: [capture_unprocessed, detector_suppressed, alert_emitted]
+    trigger_event: analytics_capture
+    guard_conditions: [calculation version current, contract IV values finite]
+    transformations:
+      [
+        group by strike,
+        retain only call-put pairs,
+        average pair IV,
+        exact match spot or linearly interpolate nearest bracketing pair,
+      ]
+    to_state: capture_persisted
+    outputs: [atm_iv_computed]
+    side_effects: [persist nullable indexed atmIv and bumped calculation version]
+    failure_paths:
+      - {
+          failure: no exact pair or bracket,
+          handling: persist atmIv null without extrapolation or one-leg fallback,
+          resulting_state: capture_persisted,
+        }
+  - id: IV-2
+    from_state: capture_persisted
+    trigger_event: atm_iv_computed
+    guard_conditions:
+      [
+        symbol is SPX NDX or RUT,
+        RTH open,
+        capture timestamp newer than persisted user-symbol state,
+        atmIv finite,
+      ]
+    transformations:
+      [
+        load user preferences and prior-only bounded lookback,
+        detect gap greater than two capture intervals,
+        require ten minutes and ten prior samples,
+        compute raw median and raw MAD,
+        use signed current-minus-median score clamped to minus-or-plus 20 with explicit zero-MAD rule,
+      ]
+    to_state: detector_tracking
+    outputs: [detector_advanced]
+    side_effects:
+      [
+        for an eligible capture atomically append the bounded sample and persist last timestamp streak direction and cooldown,
+      ]
+    failure_paths:
+      - {
+          failure: closed session unsupported symbol null IV duplicate or old capture,
+          handling: suppress without mutating detector history timestamp streak direction or cooldown,
+          resulting_state: detector_suppressed,
+        }
+      - {
+          failure: gap greater than two capture intervals,
+          handling: clear baseline streak and direction then atomically store only the current sample and timestamp,
+          resulting_state: detector_suppressed,
+        }
+      - {
+          failure: warmup under ten elapsed minutes or fewer than ten prior samples,
+          handling: atomically append the current bounded sample and advance last timestamp without scoring,
+          resulting_state: detector_suppressed,
+        }
+      - {
+          failure: cooldown active,
+          handling: atomically append the current bounded sample advance last timestamp and clear breach streak while preserving cooldownUntil,
+          resulting_state: detector_suppressed,
+        }
+  - id: IV-3
+    from_state: detector_tracking
+    trigger_event: detector_advanced
+    guard_conditions:
+      [
+        expansion score at least positive k or crush score at most negative k,
+        same direction for the second adjacent eligible capture,
+        warmup at least ten minutes and ten prior samples,
+        capture timestamp greater than or equal to cooldownUntil,
+      ]
+    transformations:
+      [
+        classify expansion or crush,
+        include the decision baseline median in the alert,
+        set cooldownUntil to capture time plus five minutes,
+        clear breach streak,
+      ]
+    to_state: alert_emitted
+    outputs: [authenticated user-scoped ivAlert]
+    side_effects: [persist detector state, websocket send, outcome metric]
+    failure_paths:
+      - {
+          failure: threshold streak warmup or cooldown guard fails,
+          handling: persist progress without emit,
+          resulting_state: detector_suppressed,
+        }
+      - {
+          failure: delivery connection absent,
+          handling: retain state and log delivery miss without duplicate replay,
+          resulting_state: detector_suppressed,
+        }
+  - id: IV-4U
+    from_state: capture_unprocessed
+    trigger_event: iv_alert_configure
+    guard_conditions: [authenticated owner, allowed symbols, validated bounded settings]
+    transformations: [merge or replace user preferences]
+    to_state: capture_unprocessed
+    outputs: [configuration acknowledgment]
+    side_effects: [upsert per-user preferences]
+    failure_paths:
+      - {
+          failure: unauthorized or invalid settings,
+          handling: reject without state mutation,
+          resulting_state: capture_unprocessed,
+        }
+  - id: IV-4P
+    from_state: capture_persisted
+    trigger_event: iv_alert_configure
+    guard_conditions: [authenticated owner, allowed symbols, validated bounded settings]
+    transformations: [merge or replace user preferences]
+    to_state: capture_persisted
+    outputs: [configuration acknowledgment]
+    side_effects: [upsert per-user preferences]
+    failure_paths:
+      - {
+          failure: unauthorized or invalid settings,
+          handling: reject without state mutation,
+          resulting_state: capture_persisted,
+        }
+  - id: IV-4S
+    from_state: detector_suppressed
+    trigger_event: iv_alert_configure
+    guard_conditions: [authenticated owner, allowed symbols, validated bounded settings]
+    transformations: [merge or replace user preferences]
+    to_state: detector_suppressed
+    outputs: [configuration acknowledgment]
+    side_effects: [upsert per-user preferences]
+    failure_paths:
+      - {
+          failure: unauthorized or invalid settings,
+          handling: reject without state mutation,
+          resulting_state: detector_suppressed,
+        }
+  - id: IV-4T
+    from_state: detector_tracking
+    trigger_event: iv_alert_configure
+    guard_conditions: [authenticated owner, allowed symbols, validated bounded settings]
+    transformations: [merge or replace user preferences]
+    to_state: detector_tracking
+    outputs: [configuration acknowledgment]
+    side_effects: [upsert per-user preferences]
+    failure_paths:
+      - {
+          failure: unauthorized or invalid settings,
+          handling: reject without state mutation,
+          resulting_state: detector_tracking,
+        }
+  - id: IV-4E
+    from_state: alert_emitted
+    trigger_event: iv_alert_configure
+    guard_conditions: [authenticated owner, allowed symbols, validated bounded settings]
+    transformations: [merge or replace user preferences]
+    to_state: alert_emitted
+    outputs: [configuration acknowledgment]
+    side_effects: [upsert per-user preferences]
+    failure_paths:
+      - {
+          failure: unauthorized or invalid settings,
+          handling: reject without state mutation,
+          resulting_state: alert_emitted,
+        }
+  - id: AUTO-1
+    from_state: auto_preferences_ready
+    trigger_event: auto_rank_request
+    guard_conditions: [authenticated owner, mode auto_scored, selected symbol and preferences valid]
+    transformations:
+      [
+        load Conservative Aggressive or edited persisted preferences,
+        fetch Tradier analytics and active-broker executable quotes,
+      ]
+    to_state: auto_assembling
+    outputs: [candidates_assembled]
+    side_effects: [candidate request metrics]
+    failure_paths:
+      - {
+          failure: unauthorized provider failure or stale source,
+          handling: return no-pass with reason and no implicit fallback,
+          resulting_state: auto_no_pass,
+        }
+  - id: AUTO-2
+    from_state: auto_assembling
+    trigger_event: candidates_assembled
+    guard_conditions:
+      [
+        assembled candidate collection present,
+        validated preferences present,
+        authoritative server time present,
+      ]
+    transformations:
+      [
+        for each candidate independently validate expiration option type strike rung quote and analytics freshness required bid ask delta gamma IV and OI consistency and hard spread premium and OI limits,
+        derive mid as bid plus ask divided by two while ignoring provider mid,
+        retain an exclusion reason for every rejected candidate,
+        use absolute put delta,
+        normalize the remaining dimensions to zero-one with equal-value equality,
+        score gamma seek or avoid and lower IV versus the passing-candidate median,
+        sort remaining candidates at full precision by score spread OI ATM distance symbol,
+      ]
+    to_state: auto_ranked
+    outputs: [winner rationale runners-up exclusions and freshness]
+    side_effects: [ranking and exclusion metrics]
+    failure_paths:
+      - {
+          failure: zero passing candidates,
+          handling: return visible warning requiring preference change or explicit Classic acknowledgment,
+          resulting_state: auto_no_pass,
+        }
+  - id: AUTO-3
+    from_state: auto_ranked
+    trigger_event: user_selects_ranked_winner
+    guard_conditions: [explicit scored-Auto confirmation captured even when global bypass enabled]
+    transformations: [build submit DTO with selected symbol exact preferences and no fallback]
+    to_state: auto_awaiting_confirmation
+    outputs: [confirmation state]
+    side_effects: []
+    failure_paths:
+      - {
+          failure: confirmation absent,
+          handling: block submission,
+          resulting_state: order_rejected,
+        }
+  - id: AUTO-4
+    from_state: auto_no_pass
+    trigger_event: user_requests_classic_fallback
+    guard_conditions: [explicit fallback acknowledgment captured]
+    transformations:
+      [
+        select retained Classic plus-one mode under existing Classic behavior without scored weights ranking or winner equality,
+      ]
+    to_state: classic_revalidating
+    outputs: [acknowledged Classic fallback submission]
+    side_effects: [fallback acknowledgment audit metric]
+    failure_paths:
+      - {
+          failure: acknowledgment absent,
+          handling: block fallback,
+          resulting_state: order_rejected,
+        }
+  - id: AUTO-5
+    from_state: auto_awaiting_confirmation
+    trigger_event: auto_order_submit
+    guard_conditions:
+      [
+        authenticated owner,
+        exact scored preferences present,
+        mode auto_scored,
+        explicit scored confirmation present regardless of global bypass,
+      ]
+    transformations:
+      [
+        refetch analytics and active-broker quotes,
+        reconstruct candidates,
+        rerun the canonical scorer,
+      ]
+    to_state: auto_revalidating
+    outputs: [fresh_rerank_completed]
+    side_effects: [freshness and rerank metrics]
+    failure_paths:
+      - {
+          failure: source failure or stale data,
+          handling: reject before broker send,
+          resulting_state: order_rejected,
+        }
+  - id: AUTO-6
+    from_state: auto_revalidating
+    trigger_event: fresh_rerank_completed
+    guard_conditions:
+      [
+        mode is auto_scored,
+        requested contract is still the unique canonical winner,
+        all hard filters freshness checks confirmation and trading controls pass,
+      ]
+    transformations: [create existing idempotent broker order command]
+    to_state: order_accepted
+    outputs: [accepted order result]
+    side_effects: [broker order send and audit record]
+    failure_paths:
+      - {
+          failure: winner changed candidate invalid stale or confirmation mismatch,
+          handling: reject with actionable reason before broker call,
+          resulting_state: order_rejected,
+        }
+  - id: AUTO-7
+    from_state: classic_revalidating
+    trigger_event: auto_order_submit
+    guard_conditions:
+      [
+        authenticated owner,
+        mode auto_otm,
+        explicit fallback acknowledgment present when entered from scored no-pass,
+      ]
+    transformations:
+      [
+        resolve Classic plus-one contract using the existing live Classic validation and confirmation policy,
+        without invoking the scored candidate service,
+      ]
+    to_state: order_accepted
+    outputs: [accepted Classic order result]
+    side_effects: [broker order send and audit record through existing idempotent controls]
+    failure_paths:
+      - {
+          failure: Classic contract absent invalid or existing confirmation control fails,
+          handling: reject before broker send,
+          resulting_state: order_rejected,
+        }
+  - id: AUTO-8
+    from_state: auto_no_pass
+    trigger_event: auto_rank_request
+    guard_conditions:
+      [authenticated owner, edited or newly selected preferences pass every normative bound]
+    transformations:
+      [
+        persist valid preference update when requested,
+        fetch a new candidate snapshot,
+        never carry forward a prior fallback acknowledgment,
+      ]
+    to_state: auto_assembling
+    outputs: [candidates_assembled]
+    side_effects: [preference and retry metrics]
+    failure_paths:
+      - {
+          failure: invalid preferences or stale unavailable sources,
+          handling: remain no-pass with field or source reasons,
+          resulting_state: auto_no_pass,
+        }
+  - id: GATE-1
+    from_state: verification_incomplete
+    trigger_event: completion_review
+    guard_conditions:
+      [
+        all automated suites pass,
+        no open P0 or P1,
+        parity within tolerance,
+        payload and decoder evidence recorded,
+        physical iPhone Energy Log recorded,
+        authenticated GitHub issue 45 comment URL recorded,
+      ]
+    transformations: [audit artifacts docs code tests warnings findings and cleanup residues]
+    to_state: complete
+    outputs: [completion evidence]
+    side_effects: [update paired checking plan]
+    failure_paths:
+      - {
+          failure: any test finding cleanup or external gate missing,
+          handling: remain incomplete and record exact blocker,
+          resulting_state: verification_incomplete,
+        }
+
+actual_event_paths:
+  - chart_started -> registry_validated -> keyed settings migration or validation -> maximum-two-pane guard -> pure geometry -> generic paired rendering
+  - l2_subscribe -> entitlement probe -> coalesced global rate slot -> Webull fetch -> bounded NY-session state -> derived indicators -> fanout -> unsubscribe/disconnect -> complete teardown
+  - analytics_capture -> paired-strike IV -> exact/interpolated atmIv persistence -> RTH monotonic detector -> streak/cooldown decision -> scoped banner or suppression
+  - auto_rank_request -> authenticated data merge -> hard filter -> deterministic rank -> visible explanation -> explicit confirmation -> fresh server rerank -> broker accept or reject
+
+all_possible_event_paths:
+  - Registry invalid, migration fails, parameters invalid, pane count exceeds two, geometry non-finite, or unknown geometry kind -> preserve last valid state and reject clearly.
+  - L2 unsupported, unentitled, throttled, stale, invalid, provider-failed, unsubscribed, disconnected, day-reset, or shutdown -> No L2 data and bounded idempotent teardown.
+  - ATM IV exact, interpolated, missing pair, no bracket, null, closed, duplicate, out-of-order, warmup, gap, breach, direction change, cooldown, disconnected delivery -> persist one monotonic safe outcome and never replay stale alerts.
+  - Auto preset, edited preferences, partial candidate, zero mid, equal dimensions, tie, no pass, fallback rejected/acknowledged, confirmation absent/present, rerank changed, broker controls failed -> visible deterministic result and no unsafe broker send.
+
+invariants:
+  preconditions:
+    [
+      registry and DTO schema validation precedes mutation,
+      user identity precedes user-scoped access,
+      market timestamps use explicit New York session policy,
+      order scoring uses finite fresh values,
+    ]
+  postconditions:
+    [
+      settings and detector writes are atomic,
+      provider and timer state is bounded,
+      output availability is explicit,
+      rankings are deterministic,
+      broker sends are freshly validated,
+    ]
+  must_never_happen:
+    [
+      more than two chart subpanes,
+      TWC semantic drift,
+      L2 zero fabrication,
+      Webull request rate above one per second per app key,
+      Level 2 attributed to Tradier,
+      cross-user state or alert access,
+      ATM IV extrapolation,
+      infinite MAD score,
+      duplicate restart alert,
+      silent fallback,
+      scored confirmation bypass,
+      stale candidate order,
+    ]
+
+risk_review:
+  user_behavior_breaks:
+    [
+      rapid chart settings toggles,
+      duplicate subscriptions,
+      rapid symbol switches,
+      repeated alert configuration,
+      stale confirmation dialogs,
+    ]
+  production_traffic_breaks:
+    [
+      global rate starvation,
+      fanout amplification,
+      abandoned timers,
+      capture lock contention,
+      active-broker quote bursts,
+    ]
+  weird_data_breaks:
+    [
+      duplicate registry ids,
+      empty candles,
+      one-sided/crossed books,
+      duplicate option strikes,
+      missing legs,
+      zero mids,
+      equal-value normalization,
+      zero MAD,
+    ]
+  concurrency_time_order_breaks:
+    [
+      late depth responses after unsubscribe,
+      NY midnight DST and early-close changes,
+      multiple capture workers,
+      websocket reconnect,
+      quote movement after client ranking,
+    ]
+
+validation:
+  tests_required:
+    - shared registry schema and shared TypeScript/Swift fixture parity at 1e-6
+    - fake-clock L2 rate coalescing bounds staleness reset and teardown tests
+    - ATM IV exact interpolation and detector state-machine/restart isolation tests
+    - scorer golden fixture property tests and trading fresh-rerank e2e tests
+    - desktop and iOS presentation accessibility persistence and confirmation tests
+    - strict type lint format build Prisma migration and full regression suites
+    - automated payload/decoder measurements and 15-minute physical-iPhone Energy Log
+  observability_required:
+    [
+      structured provider/lifecycle/detector/scorer/order logs,
+      bounded resource gauges,
+      error latency staleness coalescing alert and rerank metrics,
+    ]
+
+cleanup_requirements:
+  remove_dead_code: true
+  remove_backwards_compatibility_paths: true
+  update_related_files:
+    - shared types registry fixtures and package exports
+    - API gateway provider analytics detector scorer trading Prisma and module wiring
+    - desktop and iOS engines stores sockets controls views and tests
+    - OpenAPI API architecture runbook roadmap privacy and provider documentation

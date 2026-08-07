@@ -67,14 +67,6 @@ final class TradeViewModel: ObservableObject {
     /// to the OptionsChainViewModel's loaded chain.
     var optionContractResolver: ((String) -> OptionContract?)?
 
-    /// Reports whether the order-update socket is currently connected. An
-    /// order placement's own `orderUpdate` push (submitted, then the terminal
-    /// status) drives `handleOrderUpdate` → `refreshTradingData` already, so a
-    /// direct refresh after placing/cancelling is only needed as a fallback
-    /// for when that push has nowhere to arrive. Wired from the trade screen;
-    /// nil (treated as disconnected) only in previews/tests.
-    var isSocketConnected: (() -> Bool)?
-
     /// Gates success/info toasts (Profile → in-app toasts). Error toasts
     /// always show regardless. Nil (previews/tests) means show everything.
     var toastPolicy: (() -> Bool)?
@@ -166,6 +158,7 @@ final class TradeViewModel: ObservableObject {
         let selection: OrderSelectionDTO
         let summary: String
         let optionType = chainViewModel.optionType
+        var mayBypassConfirmation = bypass
 
         // Sent only for `.custom`; the server rejects it alongside any other
         // variant, because those four are priced from its own quote.
@@ -298,19 +291,50 @@ final class TradeViewModel: ObservableObject {
                 summary = "\(underlying) \(contract.expiration) \(leg)"
             }
         } else if chainViewModel.isAutoMode {
-            let offset = chainViewModel.autoOtmOffset
-            selection = OrderSelectionDTO(
-                mode: "auto_otm",
-                optionType: optionType.rawValue,
-                expiration: chainViewModel.selectedExpiration,
-                strike: nil,
-                // Omitted at the default so servers predating the field see
-                // the request shape they always did (they resolve +1 anyway).
-                otmOffset: offset == 1 ? nil : offset
-            )
             let expirationLabel = chainViewModel.selectedExpiration ?? "nearest"
-            let offsetLabel = offset == 0 ? "ATM" : "+\(offset) OTM"
-            summary = "\(underlying) AUTO \(offsetLabel) \(optionType.displayName) · exp \(expirationLabel)"
+            if chainViewModel.autoSelectionStrategy == .scored,
+               !chainViewModel.classicFallbackAcknowledged {
+                guard !chainViewModel.isAutoScoringLoading else {
+                    showToast("Scored Auto is still loading.", style: .error)
+                    return
+                }
+                guard let result = chainViewModel.autoScoringResult else {
+                    showToast(chainViewModel.autoScoringError ?? "Scored Auto is still loading.", style: .error)
+                    return
+                }
+                guard !result.noPass,
+                      let winner = result.rankings.first,
+                      let preferences = chainViewModel.autoScoringPreferences
+                else {
+                    showToast("No contract passes. Acknowledge Classic fallback to continue.", style: .error)
+                    return
+                }
+                selection = OrderSelectionDTO(
+                    mode: "auto_scored",
+                    optionType: optionType.rawValue,
+                    expiration: chainViewModel.selectedExpiration,
+                    strike: nil,
+                    autoScoring: AutoScoringSelectionDTO(
+                        selectedSymbol: winner.candidate.symbol,
+                        preferences: preferences,
+                        scoredConfirmationAccepted: true,
+                        rankedAt: result.rankedAt
+                    )
+                )
+                summary = "\(underlying) Scored Auto · \(winner.rationale.summary)"
+                // Scored Auto always requires the visible confirmation sheet,
+                // even when the global preference bypasses Classic orders.
+                mayBypassConfirmation = false
+            } else {
+                selection = OrderSelectionDTO(
+                    mode: "auto_otm",
+                    optionType: optionType.rawValue,
+                    expiration: chainViewModel.selectedExpiration,
+                    strike: nil,
+                    classicFallbackAcknowledged: chainViewModel.classicFallbackAcknowledged ? true : nil
+                )
+                summary = "\(underlying) Classic +1 OTM \(optionType.displayName) · exp \(expirationLabel)"
+            }
         } else {
             guard let strike = chainViewModel.selectedStrike,
                   let expiration = chainViewModel.selectedExpiration
@@ -336,7 +360,7 @@ final class TradeViewModel: ObservableObject {
             limitPrice: limitPrice,
             selection: selection
         )
-        finish(request: request, side: side, summary: summary, bypass: bypass)
+        finish(request: request, side: side, summary: summary, bypass: mayBypassConfirmation)
     }
 
     /// The one place an order leaves `arm()`: either straight to the broker
@@ -418,12 +442,9 @@ final class TradeViewModel: ObservableObject {
     /// Throws so callers surface the error their own way (sheet submit error
     /// vs. toast). Shared by the confirm and bypass paths.
     ///
-    /// Skips its own refresh when the socket is connected: the placement's own
-    /// `orderUpdate` push (submitted, then the terminal fill/reject) arrives
-    /// over the same socket and drives `handleOrderUpdate` →
-    /// `refreshTradingData` already, so refreshing here too only stacked a
-    /// redundant reload on top of it. Falls back to a direct refresh when the
-    /// socket is down and that push has nowhere to arrive.
+    /// Always refreshes after success. A connected socket does not prove this
+    /// particular status event was committed, replayed and consumed; the
+    /// refresh coalescer absorbs an overlapping push-driven refresh.
     private func submitOrder(_ request: OrderRequestDTO, idempotencyKey: String, side: OrderSide) async throws {
         let result = OrderResult(dto: try await apiClient.placeOrder(
             request,
@@ -434,9 +455,7 @@ final class TradeViewModel: ObservableObject {
             "\(side.displayName) \(result.contractSymbol) — \(result.status.displayName)",
             style: result.status == .rejected ? .error : .success
         )
-        if isSocketConnected?() != true {
-            await refreshTradingData()
-        }
+        await refreshTradingData()
     }
 
     /// Submits the armed order. The same idempotency key is reused across
@@ -583,11 +602,7 @@ final class TradeViewModel: ObservableObject {
                 "\(action) \(position.symbol) — \(result.status.displayName)",
                 style: result.status == .rejected ? .error : .success
             )
-            // See submitOrder: the placement's own orderUpdate push refreshes
-            // when the socket is up; fall back to a direct refresh when it's not.
-            if isSocketConnected?() != true {
-                await refreshTradingData()
-            }
+            await refreshTradingData()
         } catch let error as APIError {
             showToast(error.userMessage, style: .error)
         } catch {
@@ -599,11 +614,7 @@ final class TradeViewModel: ObservableObject {
         do {
             try await apiClient.cancelOrder(orderId: order.orderId)
             showToast("Order cancelled.", style: .info)
-            // See submitOrder: cancelOrder's own orderUpdate push refreshes
-            // when the socket is up; fall back to a direct refresh when it's not.
-            if isSocketConnected?() != true {
-                await refreshTradingData()
-            }
+            await refreshTradingData()
         } catch let error as APIError {
             showToast(error.userMessage, style: .error)
         } catch {

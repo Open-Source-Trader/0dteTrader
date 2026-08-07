@@ -26,15 +26,37 @@ final class OptionsChainViewModel: ObservableObject {
 
     @Published var optionType: OptionType = .call {
         didSet {
-            guard optionType != oldValue, isCurrMode else { return }
-            // CURR follows the CALL/PUT toggle: flipping sides re-lands the
-            // pickers on that side's most recent holding (or clears them).
-            preselectHolding(on: optionType)
+            guard optionType != oldValue else { return }
+            if isCurrMode {
+                // CURR follows the CALL/PUT toggle: flipping sides re-lands the
+                // pickers on that side's most recent holding (or clears them).
+                preselectHolding(on: optionType)
+            }
+            if isAutoMode, autoSelectionStrategy == .scored {
+                Task { await refreshAutoScoring() }
+            }
         }
     }
     @Published var isAutoMode = true {
-        didSet { if isAutoMode { isCurrMode = false } }
+        didSet {
+            if isAutoMode {
+                isCurrMode = false
+                Task { await refreshAutoScoring() }
+            }
+        }
     }
+    @Published var autoSelectionStrategy: AutoSelectionStrategy = .classic {
+        didSet {
+            guard autoSelectionStrategy != oldValue else { return }
+            classicFallbackAcknowledged = false
+            if autoSelectionStrategy == .scored { Task { await refreshAutoScoring() } }
+        }
+    }
+    @Published private(set) var autoScoringResult: AutoScoringResult?
+    @Published private(set) var autoScoringPreferences: AutoScoringPreferences?
+    @Published private(set) var isAutoScoringLoading = false
+    @Published private(set) var autoScoringError: String?
+    @Published var classicFallbackAcknowledged = false
     /// CURR mode: the ticket trades only contracts already held, on whichever
     /// side the CALL/PUT toggle selects. Mutually exclusive with AUTO —
     /// turning either on turns the other off — and it filters the
@@ -59,24 +81,15 @@ final class OptionsChainViewModel: ObservableObject {
     var positionsProvider: () -> [Position] = { [] }
 
     private let apiClient: APIClient
-    /// AUTO's strikes-OTM preference (Profile → AUTO selection); injected so
-    /// this view model never touches UserDefaults directly.
-    private let autoOtmOffsetProvider: () -> Int
     /// Expirations whose contracts are already present locally.
     private var loadedExpirations: Set<String> = []
     /// Bumped by every load(); in-flight fetches bail after each await when a
     /// newer load has started, so a slow response can't clobber a newer symbol.
     private var loadGeneration = 0
+    private var autoScoringGeneration = 0
 
-    init(apiClient: APIClient, autoOtmOffset: @escaping () -> Int = { 1 }) {
+    init(apiClient: APIClient) {
         self.apiClient = apiClient
-        self.autoOtmOffsetProvider = autoOtmOffset
-    }
-
-    /// The offset AUTO is walking with right now — also what arm() sends so
-    /// the server resolves the same contract the panel shows.
-    var autoOtmOffset: Int {
-        autoOtmOffsetProvider()
     }
 
     var expirations: [String] {
@@ -101,12 +114,28 @@ final class OptionsChainViewModel: ObservableObject {
     /// The contract AUTO mode would trade right now (FR-15).
     var autoContract: OptionContract? {
         guard let chain else { return nil }
+        if autoSelectionStrategy == .scored, !classicFallbackAcknowledged {
+            guard !isAutoScoringLoading else { return nil }
+            guard let candidate = autoScoringResult?.rankings.first?.candidate,
+                  let bid = candidate.bid,
+                  let ask = candidate.ask
+            else { return nil }
+            return OptionContract(
+                symbol: candidate.symbol,
+                underlying: candidate.underlying,
+                expiration: candidate.expiration,
+                strike: candidate.strike,
+                optionType: candidate.optionType,
+                bid: bid,
+                ask: ask,
+                last: (bid + ask) / 2
+            )
+        }
         return AutoContractSelector.selectAutoOTM(
             chain: chain,
             optionType: optionType,
             expiration: selectedExpiration,
-            last: underlyingLast,
-            otmOffset: autoOtmOffsetProvider()
+            last: underlyingLast
         )
     }
 
@@ -222,6 +251,20 @@ final class OptionsChainViewModel: ObservableObject {
         self.selectedStrike = strike
         self.isAutoMode = false
     }
+
+    func setAutoScoringForTesting(
+        result: AutoScoringResult,
+        preferences: AutoScoringPreferences = .conservative
+    ) {
+        autoScoringResult = result
+        autoScoringPreferences = preferences
+        autoSelectionStrategy = .scored
+        isAutoMode = true
+    }
+
+    func setAutoScoringLoadingForTesting(_ loading: Bool) {
+        isAutoScoringLoading = loading
+    }
     #endif
 
     // MARK: - Loading
@@ -269,6 +312,7 @@ final class OptionsChainViewModel: ObservableObject {
             if selectedStrike == nil, let auto = autoContract {
                 selectedStrike = auto.strike
             }
+            await refreshAutoScoring()
         } catch let error as APIError {
             guard gen == loadGeneration else { return }
             if !Self.isCredentialError(error) {
@@ -353,7 +397,53 @@ final class OptionsChainViewModel: ObservableObject {
             }
             selectedStrike = mostRecentLeg(legs)?.contract.strike
         }
-        Task { await ensureContracts(for: expiration) }
+        Task {
+            await ensureContracts(for: expiration)
+            await refreshAutoScoring()
+        }
+    }
+
+    func acknowledgeClassicFallback() {
+        guard autoSelectionStrategy == .scored, autoScoringResult?.noPass == true else { return }
+        classicFallbackAcknowledged = true
+    }
+
+    func refreshAutoScoring() async {
+        guard isAutoMode,
+              autoSelectionStrategy == .scored,
+              !underlying.isEmpty,
+              let expiration = selectedExpiration
+        else { return }
+        autoScoringGeneration += 1
+        let generation = autoScoringGeneration
+        isAutoScoringLoading = true
+        autoScoringResult = nil
+        autoScoringPreferences = nil
+        autoScoringError = nil
+        classicFallbackAcknowledged = false
+        defer {
+            if generation == autoScoringGeneration { isAutoScoringLoading = false }
+        }
+        do {
+            let preferenceRecord = try await apiClient.autoScoringPreferences()
+            guard generation == autoScoringGeneration else { return }
+            let result = try await apiClient.rankAutoContracts(AutoScoringRankRequest(
+                underlying: underlying,
+                expiration: expiration,
+                optionType: optionType
+            ))
+            guard generation == autoScoringGeneration else { return }
+            autoScoringPreferences = preferenceRecord.preferences
+            autoScoringResult = result
+        } catch let error as APIError {
+            guard generation == autoScoringGeneration else { return }
+            autoScoringResult = nil
+            autoScoringError = error.userMessage
+        } catch {
+            guard generation == autoScoringGeneration else { return }
+            autoScoringResult = nil
+            autoScoringError = error.localizedDescription
+        }
     }
 
     func ensureContracts(for expiration: String) async {

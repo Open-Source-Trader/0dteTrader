@@ -165,7 +165,10 @@ function buildGateway() {
     getDecrypted: jest.fn(async () => ({ provider: 'alpaca', apiKey: 'k', apiSecret: 's' })),
     getMode: jest.fn(async () => 'live'),
   } as unknown as CredentialsService;
-  const events = { emit: jest.fn() } as unknown as OrderEventsService;
+  const events = {
+    emit: jest.fn(),
+    ingest: jest.fn(async () => undefined),
+  } as unknown as OrderEventsService;
   const prisma = {
     user: { findUnique: jest.fn(async () => ({ tradingMode: 'live' })) },
   } as unknown as PrismaService;
@@ -228,6 +231,9 @@ describe('AlpacaBrokerGateway (SDK-backed)', () => {
     expect(call).toBeDefined();
     expect((call!.req as { underlyingSymbol: string }).underlyingSymbol).toBe(SYMBOL);
     expect(chain.contracts.map((c) => c.symbol)).toContain(EXPECTED_OCC);
+    expect(
+      chain.contracts.find((contract) => contract.symbol === EXPECTED_OCC)?.quoteTimestamp,
+    ).toBe('2024-01-01T15:00:00.000Z');
     expect(chain.underlyingPrice).toBe(UNDER);
   });
 
@@ -336,11 +342,46 @@ describe('AlpacaBrokerGateway (SDK-backed)', () => {
       });
       await jest.advanceTimersByTimeAsync(2500);
 
-      const emit = env.events.emit as unknown as jest.Mock;
-      const fillEmit = emit.mock.calls.find(([, order]) => order.status === 'filled');
+      const ingest = env.events.ingest as unknown as jest.Mock;
+      const fillEmit = ingest.mock.calls.find(([, order]) => order.status === 'filled');
       expect(fillEmit).toBeDefined();
       expect(fillEmit![1].filledQuantity).toBe(1);
       expect(fillEmit![1].filledPrice).toBe(4.1);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('retries terminal ingestion even on the final broker poll attempt', async () => {
+    env = buildGateway();
+    jest.useFakeTimers();
+    try {
+      const res = await env.gateway.placeOrder('user-1', ORDER, 'poll-ingest-retry');
+      let pollCount = 0;
+      const terminalPoll = jest.fn(async () => {
+        pollCount += 1;
+        return {
+          id: 'ord-server-1',
+          client_order_id: res.orderId,
+          status: pollCount === 90 ? 'filled' : 'new',
+          symbol: EXPECTED_OCC,
+          side: 'buy',
+          type: 'limit',
+          qty: '1',
+          filled_qty: pollCount === 90 ? '1' : '0',
+          filled_avg_price: pollCount === 90 ? '4.10' : null,
+          limit_price: null,
+          submitted_at: '2024-01-01T15:00:00Z',
+        };
+      });
+      env.client.trading.orders.getOrderByClientOrderId = terminalPoll;
+      const ingest = env.events.ingest as unknown as jest.Mock;
+      ingest.mockRejectedValueOnce(new Error('event database unavailable'));
+
+      await jest.advanceTimersByTimeAsync(225_300);
+
+      expect(terminalPoll).toHaveBeenCalledTimes(90);
+      expect(ingest).toHaveBeenCalledTimes(2);
     } finally {
       jest.useRealTimers();
     }

@@ -12,12 +12,13 @@ import {
 } from 'lightweight-charts';
 import { chartPalette } from './chartColors';
 import type { ChartCandle } from './ChartStore';
+import { applySeriesDataLifecycle, type SeriesDataPoint } from './seriesDataLifecycle';
 
 export interface PaneSeries {
   id: string;
   kind: 'line' | 'histogram';
   color?: string;
-  /** Histogram colors per sign (MACD). */
+  /** Histogram colors resolved from the canonical series style metadata. */
   positiveColor?: string;
   negativeColor?: string;
   values: (number | null)[];
@@ -45,6 +46,7 @@ export function IndicatorPane({ height, candles, series, guideLines, yRange }: I
     ids: string[];
     lengths: number[];
     firstTime: number | null;
+    data: SeriesDataPoint[][];
   } | null>(null);
   const yRangeRef = useRef(yRange);
   yRangeRef.current = yRange;
@@ -106,6 +108,7 @@ export function IndicatorPane({ height, candles, series, guideLines, yRange }: I
     const fixedRange = yRangeRef.current;
     const guideColor = chartPalette().guide;
     let guidesDrawn = false;
+    const nextData: SeriesDataPoint[][] = [];
     series.forEach((spec, idx) => {
       let api = existing.get(spec.id);
       if (!api) {
@@ -156,17 +159,25 @@ export function IndicatorPane({ height, candles, series, guideLines, yRange }: I
             });
           }
         });
-        const structural =
+        const forceReplace =
           !prev ||
           spec.id !== prev.ids[idx] ||
           prev.firstTime !== firstTime ||
           data.length !== prev.lengths[idx];
-        if (structural) {
-          (api as ISeriesApi<'Histogram'>).setData(data);
-        } else {
-          const last = data[data.length - 1];
-          if (last) (api as ISeriesApi<'Histogram'>).update(last);
-        }
+        const histogramApi = api as ISeriesApi<'Histogram'>;
+        const last = data[data.length - 1];
+        applySeriesDataLifecycle(
+          prev?.data[idx],
+          data,
+          {
+            setData: () => histogramApi.setData(data),
+            update: () => {
+              if (last) histogramApi.update(last);
+            },
+          },
+          forceReplace,
+        );
+        nextData[idx] = data;
       } else {
         const data: LineData[] = [];
         spec.values.forEach((value, index) => {
@@ -175,23 +186,32 @@ export function IndicatorPane({ height, candles, series, guideLines, yRange }: I
             data.push({ time: candle.time as UTCTimestamp, value });
           }
         });
-        const structural =
+        const forceReplace =
           !prev ||
           spec.id !== prev.ids[idx] ||
           prev.firstTime !== firstTime ||
           data.length !== prev.lengths[idx];
-        if (structural) {
-          (api as ISeriesApi<'Line'>).setData(data);
-        } else {
-          const last = data[data.length - 1];
-          if (last) (api as ISeriesApi<'Line'>).update(last);
-        }
+        const lineApi = api as ISeriesApi<'Line'>;
+        const last = data[data.length - 1];
+        applySeriesDataLifecycle(
+          prev?.data[idx],
+          data,
+          {
+            setData: () => lineApi.setData(data),
+            update: () => {
+              if (last) lineApi.update(last);
+            },
+          },
+          forceReplace,
+        );
+        nextData[idx] = data;
       }
     });
     prevPaneRef.current = {
       ids: series.map((s) => s.id),
       lengths: series.map((s) => s.values.reduce<number>((n, v) => n + (v !== null ? 1 : 0), 0)),
       firstTime,
+      data: nextData,
     };
   }, [candles, series]);
 

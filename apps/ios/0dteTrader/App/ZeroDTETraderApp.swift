@@ -37,6 +37,10 @@ struct ZeroDTETraderApp: App {
                     // is only reachable unauthenticated) and the next
                     // sign-in on that server heals the retained slot.
                     container.pushNotifications.handleServerSwitch()
+                    // Cancel any in-flight token fetch/socket before replacing
+                    // the container; generation guards prevent a late refresh
+                    // from resurrecting the departed server connection.
+                    container.quoteSocket.disconnect()
                     container = AppContainer(
                         baseURL: newBaseURL,
                         pushCoordinator: pushCoordinator

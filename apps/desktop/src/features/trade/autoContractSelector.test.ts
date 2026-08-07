@@ -49,20 +49,9 @@ describe('selectAutoOTM', () => {
     expect(selectAutoOTM(CHAIN, 'put', EXPIRATION, 101.5)?.strike).toBe(100); // ATM 101
   });
 
-  it('otmOffset 0 selects the ATM strike itself', () => {
-    expect(selectAutoOTM(CHAIN, 'call', EXPIRATION, 100.6, 0)?.strike).toBe(101);
-    expect(selectAutoOTM(CHAIN, 'put', EXPIRATION, 100.6, 0)?.strike).toBe(101);
-  });
-
-  it('otmOffset 2 steps two strikes out', () => {
-    expect(selectAutoOTM(CHAIN, 'call', EXPIRATION, 100.4, 2)?.strike).toBe(102);
-    expect(selectAutoOTM(CHAIN, 'put', EXPIRATION, 102.6, 2)?.strike).toBe(101);
-  });
-
   it('returns null when the ladder runs out', () => {
     expect(selectAutoOTM(CHAIN, 'call', EXPIRATION, 102.99)).toBeNull();
     expect(selectAutoOTM(CHAIN, 'put', EXPIRATION, 100.01)).toBeNull();
-    expect(selectAutoOTM(CHAIN, 'call', EXPIRATION, 100.4, 10)).toBeNull();
     expect(selectAutoOTM(chain([]), 'call', EXPIRATION, 100)).toBeNull();
   });
 

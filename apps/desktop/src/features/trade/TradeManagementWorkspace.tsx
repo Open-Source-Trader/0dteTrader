@@ -25,6 +25,7 @@ import { useStore } from '../../core/observable';
 import { bracketLegDraft, isWorking, orderTypeLabel } from '../chart/chartOrders';
 import { defaultBracketLevel } from './bracketDefaults';
 import { selectPositionExpiryBreakEven } from './expiryBreakEven';
+import { tradeHistoryKey } from './tradeHistoryKey';
 import {
   dayPnl,
   moveStopToEntryRequest,
@@ -846,8 +847,8 @@ function RecentTradesTable({ entries }: { entries: TradeHistoryEntry[] }) {
         </tr>
       </thead>
       <tbody>
-        {entries.map((entry) => (
-          <tr key={entry.orderId}>
+        {entries.map((entry, index) => (
+          <tr key={tradeHistoryKey(entry, index)}>
             <td className="numeric">{entry.contractSymbol}</td>
             <td
               className="numeric"

@@ -20,6 +20,8 @@ import { SnapTradeBrokerGateway } from './snaptrade/snaptrade-broker.gateway';
 import { SnapTradeConnectionService } from './snaptrade/snaptrade-connection.service';
 import { SnapTradeConnectionController } from './snaptrade/snaptrade-session.controller';
 import { SnapTradeWebhookController } from './snaptrade/snaptrade-webhook.controller';
+import { SnapTradeWebhookInboxService } from './snaptrade/snaptrade-webhook-inbox.service';
+import { SnapTradeWebhookProcessorService } from './snaptrade/snaptrade-webhook-processor.service';
 import { SnapTradeMarketDataProvider } from './snaptrade/snaptrade-market-data.provider';
 import {
   CredentialsController,
@@ -106,6 +108,8 @@ import { WebullAccountController } from './webull-account.controller';
     },
     // SnapTrade connection lifecycle (register, authorize, list, select, etc.).
     SnapTradeConnectionService,
+    SnapTradeWebhookProcessorService,
+    SnapTradeWebhookInboxService,
     // MarketDataProvider token: the SnapTrade gateway injects this router,
     // which prefers Alpaca when it has credentials and falls back to Webull.
     {

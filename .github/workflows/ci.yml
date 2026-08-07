@@ -31,6 +31,7 @@ jobs:
       JWT_ACCESS_SECRET: ci-access-secret-min-32-characters
       JWT_REFRESH_SECRET: ci-refresh-secret-min-32-characters
       CRED_ENCRYPTION_KEY: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
+      RUN_POSTGRES_INTEGRATION: '1'
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: actions/setup-node@v7.0.0
@@ -38,6 +39,7 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - run: npm run db:migrate --workspace apps/api
       - run: npm run build
       - run: npm run lint
       - run: npm run test

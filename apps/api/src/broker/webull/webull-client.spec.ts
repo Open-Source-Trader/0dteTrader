@@ -352,6 +352,20 @@ describe('WebullClient token lifecycle', () => {
 });
 
 describe('WebullClient resilience', () => {
+  it('can disable internal business-request retries for externally rate-limited endpoints', async () => {
+    const { client, calls, sleeps } = makeHarness(
+      withToken(() => ({ status: 429, headers: { 'retry-after': '0' } })),
+    );
+    await expect(
+      client.request('stockDepth', {
+        query: { symbol: 'SPY' },
+        automaticRetries: false,
+      }),
+    ).rejects.toMatchObject({ code: 'BROKER_RATE_LIMITED' });
+    expect(calls).toHaveLength(2);
+    expect(sleeps).toEqual([]);
+  });
+
   it('retries 429 honoring Retry-After and then succeeds', async () => {
     const { client, calls, sleeps } = makeHarness(
       withToken(

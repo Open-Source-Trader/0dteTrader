@@ -1,4 +1,4 @@
-import { Controller, HttpCode, HttpStatus, Logger, Post, Req, Res } from '@nestjs/common';
+import { Controller, HttpCode, HttpStatus, Logger, Optional, Post, Req, Res } from '@nestjs/common';
 import { Request, Response } from 'express';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { TradingMode } from '@0dtetrader/shared-types';
@@ -6,6 +6,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { CredentialsService } from '../../credentials/credentials.service';
 import { OrderEventsService } from '../order-events.service';
 import { compactOcc, mapOrderStatus } from './snaptrade-mappers';
+import { SnapTradeWebhookInboxService } from './snaptrade-webhook-inbox.service';
 
 /** How OLD a signed `eventTimestamp` may be. Wide because SnapTrade retries
  *  a failed delivery on 30-minute exponential backoff for three tries: a
@@ -52,11 +53,8 @@ function canonicalJson(value: unknown): string {
  *   MAX_REPLAY_DRIFT_MS — the bound has to clear SnapTrade's own retry
  *   ladder, so it is coarse; exact-replay suppression comes from the
  *   idempotency downstream, not from this check).
- * - Always returns 2xx after dispatch (SnapTrade retries with 30-min
- *   exponential backoff, 3 tries). The 2xx is sent once the in-process
- *   handlers have run, which is NOT a durability boundary: an instance that
- *   dies mid-dispatch loses the event, since nothing stores the raw payload.
- *   Closing that needs a webhook inbox table — see the PR discussion.
+ * - Returns 2xx only after the authenticated raw payload has committed to the
+ *   durable inbox. Leased workers perform dispatch and retry independently.
  *
  * Each user registers this same URL in their own SnapTrade Dashboard.
  */
@@ -68,6 +66,7 @@ export class SnapTradeWebhookController {
     private readonly credentials: CredentialsService,
     private readonly prisma: PrismaService,
     private readonly events: OrderEventsService,
+    @Optional() private readonly inbox?: SnapTradeWebhookInboxService,
   ) {}
 
   @Post()
@@ -78,24 +77,6 @@ export class SnapTradeWebhookController {
     const clientId = typeof body['clientId'] === 'string' ? (body['clientId'] as string) : '';
 
     if (!signature || !clientId) {
-      res.sendStatus(HttpStatus.BAD_REQUEST);
-      return;
-    }
-
-    // Freshness comes ONLY from the SIGNED payload. SnapTrade documents
-    // `eventTimestamp` as a body field and signs the body; a header is not
-    // covered by the HMAC, so accepting one — even as a fallback — would let
-    // a captured payload be replayed under a fresh unsigned stamp. Missing
-    // or malformed is a hard 400: an unverifiable age is not an acceptable
-    // age.
-    const signedTimestamp = body['eventTimestamp'];
-    const eventTimestamp =
-      typeof signedTimestamp === 'string' ? Date.parse(signedTimestamp) : Number.NaN;
-    if (
-      Number.isNaN(eventTimestamp) ||
-      Date.now() - eventTimestamp > MAX_EVENT_AGE_MS ||
-      eventTimestamp - Date.now() > MAX_FUTURE_SKEW_MS
-    ) {
       res.sendStatus(HttpStatus.BAD_REQUEST);
       return;
     }
@@ -137,8 +118,94 @@ export class SnapTradeWebhookController {
     const eventType = typeof body['eventType'] === 'string' ? (body['eventType'] as string) : '';
     const webhookId = typeof body['webhookId'] === 'string' ? (body['webhookId'] as string) : '';
 
+    // Production always injects the inbox. The fallback preserves the small
+    // direct-construction unit tests while exercising the same old processor
+    // behavior; Nest never acknowledges an identity-less payload.
+    if (this.inbox && webhookId === '') {
+      res.sendStatus(HttpStatus.BAD_REQUEST);
+      return;
+    }
+
+    // A provider retry remains a successful no-op after its signed timestamp
+    // grows stale. Authenticate it first (otherwise the inbox becomes an id
+    // oracle), then consult the durable uniqueness boundary before applying
+    // freshness to previously unseen work.
+    if (this.inbox) {
+      try {
+        if (await this.inbox.exists(webhookId)) {
+          res.sendStatus(HttpStatus.OK);
+          return;
+        }
+      } catch (err) {
+        this.logger.error(
+          `webhook duplicate lookup failed: webhookId=${webhookId} ` +
+            `userId=${owner.userId} message=${(err as Error).message}`,
+        );
+        res.sendStatus(HttpStatus.INTERNAL_SERVER_ERROR);
+        return;
+      }
+    }
+
+    // Freshness comes ONLY from the SIGNED payload. SnapTrade documents
+    // `eventTimestamp` as a body field and signs the body; a header is not
+    // covered by the HMAC, so accepting one — even as a fallback — would let
+    // a captured payload be replayed under a fresh unsigned stamp. Missing,
+    // malformed, stale or implausibly future timestamps are rejected for new
+    // webhook ids.
+    const signedTimestamp = body['eventTimestamp'];
+    const eventTimestamp =
+      typeof signedTimestamp === 'string' ? Date.parse(signedTimestamp) : Number.NaN;
+    if (
+      Number.isNaN(eventTimestamp) ||
+      Date.now() - eventTimestamp > MAX_EVENT_AGE_MS ||
+      eventTimestamp - Date.now() > MAX_FUTURE_SKEW_MS
+    ) {
+      res.sendStatus(HttpStatus.BAD_REQUEST);
+      return;
+    }
+
     try {
-      await this.dispatch(eventType, owner.userId, owner.environment, body);
+      if (this.inbox) {
+        const details =
+          body['details'] && typeof body['details'] === 'object' && !Array.isArray(body['details'])
+            ? (body['details'] as Record<string, unknown>)
+            : null;
+        let accountId: string | undefined;
+        if (typeof body['accountId'] === 'string') accountId = body['accountId'];
+        else if (typeof details?.['accountId'] === 'string') accountId = details['accountId'];
+        // Snapshot the only possible broker account at receipt time. This is
+        // deliberately not `selectedAccountId`: selection is mutable, so it
+        // cannot safely route a delayed delivery when multiple accounts exist.
+        if (!accountId && (eventType === 'TRADE_UPDATE' || eventType === 'TRADE_DETECTION')) {
+          const connection = await this.prisma.brokerConnection.findUnique({
+            where: {
+              userId_provider_environment: {
+                userId: owner.userId,
+                provider: 'snaptrade',
+                environment: owner.environment,
+              },
+            },
+          });
+          const accounts = Array.from(
+            new Set(
+              (connection?.accountIds ?? [])
+                .map((candidate) => candidate.trim())
+                .filter((candidate) => candidate !== ''),
+            ),
+          );
+          if (accounts.length === 1) [accountId] = accounts;
+        }
+        await this.inbox.enqueue({
+          webhookId,
+          userId: owner.userId,
+          environment: owner.environment,
+          accountId,
+          eventType,
+          payload: body,
+        });
+      } else {
+        await this.dispatch(eventType, owner.userId, owner.environment, body);
+      }
     } catch (err) {
       // A failure after signature verification means required database work
       // did not finish. Answering 2xx here would tell SnapTrade the event
@@ -147,7 +214,7 @@ export class SnapTradeWebhookController {
       this.logger.error(
         `webhook processing failed: webhookId=${webhookId || 'unknown'} ` +
           `eventType=${eventType} userId=${owner.userId} ` +
-          `environment=${owner.environment} stage=dispatch: ${(err as Error).message}`,
+          `environment=${owner.environment} stage=inbox_insert: ${(err as Error).message}`,
       );
       res.sendStatus(HttpStatus.INTERNAL_SERVER_ERROR);
       return;

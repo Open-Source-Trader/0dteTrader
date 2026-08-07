@@ -4,16 +4,15 @@ import { dayString, isDayString } from '../../core/models/dates';
 /**
  * AUTO contract selection (server's resolveAutoOtm analog): anchor on the ATM
  * strike — the one closest to the live underlying price, ties resolving toward
- * the OTM side — then step `otmOffset` rungs out of the money (calls up the
- * ladder, puts down). Offset 0 trades the ATM strike itself. Returns null when
- * the ladder runs out; the server re-validates at submission time.
+ * the OTM side — then step exactly one rung out of the money (calls up the
+ * ladder, puts down). Returns null when the ladder runs out; the server
+ * re-validates the same fixed Classic rule at submission time.
  */
 export function selectAutoOTM(
   chain: OptionsChain,
   optionType: OptionType,
   expiration?: string | null,
   last?: number | null,
-  otmOffset = 1,
 ): OptionContract | null {
   const referencePrice = last ?? chain.underlyingPrice;
   const targetExpiration = expiration ?? nearestExpiration(chain.expirations);
@@ -39,8 +38,7 @@ export function selectAutoOTM(
   }
 
   // Out-of-range indexes fall out as undefined: the ladder is exhausted.
-  const target: number | undefined =
-    ladder[optionType === 'call' ? atm + otmOffset : atm - otmOffset];
+  const target: number | undefined = ladder[optionType === 'call' ? atm + 1 : atm - 1];
   if (target === undefined) return null;
   return candidates.find((contract: OptionContract) => contract.strike === target) ?? null;
 }

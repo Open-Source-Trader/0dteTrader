@@ -1,0 +1,1737 @@
+schema_version: 1
+template_id: checking_plan.v1
+title: Checking Plan - Issues 44, 45, 47, and 48
+description: Live verification, finding, remediation, artifact-lineage, and completion record for the coordinated indicator, Level 2, ATM IV alert, and scored Auto implementation.
+maintainers:
+  - { name: Codex, role_id: implementation_controller }
+  - { name: Backend reviewer, role_id: senior_backend_engineer }
+  - { name: Client reviewer, role_id: senior_desktop_ios_engineer }
+  - { name: Quant reviewer, role_id: senior_quant_engineer }
+
+plan_ref:
+  plan_path: docs/plans/2026-08-05-issues-44-48.yaml
+  plan_name: issues-44-45-47-48
+  paired_checking_plan: docs/plans/checking_plan_2026-08-05-issues-44-48.yaml
+
+required_context_files_read_first:
+  purpose: Check implementation against the approved requirement, current/target flow, guarded state, repository, provider, client, persistence, and execution contracts.
+  core_required:
+    - { path: AGENTS.md, why: Quality, planning, delegation, and cleanup rules. }
+    - { path: docs/plans/2026-08-05-issues-44-48.yaml, why: Executable task and verification plan. }
+    - { path: docs/specs/2026-08-05-issues-44-48-spec.md, why: REQ and acceptance source. }
+    - {
+        path: docs/flow-charts/2026-08-05-issues-44-48-flow-chart.yaml,
+        why: Current and target event paths.,
+      }
+    - {
+        path: docs/logic-maps/2026-08-05-issues-44-48-logic-map.yaml,
+        why: Decisions failures teardown persistence and gates.,
+      }
+    - { path: docs/plans/plan-template.yaml, why: Plan lineage. }
+    - { path: docs/plans/checking_plan_plan-template.yaml, why: Checking-plan lineage. }
+  conditional_required:
+    - {
+        when: checking implementation,
+        paths:
+          [
+            packages/shared-types,
+            apps/api/src,
+            apps/api/prisma,
+            apps/desktop/src,
+            apps/ios/0dteTrader,
+            apps/ios/0dteTraderTests,
+          ],
+        why: Verify claims in actual code and tests.,
+      }
+  read_order: [core_required, conditional_required]
+
+instructions:
+  - Update this file immediately when a task starts, a RED or GREEN test runs, a finding appears, remediation lands, or evidence changes.
+  - Inspect diffs and rerun fresh commands; never accept an agent report as proof.
+  - For every behavior task require RED evidence before production edits, GREEN focused evidence after, then independent spec and quality reviews.
+  - Record severity, file/symbol, reproduction, invariant impact, minimal fix, blocker, and remediation status for each finding.
+  - Convert every risk to an in-scope code/test/doc change or an explicit residual-risk entry.
+  - Block completion on unresolved P0/P1, failed required checks, obsolete code, missing physical-iPhone Energy Log, or missing GitHub #45 capability comment.
+  - Issue 46 is deleted/withdrawn and must not acquire invented implementation requirements.
+
+scope:
+  include_globs:
+    [
+      packages/shared-types/**,
+      apps/api/src/**,
+      apps/api/prisma/**,
+      apps/desktop/src/**,
+      apps/ios/0dteTrader/**,
+      apps/ios/0dteTraderTests/**,
+      apps/ios/project.yml,
+      docs/**,
+    ]
+  exclude_globs: [node_modules/**, build/**, dist/**, .artifacts/**]
+  default_target: plan_ref
+
+variables:
+  pr_base: origin/main
+  pr_head: HEAD
+  plan_path_glob: docs/plans/2026-08-05-issues-44-48.yaml
+  plan_filename_pattern: 2026-08-05-issues-44-48.yaml
+  live_issue_log_artifact: this file under live_findings
+  live_recommendations_artifact: this file under live_recommendations
+  live_progress_artifact: this file under live_progress
+  required_spec: docs/specs/2026-08-05-issues-44-48-spec.md
+  required_flow_chart: docs/flow-charts/2026-08-05-issues-44-48-flow-chart.yaml
+  required_logic_map: docs/logic-maps/2026-08-05-issues-44-48-logic-map.yaml
+
+baseline:
+  isolated_worktree:
+    result: pass
+    evidence: Implementation uses /Users/jacobfox/.config/superpowers/worktrees/0dteTrader/issues-44-48; dirty original checkout remains untouched.
+  dependency_install:
+    command: npm ci
+    result: pass-with-warnings
+    evidence: npm reported deprecated transitive packages and 5 high-severity audit findings; no out-of-scope dependency upgrade applied.
+  shared_types_build:
+    command: npm run build --workspace packages/shared-types
+    result: pass
+    evidence: Shared-types build completed successfully before the root test rerun.
+  api_tests:
+    command: npm test
+    result: baseline-green-with-skips
+    evidence: API 54 of 55 suites passed; 833 tests passed and 2 tests were skipped.
+  desktop_tests:
+    command: npm test
+    result: pass
+    evidence: Desktop 50 files and 530 tests passed.
+  ios_tests:
+    command: xcodegen then xcodebuild test on iPhone 16 simulator
+    result: pass-with-baseline-warnings
+    evidence: After the generated-environment bootstrap script and second xcodegen run, the iPhone 16 simulator executed 399 tests with 0 failures. SwiftLint reported 15 pre-existing warnings and 0 serious violations. Normal tests emitted expected localhost:0 network failures.
+  warnings:
+    result: baseline-residual
+    evidence: Existing ts-jest TS151002 hybrid-module warnings remain; implementation must not add new warnings.
+  external_gates:
+    github_issue_45_comment: unavailable because gh is not authenticated
+    physical_iphone_energy_log: unavailable or unproven because no physical-device run evidence exists
+
+checklist:
+  - {
+      id: C1,
+      title: Five required artifacts exist cross-link use required templates parse and pass independent semantic review,
+      type: automated-and-manual,
+      required: true,
+      status: passed,
+    }
+  - {
+      id: C2,
+      title: Public shared contracts registry and fixtures compile and validate,
+      type: automated,
+      required: true,
+      status: passed,
+    }
+  - {
+      id: C3,
+      title: Indicator registry migration generic geometry approved suite TWC regression two-pane parity and 1e-6 fixture pass,
+      type: automated-and-manual,
+      required: true,
+      status: passed,
+    }
+  - {
+      id: C4,
+      title: L2 provider entitlement Redis-global one-per-second coalescing exact formulas caps bounds repeat refresh NY reset five-second stale and every-active-state teardown pass,
+      type: automated,
+      required: true,
+      status: passed_automated_real_redis_and_live_entitlement_external,
+    }
+  - {
+      id: C5,
+      title: L2 derived indicators paired decoders No-L2 presentation metrics and automated payload measurements pass,
+      type: automated-and-manual,
+      required: true,
+      status: passed_automated_physical_energy_log_external,
+    }
+  - {
+      id: C6,
+      title: Fifteen-minute physical-iPhone Energy Log is attached and within documented acceptance thresholds,
+      type: manual-device,
+      required: true,
+      status: blocked_external,
+    }
+  - {
+      id: C7,
+      title: ATM IV exact/interpolation/no-extrapolation calculation version nullable indexed migration pass,
+      type: automated,
+      required: true,
+      status: passed_automated_live_database_apply_external,
+    }
+  - {
+      id: C8,
+      title: Prior-only raw median-MAD signed thresholds direction streak cooldown boundary gap zero-MAD clamp banner median restart monotonic RTH and user-symbol isolation pass,
+      type: automated,
+      required: true,
+      status: passed,
+    }
+  - {
+      id: C9,
+      title: ivAlertConfigure persistence authorization scoped delivery and paired banner accessibility pass,
+      type: automated-and-manual,
+      required: true,
+      status: passed,
+    }
+  - {
+      id: C10,
+      title: API desktop and Swift numeric presets weighted ranking hard filters direction constant-domain normalization gamma IV freshness and tie parity pass,
+      type: automated,
+      required: true,
+      status: passed,
+    }
+  - {
+      id: C11,
+      title: Auto candidate auth merge rationale runners-up no-pass fallback acknowledgment and preferences pass,
+      type: automated-and-manual,
+      required: true,
+      status: passed,
+    }
+  - {
+      id: C12,
+      title: Server fresh rerank rejects stale or changed selection and scored confirmation cannot be bypassed while Classic remains unchanged,
+      type: automated-and-e2e,
+      required: true,
+      status: passed,
+    }
+  - {
+      id: C13,
+      title: Old flat/manual/per-indicator and standalone Auto offset paths plus stale docs are removed,
+      type: automated-and-manual,
+      required: true,
+      status: passed,
+    }
+  - {
+      id: C14,
+      title: Prisma generation validation migration and database integration pass,
+      type: automated,
+      required: true,
+      status: passed_schema_generate_validate_live_database_apply_external,
+    }
+  - {
+      id: C15,
+      title: Strict type lint format build complete JS and iOS suites pass without new warnings,
+      type: automated,
+      required: true,
+      status: passed_with_documented_baseline_warnings_and_environment_skips,
+    }
+  - {
+      id: C16,
+      title: Independent spec and code-quality reviews have no open P0 or P1,
+      type: manual,
+      required: true,
+      status: passed,
+    }
+  - {
+      id: C17,
+      title: Webull capability result is posted to GitHub issue 45 from an authenticated account,
+      type: manual-external,
+      required: true,
+      status: blocked_external,
+    }
+  - {
+      id: C18,
+      title: Issue 46 remains documented as deleted and withdrawn with no invented code,
+      type: manual,
+      required: true,
+      status: passed,
+    }
+
+NEW_TASK_CHECK_LIST:
+  - Validate and freeze shared contracts registry and fixtures before consumers.
+  - Implement every behavior with a failing focused test first and preserve RED/GREEN evidence.
+  - Review each task for spec compliance then code quality before advancing.
+  - Keep L2 resources rate-safe bounded truthful and leak-free.
+  - Keep IV detector time-ordered persisted user-scoped and replay-safe.
+  - Keep Auto ranking deterministic explainable confirmed and freshly server-validated.
+  - Remove obsolete paths and update all public and operational docs.
+  - Run full automated verification plus required physical-device and GitHub external gates.
+
+paired_plan_parts_inventory:
+  - { part: metadata objective intake constraints, verification_checks: [C1], status: mapped }
+  - {
+      part: skills artifact discovery current-target flow and solution selection,
+      verification_checks: [C1, C16],
+      status: mapped,
+    }
+  - {
+      part: invariants risk conversion and engineering standards,
+      verification_checks: [C4, C8, C12, C15, C16],
+      status: mapped,
+    }
+  - { part: T0 planning baseline, verification_checks: [C1], status: completed }
+  - { part: T1 shared contracts, verification_checks: [C2], status: completed }
+  - { part: T2 shared indicators, verification_checks: [C3, C13], status: completed }
+  - {
+      part: T3-T4 Level 2,
+      verification_checks: [C4, C5, C6, C17],
+      status: implementation_complete_external_gates_pending,
+    }
+  - {
+      part: T5-T6 ATM IV alerts,
+      verification_checks: [C7, C8, C9, C14],
+      status: completed_automated_live_database_apply_external,
+    }
+  - { part: T7-T8 scored Auto, verification_checks: [C10, C11, C12, C13, C14], status: completed }
+  - {
+      part: T9 docs cleanup full verification,
+      verification_checks: [C6, C13, C15, C16, C17, C18],
+      status: automated_complete_external_gates_block_completion,
+    }
+
+requirement_coverage_matrix:
+  - { requirements: REQ-044-001..006, tasks: [T1, T2], checks: [C2, C3, C13, C15], status: passed }
+  - {
+      requirements: REQ-045-001..007,
+      tasks: [T1, T3, T4, T9],
+      checks: [C2, C4, C5, C6, C17],
+      status: blocked_on_external_evidence,
+    }
+  - {
+      requirements: REQ-047-001..006,
+      tasks: [T1, T5, T6],
+      checks: [C2, C7, C8, C9, C14],
+      status: passed_automated_live_database_apply_external,
+    }
+  - {
+      requirements: REQ-048-001..005,
+      tasks: [T1, T7, T8],
+      checks: [C2, C10, C11, C12, C13, C14],
+      status: passed,
+    }
+  - { requirements: withdrawn-046, tasks: [T0, T9], checks: [C18], status: documented }
+
+artifact_lineage:
+  - {
+      artifact: docs/specs/2026-08-05-issues-44-48-spec.md,
+      template: docs/specs/templates/spec-template.md,
+      review_status: approved_after_independent_review,
+    }
+  - {
+      artifact: docs/flow-charts/2026-08-05-issues-44-48-flow-chart.yaml,
+      template: docs/flow-charts/templates/event-driven-flow-chart-template.yaml,
+      review_status: approved_after_independent_review,
+    }
+  - {
+      artifact: docs/logic-maps/2026-08-05-issues-44-48-logic-map.yaml,
+      template: docs/logic-maps/templates/event-driven-logic-map-template.yaml,
+      review_status: approved_after_independent_review,
+    }
+  - {
+      artifact: docs/plans/2026-08-05-issues-44-48.yaml,
+      template: docs/plans/plan-template.yaml,
+      review_status: approved_after_independent_review,
+    }
+  - {
+      artifact: docs/plans/checking_plan_2026-08-05-issues-44-48.yaml,
+      template: docs/plans/checking_plan_plan-template.yaml,
+      review_status: live,
+    }
+
+live_progress:
+  - at: '2026-08-05T23:31:00-04:00'
+    phase: final-full-verification-and-external-gate-handoff
+    status: automated-green-independent-reviews-approved-external-gates-block-completion
+    evidence: >-
+      Fresh root validation passes Prettier, every JavaScript/TypeScript workspace lint and build,
+      shared runtime fixtures 6 of 6 plus strict negative compile contracts, desktop 68 files and
+      673 tests, API 70 suites and 1,003 tests with three environment-gated skips, Prisma generate
+      and validate, all required YAML parsing, OpenAPI parsing, and git diff check. Fresh iPhone 16
+      Pro simulator validation passes 442 of 442 tests with zero failures; repository SwiftLint has
+      the documented 14 baseline warnings and zero serious violations. Final API remediation
+      backfills pre-feature detector markers before indexing, proves true 1,001-row pending backlog
+      metrics, fans configurations live across replicas, prevents delayed stale configuration,
+      suppresses historical alert/config replay while retaining cursor continuity, and removes
+      false per-replica miss metrics. Remaining gates are real Redis/live database integration,
+      live Webull entitlement evidence, the physical-iPhone Energy Log, and authenticated GitHub
+      issue 45 comment; L2 remains default-off and fail-closed.
+  - at: '2026-08-05T23:01:00-04:00'
+    phase: final-independent-review-remediation
+    status: RED-GREEN-in-progress
+    evidence: >-
+      Independent desktop review found stale active scoring after preference saves, invalid native
+      premium stepping, an IV server-error confirmation hang, and stale rationale during reranking.
+      Production fixes and regression tests now pass 33 of 33 focused desktop tests; desktop lint
+      and production build pass with only the documented bundle advisory. Independent API review
+      additionally found a viewed/core IV capture collision, missing cross-replica alert fanout,
+      incomplete same-user configuration fanout, and missing decision observability; independent
+      iOS review found rejected/disconnected/timed-out IV saves could remain permanently busy. API
+      and iOS remediations and their RED/GREEN evidence are active. Shared contracts pass 6 of 6
+      runtime tests and strict compile-time negative contracts.
+  - at: '2026-08-05T22:53:00-04:00'
+    phase: independent-client-review-remediation
+    status: implemented-pending-full-rerun
+    evidence: >-
+      Independent client review found and remediation addressed prior-user IV state surviving
+      disconnect, stale Scored Auto winners remaining armable during rerank, strict L2 and IV wire
+      bounds, a missing committed iOS L2 opt-in path, incomplete IV detector controls, missing custom
+      Auto preference editors on both clients, IV banner spoken percentages/time, and compact desktop
+      no-pass fallback. iOS now defaults L2 off through L2_CAPABILITY_ENABLED=NO but supports explicit
+      entitled-build opt-in; desktop custom preference focused tests pass 4 of 4 and strict lint/build
+      pass. Full client suites and independent rereview remain active.
+  - at: '2026-08-05T22:48:00-04:00'
+    phase: independent-client-review-findings
+    status: RED-confirmed
+    evidence: >-
+      Independent desktop and iOS reviewers identified P1 user-isolation and stale-ranking defects,
+      unreachable custom preferences, incomplete iOS IV configuration, and compact no-pass fallback,
+      plus P2 strict-wire, freshness-boundary, confirmation-recovery, and accessibility gaps. Each
+      finding was mapped to an in-scope code and regression-test change before consolidated approval.
+  - at: '2026-08-05T22:42:00-04:00'
+    phase: consolidated-desktop-and-iOS-L2-lifecycle-GREEN
+    status: GREEN-confirmed
+    evidence: >-
+      Desktop scored-selection, preference, and ticket tests passed 82 of 82; desktop ESLint and
+      production build passed after preset logic was separated from the React component, removing
+      the new fast-refresh warning. The complete desktop suite then passed 657 of 657. On iOS, a
+      focused lifecycle test first failed because an unavailable L2 status retained its symbol's
+      freshness task. The status handler now cancels and removes that task before clearing numeric
+      data, and the same focused simulator test passes.
+  - at: '2026-08-05T22:41:00-04:00'
+    phase: T4-iOS-unavailable-freshness-teardown-RED
+    status: RED-confirmed
+    evidence: >-
+      The new DTODecodingTests.testL2UnavailableStatusCancelsPendingFreshnessDeadline assertion
+      failed because l2FreshnessTaskCountForTesting remained one after an entitlement-unavailable
+      status. Snapshot data was cleared, but the symbol task was not cancelled and removed.
+  - at: '2026-08-05T22:40:00-04:00'
+    phase: T4-desktop-receivedAt-future-skew-boundary-GREEN
+    status: GREEN-confirmed
+    evidence: >-
+      npm run test --workspace apps/desktop -- QuoteSocket.l2Iv QuoteSocket.decoderBenchmark
+      ChartView passed 31 of 31. Exact decoding now permits provider timestamp through 1,000 ms
+      ahead of receivedAt and rejects 1,001 ms, matching the API transport boundary without using
+      receivedAt to extend client freshness.
+  - at: '2026-08-05T22:39:00-04:00'
+    phase: T4-desktop-receivedAt-future-skew-boundary-RED
+    status: RED-confirmed
+    evidence: >-
+      npm run test --workspace apps/desktop -- QuoteSocket.l2Iv exited 1 with only the new exact
+      one-second future-skew boundary failing: the decoder returned null when provider timestamp
+      was exactly 1,000 ms ahead of receivedAt. The other 15 socket contract and lifecycle tests
+      passed, including rejection beyond the approved skew.
+  - at: '2026-08-05T22:38:00-04:00'
+    phase: T8-desktop-scored-auto-GREEN
+    status: GREEN-confirmed-pending-independent-review
+    evidence: >-
+      Desktop now has authenticated preference and rank endpoints, Scored versus Classic +1
+      strategy state, exact server-winner selection, rationale and runners-up presentation,
+      no-pass fallback acknowledgement, optimistic preset editing, and mandatory confirmation
+      even when the global bypass is enabled. Focused TradeStore, ChainStore, and desktop ticket
+      verification passes 80 of 80; strict TypeScript, ESLint, and the Vite production build pass
+      with only the documented chunk-size advisory. AutoScoringSettings component tests were added
+      and await the next consolidated run after Profile integration.
+  - at: '2026-08-05T22:37:00-04:00'
+    phase: T4-T6-iOS-L2-IV-client-GREEN
+    status: GREEN-confirmed-pending-independent-review-and-receivedAt-sync
+    evidence: >-
+      iOS has strict bounded L2 and IV wire DTOs, a default-off 50-symbol subscription lifecycle,
+      reconnect restoration, exhaustive registry-keyed L2 geometry, truthful No-L2 presentation,
+      persisted IV configuration controls, and a dismissible accessible banner containing symbol,
+      direction, current IV, baseline, z-score, and alert time. Contract and chart tests pass 39
+      focused cases. A 50-level payload decodes 2000 times in 0.548 seconds under the one-second
+      threshold; subscription-cap coverage also passes. Independent review is active and the
+      canonical receivedAt field is being synchronized by the API/shared owner.
+  - at: '2026-08-05T22:36:30-04:00'
+    phase: T8-iOS-scored-auto-and-offset-cleanup-GREEN
+    status: GREEN-confirmed-pending-independent-review
+    evidence: >-
+      iOS implements shared-fixture scorer parity, authenticated preference/rank calls, Scored
+      versus Classic selection, winner rationale and runners-up, no-pass fallback acknowledgement,
+      forced scored confirmation, optimistic preset editing, and removal of the configurable
+      legacy offset across selection, settings, Profile, and order DTOs. Focused scorer and arm
+      tests passed before the L2/IV slice; final consolidated iOS verification remains pending.
+  - at: '2026-08-05T22:37:00-04:00'
+    phase: T4-desktop-receivedAt-contract-GREEN
+    status: GREEN-confirmed
+    evidence: >-
+      npm run test --workspace apps/desktop -- QuoteSocket.l2Iv QuoteSocket.decoderBenchmark
+      ChartView passed 30 of 30. Desktop exact decoding now requires canonical ISO receivedAt,
+      rejects server receipt before provider timestamp, retains timestamp as the five-second stale
+      anchor, and includes receivedAt in the decoded snapshot. Socket, benchmark, and chart fixtures
+      consume the same contract.
+  - at: '2026-08-05T22:36:00-04:00'
+    phase: T4-desktop-receivedAt-contract-RED
+    status: RED-confirmed
+    evidence: >-
+      After the approved shared/API contract added server receipt metadata, npm run test
+      --workspace apps/desktop -- QuoteSocket.l2Iv exited 1 with ten expected downstream failures:
+      the exact decoder rejected every canonical snapshot containing receivedAt, so snapshot and
+      freshness lifecycle assertions could not advance. Invalid receivedAt-before-timestamp remained
+      rejected. Production decoding had not yet been changed.
+  - at: '2026-08-05T22:35:00-04:00'
+    phase: T4-T6-desktop-explicit-disconnect-user-state-GREEN
+    status: GREEN-confirmed
+    evidence: >-
+      npm run test --workspace apps/desktop -- QuoteSocket.l2Iv passed 15 of 15. Explicit
+      disconnect now clears authenticated IV configuration, all retained L2 presentation state,
+      and every per-symbol freshness timer while preserving ordinary reconnect subscription
+      behavior. This prevents cross-login preference exposure and retired-container timer work.
+  - at: '2026-08-05T22:34:00-04:00'
+    phase: T4-T6-desktop-explicit-disconnect-user-state-RED
+    status: RED-confirmed
+    evidence: >-
+      npm run test --workspace apps/desktop -- QuoteSocket.l2Iv exited 1 with only the new explicit
+      disconnect isolation test failing: the prior authenticated user's IV configuration remained
+      in socket state. The test also requires retained L2 state and its freshness timer to clear so
+      a logout or retired app container cannot preserve account-scoped or numeric market state.
+  - at: '2026-08-05T22:33:00-04:00'
+    phase: T6-desktop-IV-pending-draft-remediation-GREEN
+    status: GREEN-confirmed
+    evidence: >-
+      npm run test --workspace apps/desktop -- IvAlertSettings passed 3 of 3. Pending server
+      revision tracking now uses a ref, so saving does not reapply the previous server snapshot;
+      the enabled state, selected symbols, and edited threshold remain visible until the newer
+      authenticated configuration arrives and produces the saved status.
+  - at: '2026-08-05T22:32:00-04:00'
+    phase: T6-desktop-IV-pending-draft-remediation-RED
+    status: RED-confirmed
+    evidence: >-
+      npm run test --workspace apps/desktop -- IvAlertSettings exited 1 with only the new pending
+      draft assertion failing: after the exact save message was sent, the enabled switch reverted
+      to false before server confirmation. The other two IV settings tests passed, isolating an
+      effect dependency that reapplied the prior server state when pending state changed.
+  - at: '2026-08-05T22:31:00-04:00'
+    phase: T6-desktop-IV-alert-settings-remediation-GREEN
+    status: GREEN-confirmed
+    evidence: >-
+      npm run test --workspace apps/desktop -- IvAlertSettings passed 3 of 3. The Profile consumer
+      now renders the authenticated server configuration, names every control for assistive
+      technology, exposes the canonical numeric limits, prevents empty-symbol and out-of-range
+      submissions, sends only the exact editable ivAlertConfigure fields, and reports pending,
+      confirmed, and disconnected states without a modal. Toggle buttons are explicitly non-submit.
+  - at: '2026-08-05T22:29:00-04:00'
+    phase: T6-desktop-IV-alert-settings-remediation-RED
+    status: RED-confirmed
+    evidence: >-
+      npm run test --workspace apps/desktop -- IvAlertSettings exited 1 with all three intended
+      behavior tests failing against the behavior-free typed seam: no received configuration UI
+      or accessible bounded fields rendered, no exact ivAlertConfigure message was sent or server
+      confirmation reported, and invalid bounds or an empty symbol set were not blocked.
+  - at: '2026-08-05T22:28:00-04:00'
+    phase: T4-desktop-canonical-decoder-client-freshness-remediation-GREEN
+    status: GREEN-confirmed
+    evidence: >-
+      npm run test --workspace apps/desktop -- QuoteSocket.l2Iv QuoteSocket.decoderBenchmark
+      ChartStore passed 33 of 33. The strict boundary accepts canonical nonnegative sizes, locked
+      books, and spreadPercentile through 100 while rejecting values above 100. Per-symbol timers
+      now replace numeric state with a retryable stale status at the provider timestamp plus five
+      seconds, cap future-clock delay to five seconds from receipt, and do not publish snapshots
+      already at the stale boundary.
+  - at: '2026-08-05T22:27:00-04:00'
+    phase: T4-desktop-canonical-decoder-client-freshness-remediation-RED
+    status: RED-confirmed
+    evidence: >-
+      npm run test --workspace apps/desktop -- QuoteSocket.l2Iv exited 1 with exactly three
+      intended failures: the decoder returned null for a canonical zero-size locked book with
+      spreadPercentile 75, retained numeric L2 state remained available at its five-second
+      freshness deadline, and an already-five-seconds-old provider snapshot was published as
+      available. The other seven focused socket tests passed.
+  - at: '2026-08-06T00:30:00-04:00'
+    phase: T4-T6-T8-desktop-final-validation
+    status: green-pending-independent-review-and-cross-client-gates
+    evidence: >-
+      Shared-types build passes. Fresh desktop full suite passes 65 files and 626 tests; strict
+      TypeScript plus Vite production build pass; ESLint and git diff --check pass. Vite reports
+      only the baseline greater-than-500-kB chunk advisory. A desktop source residue scan finds no
+      otmOffset, autoOtmOffset, or settings.autoOtmOffset. T4/T6 includes default-off capability,
+      exact four-message DTO decoding, bounded 50-symbol L2 state, reconnect subscribe restoration,
+      explicit unavailable/stale No-L2 panes, exact IV configuration/alert delivery, accessible
+      dismissible nonmodal banner, and the recorded 3,160-byte/28.62-ms benchmark. T8 desktop now
+      uses fixed Classic +1 selection, request, and summary with no device-specific preference.
+  - at: '2026-08-06T00:15:00-04:00'
+    phase: T3-009-T3-011-full-validation
+    status: completed
+    evidence: >-
+      Focused L2/Webull verification passes 117 tests with only the REDIS_URL-gated integration
+      skipped. The complete API suite passes 984 tests with 3 external skips across 72 suites.
+      API TypeScript build and ESLint pass. A compiled Node denied-wait abort process exits 0 in
+      0.14 seconds rather than waiting the one-second lease interval. The checking-plan YAML parses
+      and git diff --check passes. Only the recorded baseline ts-jest TS151002 warning remains.
+  - at: '2026-08-06T00:35:00-04:00'
+    phase: T3-012-independent-review-remediation-start
+    status: RED-in-progress
+    evidence: >-
+      Independent API review reproduced an unhandled node-redis disconnect that exited Node 1 and
+      a stalled distributed lease that remained pending after AbortSignal cancellation. It also
+      found the missing canonical receipt timestamp, retryable capacity rejection retaining a
+      phantom per-socket slot, and incomplete active-symbol metrics and structured lifecycle logs.
+      RED-first regression coverage is in progress; production behavior remains unchanged at this
+      checkpoint and the real Redis integration remains REDIS_URL-gated.
+  - at: '2026-08-06T00:40:00-04:00'
+    phase: T3-012-redis-runtime-cancellation-timeout-RED
+    status: RED-confirmed
+    evidence: >-
+      npm run test --workspace apps/api -- order-book-rate-limiter.spec.ts --runInBand exited 1
+      with exactly four intended failures: a live Redis error event threw as unhandled, the app-key
+      limiter did not pass its AbortSignal into the lease, a stalled connect remained pending after
+      abort, and a stalled SET remained unsettled at the configured 250 ms operation deadline. The
+      five prior rate-limit tests passed; only the recorded baseline ts-jest TS151002 warning remained.
+  - at: '2026-08-06T00:45:00-04:00'
+    phase: T3-012-redis-runtime-cancellation-timeout-GREEN
+    status: GREEN-confirmed
+    evidence: >-
+      npm run test --workspace apps/api -- order-book-rate-limiter.spec.ts --runInBand passes 9 of 9.
+      Redis clients now own a structured error listener, disable automatic reconnect, use bounded
+      connect and socket timeouts, receive the subscription AbortSignal through the distributed
+      lease, cancel stalled connect and SET work, and destroy immediately on module shutdown. The
+      only output outside test results is the intentional structured Redis disconnect warning and
+      the recorded baseline ts-jest TS151002 warning.
+  - at: '2026-08-06T00:50:00-04:00'
+    phase: T3-013-canonical-receipt-timestamp-RED
+    status: RED-confirmed
+    evidence: >-
+      The shared-types suite passed 5 of 6 then failed exactly because OrderBookSnapshot lacked the
+      required receivedAt declaration. The focused provider suite passed 12 of 13 then failed because
+      its otherwise-valid snapshot omitted receivedAt while timestamp correctly retained the provider
+      observation time. These failures establish separate source and server-receipt time semantics.
+      A focused iOS DTO test also exited 65 with its single intended assertion failure because a
+      snapshot missing receivedAt still decoded successfully; simulator launch emitted its baseline
+      local-health connection noise.
+  - at: '2026-08-06T00:55:00-04:00'
+    phase: T3-013-canonical-receipt-timestamp-GREEN
+    status: GREEN-confirmed
+    evidence: >-
+      Shared types pass 6 of 6 plus strict compile contracts; focused provider, indicator, and
+      service suites pass 50 of 50. Canonical snapshots now carry provider source `timestamp` and
+      server `receivedAt`; freshness and all history math remain source-time anchored. Focused iOS
+      DTO/decoder tests pass 3 of 3 with required and malformed receipt-time coverage. Coordinated
+      desktop decoder work passes 31 of 31, preserves source-time staleness, and accepts at most the
+      same 1,000 ms future source-clock skew as the API.
+  - at: '2026-08-06T01:00:00-04:00'
+    phase: T3-014-capacity-observability-RED
+    status: RED-confirmed
+    evidence: >-
+      npm run test --workspace apps/api -- order-book.service.spec.ts --runInBand exited 1 with
+      three intended assertion failures after 20 existing tests passed: no structured stale event,
+      no activeSymbolGauge metric, and no structured entitlement-unavailable event. The same test
+      now also requires capacity rejection to be non-retryable so the gateway releases its already
+      reserved per-socket slot rather than retaining a phantom subscription.
+  - at: '2026-08-06T01:05:00-04:00'
+    phase: T3-014-capacity-observability-GREEN
+    status: GREEN-confirmed
+    evidence: >-
+      npm run test --workspace apps/api -- order-book.service.spec.ts --runInBand passes 23 of 23.
+      Capacity rejection is now non-retryable so the existing gateway terminal-status path releases
+      the socket slot. activeSymbolGauge tracks creation through every teardown reason. Structured
+      events now cover subscribe, unsubscribe/disconnect, coalescing, rate waits, stale transitions,
+      entitlement failures, capacity rejection, terminal/shutdown teardown, snapshots, session reset,
+      provider/rate failures, and cleanup warnings without secrets.
+  - at: '2026-08-06T01:10:00-04:00'
+    phase: T3-012-T3-014-remediation-full-validation
+    status: GREEN-confirmed-pending-independent-rereview-and-external-gates
+    evidence: >-
+      The complete API suite passes 70 suites and 990 tests with only three environment-gated skips;
+      the focused L2/API set passes 135 tests with the real REDIS_URL suite skipped. Shared contracts
+      pass 6 of 6 plus strict compilation, API build and lint pass, desktop L2/IV/chart tests pass 31
+      of 31, desktop production build and lint pass, and focused iOS receipt-contract tests pass 3
+      of 3. A built RedisRateLease acquired through a local RESP server, received a forced socket
+      disconnect, emitted structured l2_redis_error warnings, remained alive, and exited 0. Both plan
+      YAML files parse and git diff --check passes. The only build advisory is the existing desktop
+      bundle-size warning; only the recorded ts-jest TS151002 warning remains in API tests. Live
+      Webull entitlement and real Redis integration remain external and fail-closed.
+  - at: '2026-08-06T00:05:00-04:00'
+    phase: T3-011-rate-wait-timer-GREEN
+    status: GREEN-confirmed
+    evidence: >-
+      npm test --workspace apps/api -- order-book-rate-limiter.spec.ts order-book.service.spec.ts
+      --runInBand passes 28 of 28. The limiter unit test observes one denied-wait timer before abort
+      and zero afterward; the real service-plus-limiter shutdown test also ends with zero Jest timers
+      and zero cleanupPending state. Exact digest, distributed serialization, denial reporting, and
+      fail-closed tests remain green.
+  - at: '2026-08-06T00:00:00-04:00'
+    phase: T3-011-rate-wait-timer-RED
+    status: RED-confirmed
+    evidence: >-
+      npm test --workspace apps/api -- order-book-rate-limiter.spec.ts --runInBand exited 1 with
+      the new post-abort timer assertion receiving one instead of zero. The logical acquire rejected
+      with AbortError and the other four limiter tests passed, isolating the hidden native timer leak.
+  - at: '2026-08-05T23:55:00-04:00'
+    phase: T3-010-provider-timestamp-RTH-GREEN
+    status: GREEN-confirmed
+    evidence: >-
+      npm test --workspace apps/api -- order-book.service.spec.ts --runInBand passes 22 of 22.
+      Spring EDT and fall EST snapshots timestamped one second before the official 09:30 open now
+      publish retryable market_closed status, never l2Snapshot, and leave historySamples at zero.
+  - at: '2026-08-05T23:50:00-04:00'
+    phase: T3-010-provider-timestamp-RTH-RED
+    status: RED-confirmed
+    evidence: >-
+      npm test --workspace apps/api -- order-book.service.spec.ts --runInBand exited 1 with
+      exactly the spring and fall DST pre-open timestamp cases failing because each was published
+      as l2Snapshot. The other 20 service tests passed and logs showed the two improper publications.
+  - at: '2026-08-05T23:45:00-04:00'
+    phase: T3-009-response-body-cancellation-GREEN
+    status: GREEN-confirmed
+    evidence: >-
+      npm test --workspace apps/api -- order-book.provider.spec.ts --runInBand passes 13 of 13.
+      The real default fetch now holds its combined timeout and external AbortSignal through JSON
+      decoding and returns the eagerly decoded payload without changing non-abort invalid-JSON handling.
+  - at: '2026-08-05T23:40:00-04:00'
+    phase: T3-009-response-body-cancellation-RED
+    status: RED-confirmed
+    evidence: >-
+      npm test --workspace apps/api -- order-book.provider.spec.ts --runInBand exited 1 with
+      exactly the two new transport/provider regressions failing: a stalled response body remained
+      unsettled after the built-in 10-second timeout, and an external abort after headers remained
+      unsettled. The other 11 provider tests passed; the known baseline ts-jest TS151002 warning remained.
+  - at: '2026-08-05T23:30:00-04:00'
+    phase: T4-T6-desktop-L2-IV-client-RED
+    status: RED-confirmed
+    evidence: >-
+      npm run test --workspace apps/desktop -- QuoteSocket.l2Iv
+      QuoteSocket.decoderBenchmark IvAlertBanner exited 1 with seven intended behavior failures and
+      one missing-component suite failure. The failures were only the absent exact decoder,
+      byte limit, fail-closed capability flag, bounded L2 lifecycle/listeners, and IV banner; the
+      test harness itself ran. No API or iOS production file is in this task scope.
+  - at: '2026-08-05T23:45:00-04:00'
+    phase: T4-T6-desktop-L2-IV-client-GREEN
+    status: focused-green-strict-checks-in-progress
+    evidence: >-
+      Focused desktop command passed 5 files and 41 tests covering strict canonical-field decoding,
+      malformed/alias rejection, 50-symbol bounds, default-off capability, exact subscription wire
+      messages, requested-symbol filtering, unavailable/stale ChartStore state, chart No-L2 versus
+      numeric presentation, and accessible banner dismissal. Desktop ESLint passes. The verbose
+      decoder measurement passed with a 3,160-byte capped 50-level payload decoded 2,000 times in
+      28.62 ms against a 1,000 ms threshold and a 65,536-byte pre-parse limit. Strict desktop
+      typecheck remains blocked by concurrent out-of-scope TradeStore otmOffset work and is being
+      rechecked after local type remediation.
+  - at: '2026-08-05T23:50:00-04:00'
+    phase: T8-desktop-Classic-offset-removal-RED
+    status: RED-confirmed
+    evidence: >-
+      Focused desktop command ran 82 tests with 80 passing and two intended failures: SettingsStore
+      still exposed autoOtmOffset and TradeStore rendered AUTO +undefined OTM after the test double
+      stopped providing the obsolete preference. ChainStore and selector fixed-rule expectations
+      were already green. Production removal started only after this RED evidence. T4/T6 evidence
+      remains preserved and will be rerun after this coordinated removal.
+  - at: '2026-08-05T00:00:00-04:00'
+    phase: isolation
+    status: completed
+    evidence: Dirty original checkout protected; isolated codex/issues-44-48 worktree created from origin/main.
+  - at: '2026-08-05T00:10:00-04:00'
+    phase: baseline
+    status: completed-with-known-warnings-and-skips
+    evidence: Shared build passes; API reports 54/55 suites, 833 tests passed, 2 skipped; desktop reports 50 files and 530 tests passed; TS151002 and npm audit findings recorded.
+  - at: '2026-08-05T00:20:00-04:00'
+    phase: artifact-discovery
+    status: completed
+    evidence: No issue-44/45/47/48 spec flow or logic artifact existed; prior options-analytics suite was reviewed for structure only.
+  - at: '2026-08-05T00:30:00-04:00'
+    phase: planning-artifacts
+    status: in_progress
+    evidence: Source spec, current/target flow, guarded logic map, implementation plan, and this checking plan created; parse and review pending.
+  - at: '2026-08-05T00:40:00-04:00'
+    phase: planning-artifact-spec-review
+    status: remediation-in-progress
+    evidence: Independent review required four orthogonal machines, exhaustive L2 lifecycle and Redis-global limiter, normative formulas, exact detector boundaries, numeric Auto presets/scoring/freshness, separate Classic path, and versioned Prisma preferences; artifacts were updated and await parse/re-review.
+  - at: '2026-08-05T00:50:00-04:00'
+    phase: planning-artifact-validation
+    status: completed
+    evidence: Ruby Psych parsed all four YAML files; diff check and placeholder scan passed; cross-links resolved; the then-current 23 transition triggers were declared and no terminal state had an outgoing transition.
+  - at: '2026-08-05T01:00:00-04:00'
+    phase: planning-artifact-independent-rereview
+    status: remediation-in-progress
+    evidence: Second review found recurring-state, L2 retry/partial-unsubscribe, indicator-formula/default, detector-time, scorer-bound, clean-iOS-bootstrap, and executable shared-test gaps; the spec, map, plan, and checking ledger are being corrected before T1.
+  - at: '2026-08-05T01:10:00-04:00'
+    phase: planning-artifact-final-review-remediation
+    status: validation-passed-pending-independent-review
+    evidence: Added active-state L2 subscriber joins and stale retry scheduling, kept invalid initial subscriptions idle, separated no-mutation IV branches from gap/warmup/cooldown updates, made IV configuration reachable from every live state, derived Auto mid from bid/ask while excluding malformed candidates independently, added optimistic-concurrency test scope, restored the required flow_chart template section, and passed YAML plus ownership/state/trigger/terminal structural checks across 45 transitions and 25 declared triggers.
+  - at: '2026-08-05T01:20:00-04:00'
+    phase: planning-artifact-independent-confirmation
+    status: remediation-in-progress
+    evidence: Independent confirmation found four final semantic blockers in AUTO-2 collection-level guards, successful L2 timer arming, terminal L2 subscriber cleanup and teardown retry, and the high-level IV ignored-versus-mutating suppression split; PLAN-004 records the fixes pending re-review.
+  - at: '2026-08-05T01:30:00-04:00'
+    phase: planning-artifact-final-approval
+    status: completed
+    evidence: Final independent re-review approved PLAN-004 after confirming per-candidate Auto exclusion, L2 timer arming, leak-free terminal teardown, idempotent superseded-response discard, and separated IV no-mutation versus mutating suppression paths. YAML parse semantic structural scan and git diff check pass. T1 RED phase started.
+  - at: '2026-08-05T01:40:00-04:00'
+    phase: T1-shared-contracts-registry-fixtures-RED
+    status: RED-confirmed
+    evidence: >-
+      npm run test --workspace packages/shared-types exited 1 after the test runner and clean TypeScript build executed correctly; all 6 tests failed only on missing T1 production artifacts and declarations: indicator-registry.json, indicator-parity-v1.json, auto-scoring-v1.json, auto_scored SelectionMode, and OptionContract scorer metadata. Production implementation started only after this RED evidence.
+  - at: '2026-08-05T01:50:00-04:00'
+    phase: T1-shared-contracts-registry-fixtures-GREEN
+    status: green-pending-spec-review
+    evidence: >-
+      Fresh local commands pass: shared-types 6/6 tests, lint, and build; API build; desktop typecheck and Vite build; git diff --check. Desktop emitted only its existing greater-than-500-kB chunk advisory. T1 independent spec review started.
+  - at: '2026-08-05T02:00:00-04:00'
+    phase: T1-independent-spec-review
+    status: request-changes
+    evidence: Review opened T1-001 because Classic fallback acknowledgment was attached to the scored shape, cumulative-pressure fixture math omitted the current book, indicator/ATM/Auto fixtures missed required edge branches and full rationale, and schema tests were too shallow. T1 remediation returned to RED-first implementation; full arbitrary otmOffset deletion remains explicitly assigned to T8 so existing consumers stay buildable until coordinated cleanup.
+  - at: '2026-08-05T02:10:00-04:00'
+    phase: T1-spec-remediation-RED
+    status: RED-confirmed
+    evidence: Strengthened package test exited 1 with 4/6 JS tests passing and intended failures for missing anchored VWAP user-anchor and Auto edge/tie cases. Focused npm run test:types exited 1 under TypeScript 7 --ignoreConfig because the Classic branch lacked fallback acknowledgment, scored payload incorrectly required it, and four expected-invalid selection combinations still compiled. No harness or syntax defect caused RED.
+  - at: '2026-08-05T02:20:00-04:00'
+    phase: T1-spec-remediation-GREEN
+    status: green-pending-spec-rereview
+    evidence: Shared 6/6 runtime tests and compile-contract fixture pass; shared build/lint, API build/lint, desktop build, focused trading service 44/44, independent recomputation of all eight Auto cases, and git diff check pass. Only baseline TS151002 and desktop chunk advisories remain. API boundary changes are a private recovery parameter union and typed explicit test request with no casts.
+  - at: '2026-08-05T02:30:00-04:00'
+    phase: T1-exclusion-matrix-RED
+    status: RED-confirmed
+    evidence: Spec re-review accepted all prior fixes but required parity vectors for every public Auto exclusion reason. Strengthened package test exited 1 with 5/6 passing; the sole intended failure was the missing exclusion-reason-matrix after the test derived the complete reason literal set from compiled declarations and compared it with observed fixture reasons.
+  - at: '2026-08-05T02:40:00-04:00'
+    phase: T1-independent-spec-rereview
+    status: approved-pending-quality-review
+    evidence: All public Auto exclusion reasons now have isolated deterministic golden vectors and exact compiled-union set equality. Independent spec reviewer returned APPROVE with prior Classic fallback discriminated union cumulative-pressure edge-vector rationale tie-break and validator findings still resolved. Independent code-quality review started.
+  - at: '2026-08-05T20:47:00-04:00'
+    phase: T1-independent-quality-review
+    status: request-changes
+    evidence: Quality review opened T1-002 because AutoScoringResult and AutoScoringSelection allowed contradictory no-pass or unconfirmed scored states, and T1-003 because stale auto_scored recovery could use a broad underlying-prefix fallback instead of the selected OCC symbol. Shared and API tests, strict typechecks, and lint passed but did not cover these safety invariants. Remediation returned to RED-first implementation.
+  - at: '2026-08-05T20:50:00-04:00'
+    phase: T1-quality-remediation-RED
+    status: RED-confirmed
+    evidence: The compile-contract command exited 1 with exactly three unused ts-expect-error directives because false scored confirmation and both contradictory AutoScoringResult states still compiled. The focused API suite ran 44 passing and 1 intended failing test because stale scored-Auto recovery returned ORDER_RECOVERY_AMBIGUOUS when the selected and a competing same-underlying contract were both present.
+  - at: '2026-08-05T20:55:00-04:00'
+    phase: T1-quality-remediation-GREEN
+    status: green-pending-independent-rereviews
+    evidence: AutoScoringResult is now a noPass-discriminated union, scored confirmation is literal true, and stale auto_scored recovery exact-matches autoScoring.selectedSymbol without casts. Shared runtime tests passed 6/6 with compile contracts, lint, and build; focused API tests passed 45/45 with API lint/build; desktop build and git diff check passed.
+  - at: '2026-08-05T21:00:00-04:00'
+    phase: T1-public-protocol-quality-review
+    status: request-changes
+    evidence: Independent review against the authoritative issue pages opened T1-004. The shared L2 and IV public DTOs used normalized names that the approved spec did not explicitly authorize to supersede issue 45 l2Snapshot/timestamp/depth or issue 47 currentIv/baselineIv/zScore/timestamp. The prior confirmation-state and exact stale-recovery P1s were independently approved.
+  - at: '2026-08-05T21:05:00-04:00'
+    phase: T1-public-protocol-remediation-RED
+    status: RED-confirmed
+    evidence: Strengthened shared tests ran 5/6 with the declaration test failing for missing StreamL2SnapshotMessage. The focused compile-contract command exited 1 because required timestamp currentIv and l2Snapshot names were absent while old book and IV spellings remained accepted, producing unused ts-expect-error directives.
+  - at: '2026-08-05T21:10:00-04:00'
+    phase: T1-public-protocol-remediation-GREEN
+    status: green-pending-independent-rereviews
+    evidence: OrderBookSnapshot now exposes timestamp and depth, the websocket snapshot discriminant is l2Snapshot, and IVAlert exposes currentIv baselineIv zScore and timestamp with all old aliases removed. Shared runtime tests passed 6/6 with compile contracts, lint, and build; API build/lint and trading tests passed 45/45; desktop build and git diff check passed.
+  - at: '2026-08-05T21:15:00-04:00'
+    phase: T1-final-independent-rereviews
+    status: completed
+    evidence: Independent spec and code-quality rereviews both returned APPROVE with no P0/P1. Authoritative L2 and IV names and negative alias tests passed; prior selection confirmation no-pass and exact stale-recovery approvals remained intact. C2 and T1 are complete; T2 RED phase started.
+  - at: '2026-08-05T21:25:00-04:00'
+    phase: T2-desktop-generic-indicators-RED
+    status: RED-confirmed
+    evidence: Focused desktop registry decode keyed-settings pane L2-unavailable all-25-fixture-parity invalid-input and SettingsStore migration tests first failed on the intended missing registry and generic compute modules. Behavior-free typed seams were added only to reach assertion-level RED before formula and persistence implementation.
+  - at: '2026-08-05T21:25:00-04:00'
+    phase: T2-iOS-generic-indicators-RED
+    status: RED-confirmed
+    evidence: Focused xcodebuild failed on the intended missing IndicatorRegistry IndicatorSettingsState validator generic geometry and migration/store APIs. The bundled resource declaration and behavior seams are now being implemented against those failures before UI refactoring.
+  - at: '2026-08-05T21:40:00-04:00'
+    phase: T2-desktop-engine-settings-focused-GREEN
+    status: green-ui-refactor-in-progress
+    evidence: Six focused desktop files passed all 75 tests covering canonical registry decode strict settings including fractional timestamp rejection pane cap L2 unavailable state all 25 shared parity cases legacy engine behavior atomic migration corruption rollback registry UI enumeration and all seven render mappings. Full store chart and trade consumers remain intentionally in refactor before the full suite.
+  - at: '2026-08-05T21:40:00-04:00'
+    phase: T2-iOS-presentation-RED
+    status: RED-confirmed
+    evidence: Focused xcodebuild exited 65 before execution because new presentation tests require missing IndicatorControlCatalog and IndicatorPanePresentation production symbols. Registry and parity implementation had no observed assertion failure before this intended presentation seam RED; minimal generic presentation implementation and live UI refactor started.
+  - at: '2026-08-05T21:50:00-04:00'
+    phase: T2-iOS-engine-settings-presentation-focused-GREEN
+    status: green-live-consumer-refactor-in-progress
+    evidence: Fresh focused iOS run passed 11 of 11 tests across all shared parity cases registry decode validation and generic presentation adapters with zero failures. Only expected simulator localhost connection warnings appeared. Live ChartViewModel SwiftUI settings renderer migration and legacy residue removal continue before the full suite.
+  - at: '2026-08-05T22:05:00-04:00'
+    phase: T2-desktop-full-GREEN
+    status: green-pending-independent-spec-review
+    evidence: Desktop canonical registry keyed settings separate volume rollback-safe idempotent migration strict validation generic engine and all seven live rendering kinds are implemented with old flat manual palette and per-indicator paths removed. Fresh desktop suite passed 54 files and 586 tests; dedicated parity plus TWC passed 54 tests; lint strict TypeScript production build shared tests diff and residue scan passed. Only the existing Vite 735 KB chunk advisory remains.
+  - at: '2026-08-05T22:05:00-04:00'
+    phase: T3-indicators-provider-RED-GREEN
+    status: green-lifecycle-RED-pending
+    evidence: API pure order-book tests first failed on missing indicator and provider modules. Minimal implementations now pass 16 focused tests for validation spread percentile imbalance pressure depletion Webull payload mapping caps fail-closed configuration entitlement instrument and provider-error states. Baseline TS151002 warnings remain; limiter lifecycle gateway tests are next.
+  - at: '2026-08-05T22:15:00-04:00'
+    phase: T2-desktop-independent-spec-review
+    status: request-changes
+    evidence: Review opened T2-001 because VPVR used all loaded candles instead of the visible window, T2-002 because the render boundary did not independently enforce the two-pane cap, and T2-003 because settings persisted before candidate geometry validation. Existing focused/full tests parity lint build and TWC remained green but lacked these live branches; desktop returned to RED-first remediation.
+  - at: '2026-08-05T03:10:00-04:00'
+    phase: T2-iOS-independent-spec-review
+    status: request-changes
+    evidence: >-
+      Review opened T2-004 through T2-008: band and cloud fills were flattened to lines, the engine retained a prohibited per-indicator switch, partial and interrupted V1 migration paths were incomplete, candle validation accepted duplicate or decreasing timestamps and invalid OHLC relationships, and live renderer coverage did not prove all seven mappings. iOS returned to RED-first remediation while the already-green focused and full suites remain insufficient evidence for these missing branches.
+  - at: '2026-08-05T22:25:00-04:00'
+    phase: T2-desktop-spec-remediation-RED-GREEN
+    status: green-pending-independent-rereview
+    evidence: >-
+      New desktop tests first exposed the missing visible-window VPVR integration, unguarded three-subpane render boundary, and pre-persistence geometry validation. The remediation now passes 55 files and 593 tests, dedicated parity and TWC 54 tests, shared contracts 6 tests, lint, strict type checking, production build, diff check, and obsolete-path scan. Only the pre-existing Vite chunk-size advisory remains; independent spec rereview started.
+  - at: '2026-08-05T22:30:00-04:00'
+    phase: T2-desktop-independent-spec-rereview
+    status: approved-pending-quality-review
+    evidence: >-
+      Independent rereview approved T2-001 through T2-003 with no remaining P0/P1: live viewport slicing changes VPVR inputs, the render boundary independently rejects a third subpane with the canonical message, and ChartStore validates all enabled geometry before persistence while preserving prior settings. Reviewer reran 107 focused tests, lint, strict build, production build, and diff check successfully. Separate quality review started.
+  - at: '2026-08-05T22:35:00-04:00'
+    phase: T3-module-rate-lifecycle-RED-GREEN
+    status: green-additional-lifecycle-verification-in-progress
+    evidence: >-
+      Module metadata tests first failed because the Redis lease, Webull depth transport/provider, global limiter, and order-book service were not registered. Missing-Redis, cancellable rate-wait, active-join replay, retryable capability, market-session, exponential retry, NY reset, and no-internal-Webull-retry tests then failed on the corresponding absent behavior. Focused suites now pass with API build and lint: L2 remains disabled and entitlement-unproven by default, blank REDIS_URL fails closed, final unsubscribe cancels a denied rate wait, retries are bounded, and the stock-depth transport makes only one Webull HTTP attempt per distributed grant.
+  - at: '2026-08-05T22:40:00-04:00'
+    phase: T2-iOS-spec-remediation-RED-GREEN
+    status: green-pending-independent-rereview
+    evidence: >-
+      iOS remediation added failing coverage for real Bollinger and Ichimoku fills, registry-executor completeness, partial and interrupted migration with exact MACD fields, timestamp and OHLC validation, and all seven live geometry mappings. Implementation reports 418 of 418 full tests passing, focused indicator and TWC suites passing, 0 serious SwiftLint findings with the same 15 baseline warnings, clean iOS diff check, and no indicator-ID switch residue. Independent rereview started.
+  - at: '2026-08-05T22:45:00-04:00'
+    phase: T2-desktop-independent-quality-review
+    status: request-changes
+    evidence: >-
+      Quality review opened T2-009 through T2-012 because unrelated settings controls and resets disappeared, valid V1 settings could be overwritten when only the display record was corrupt, parameter changes did not invalidate historical chart caches, and generic subpanes lost fixed ranges and guide lines. It also opened nonblocking T2-013 and T2-014 for semantic colors and renderer-level test depth. Desktop returned to RED-first remediation despite 593 green tests because those tests did not exercise the regressed lifecycle.
+  - at: '2026-08-05T23:00:00-04:00'
+    phase: T2-iOS-second-spec-remediation-RED-GREEN
+    status: independently-spec-approved-quality-review-started
+    evidence: >-
+      Rereview first found that non-finite volume could not be represented by the candle model and that an enabled unavailable Spread silently lost its multi-line presentation. RED-first remediation changed candle volume to Double with finite validation and preserved descriptor-declared unavailable geometry through three empty lines plus visible No L2 data. Focused tests passed 66, the full iOS suite passed 419, diff check passed, and final independent spec rereview returned APPROVE with the documented 15 baseline SwiftLint warnings only. Independent quality review started.
+  - at: '2026-08-05T23:05:00-04:00'
+    phase: T2-desktop-quality-remediation-RED-GREEN
+    status: green-pending-independent-spec-and-quality-rereviews
+    evidence: >-
+      RED tests exposed missing settings controls, interrupted V1 preservation, parameter-only and equal-length timestamp cache invalidation, missing oscillator guides/ranges, theme-token mapping, and real lifecycle execution. Remediation reports 50 focused tests and the full 57-file 611-test suite passing with desktop lint, strict TypeScript/build, shared contracts, and diff check. Only the existing Vite chunk-size advisory remains; independent rereview started and must explicitly verify registry-keyed executor dispatch.
+  - at: '2026-08-05T23:10:00-04:00'
+    phase: T3-api-L2-full-GREEN
+    status: green-pending-independent-review-and-external-integration-gates
+    evidence: >-
+      The complete API run passed 60 of 61 suites and 881 tests with 2 environment-gated skips; focused L2 tests passed 43, build and lint passed, and the real Redis integration suite was skipped because REDIS_URL is unavailable. Entitlement proof and a live Webull capability request also remain external gates; L2 therefore stays disabled and fail-closed. Independent spec review is in progress.
+  - at: '2026-08-05T23:15:00-04:00'
+    phase: T5-atm-IV-calculation-snapshot-detector-RED-GREEN
+    status: green-persistence-and-delivery-in-progress
+    evidence: >-
+      Focused tests first failed on the missing ATM-at-spot calculator and IV detector. Exact paired mean, order-independent interpolation, no extrapolation, missing-leg and non-finite rejection now pass; calculation version is v2 and nullable indexed atmIv persistence is generated and Prisma-validated. Seven pure detector cases covering prior-only median/MAD, signed zero-MAD clamp, direction streak, cooldown, gap/reset, monotonic processing, and RTH pass with API build and lint. Persisted per-user state, restart/isolation, delivery, and client banners remain in progress.
+  - at: '2026-08-05T23:20:00-04:00'
+    phase: T3-api-L2-independent-review-remediation
+    status: green-pending-independent-rereview-and-external-gates
+    evidence: >-
+      Independent review opened seven P1 lifecycle, freshness, timeout, metric, per-client-cap, and RTH-history gaps. RED-first remediation now anchors freshness to the provider timestamp, resets every active state on the New York boundary, propagates abort through HTTP, maps real request timeouts, exposes subscriber/rate/decoder/cleanup metrics and logs, caps each socket at 50 unique symbols, and filters history to official RTH. Focused L2 passed 94; full API reported 964 passed with only the separately corrected v1-to-v2 e2e expectation and three environment skips. Redis and live entitlement remain external.
+  - at: '2026-08-05T23:25:00-04:00'
+    phase: T2-desktop-second-quality-remediation
+    status: green-pending-independent-spec-and-quality-rereviews
+    evidence: >-
+      Review found empty/future VPVR viewport fallback, missing vertical-axis repaint, shallow decoration tests, and hard-coded semantic colors. RED-first remediation added discriminated uninitialized/empty/range viewport state, stable subscriptions, explicit coalesced vertical-transform repaint, canonical theme-resolved fill/profile colors, and mounted cleanup tests. Focused tests passed 55, mounted lifecycle passed 3, full desktop passed 621, lint/type/build/shared checks and diff check passed; only the baseline Vite chunk advisory remains.
+  - at: '2026-08-05T23:30:00-04:00'
+    phase: T2-iOS-independent-rereview
+    status: request-changes-remediation-started
+    evidence: >-
+      Independent rereview approved all prior presentation, renderer, registry, migration, unavailable-state, finite-volume, and two-pane fixes but opened T2-021 because settings persisted before current-candle geometry validation and T2-022 because successful default initialization cleared a corrupt-settings load error. Focused 65 tests and scoped strict SwiftLint passed, but the P1 invariant blocks approval; RED-first remediation started.
+  - at: '2026-08-05T23:36:00-04:00'
+    phase: T2-iOS-quality-remediation-RED
+    status: RED-confirmed
+    evidence: >-
+      The focused IndicatorPresentationTests run executed 11 tests and failed only the two new regressions with three assertions: invalid current candle geometry changed both in-memory and persisted settings, and successful default snapshot construction erased the corrupt-settings load error. Production remediation has not yet been applied.
+  - at: '2026-08-05T23:38:00-04:00'
+    phase: T2-iOS-quality-remediation-focused-GREEN
+    status: green-broad-validation-in-progress
+    evidence: >-
+      Candidate geometry is now validated before storage or published-state mutation, and the already-validated settings and snapshot are published only after persistence succeeds. Initialization preserves any corrupt-load error across fallback snapshot construction. All 11 focused IndicatorPresentationTests pass, including both new regressions; only known simulator localhost and metadata diagnostics appeared.
+  - at: '2026-08-05T23:39:00-04:00'
+    phase: T2-iOS-quality-remediation-full-validation
+    status: blocked-by-unrelated-concurrent-work
+    evidence: >-
+      The full xcodebuild reached test-target compilation but stopped on the concurrently added AutoContractScorerTests because AutoScoringRequest, AutoScoringPreferences, AutoScoringCandidate, AutoScoringContributions, AutoScoringExclusionReason, AutoContractScorer, and AutoScoringExclusion do not yet exist in the iOS production target. No indicator-remediation compile or test failure appeared; focused indicator validation remains green and full validation must be retried after the unrelated Auto scorer slice lands.
+  - at: '2026-08-05T23:42:00-04:00'
+    phase: T2-iOS-quality-remediation-broad-validation-retry
+    status: green-for-T2-pending-unrelated-suite-fix-and-independent-rereview
+    evidence: >-
+      After the concurrent Auto scorer types landed, the focused IndicatorPresentationTests again passed 11 of 11, including byte-for-byte preservation of persisted settings. The complete iOS suite executed 422 tests: 421 passed and the sole failure was the unrelated concurrent TradeViewModelArmTests testArm_autoOTM_encodesServerSideSelection expectation. Strict lint reports 0 violations in the two T2 remediation files and the documented baseline 15 violations globally. Git diff check and paired-plan YAML parse pass.
+  - at: '2026-08-05T23:44:00-04:00'
+    phase: T2-iOS-quality-remediation-full-GREEN
+    status: green-pending-independent-rereview
+    evidence: >-
+      The unrelated Auto OTM regression was corrected by its owner and its focused test passed. A fresh complete iOS rerun then passed all 421 tests with zero failures. T2 focused tests remain 11 of 11 green, scoped strict lint remains zero, global strict lint remains at the documented 15 baseline violations, and only known simulator localhost plus metadata diagnostics remain.
+  - at: '2026-08-05T23:35:00-04:00'
+    phase: T5-T8-api-persistence-delivery-scoring-RED-GREEN
+    status: green-pending-independent-reviews-client-work-and-database-integration
+    evidence: >-
+      Persisted per-user IV preferences/state, monotonic capture integration, authenticated configure/fan-out, and detector isolation are green. Auto scorer fixtures, authenticated active-broker-plus-analytics assembly, versioned optimistic preferences, route validation, and fresh pre-acceptance reranking are green. Shared and API Classic Auto now expose no offset and always resolve exactly one strike OTM; RED compile/DTO tests failed before removal and the resulting shared suite plus 73 focused API tests and strict builds pass. Desktop and iOS scoring/alert consumers remain in progress.
+  - at: '2026-08-05T22:29:00-04:00'
+    phase: T2-desktop-final-boundary-remediation-RED-GREEN
+    status: green-pending-independent-rereview
+    evidence: >-
+      RED produced ten intended assertions for unavailable-L2 pane overflow, pointercancel blur and unmount drag leakage, pure semantic histogram colors, and mounted MACD plus L2 histogram data; the live-L2 catalog separately failed two intended missing-entry-point assertions. Minimal GREEN passes 42 focused tests and the final complete desktop suite passes 646 tests across 66 files after concurrent IV work settled. Desktop lint and strict TypeScript production build pass with only the existing Vite chunk-size advisory; shared registry runtime tests pass 6 of 6 with strict compile contracts lint and build.
+  - at: '2026-08-05T22:33:00-04:00'
+    phase: T2-desktop-post-green-concurrent-suite-retry
+    status: T2-green-full-suite-blocked-by-unrelated-concurrent-work
+    evidence: >-
+      A later fresh complete desktop retry picked up additional concurrent socket work and passed 652 of 653 tests; the sole failure is QuoteSocket.l2Iv explicit disconnect retaining ivAlertConfiguration instead of clearing it. The prohibited socket and IV scope was not changed by T2. The 42 focused T2 tests, scoped ESLint, strict desktop build, shared 6-of-6 runtime and compile contracts, formatting, YAML parse, residue scan, and diff check remain green.
+  - at: '2026-08-05T22:34:00-04:00'
+    phase: T2-desktop-final-suite-after-socket-settled
+    status: T2-and-full-tests-green-global-static-checks-blocked-by-unrelated-concurrent-work
+    evidence: >-
+      The owning socket remediation settled and a fresh complete desktop run passed all 654 tests across 66 files. Global lint is temporarily blocked only by concurrent TradePanel nested-ternary work, and strict build is temporarily blocked only by concurrent ChainStore Auto discriminated-contract test data. Both are prohibited T2 scope; T2 scoped lint and 42 focused tests remain green and the last settled strict desktop build passed.
+  - at: '2026-08-05T22:35:00-04:00'
+    phase: T2-desktop-handoff-under-concurrent-trade-work
+    status: T2-green-one-unrelated-full-suite-failure
+    evidence: >-
+      Global desktop lint and strict production build returned to green after the concurrent Trade and Auto static errors were repaired. A subsequent runtime retry picked up another concurrent DesktopTradeTicket expectation before its matching strategy controls landed and now passes 653 of 654 tests. The sole failure is outside T2 and is owned by the active Trade implementer; T2 remains focused-green and does not modify that prohibited scope.
+
+live_findings:
+  - id: PLAN-001
+    severity: P1
+    description: Initial umbrella artifacts left domain machines and several normative branches under-specified, including terminal-state contradictions, active-state L2 teardown/repeat/reset, distributed rate authority, L2 formulas, detector boundaries, Auto numeric scoring/freshness/Classic split, indicator default branch, and Auto Prisma shape.
+    file: docs/specs/2026-08-05-issues-44-48-spec.md and paired YAML artifacts
+    symbol_or_call_path: normative requirements, state_model, transitions, locked_domain_decisions
+    reproduction_steps: Compare the first artifact draft against the approved requirements and enumerate undeclared triggers and ambiguous calculations.
+    impact_to_intended_output_or_invariants: Implementers could produce divergent formulas, a cross-replica rate violation, incomplete teardown, stale alerts, or route acknowledged Classic fallback through scored reranking.
+    minimal_fix: Define four independent machines plus delivery gate, declare triggers, make lifecycle paths exhaustive, select Redis global limiting, lock formulas/defaults/boundaries/freshness/persistence, and update plan tests.
+    blocker: true
+    remediation_status: superseded-by-PLAN-002-after-independent-rereview
+  - id: PLAN-002
+    severity: P1
+    description: Independent re-review found that recurring indicator and IV states, L2 denied-slot/retry/partial-unsubscribe behavior, new-indicator formulas/defaults, detector timing boundaries, scorer input and preference bounds, Auto no-pass retry, and clean-checkout verification commands were still incomplete.
+    file: docs/specs/2026-08-05-issues-44-48-spec.md, docs/logic-maps/2026-08-05-issues-44-48-logic-map.yaml, and docs/plans/2026-08-05-issues-44-48.yaml
+    symbol_or_call_path: normative indicator contract, state_model and transitions, T1/T2/T9 commands
+    reproduction_steps: Run the second independent review, execute the stated shared-types test command, and attempt clean iOS generation without a pre-generated environment file.
+    impact_to_intended_output_or_invariants: Cross-language fixtures could encode different algorithms, recurring streams could dead-end, retries could stop permanently, and required checks could fail before exercising the implementation.
+    minimal_fix: Lock exact formulas/defaults/bounds/timing, add recurring and retry transitions, separate partial and final unsubscribe, add a Node shared-types test runner, bootstrap environment before XcodeGen, and pin the simulator id.
+    blocker: true
+    remediation_status: superseded-by-PLAN-003-after-final-review
+  - id: PLAN-003
+    severity: P1
+    description: Final artifact review found active-state L2 joins and stale retry were incomplete, several IV suppression branches incorrectly shared persistence semantics and configuration was initially unreachable, Auto required a provider mid and rejected the whole set for one malformed candidate, optimistic-concurrency test scope was absent, and the flow chart omitted its required template section.
+    file: docs/flow-charts/2026-08-05-issues-44-48-flow-chart.yaml, docs/logic-maps/2026-08-05-issues-44-48-logic-map.yaml, and docs/plans/2026-08-05-issues-44-48.yaml
+    symbol_or_call_path: flow_chart, L2-1/L2-5/L2-14*, IV-2/IV-4*, AUTO-2, and T7
+    reproduction_steps: Trace new subscriber, stale retry, configuration, invalid capture, and malformed-candidate paths from every live state and compare the flow artifact with its event-driven template.
+    impact_to_intended_output_or_invariants: A live L2 stream could reject later subscribers or stop permanently, detector state could mutate on ignored captures, users could not configure alerts before suppression, valid Auto candidates could be hidden, and stale preference writes could silently win.
+    minimal_fix: Add per-active-state subscriber joins and scheduled retry, split IV mutation branches and configuration self-transitions, derive mid from bid/ask and exclude malformed candidates independently, add stale-write conflict tests, and restore the flow_chart template section.
+    blocker: true
+    remediation_status: superseded-by-PLAN-004-after-independent-confirmation
+  - id: PLAN-004
+    severity: P1
+    description: Independent confirmation found that AUTO-2 still guarded as if every candidate passed, successful L2 fetches did not explicitly arm refresh and stale timers, terminal L2 teardown could retain subscribers or leave failed cleanup in an unscheduled state, and the high-level IV flow still conflated ignored captures with state-mutating suppression.
+    file: docs/flow-charts/2026-08-05-issues-44-48-flow-chart.yaml and docs/logic-maps/2026-08-05-issues-44-48-logic-map.yaml
+    symbol_or_call_path: T47G/T47H, L2-2/L2-4/L2-7/L2-8/L2-11, and AUTO-2
+    reproduction_steps: Trace a mixed valid-invalid Auto set, a successful L2 response, a terminal failure with active subscribers, a failed teardown cleanup, and each ignored or suppressed IV capture.
+    impact_to_intended_output_or_invariants: Valid Auto candidates could be hidden, L2 polling could stop after one success, terminal failures could leak registrations or deadlock teardown, and ignored IV captures could incorrectly mutate persisted detector state.
+    minimal_fix: Validate candidates independently inside AUTO-2, arm both L2 timers on success, atomically clear terminal registrations and retry teardown in place, and split ignored versus mutating IV suppression in the target flow.
+    blocker: true
+    remediation_status: remediated-and-independently-approved
+  - id: T1-001
+    severity: P1
+    description: T1 passed its initial tests but the spec review found an unrepresentable acknowledged Classic fallback, incorrect cumulative-pressure golden math, insufficient indicator ATM-IV and Auto edge/rationale coverage, and shallow fixture/compile contract validation.
+    file: packages/shared-types/src/index.ts, packages/shared-types/fixtures/indicator-parity-v1.json, packages/shared-types/fixtures/auto-scoring-v1.json, and packages/shared-types/test/contracts.test.mjs
+    symbol_or_call_path: OrderSelection and AutoScoringSelection, balanced-book cumulativePressure, indicatorCases/atmIvCases/Auto cases, fixture validators and declaration checks
+    reproduction_steps: Compare public selection branches and golden cases against the approved normative branches; include the current balanced book after priorDepthHistory when evaluating cumulative pressure.
+    impact_to_intended_output_or_invariants: The fallback acknowledgment could not reach its Classic request, clients could implement a wrong pressure formula, and three runtimes could agree with shallow tests while diverging on required edge behavior or rationale.
+    minimal_fix: Use a discriminated selection union with Classic-owned fallback acknowledgment, correct and label prior-only history, add required edge vectors and full Auto rationale/tie/filter cases, and add deep runtime plus compile-time contract validation. Preserve otmOffset only as a staged auto_otm field until coordinated T8 deletion across all consumers.
+    blocker: true
+    remediation_status: remediated-and-independently-approved
+  - id: T1-002
+    severity: P1
+    description: AutoScoringResult and AutoScoringSelection permit contradictory no-pass or unconfirmed scored-order states.
+    file: packages/shared-types/src/index.ts and packages/shared-types/test/contracts.compile.ts
+    symbol_or_call_path: AutoScoringResult and AutoScoringSelection
+    reproduction_steps: Compile a scored selection with scoredConfirmationAccepted false or a result whose noPass flag contradicts its selected symbol and rankings.
+    impact_to_intended_output_or_invariants: A scored order could cross the shared boundary without the mandatory explicit confirmation, and consumers could disagree about whether a ranking passed.
+    minimal_fix: Make the result a noPass-discriminated union, require scoredConfirmationAccepted true, and add negative compile-contract tests.
+    blocker: true
+    remediation_status: remediated-and-independently-approved
+  - id: T1-003
+    severity: P1
+    description: Stale-order recovery does not derive the exact expected OCC symbol from auto_scored selection and can fall back to a same-underlying prefix match.
+    file: apps/api/src/trading/trading.service.ts and apps/api/src/trading/trading.service.spec.ts
+    symbol_or_call_path: TradingService.recoverStalePlacement
+    reproduction_steps: Recover a stale auto_scored placement when recent history contains a different same-underlying option with matching side quantity and order type.
+    impact_to_intended_output_or_invariants: Recovery could attach an unrelated broker order to the interrupted request.
+    minimal_fix: Match autoScoring.selectedSymbol exactly and add a competing same-underlying recovery test.
+    blocker: true
+    remediation_status: remediated-and-independently-approved
+  - id: T1-004
+    severity: P1
+    description: Public L2 and IV alert contracts use wire names that diverge from the authoritative issue contracts.
+    file: packages/shared-types/src/index.ts and packages/shared-types/test/contracts.compile.ts
+    symbol_or_call_path: OrderBookSnapshot, StreamL2DataMessage, IVAlert, and StreamIVAlertMessage
+    reproduction_steps: Compare the public shared declarations with issue 45 l2Snapshot timestamp depth and issue 47 currentIv baselineIv zScore timestamp.
+    impact_to_intended_output_or_invariants: API, desktop, and iOS could implement a mutually consistent but source-incompatible public protocol, forcing later breaking changes.
+    minimal_fix: Rename the public DTO fields and message discriminant to the required issue spellings, retain only necessary distinct internal timestamps, add positive and negative compile/runtime payload tests, and add no compatibility aliases.
+    blocker: true
+    remediation_status: remediated-and-independently-approved
+  - id: T2-001
+    severity: P1
+    description: Live VPVR geometry is computed from all loaded candles rather than the currently visible chart window.
+    file: apps/desktop/src/features/chart/ChartView.tsx and CandleChart viewport integration
+    symbol_or_call_path: ChartView indicatorModels to computeIndicatorGeometry for vpvr
+    reproduction_steps: Change the chart viewport while the loaded candle set remains fixed and observe unchanged VPVR rows.
+    impact_to_intended_output_or_invariants: The visible-range volume profile can describe off-screen history and mislead the trader.
+    minimal_fix: Feed visible-window candles into VPVR and add a viewport-change live test proving recomputation.
+    blocker: true
+    remediation_status: remediated-and-independently-spec-approved
+  - id: T2-002
+    severity: P1
+    description: The desktop render boundary can render more than two subpanes if invalid state bypasses the mutation validator.
+    file: apps/desktop/src/features/chart/ChartView.tsx and indicatorRegistry.ts
+    symbol_or_call_path: enabledSubPaneIds and subpaneModels
+    reproduction_steps: Render ChartView with three enabled subpane entries in an otherwise keyed state.
+    impact_to_intended_output_or_invariants: Corrupt or future persisted state can violate bounded chart layout despite mutation-time checks.
+    minimal_fix: Independently cap/reject at render with the canonical pane-limit message and add a live test.
+    blocker: true
+    remediation_status: remediated-and-independently-spec-approved
+  - id: T2-003
+    severity: P1
+    description: Desktop settings persistence validates only schema and pane count before writing, while geometry is validated later during render.
+    file: apps/desktop/src/features/chart/ChartStore.ts and ChartView.tsx
+    symbol_or_call_path: ChartStore.setIndicatorSettings then ChartView indicator computation
+    reproduction_steps: Submit schema-valid settings whose enabled geometry calculation produces invalid or non-finite output.
+    impact_to_intended_output_or_invariants: Invalid settings can replace the last valid persisted state and blank all indicator rendering.
+    minimal_fix: Validate all enabled candidate geometry against current candles before persistence and preserve the last valid settings/render on failure.
+    blocker: true
+    remediation_status: remediated-and-independently-spec-approved
+  - id: T2-004
+    severity: P1
+    description: iOS band and cloud outputs are flattened into line datasets instead of rendering their required filled geometry.
+    file: apps/ios/0dteTrader/Features/Chart/ChartViewModel+Indicators.swift and apps/ios/0dteTrader/Features/Chart/CandleChartRepresentable.swift
+    symbol_or_call_path: indicator presentation mapping and chart dataset construction
+    reproduction_steps: Enable Bollinger Bands or Ichimoku and inspect the live chart datasets; no filled band or cloud dataset reaches the renderer.
+    impact_to_intended_output_or_invariants: Two approved visual mappings are absent even though their calculations pass.
+    minimal_fix: Preserve fill geometry through presentation and construct actual filled renderer datasets with live tests.
+    blocker: true
+    remediation_status: remediated-and-independently-spec-approved
+  - id: T2-005
+    severity: P1
+    description: iOS IndicatorEngine retains a large per-indicator switch instead of registry-driven generic dispatch.
+    file: apps/ios/0dteTrader/Features/Chart/IndicatorEngine.swift
+    symbol_or_call_path: indicatorId switch
+    reproduction_steps: Inspect the engine dispatch path and add a registry entry without editing the switch.
+    impact_to_intended_output_or_invariants: The canonical registry is not the executable source of truth and future indicators require manual runtime edits.
+    minimal_fix: Replace the switch with a registry-keyed executor table or equivalent generic dispatch and test registry completeness.
+    blocker: true
+    remediation_status: remediated-and-independently-spec-approved
+  - id: T2-006
+    severity: P1
+    description: iOS legacy settings migration requires every old field, omits exact MACD period mapping, and can retain a leftover legacy key after interrupted migration.
+    file: apps/ios/0dteTrader/Core/Storage/SettingsStore.swift
+    symbol_or_call_path: indicator settings V1 migration
+    reproduction_steps: Migrate partial old settings, non-default MACD periods, and a store containing both valid V1 data and the old key.
+    impact_to_intended_output_or_invariants: Valid user preferences can be dropped or duplicated and migration is not fully atomic or idempotent.
+    minimal_fix: Default missing legacy fields, map all MACD periods exactly, remove residue after validated V1 recovery, and add focused tests.
+    blocker: true
+    remediation_status: remediated-and-independently-spec-approved
+  - id: T2-007
+    severity: P1
+    description: iOS candle validation does not reject duplicate or decreasing timestamps and invalid OHLC relationships.
+    file: apps/ios/0dteTrader/Features/Chart/IndicatorGeometry.swift
+    symbol_or_call_path: candle input validation
+    reproduction_steps: Submit duplicate-time, reverse-time, high-below-body, or low-above-body candles.
+    impact_to_intended_output_or_invariants: Invalid input can enter geometry calculations and replace the last valid render.
+    minimal_fix: Enforce strictly increasing timestamps and finite coherent OHLC values before calculation with edge tests.
+    blocker: true
+    remediation_status: remediated-and-independently-spec-approved
+  - id: T2-008
+    severity: P1
+    description: iOS tests do not exercise all seven intended indicator mappings through the live renderer boundary.
+    file: apps/ios/0dteTraderTests/IndicatorPresentationTests.swift and chart renderer tests
+    symbol_or_call_path: registry output to CandleChartRepresentable
+    reproduction_steps: Compare the seven registry render modes with live renderer assertions and observe missing fill and mapping branches.
+    impact_to_intended_output_or_invariants: Fixture parity can remain green while production presentation silently drops an indicator mode.
+    minimal_fix: Add live renderer-boundary coverage for all seven mappings including filled band and cloud geometry.
+    blocker: true
+    remediation_status: remediated-and-independently-spec-approved
+  - id: T2-009
+    severity: P1
+    description: The desktop indicator settings refactor removed unrelated options settings controls and reset actions.
+    file: apps/desktop/src/features/chart/IndicatorSettingsView.tsx
+    symbol_or_call_path: IndicatorSettingsBody
+    reproduction_steps: Open settings and attempt to edit profileStrikeCount refreshSeconds showDiagnostics bracketDrag or defaultQuantity or reset indicator/options settings.
+    impact_to_intended_output_or_invariants: Existing user-facing preferences become read-only or unreachable as an unrelated regression.
+    minimal_fix: Restore all prior controls and reset actions alongside the registry-generated indicator controls and add live tests.
+    blocker: true
+    remediation_status: remediated-green-pending-independent-rereviews
+  - id: T2-010
+    severity: P1
+    description: Desktop interrupted migration can overwrite a valid V1 keyed record when the separate display record is missing or corrupt and legacy residue remains.
+    file: apps/desktop/src/core/storage/SettingsStore.ts
+    symbol_or_call_path: ensureIndicatorMigration
+    reproduction_steps: Store valid keyed V1 settings plus a legacy record and omit or corrupt only the chart display record.
+    impact_to_intended_output_or_invariants: A valid migrated preference set can be replaced by stale legacy values instead of repairing only the display record.
+    minimal_fix: Preserve validated V1 keyed settings, independently repair or default display state, remove residue, and add interrupted idempotency coverage.
+    blocker: true
+    remediation_status: remediated-green-pending-independent-rereviews
+  - id: T2-011
+    severity: P1
+    description: Desktop chart caches invalidate historical datasets only for id length or first-timestamp changes, not for parameter-driven value changes.
+    file: apps/desktop/src/features/chart/CandleChart.tsx and apps/desktop/src/features/chart/IndicatorPane.tsx
+    symbol_or_call_path: setData cache guards
+    reproduction_steps: Change Bollinger Keltner or MACD parameters while keeping series IDs lengths and first timestamps stable.
+    impact_to_intended_output_or_invariants: Historical lines remain stale while newest values and fills update, producing internally inconsistent charts.
+    minimal_fix: Include stable series-value or revision identity in invalidation and add renderer lifecycle tests proving full historical repaint.
+    blocker: true
+    remediation_status: remediated-green-pending-independent-rereviews
+  - id: T2-012
+    severity: P1
+    description: Generic desktop subpane rendering stopped passing guide lines and fixed y-ranges for bounded oscillators.
+    file: apps/desktop/src/features/chart/ChartView.tsx and apps/desktop/src/features/chart/IndicatorPane.tsx
+    symbol_or_call_path: generic subpane model to IndicatorPane props
+    reproduction_steps: Render RSI Stochastic or Williams percent R through ChartView and inspect scale and guides.
+    impact_to_intended_output_or_invariants: Established thresholds disappear and oscillator scales auto-fit misleadingly.
+    minimal_fix: Carry registry presentation guideLines and yRange through the generic model and test each bounded oscillator.
+    blocker: true
+    remediation_status: remediated-green-pending-independent-rereviews
+  - id: T2-013
+    severity: P2
+    description: Desktop styleColor hashes semantic tokens into arbitrary hues with weak distinction and theme drift.
+    file: apps/desktop/src/features/chart/indicatorRenderModel.ts
+    symbol_or_call_path: styleColor
+    reproduction_steps: Compare Ichimoku span and Stochastic line colors in the active theme.
+    impact_to_intended_output_or_invariants: Related lines can be hard to distinguish and do not follow design tokens.
+    minimal_fix: Resolve semantic color roles through the chart theme palette with contrast assertions.
+    blocker: false
+    remediation_status: remediated-green-pending-independent-rereviews
+  - id: T2-014
+    severity: P2
+    description: Desktop rendering tests mock the real chart boundary and miss parameter repaint fill and profile lifecycle regressions.
+    file: apps/desktop/src/features/chart/ChartView.test.tsx and apps/desktop/src/features/chart/CandleChart.test.ts
+    symbol_or_call_path: renderer test harness
+    reproduction_steps: Inspect tests for a real setData lifecycle after parameter-only value changes.
+    impact_to_intended_output_or_invariants: Pure mappings can pass while live chart caches or drawing layers remain stale.
+    minimal_fix: Add focused renderer-boundary lifecycle coverage without broad brittle snapshots.
+    blocker: false
+    remediation_status: remediated-green-pending-independent-rereviews
+  - id: T2-015
+    severity: P1
+    description: The iOS candle model used integer volume, so strict geometry validation could not represent and explicitly reject positive infinity.
+    file: apps/ios/0dteTrader/Features/Chart/IndicatorGeometry.swift and candle transport/persistence adapters
+    symbol_or_call_path: Candle.volume and validateCandles
+    reproduction_steps: Construct a candle with positive-infinite volume and attempt indicator geometry calculation.
+    impact_to_intended_output_or_invariants: The strict finite-OHLCV boundary was incomplete and transport/storage conversions could hide invalid numeric input.
+    minimal_fix: Represent calculation volume as Double, keep DTO conversion typed, reject non-finite values at calculation and persistence boundaries, and retain integer JSON compatibility.
+    blocker: true
+    remediation_status: remediated-and-independently-spec-approved
+  - id: T2-016
+    severity: P1
+    description: A persisted enabled unavailable Spread lost its descriptor-declared multi-line geometry and never rendered the required No L2 data pane.
+    file: apps/ios/0dteTrader/Features/Chart/ChartViewModel+Indicators.swift and IndicatorPresentation.swift
+    symbol_or_call_path: unavailable indicator geometry to pane presentation
+    reproduction_steps: Load persisted enabled Spread while no L2 snapshot is available and inspect the chart panes.
+    impact_to_intended_output_or_invariants: The enabled indicator disappeared silently instead of exposing its fail-closed unavailable state.
+    minimal_fix: Preserve registry geometry, construct all descriptor-declared empty series, and render the visible No L2 data state.
+    blocker: true
+    remediation_status: remediated-and-independently-spec-approved
+  - id: T2-017
+    severity: P1
+    description: Fully blank valid desktop viewports fell back to all loaded candles and transient candle updates cleared VPVR range state.
+    file: apps/desktop/src/features/chart/candleViewport.ts and ChartStore.ts
+    symbol_or_call_path: visible candle viewport normalization and VPVR input selection
+    reproduction_steps: Move the chart completely before or after loaded candles, then append a candle while retaining the logical range.
+    impact_to_intended_output_or_invariants: VPVR could present off-screen history as visible data or flash a full-history profile.
+    minimal_fix: Use discriminated uninitialized empty and range states and retain a single range subscription across candle updates.
+    blocker: true
+    remediation_status: remediated-green-pending-independent-rereviews
+  - id: T2-018
+    severity: P1
+    description: Desktop canvas fills clouds and VPVR did not repaint when the user changed only the vertical price transform.
+    file: apps/desktop/src/features/chart/IndicatorDecorationLayer.tsx and chartRepaintSignal.ts
+    symbol_or_call_path: lightweight chart price-axis transform to canvas decoration repaint
+    reproduction_steps: Drag the price axis with enabled Bollinger Ichimoku or VPVR geometry and observe stale overlay pixels.
+    impact_to_intended_output_or_invariants: Decorations could become visually detached from the underlying price scale.
+    minimal_fix: Publish a vertical-transform signal and subscribe with requestAnimationFrame coalescing plus complete cleanup.
+    blocker: true
+    remediation_status: remediated-green-pending-independent-rereviews
+  - id: T2-019
+    severity: P2
+    description: Desktop decoration lifecycle tests did not directly prove vertical repaint and cleanup behavior.
+    file: apps/desktop/src/features/chart/IndicatorDecorationLayer.lifecycle.test.tsx
+    symbol_or_call_path: mounted canvas decoration lifecycle
+    reproduction_steps: Inspect the earlier renderer suite for an actual mounted transform notification and unsubscription assertion.
+    impact_to_intended_output_or_invariants: Overlay repaint or listener leaks could regress behind pure mapping tests.
+    minimal_fix: Add mounted signal repaint request coalescing and teardown assertions.
+    blocker: false
+    remediation_status: remediated-green-pending-independent-rereviews
+  - id: T2-020
+    severity: P2
+    description: Desktop fill and profile decorations ignored canonical semantic style metadata and duplicated hard-coded colors.
+    file: apps/desktop/src/features/chart/indicatorRenderModel.ts and IndicatorDecorationLayer.tsx
+    symbol_or_call_path: registry style role to canvas color and opacity
+    reproduction_steps: Compare active theme tokens with Bollinger Ichimoku and VPVR canvas colors.
+    impact_to_intended_output_or_invariants: Theme changes could produce inconsistent or unreadable decoration colors.
+    minimal_fix: Carry canonical semantic roles through render models and resolve them once through the chart theme.
+    blocker: false
+    remediation_status: remediated-green-pending-independent-rereviews
+  - id: T2-021
+    severity: P1
+    description: iOS indicator setting mutations persisted before validation against the current candle input and computed output.
+    file: apps/ios/0dteTrader/Features/Chart/ChartViewModel.swift
+    symbol_or_call_path: ChartViewModel.applyIndicatorSettings
+    reproduction_steps: Load invalid OHLC candles then toggle an indicator and inspect in-memory and UserDefaults settings.
+    impact_to_intended_output_or_invariants: A rejected render could still replace the last valid persisted settings.
+    minimal_fix: Build and validate the candidate render snapshot before any state or storage mutation and test persistence remains unchanged on failure.
+    blocker: true
+    remediation_status: remediated-green-pending-independent-rereview
+  - id: T2-022
+    severity: P2
+    description: A successful default iOS render during initialization cleared the visible corrupt-settings load error.
+    file: apps/ios/0dteTrader/Features/Chart/ChartViewModel.swift
+    symbol_or_call_path: initialization and refreshIndicatorSnapshot error lifecycle
+    reproduction_steps: Initialize with corrupt persisted indicator settings and inspect indicatorErrorMessage after the default render refresh.
+    impact_to_intended_output_or_invariants: The fallback occurs silently and users cannot distinguish corruption from a normal default.
+    minimal_fix: Preserve the load error across default initialization and add a focused regression test.
+    blocker: false
+    remediation_status: remediated-green-pending-independent-rereview
+  - id: T2-023
+    severity: P1
+    description: Unavailable desktop L2 pane cards are rebuilt outside the canonical render-boundary pane-limit rejection.
+    file: apps/desktop/src/features/chart/ChartView.tsx and ChartView.test.tsx
+    symbol_or_call_path: indicatorModels and unavailableL2Panes
+    reproduction_steps: Render corrupt keyed settings with three enabled L2 subpanes while L2 is unavailable.
+    impact_to_intended_output_or_invariants: The canonical warning is shown but three unavailable pane cards still violate the two-pane layout invariant.
+    minimal_fix: Derive available and unavailable subpanes through one rejected-or-renderable boundary and add a three-unavailable-L2 live test.
+    blocker: true
+    remediation_status: remediated-green-pending-independent-rereview
+  - id: T2-024
+    severity: P1
+    description: Available desktop L2 geometry bypasses the exhaustive executor registry through a separate indicator-id switch.
+    file: apps/desktop/src/features/chart/ChartView.tsx and indicatorExecutorRegistry.test.ts
+    symbol_or_call_path: l2IndicatorGeometry
+    reproduction_steps: Add or change an L2 descriptor while leaving the live switch unchanged; executor completeness stays green but the live route throws or mis-maps.
+    impact_to_intended_output_or_invariants: The canonical registry is not the executable source of truth for live L2 rendering.
+    minimal_fix: Replace the branch and switch with an exhaustive typed live-L2 executor catalog and test completeness plus every mapping.
+    blocker: true
+    remediation_status: remediated-green-pending-independent-rereview
+  - id: T2-025
+    severity: P2
+    description: Active vertical-axis drag window listeners survive unmount and lack pointer-cancel and blur cleanup.
+    file: apps/desktop/src/features/chart/FloatingAxes.tsx and FloatingAxes.lifecycle.test.tsx
+    symbol_or_call_path: onPointerDown active drag lifecycle
+    reproduction_steps: Start an axis drag, unmount without pointerup, then dispatch pointermove.
+    impact_to_intended_output_or_invariants: A stale chart and repaint callback can execute after teardown.
+    minimal_fix: Centralize active-drag cleanup for pointerup pointercancel blur and effect teardown and add interrupted-drag coverage.
+    blocker: false
+    remediation_status: remediated-green-pending-independent-rereview
+  - id: T2-026
+    severity: P2
+    description: Desktop histogram render models discard canonical series style tokens and hard-code positive and negative colors.
+    file: apps/desktop/src/features/chart/indicatorRenderModel.ts and IndicatorPane lifecycle tests
+    symbol_or_call_path: buildIndicatorRenderModel histogram branch
+    reproduction_steps: Render MACD and two differently styled L2 histograms and inspect the colors passed to mounted histogram data.
+    impact_to_intended_output_or_invariants: Registry semantic metadata and theme changes do not control histogram appearance.
+    minimal_fix: Resolve histogram colors from canonical semantic registry metadata and prove mounted MACD and multiple L2 mappings.
+    blocker: false
+    remediation_status: remediated-green-pending-independent-rereview
+  - id: T3-001
+    severity: P1
+    description: The generic Webull client could internally retry stock-depth 429 or 5xx responses after a single distributed rate grant.
+    file: apps/api/src/broker/webull/webull-client.ts and apps/api/src/market-data/order-book.provider.ts
+    symbol_or_call_path: WebullClient.request automatic retry loop and WebullClientOrderBookTransport.requestDepth
+    reproduction_steps: Grant one app-key lease, return 429 or 5xx from stockDepth, and count actual HTTP attempts before the service reacquires Redis.
+    impact_to_intended_output_or_invariants: One logical provider call could exceed Webull's exact one-request-per-second-per-app-key limit across replicas.
+    minimal_fix: Add an explicit no-automatic-retry request option, use it only for the externally rate-limited depth transport, and prove a 429 performs one business HTTP attempt.
+    blocker: true
+    remediation_status: remediated-green-pending-independent-review
+  - id: T3-002
+    severity: P1
+    description: L2 freshness was measured from API receipt instead of the provider timestamp.
+    file: apps/api/src/market-data/order-book.service.ts
+    symbol_or_call_path: snapshot freshness timer
+    reproduction_steps: Return an already aged provider book and compare stale transition time with provider timestamp plus five seconds.
+    impact_to_intended_output_or_invariants: Delayed data could be advertised fresh longer than five seconds.
+    minimal_fix: Arm freshness from the exact provider timestamp and treat age at least five seconds as stale.
+    blocker: true
+    remediation_status: remediated-green-pending-independent-rereview
+  - id: T3-003
+    severity: P1
+    description: New York session-boundary reset was not exhaustive across every active L2 state.
+    file: apps/api/src/market-data/order-book.service.ts
+    symbol_or_call_path: session reset state transitions
+    reproduction_steps: Cross the trading-date boundary while queued fetching fresh stale and retrying.
+    impact_to_intended_output_or_invariants: Prior-session history timers or work could survive into a new session.
+    minimal_fix: Reset history and generation-bound work from every active state with DST-aware New York time.
+    blocker: true
+    remediation_status: remediated-green-pending-independent-rereview
+  - id: T3-004
+    severity: P1
+    description: L2 cancellation and cleanup did not prove abort propagation to the actual HTTP request or truthful cleanup metrics.
+    file: apps/api/src/broker/webull/webull-client.ts and apps/api/src/market-data/order-book.provider.ts
+    symbol_or_call_path: AbortSignal to Webull depth HTTP transport
+    reproduction_steps: Unsubscribe the last listener during an in-flight request and inspect transport abort plus cleanup outcome metrics.
+    impact_to_intended_output_or_invariants: Terminal work could continue consuming rate grants while operations reported successful cleanup.
+    minimal_fix: Propagate AbortSignal through HTTP and record cleanup success or failure from the real outcome.
+    blocker: true
+    remediation_status: remediated-green-pending-independent-rereview
+  - id: T3-005
+    severity: P1
+    description: Provider timeout mapping did not exercise a real Webull request timeout.
+    file: apps/api/src/broker/webull/webull-client.ts and order-book.provider.ts
+    symbol_or_call_path: Webull transport timeout classification
+    reproduction_steps: Let the depth HTTP deadline expire and inspect the public unavailable reason.
+    impact_to_intended_output_or_invariants: Timeout failures could be misclassified and retried or surfaced incorrectly.
+    minimal_fix: Map the actual client timeout to request_timeout with focused transport coverage.
+    blocker: true
+    remediation_status: remediated-green-pending-independent-rereview
+  - id: T3-006
+    severity: P1
+    description: Required L2 subscriber rate decoder and cleanup metrics and structured logs were incomplete or not exported.
+    file: apps/api/src/market-data/order-book.service.ts and stream.gateway.ts
+    symbol_or_call_path: L2 operational instrumentation
+    reproduction_steps: Exercise subscribe rate denial decode and teardown then inspect exported counters and structured fields.
+    impact_to_intended_output_or_invariants: Rate safety staleness and leaks could not be operated or audited from production evidence.
+    minimal_fix: Export and test subscriber rate decoder cleanup and outcome metrics with structured logs.
+    blocker: true
+    remediation_status: remediated-green-pending-independent-rereview
+  - id: T3-007
+    severity: P1
+    description: A single websocket had no enforced 50-symbol unique L2 subscription cap.
+    file: apps/api/src/market-data/stream.gateway.ts
+    symbol_or_call_path: l2Subscribe client state
+    reproduction_steps: Subscribe one authenticated socket to 51 distinct supported symbols.
+    impact_to_intended_output_or_invariants: One client could create unbounded server and provider pressure.
+    minimal_fix: Enforce 50 unique L2 symbols per socket while keeping duplicate subscriptions idempotent.
+    blocker: true
+    remediation_status: remediated-green-pending-independent-rereview
+  - id: T3-008
+    severity: P1
+    description: Bounded L2 history accepted samples outside official regular trading hours.
+    file: apps/api/src/market-data/order-book.service.ts
+    symbol_or_call_path: session history insertion
+    reproduction_steps: Publish a valid premarket or after-hours book and inspect spread percentile history.
+    impact_to_intended_output_or_invariants: Session percentiles could include out-of-contract observations.
+    minimal_fix: Insert history only during official New York RTH and test both boundaries.
+    blocker: true
+    remediation_status: remediated-green-pending-independent-rereview
+  - id: T3-009
+    severity: P1
+    description: The real Webull default fetch cleared its timeout and external abort forwarding after response headers but before body read and JSON decoding completed.
+    file: apps/api/src/broker/webull/webull-client.ts and apps/api/src/market-data/order-book.provider.spec.ts
+    symbol_or_call_path: defaultFetch to WebullClient.send to WebullClientOrderBookTransport to WebullOrderBookProvider.fetch
+    reproduction_steps: Return valid response headers with a body that never settles, then either advance the built-in timeout or abort the caller signal after body decoding starts.
+    impact_to_intended_output_or_invariants: Provider calls can hang after headers despite timeout, unsubscribe, or shutdown, retaining work beyond the L2 lifecycle.
+    minimal_fix: Decode the response body while the combined timeout and external signal are still active, preserve non-abort invalid-JSON behavior, and prove both paths through the real transport/provider.
+    blocker: true
+    remediation_status: remediated-GREEN-full-validation-passed
+  - id: T3-010
+    severity: P1
+    description: A current provider snapshot whose own timestamp was outside official New York RTH could still be derived, inserted into history, and published when the receipt clock was inside RTH.
+    file: apps/api/src/market-data/order-book.service.ts and apps/api/src/market-data/order-book.service.spec.ts
+    symbol_or_call_path: refresh result validation before acceptSnapshot
+    reproduction_steps: At the spring and fall DST-adjusted market opens, return an otherwise valid snapshot timestamped one second before the official open.
+    impact_to_intended_output_or_invariants: Premarket data can be presented as a current RTH snapshot and contaminate bounded session indicators.
+    minimal_fix: Reject out-of-RTH provider timestamps before derive, history insertion, and l2Snapshot publication, with spring and fall boundary coverage.
+    blocker: true
+    remediation_status: remediated-GREEN-full-validation-passed
+  - id: T3-011
+    severity: P1
+    description: Aborting a denied Redis rate-limit wait rejected the logical operation but left its native timeout scheduled and keeping the process alive.
+    file: apps/api/src/market-data/order-book-rate-limiter.ts and apps/api/src/market-data/order-book-rate-limiter.spec.ts
+    symbol_or_call_path: AppKeyRateLimiter.acquire denied wait and sleepWithAbort
+    reproduction_steps: Deny the Redis lease, begin the one-second wait, abort it, and inspect fake timer count or process exit latency.
+    impact_to_intended_output_or_invariants: Unsubscribe and shutdown can retain hidden timers for the full wait even after cleanup reports completion.
+    minimal_fix: Make the production wait timer directly abortable and clear it on cancellation while preserving exact Redis NX PX lease semantics and fail-closed errors.
+    blocker: true
+    remediation_status: remediated-GREEN-full-validation-passed
+  - id: BASE-001
+    severity: P2
+    description: npm ci reports five high-severity dependency audit findings.
+    file: package-lock.json
+    symbol_or_call_path: dependency graph
+    reproduction_steps: Run npm ci or npm audit.
+    impact_to_intended_output_or_invariants: Baseline supply-chain risk exists but indiscriminate dependency upgrades could expand scope.
+    minimal_fix: Audit exact dependency paths and remediate only compatible scoped upgrades in a separately reviewed task.
+    blocker: false
+    remediation_status: baseline-residual-recorded
+  - id: BASE-002
+    severity: P3
+    description: Existing ts-jest TS151002 hybrid-module warnings appear during API tests.
+    file: apps/api test configuration
+    symbol_or_call_path: ts-jest compilation
+    reproduction_steps: Run npm test after building shared-types.
+    impact_to_intended_output_or_invariants: Warning noise can hide new warnings; no baseline functional failure is attributed to it.
+    minimal_fix: Do not add warnings; track warning count and address config separately if safely in scope.
+    blocker: false
+    remediation_status: baseline-residual-recorded
+  - id: GATE-001
+    severity: P1
+    description: Required GitHub issue 45 capability comment cannot be posted because GitHub CLI authentication is unavailable.
+    file: external GitHub state
+    symbol_or_call_path: gh authentication and issue 45 comment
+    reproduction_steps: Run gh auth status.
+    impact_to_intended_output_or_invariants: Requirement REQ-045-007 and completion evidence cannot be satisfied yet.
+    minimal_fix: Authenticate an authorized GitHub account, run the provider capability probe, and post the factual result with evidence URL.
+    blocker: true
+    remediation_status: external-action-required
+  - id: GATE-002
+    severity: P1
+    description: Required 15-minute physical-iPhone Energy Log has not been run or attached.
+    file: external physical-device evidence
+    symbol_or_call_path: Instruments Energy Log
+    reproduction_steps: Inspect checking artifacts; no physical-device run exists.
+    impact_to_intended_output_or_invariants: Mobile energy acceptance and REQ-045-007 remain unproven.
+    minimal_fix: Connect a physical iPhone, exercise L2 for 15 minutes under the runbook scenario, export the Energy Log, and record thresholds/results.
+    blocker: true
+    remediation_status: external-action-required
+
+live_recommendations:
+  - {
+      id: REC-001,
+      priority: required,
+      recommendation: Keep the L2 provider seam and global app-key limiter server-side and independently fake-clock testable.,
+      conversion: T3,
+    }
+  - {
+      id: REC-002,
+      priority: required,
+      recommendation: Share fixture inputs/expected outputs rather than duplicating language-specific golden data.,
+      conversion: T1 T2 T7,
+    }
+  - {
+      id: REC-003,
+      priority: required,
+      recommendation: Treat persisted settings migration as atomic and idempotent then remove old runtime consumers.,
+      conversion: T2 T8,
+    }
+  - {
+      id: REC-004,
+      priority: required,
+      recommendation: Store detector timestamp and cooldown in the same user-symbol state update used for its decision.,
+      conversion: T5,
+    }
+  - {
+      id: REC-005,
+      priority: required,
+      recommendation: Run scored Auto fresh rerank inside the existing authenticated/idempotent pre-broker validation path.,
+      conversion: T8,
+    }
+
+risk_conversion_register:
+  - {
+      risk: Cross-language formula drift,
+      conversion_type: fix_in_scope,
+      conversion_target: T1 T2 T7 shared fixtures and parity checks,
+      status: completed,
+    }
+  - {
+      risk: Provider rate violation or leaked lifecycle work,
+      conversion_type: fix_in_scope,
+      conversion_target: T3 limiter coalescing teardown metrics and tests,
+      status: completed_automated_real_redis_and_entitlement_external,
+    }
+  - {
+      risk: False or duplicate IV alerts,
+      conversion_type: fix_in_scope,
+      conversion_target: T5 persisted monotonic detector and fake-clock restart tests,
+      status: completed_automated_live_database_apply_external,
+    }
+  - {
+      risk: Unsafe stale Auto contract,
+      conversion_type: fix_in_scope,
+      conversion_target: T8 fresh server rerank confirmation and no-broker-send tests,
+      status: completed,
+    }
+  - {
+      risk: GitHub authentication unavailable,
+      conversion_type: residual_risk_entry,
+      conversion_target: GATE-001 external completion blocker,
+      status: open,
+    }
+  - {
+      risk: Physical iPhone unavailable,
+      conversion_type: residual_risk_entry,
+      conversion_target: GATE-002 external completion blocker,
+      status: open,
+    }
+
+post_listing_fix_execution_log:
+  - {
+      event_id: FIX-001,
+      finding_ids: [PLAN-001],
+      changed_files:
+        [
+          docs/specs/2026-08-05-issues-44-48-spec.md,
+          docs/flow-charts/2026-08-05-issues-44-48-flow-chart.yaml,
+          docs/logic-maps/2026-08-05-issues-44-48-logic-map.yaml,
+          docs/plans/2026-08-05-issues-44-48.yaml,
+          docs/plans/checking_plan_2026-08-05-issues-44-48.yaml,
+        ],
+      status: superseded,
+      validation_evidence: Structural checks passed but independent semantic re-review opened PLAN-002.,
+    }
+  - {
+      event_id: FIX-002,
+      finding_ids: [PLAN-002],
+      changed_files:
+        [
+          docs/specs/2026-08-05-issues-44-48-spec.md,
+          docs/logic-maps/2026-08-05-issues-44-48-logic-map.yaml,
+          docs/plans/2026-08-05-issues-44-48.yaml,
+          docs/plans/checking_plan_2026-08-05-issues-44-48.yaml,
+        ],
+      status: superseded,
+      validation_evidence: Structural validation passed but final semantic review opened PLAN-003.,
+    }
+  - {
+      event_id: FIX-003,
+      finding_ids: [PLAN-003],
+      changed_files:
+        [
+          docs/flow-charts/2026-08-05-issues-44-48-flow-chart.yaml,
+          docs/logic-maps/2026-08-05-issues-44-48-logic-map.yaml,
+          docs/plans/2026-08-05-issues-44-48.yaml,
+          docs/plans/checking_plan_2026-08-05-issues-44-48.yaml,
+        ],
+      status: superseded,
+      validation_evidence: Structural validation passed and the next independent review opened PLAN-004.,
+    }
+  - {
+      event_id: FIX-004,
+      finding_ids: [PLAN-004],
+      changed_files:
+        [
+          docs/flow-charts/2026-08-05-issues-44-48-flow-chart.yaml,
+          docs/logic-maps/2026-08-05-issues-44-48-logic-map.yaml,
+          docs/plans/checking_plan_2026-08-05-issues-44-48.yaml,
+        ],
+      status: completed,
+      validation_evidence: Candidate-set guards permit independent exclusion; successful fetches arm generation-bound refresh and stale timers; terminal teardown clears registrations and retries cleanup in place; superseded responses discard idempotently; target flow distinguishes no-mutation ignored captures from mutating suppression; YAML structural scan and git diff check pass; final independent reviewer returned APPROVE.,
+    }
+  - {
+      event_id: FIX-005,
+      finding_ids: [T1-001],
+      changed_files:
+        [
+          packages/shared-types/src/index.ts,
+          packages/shared-types/fixtures/indicator-parity-v1.json,
+          packages/shared-types/fixtures/auto-scoring-v1.json,
+          packages/shared-types/test/contracts.test.mjs,
+          packages/shared-types/test/contracts.compile.ts,
+        ],
+      status: completed,
+      validation_evidence: RED and GREEN captured; shared runtime compile lint build API and desktop checks pass; independent spec and final quality reviews approved the discriminated selection fixture schema and exclusion coverage.,
+    }
+  - {
+      event_id: FIX-006,
+      finding_ids: [T1-002, T1-003],
+      changed_files:
+        [
+          packages/shared-types/src/index.ts,
+          packages/shared-types/test/contracts.compile.ts,
+          packages/shared-types/test/contracts.test.mjs,
+          apps/api/src/trading/trading.service.ts,
+          apps/api/src/trading/trading.service.spec.ts,
+        ],
+      status: completed,
+      validation_evidence: Negative compile tests reject contradictory no-pass and unconfirmed scored states; competing-order runtime test proves exact selected-symbol recovery; shared tests pass and focused API tests pass 45 of 45; independent spec and quality rereviews approved.,
+    }
+  - {
+      event_id: FIX-007,
+      finding_ids: [T1-004],
+      changed_files:
+        [
+          packages/shared-types/src/index.ts,
+          packages/shared-types/test/contracts.compile.ts,
+          packages/shared-types/test/contracts.test.mjs,
+        ],
+      status: completed,
+      validation_evidence: Required l2Snapshot timestamp depth currentIv baselineIv zScore names pass positive compile/runtime checks,
+      old aliases fail negative checks,
+      and final independent spec and quality rereviews approved.,
+    }
+  - {
+      event_id: FIX-008,
+      finding_ids: [T2-021, T2-022],
+      changed_files:
+        [
+          apps/ios/0dteTrader/Features/Chart/ChartViewModel.swift,
+          apps/ios/0dteTraderTests/IndicatorPresentationTests.swift,
+          docs/plans/checking_plan_2026-08-05-issues-44-48.yaml,
+        ],
+      status: green-pending-independent-rereview,
+      validation_evidence: RED focused tests failed only the two intended regressions; GREEN focused tests pass 11 of 11 with exact in-memory snapshot and persisted-byte preservation plus corrupt-load error retention; the fresh complete iOS suite passes 421 of 421; scoped strict lint is zero while global strict lint retains the documented 15 baseline violations; diff and YAML checks pass.,
+    }
+  - {
+      event_id: FIX-009,
+      finding_ids: [T2-023, T2-024, T2-025, T2-026],
+      changed_files:
+        [
+          apps/desktop/src/features/chart/ChartView.tsx,
+          apps/desktop/src/features/chart/ChartView.test.tsx,
+          apps/desktop/src/features/chart/indicatorEngine.ts,
+          apps/desktop/src/features/chart/indicatorExecutorRegistry.test.ts,
+          apps/desktop/src/features/chart/FloatingAxes.tsx,
+          apps/desktop/src/features/chart/FloatingAxes.lifecycle.test.tsx,
+          apps/desktop/src/features/chart/indicatorRenderModel.ts,
+          apps/desktop/src/features/chart/indicatorRenderModel.test.ts,
+          apps/desktop/src/features/chart/IndicatorPane.tsx,
+          apps/desktop/src/features/chart/IndicatorPane.lifecycle.test.tsx,
+          docs/plans/checking_plan_2026-08-05-issues-44-48.yaml,
+        ],
+      status: green-pending-independent-rereview,
+      validation_evidence: RED produced ten intended UI lifecycle and semantic-color assertion failures plus two missing-catalog failures. GREEN passes all 42 focused tests,
+      the final 646-test full desktop suite,
+      global lint,
+      strict TypeScript production build,
+      and shared runtime compile lint build checks with one shared subpane boundary,
+      exhaustive validated live-L2 catalog,
+      centralized drag teardown,
+      and canonical mounted histogram colors.,
+    }
+
+verification_commands:
+  artifact_parse: ruby -e "require 'yaml'; ARGV.each { |p| YAML.load_file(p) }" docs/flow-charts/2026-08-05-issues-44-48-flow-chart.yaml docs/logic-maps/2026-08-05-issues-44-48-logic-map.yaml docs/plans/2026-08-05-issues-44-48.yaml docs/plans/checking_plan_2026-08-05-issues-44-48.yaml
+  artifact_links: rg -n "2026-08-05-issues-44-48" docs/specs/2026-08-05-issues-44-48-spec.md docs/flow-charts/2026-08-05-issues-44-48-flow-chart.yaml docs/logic-maps/2026-08-05-issues-44-48-logic-map.yaml docs/plans/2026-08-05-issues-44-48.yaml docs/plans/checking_plan_2026-08-05-issues-44-48.yaml
+  database: npm run db:generate --workspace apps/api && npx prisma validate --schema apps/api/prisma/schema.prisma
+  typescript_full: npm run build && npm run lint && npm run test && npm run format:check
+  ios_full: swiftlint lint --strict --config apps/ios/.swiftlint.yml && bash apps/ios/scripts/generate-env.sh && xcodegen --spec apps/ios/project.yml && xcodebuild test -project apps/ios/0dteTrader.xcodeproj -scheme 0dteTrader -destination "platform=iOS Simulator,id=2E528611-E27C-4D08-B483-8E1872A850E8" CODE_SIGNING_ALLOWED=NO
+  diff: git diff --check
+
+acceptance_criteria:
+  pass_when:
+    - all_required_checks_pass: true
+    - zero_open_P0_or_P1: true
+    - all_findings_remediated_or_explicitly_accepted_nonblocking_residuals: true
+    - all_requirements_have_evidence: true
+    - no_obsolete_runtime_or_documentation_paths: true
+    - physical_iphone_energy_log_attached: true
+    - github_issue_45_capability_comment_attached: true
+  report_outputs:
+    [
+      this live checking plan,
+      final command logs,
+      focused RED-GREEN evidence,
+      independent review findings,
+      device Energy Log,
+      GitHub comment URL,
+    ]
+
+result_schema:
+  checklist_report:
+    [
+      {
+        id: string,
+        title: string,
+        status: [pass, fail, warn, skip, blocked_external],
+        evidence: [string],
+        notes: string,
+      },
+    ]
+  findings:
+    [
+      {
+        id: string,
+        severity: [P0, P1, P2, P3],
+        description: string,
+        file: string,
+        reproduction_steps: string,
+        minimal_fix: string,
+        blocker: boolean,
+        remediation_status: string,
+      },
+    ]
+
+runtime_instructions: |
+  Re-read the plan, spec, flow, and logic artifacts. Execute T0 through T9 in order unless
+  non-overlapping read-only research is delegated. For every behavior task capture RED,
+  minimal GREEN, refactor, focused verification, spec review, and quality review. Update
+  live_progress, findings, recommendations, coverage, and remediation immediately. Run
+  full verification fresh at the end. Do not claim completion until the physical-iPhone
+  Energy Log and authenticated GitHub #45 capability comment are attached.
+
+escalation_policy:
+  - { if: open P0 or P1, action: Stop completion, record exact blocker and remediation owner. }
+  - {
+      if: test failure after baseline,
+      action: Diagnose root cause,
+      add or correct RED coverage,
+      remediate,
+      and rerun fresh.,
+    }
+  - {
+      if: provider or order safety invariant cannot be proven,
+      action: Keep feature disabled and reject unsafe operation.,
+    }
+
+examples:
+  minimal_filled_example:
+    original_plan_summary: Implement one shared indicator platform, truthful bounded L2, restart-safe ATM IV alerts, and confirmed freshly revalidated scored Auto selection.
+    NEW_TASK_CHECK_LIST:
+      [freeze contracts, prove RED-GREEN behavior, review every task, run full and external gates]
+    checklist_report: [{ id: C1, status: in_progress, evidence: [five created artifact paths] }]
+
+notes:
+  - This is the single live findings, recommendations, progress, inventory, coverage, and remediation artifact for the plan.
+  - Baseline audit and ts-jest warnings are not silently accepted as implementation regressions; compare final output against baseline.

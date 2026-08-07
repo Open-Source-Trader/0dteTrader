@@ -1,0 +1,526 @@
+schema_version: 1
+template_id: event_driven_flow_chart.v1
+title: issues-44-45-47-48-event-driven-flow-chart
+owner: Codex implementation team
+date: '2026-08-05'
+status: approved
+system: cross-platform-chart-market-data-alerts-and-auto-selection
+source_plan: docs/plans/2026-08-05-issues-44-48.yaml
+source_spec_sheet: docs/specs/2026-08-05-issues-44-48-spec.md
+source_logic_map: docs/logic-maps/2026-08-05-issues-44-48-logic-map.yaml
+
+objective:
+  restated:
+    - Show the exact current behavior that causes indicator drift, missing L2, incorrect ATM IV alerts, and offset-only Auto selection.
+    - Show the target success, decision, failure, persistence, validation, and teardown paths for issues 44, 45, 47, and 48.
+    - Document issue 46 as deleted and withdrawn with no implementation path.
+
+required_context_files_read_first:
+  - AGENTS.md
+  - docs/plans/plan-template.yaml
+  - docs/plans/checking_plan_plan-template.yaml
+  - docs/specs/2026-08-05-issues-44-48-spec.md
+  - packages/shared-types/src/index.ts
+  - apps/api/src/market-data/stream.gateway.ts
+  - apps/api/src/options-analytics/options-analytics.engine.ts
+  - apps/api/src/broker/contract-resolution.ts
+  - apps/desktop/src/features/chart/indicatorEngine.ts
+  - apps/ios/0dteTrader/Features/Chart/IndicatorEngine.swift
+
+artifact_discovery:
+  existing_scope_specific_artifact_found: false
+  scanned:
+    - docs/specs
+    - docs/flow-charts
+    - docs/logic-maps
+  current_state_brief: Existing options-analytics artifacts cover the 2026-07-19 snapshot suite, but no artifact covers issues 44, 45, 47, or 48.
+  target_state_detailed: This net-new chart records current and target event paths for the four approved issues and all material alternate, failure, teardown, persistence, and validation outcomes.
+
+flow_chart:
+  style: event_driven_current_vs_target
+  nodes:
+    - { id: CURRENT_FLOW, label: Current behavior and failure paths, type: current_state }
+    - {
+        id: TARGET_FLOW,
+        label: Approved implementation behavior and completion gates,
+        type: target_state,
+      }
+  edges:
+    - {
+        from: CURRENT_FLOW,
+        to: TARGET_FLOW,
+        condition: approved issues 44 45 47 and 48 implementation,
+      }
+  detailed_sections: [current_flow, target_flow]
+
+current_flow:
+  nodes:
+    - { id: C0, label: User opens chart or trade panel, type: event }
+    - { id: C44A, label: Desktop reads flat TypeScript indicator settings, type: process }
+    - { id: C44B, label: iOS reads independent Swift settings, type: process }
+    - { id: C44C, label: Each client manually dispatches calculations and panes, type: process }
+    - { id: C44D, label: Different indicators and pane rules can render, type: output }
+    - { id: C45A, label: Client subscribes to quote websocket only, type: event }
+    - { id: C45B, label: Gateway publishes Level 1 quote, type: output }
+    - { id: C45C, label: No shared L2 snapshot or unavailable contract exists, type: output }
+    - { id: C47A, label: Snapshot selects nearest forward strike, type: process }
+    - { id: C47B, label: Pair IV is used without spot interpolation, type: process }
+    - { id: C47C, label: No persisted per-user anomaly detector exists, type: output }
+    - { id: C48A, label: Auto selects configured OTM offset ladder, type: process }
+    - { id: C48B, label: Client submits Classic selection, type: output }
+  edges:
+    - { from: C0, to: C44A, condition: desktop chart }
+    - { from: C0, to: C44B, condition: iOS chart }
+    - { from: C44A, to: C44C, condition: settings loaded }
+    - { from: C44B, to: C44C, condition: settings loaded }
+    - { from: C44C, to: C44D, condition: calculation/render completes }
+    - { from: C0, to: C45A, condition: quote subscription }
+    - { from: C45A, to: C45B, condition: provider quote received }
+    - { from: C45B, to: C45C, condition: user requests depth insight }
+    - { from: C0, to: C47A, condition: options analytics capture }
+    - { from: C47A, to: C47B, condition: nearest strike found }
+    - { from: C47B, to: C47C, condition: snapshot persisted }
+    - { from: C0, to: C48A, condition: Auto mode }
+    - { from: C48A, to: C48B, condition: offset contract exists }
+
+target_flow:
+  nodes:
+    - { id: T0, label: Authenticated user opens chart or trade panel, type: event }
+    - { id: T44A, label: Load and validate one versioned registry JSON, type: process }
+    - {
+        id: T44B,
+        label: Migrate flat settings once to keyed settings and separate volume preference,
+        type: process,
+      }
+    - { id: T44C, label: Validate parameters and maximum two subpanes, type: decision }
+    - { id: T44D, label: Compute descriptor-selected pure geometry, type: process }
+    - { id: T44E, label: Generic renderer draws matching desktop and iOS output, type: output }
+    - { id: T44F, label: Reject invalid setting or third pane with shared message, type: output }
+    - { id: T45A, label: Receive L2 subscribe for stock or ETF symbol, type: event }
+    - { id: T45B, label: Validate auth instrument provider and entitlement, type: decision }
+    - { id: T45C, label: Register subscriber and coalesce symbol work, type: process }
+    - {
+        id: T45D,
+        label: Redis atomic global app-key lease grants Webull request only when prior grant is at least one second old,
+        type: decision,
+      }
+    - {
+        id: T45E,
+        label: Normalize cap and store bounded NY-session book and quote history,
+        type: process,
+      }
+    - {
+        id: T45F,
+        label: Derive microstructure indicators and publish fresh L2 snapshot,
+        type: output,
+      }
+    - { id: T45G, label: Publish No L2 data with explicit reason, type: output }
+    - { id: T45H, label: Last unsubscribe disconnect failure shutdown or NY reset, type: event }
+    - {
+        id: T45I,
+        label: Cancel timers release work reset or mark stale and record metrics,
+        type: process,
+      }
+    - { id: T47A, label: New options analytics capture arrives, type: event }
+    - { id: T47B, label: Build paired-strike IV values and exact or bracket spot, type: decision }
+    - { id: T47C, label: Persist nullable interpolated ATM IV with bumped version, type: process }
+    - {
+        id: T47D,
+        label: Validate RTH symbol monotonic time warmup gap and cooldown,
+        type: decision,
+      }
+    - { id: T47E, label: Advance median MAD streak and persisted per-user state, type: process }
+    - { id: T47F, label: Emit user-scoped expansion or crush alert banner, type: output }
+    - {
+        id: T47G,
+        label: Ignore closed unsupported null duplicate or old capture without detector mutation,
+        type: output,
+      }
+    - {
+        id: T47H,
+        label: Suppress alert while atomically applying the specified gap warmup cooldown or streak progress update,
+        type: output,
+      }
+    - { id: T48A, label: User requests auto_scored with preset or edited preferences, type: event }
+    - {
+        id: T48B,
+        label: Authorize and merge analytics with active-broker fresh quotes,
+        type: process,
+      }
+    - { id: T48C, label: Apply hard filters and required-data validation, type: decision }
+    - { id: T48D, label: Normalize score and deterministically rank candidates, type: process }
+    - { id: T48E, label: Show winner rationale runners-up and explicit confirmation, type: output }
+    - {
+        id: T48F,
+        label: Show no-pass warning and require Classic fallback acknowledgment,
+        type: output,
+      }
+    - {
+        id: T48G,
+        label: Submit selected symbol preferences fallback acknowledgment and confirmation,
+        type: event,
+      }
+    - { id: T48H, label: Server refetches reranks and revalidates fresh inputs, type: decision }
+    - {
+        id: T48I,
+        label: Accept validated confirmed order through existing trading controls,
+        type: output,
+      }
+    - {
+        id: T48J,
+        label: Reject stale changed invalid or unconfirmed selection before broker send,
+        type: output,
+      }
+    - {
+        id: T48K,
+        label: Acknowledged Classic fallback uses existing live plus-one validation without scored reranking,
+        type: process,
+      }
+    - {
+        id: TGATE,
+        label: Verify tests docs payload decoder device energy and GitHub capability evidence,
+        type: decision,
+      }
+    - {
+        id: TDONE,
+        label: Issues 44 45 47 and 48 complete; issue 46 remains withdrawn,
+        type: output,
+      }
+  edges:
+    - { from: T0, to: T44A, condition: chart starts }
+    - { from: T44A, to: T44B, condition: registry valid }
+    - { from: T44A, to: T44F, condition: registry invalid }
+    - { from: T44B, to: T44C, condition: settings available }
+    - { from: T44C, to: T44D, condition: parameters valid and pane count at most two }
+    - { from: T44C, to: T44F, condition: invalid parameter or third pane }
+    - { from: T44D, to: T44E, condition: finite geometry generated }
+    - {
+        from: T44E,
+        to: T44C,
+        condition: user changes an indicator setting; validate the complete candidate before replacing current rendering,
+      }
+    - { from: T0, to: T45A, condition: L2 requested }
+    - { from: T45A, to: T45B, condition: always }
+    - { from: T45B, to: T45C, condition: authorized supported and entitled }
+    - { from: T45B, to: T45G, condition: unauthorized unsupported or unentitled }
+    - { from: T45C, to: T45D, condition: first subscriber or refresh due }
+    - {
+        from: T45D,
+        to: T45D,
+        condition: Redis slot denied; wait until exact next eligible grant and keep one coalesced request,
+      }
+    - { from: T45D, to: T45E, condition: distributed Redis slot and provider success }
+    - { from: T45D, to: T45G, condition: provider failure or timeout }
+    - { from: T45E, to: T45F, condition: both sides valid and age at most five seconds }
+    - { from: T45E, to: T45G, condition: missing side invalid or stale }
+    - { from: T45B, to: T45H, condition: last unsubscribe disconnect terminal failure or shutdown }
+    - { from: T45C, to: T45H, condition: last unsubscribe disconnect terminal failure or shutdown }
+    - { from: T45D, to: T45H, condition: last unsubscribe disconnect terminal failure or shutdown }
+    - { from: T45E, to: T45H, condition: last unsubscribe disconnect terminal failure or shutdown }
+    - { from: T45F, to: T45H, condition: last unsubscribe disconnect terminal failure or shutdown }
+    - { from: T45G, to: T45H, condition: last unsubscribe disconnect terminal failure or shutdown }
+    - { from: T45F, to: T45D, condition: next refresh due and subscribers remain }
+    - {
+        from: T45G,
+        to: T45B,
+        condition: bounded retry due after a retryable capability provider Redis or validation failure and subscribers remain,
+      }
+    - {
+        from: T45B,
+        to: T45B,
+        condition: NY session changes; invalidate generation,
+        clear histories,
+        cancel old work,
+        and reprobe only if subscribed,
+      }
+    - { from: T45C, to: T45B, condition: NY session changes; clear histories and restart lifecycle }
+    - { from: T45D, to: T45B, condition: NY session changes; clear histories and restart lifecycle }
+    - {
+        from: T45E,
+        to: T45B,
+        condition: NY session changes; discard late response and restart lifecycle,
+      }
+    - { from: T45F, to: T45B, condition: NY session changes; clear snapshot and restart lifecycle }
+    - {
+        from: T45G,
+        to: T45B,
+        condition: NY session changes; clear unavailable history and restart lifecycle,
+      }
+    - { from: T45H, to: T45I, condition: always }
+    - { from: T0, to: T47A, condition: capture scheduler }
+    - { from: T47A, to: T47B, condition: calculation begins }
+    - { from: T47B, to: T47C, condition: exact pair bracket interpolation or no bracket as null }
+    - { from: T47C, to: T47D, condition: capture persisted }
+    - { from: T47D, to: T47E, condition: new SPX NDX or RUT RTH sample after guards }
+    - { from: T47D, to: T47G, condition: closed unsupported null duplicate or old capture }
+    - { from: T47D, to: T47H, condition: gap warmup or cooldown path }
+    - { from: T47E, to: T47F, condition: second consecutive same-direction threshold breach }
+    - { from: T47E, to: T47H, condition: threshold not yet met }
+    - { from: T47F, to: T47A, condition: next newer capture }
+    - { from: T47G, to: T47A, condition: next newer capture }
+    - { from: T47H, to: T47A, condition: next newer capture }
+    - { from: T0, to: T48A, condition: scored Auto selected }
+    - { from: T48A, to: T48B, condition: preferences valid }
+    - { from: T48B, to: T48C, condition: candidate merge completes }
+    - { from: T48C, to: T48D, condition: at least one candidate passes }
+    - { from: T48C, to: T48F, condition: no candidate passes }
+    - {
+        from: T48F,
+        to: T48B,
+        condition: user edits or selects valid preferences and requests a new ranking,
+      }
+    - { from: T48D, to: T48E, condition: deterministic ranking complete }
+    - { from: T48E, to: T48G, condition: user explicitly confirms }
+    - { from: T48F, to: T48K, condition: user explicitly acknowledges Classic fallback }
+    - {
+        from: T48K,
+        to: T48I,
+        condition: existing Classic plus-one live validation and confirmation pass,
+      }
+    - { from: T48K, to: T48J, condition: Classic contract or existing validation fails }
+    - { from: T48G, to: T48H, condition: submission received }
+    - { from: T48H, to: T48I, condition: selection remains fresh valid and confirmed }
+    - { from: T48H, to: T48J, condition: stale changed invalid or unconfirmed }
+    - { from: T44E, to: TGATE, condition: implementation verification }
+    - { from: T45I, to: TGATE, condition: lifecycle verification }
+    - { from: T47F, to: TGATE, condition: alert verification }
+    - { from: T48I, to: TGATE, condition: trading verification }
+    - { from: TGATE, to: TDONE, condition: every automated manual and external gate proven }
+
+actual_events_by_step:
+  - {
+      step: 1,
+      event: Registry load,
+      outcome: Both clients use the same descriptor contract and migrated settings.,
+    }
+  - {
+      step: 2,
+      event: L2 subscription,
+      outcome: Entitled Webull book is bounded derived and published or a truthful unavailable state is published.,
+    }
+  - {
+      step: 3,
+      event: New capture,
+      outcome: ATM IV is exact/interpolated or null and detector state advances once.,
+    }
+  - {
+      step: 4,
+      event: Scored Auto request and submit,
+      outcome: Explainable rank is confirmed and freshly revalidated before broker send.,
+    }
+  - {
+      step: 5,
+      event: Completion review,
+      outcome: All tests,
+      measurements,
+      documentation,
+      device evidence,
+      and issue comment are present.,
+    }
+
+all_possible_events_by_step:
+  - step: 1
+    possible_events:
+      [
+        valid registry,
+        invalid registry,
+        legacy settings,
+        keyed settings,
+        valid pane request,
+        third pane,
+        finite geometry,
+        invalid geometry,
+      ]
+    outcomes: [render, migrate once, reject with shared message, fail safe without partial state]
+  - step: 2
+    possible_events:
+      [
+        subscribe,
+        duplicate subscribe,
+        refresh,
+        rate wait,
+        provider success,
+        entitlement failure,
+        stale book,
+        unsubscribe,
+        disconnect,
+        day reset,
+        shutdown,
+      ]
+    outcomes:
+      [coalesce, publish snapshot, publish No L2 data, teardown resources, reset bounded state]
+  - step: 3
+    possible_events:
+      [
+        exact strike,
+        bracket interpolation,
+        missing leg,
+        no bracket,
+        closed session,
+        old capture,
+        gap,
+        warmup,
+        breach,
+        cooldown,
+      ]
+    outcomes: [persist ATM IV, persist null, reset state, suppress, emit one scoped alert]
+  - step: 4
+    possible_events:
+      [
+        preset,
+        edited preferences,
+        missing data,
+        no pass,
+        scored pass,
+        fallback acknowledgment,
+        confirmation,
+        fresh rerank change,
+      ]
+    outcomes: [explain result, warn, Classic fallback, accept order, reject before broker]
+
+failure_recovery_paths:
+  - failure: Registry decode or schema mismatch
+    detection: Registry validation and client decode tests
+    retry_timeout_fallback: Do not apply partial settings; show stable unavailable/error state.
+    terminal_outcome: No inconsistent indicator render.
+  - failure: Provider entitlement or request failure
+    detection: Capability probe, HTTP response, timeout, and metrics
+    retry_timeout_fallback: Obey one-per-second limiter; publish No L2 data; tear down on terminal provider failure.
+    terminal_outcome: No fabricated book and no leaked timer.
+  - failure: Invalid or discontinuous ATM IV series
+    detection: Pair/bracket validation, timestamp monotonicity, gap guard, finite MAD guard
+    retry_timeout_fallback: Persist null/reset/progress state; wait for a new valid capture.
+    terminal_outcome: No stale or non-finite alert.
+  - failure: Candidate becomes stale or ranking changes
+    detection: Server-side fresh refetch, rerank, and equality/freshness validation
+    retry_timeout_fallback: Reject with actionable reason; user requests a new ranking.
+    terminal_outcome: No broker order sent.
+  - failure: Completion evidence unavailable
+    detection: Checking-plan gate lacks physical Energy Log or GitHub comment URL.
+    retry_timeout_fallback: Keep implementation ready but status incomplete until external evidence exists.
+    terminal_outcome: Completion is not claimed.
+
+inputs_transformations_outputs_side_effects:
+  inputs:
+    [
+      registry JSON,
+      candles and volume,
+      L1 quotes,
+      Webull books,
+      options chains,
+      spot,
+      captures,
+      user preferences,
+      broker quotes,
+      websocket lifecycle events,
+    ]
+  transformations:
+    [
+      schema validation,
+      migration,
+      indicator calculation,
+      rate limiting,
+      coalescing,
+      book normalization,
+      interpolation,
+      median MAD detection,
+      filtering,
+      normalization,
+      deterministic scoring,
+      fresh reranking,
+    ]
+  outputs:
+    [
+      generic geometry,
+      L2 snapshot or No L2 data,
+      scoped IV alert,
+      ranked Auto result,
+      accepted or rejected order,
+    ]
+  side_effects:
+    [
+      settings writes,
+      timers,
+      provider requests,
+      bounded session state,
+      Prisma writes,
+      websocket messages,
+      metrics and structured logs,
+      broker order only after validation,
+    ]
+
+invariants:
+  preconditions:
+    [
+      authenticated user for user-scoped paths,
+      validated public DTOs,
+      explicit New York session clock,
+      finite market values,
+    ]
+  postconditions:
+    [
+      bounded resources,
+      deterministic outputs,
+      explicit unavailable reasons,
+      persisted monotonic alert state,
+      broker send only after fresh validation,
+    ]
+  must_never_happen:
+    [
+      more than two subpanes,
+      Tradier represented as L2,
+      Webull rate above one request per second per app key,
+      missing L2 represented as zero,
+      ATM IV extrapolation,
+      cross-user alert delivery,
+      silent Classic fallback,
+      scored Auto bypassing confirmation,
+      broker send after stale rerank,
+    ]
+
+risk_review:
+  user_behavior_breaks:
+    [
+      rapid toggles could exceed pane limits,
+      rapid symbol changes could leave stale subscriptions,
+      repeated submits could race reranking,
+    ]
+  production_traffic_breaks:
+    [
+      provider throttling,
+      timer leaks,
+      websocket fanout,
+      database detector write contention,
+      candidate quote fanout,
+    ]
+  weird_data_breaks:
+    [
+      crossed or one-sided books,
+      duplicate strikes,
+      missing option legs,
+      zero mids,
+      equal score dimensions,
+      zero MAD,
+      non-finite Greeks,
+    ]
+  concurrency_time_order_breaks:
+    [
+      NY day and DST changes,
+      late provider responses,
+      unsubscribe during inflight fetch,
+      duplicate captures,
+      restart backfill,
+      quote change between rank and submit,
+    ]
+
+cleanup_requirements:
+  remove_dead_code: true
+  remove_backwards_compatibility_paths: true
+  update_related_files:
+    [
+      shared contracts and fixtures,
+      API modules and Prisma,
+      desktop and iOS engines stores sockets and views,
+      OpenAPI architecture API runbook and privacy docs,
+      automated and device evidence,
+    ]

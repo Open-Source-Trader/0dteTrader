@@ -210,4 +210,56 @@ describe('UsersService', () => {
     expect(meBoth.snaptradePracticeConfigured).toBe(true);
     expect(meBoth.snaptradePracticeAccountId).toBe('acct-practice');
   });
+
+  it('requires the account email and cascades every user-owned record on deletion', async () => {
+    const userId = await seedUser();
+    const otherUserId = (
+      await prisma.user.create({
+        data: { email: 'other@example.com', passwordHash: 'hash' },
+      })
+    ).id as string;
+    const now = new Date();
+    const ownedTables = [
+      prisma.credentials,
+      prisma.refreshTokens,
+      prisma.orderAudits,
+      prisma.chartOrders,
+      prisma.bracketGroups,
+      prisma.brokerCredentials,
+      prisma.brokerApiTokens,
+      prisma.brokerConnections,
+      prisma.deviceTokens,
+      prisma.pushDeliveries,
+      prisma.webhookInboxRows,
+      prisma.userEvents,
+      prisma.discordSettingsRows,
+      prisma.discordDeliveries,
+      prisma.legalAcceptances,
+    ];
+    for (const [index, table] of ownedTables.entries()) {
+      table.push({ id: `owned-${index}`, userId }, { id: `other-${index}`, userId: otherUserId });
+    }
+    prisma.tradeOrders.push(
+      { id: 'owned-order', userId, placedAt: now },
+      { id: 'other-order', userId: otherUserId, placedAt: now },
+    );
+    prisma.tradeOrderExecutions.push(
+      { id: 'owned-execution', orderId: 'owned-order' },
+      { id: 'other-execution', orderId: 'other-order' },
+    );
+
+    await expect(users.deleteAccount(userId, 'wrong@example.com')).rejects.toMatchObject({
+      code: 'VALIDATION_ERROR',
+    });
+    await users.deleteAccount(userId, ' U@EXAMPLE.COM ');
+
+    expect(await prisma.user.findUnique({ where: { id: userId } })).toBeNull();
+    expect(await prisma.user.findUnique({ where: { id: otherUserId } })).not.toBeNull();
+    for (const table of ownedTables) {
+      expect(table.some((row) => row.userId === userId)).toBe(false);
+      expect(table.some((row) => row.userId === otherUserId)).toBe(true);
+    }
+    expect(prisma.tradeOrders.map((row) => row.id)).toEqual(['other-order']);
+    expect(prisma.tradeOrderExecutions.map((row) => row.id)).toEqual(['other-execution']);
+  });
 });

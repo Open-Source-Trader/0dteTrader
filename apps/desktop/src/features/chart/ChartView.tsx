@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo } from 'react';
 import { timed } from '../../core/timing';
-import type { ChartInterval, TradingMode } from '@0dtetrader/shared-types';
+import type { ChartInterval, IndicatorDescriptor, TradingMode } from '@0dtetrader/shared-types';
 import type { ApiClient } from '../../core/api/ApiClient';
 import { useStore } from '../../core/observable';
 import { Menu } from '../../design/components/Menu';
@@ -8,18 +8,26 @@ import { Spinner } from '../../design/components/Spinner';
 import { Format } from '../../design/format';
 import { ChevronDownIcon, SlidersIcon, WarningFillIcon } from '../../design/icons';
 import type { ChartStore } from './ChartStore';
-import { CHART_INTERVALS, INTERVAL_HINTS } from './ChartStore';
+import { CHART_INTERVALS, INTERVAL_HINTS, intervalSeconds, isTickInterval } from './ChartStore';
 import { CandleChart, type ChartTradingProps, type OverlaySeries } from './CandleChart';
-import { overlayPalette, panePalette } from './chartColors';
 import { DrawToolsMenu, DrawToolsRail } from './DrawingToolbar';
 import type { DrawingsStore } from './drawings';
 import { IndicatorPane, type PaneSeries } from './IndicatorPane';
 import { PaneCard, type PaneReadout } from './PaneCard';
-import * as engine from './indicatorEngine';
-import { enabledSubPanes, type SubPaneKey } from './indicatorSettings';
+import {
+  computeIndicatorGeometry,
+  computeL2IndicatorGeometry,
+  lastValue,
+  type TimedCandleInput,
+} from './indicatorEngine';
+import { INDICATOR_REGISTRY, enabledSubPaneIds } from './indicatorRegistry';
+import { buildIndicatorRenderModel, type IndicatorRenderModel } from './indicatorRenderModel';
+import { indicatorPanePresentation } from './indicatorPresentation';
 import { useOptionsAnalytics } from './optionsAnalytics/useOptionsAnalytics';
 import { computeTwc } from './twc/computeTwc';
-import { intervalSeconds } from './ChartStore';
+import { mergeScriptRenderModels } from './scriptOverlayTypes';
+import { computeUsr } from './ultimateSupportResistance/computeUsr';
+import { isContinuousMarketSymbol } from './symbolSections';
 import './chart.css';
 
 interface ChartViewProps {
@@ -101,17 +109,26 @@ export function ChartView({
     isLoading,
     errorMessage,
     isStale,
+    l2,
     tickProgress,
     indicatorSettings,
+    chartDisplay,
     twcSettings,
+    usrSettings,
     optionsAnalytics,
     revealPrice,
+    visibleCandleViewport,
   } = useStore(store);
 
   // Stable: the reporting effect in CandleChart re-subscribes when this
   // changes, and it must not do that on every render.
   const onVisiblePriceRange = useCallback(
     (range: { min: number; max: number } | null) => store.setVisiblePriceRange(range),
+    [store],
+  );
+  const onVisibleCandleViewport = useCallback(
+    (viewport: Parameters<ChartStore['setVisibleCandleViewport']>[0]) =>
+      store.setVisibleCandleViewport(viewport),
     [store],
   );
 
@@ -129,55 +146,71 @@ export function ChartView({
       ? optionsAnalyticsState.snapshot
       : null;
 
-  const closes = useMemo(() => candles.map((c) => c.close), [candles]);
+  const subPaneBoundary = useMemo(() => {
+    const enabledIds = enabledSubPaneIds(indicatorSettings);
+    if (enabledIds.length > INDICATOR_REGISTRY.maxSubPanes) {
+      return {
+        visibleIds: new Set<(typeof enabledIds)[number]>(),
+        error: INDICATOR_REGISTRY.paneLimitMessage,
+      };
+    }
+    return { visibleIds: new Set(enabledIds), error: null as string | null };
+  }, [indicatorSettings]);
+
+  const indicatorModels = useMemo(() => {
+    const timedCandles: TimedCandleInput[] = candles.map((candle) => ({
+      ...candle,
+      timestamp: candle.time * 1000,
+    }));
+    const models: Array<{ descriptor: IndicatorDescriptor; model: IndicatorRenderModel }> = [];
+    if (subPaneBoundary.error) {
+      return { models, error: subPaneBoundary.error };
+    }
+    try {
+      timed('ChartView.indicators', () => {
+        for (const descriptor of INDICATOR_REGISTRY.indicators) {
+          const setting = indicatorSettings.indicators[descriptor.id];
+          if (!setting.enabled) continue;
+          if (descriptor.requiresL2) {
+            if (l2.kind !== 'available') continue;
+            const geometry = computeL2IndicatorGeometry(descriptor, l2.indicators, candles.length);
+            models.push({ descriptor, model: buildIndicatorRenderModel(descriptor, geometry) });
+            continue;
+          }
+          let inputCandles = timedCandles;
+          if (descriptor.geometry.kind === 'price_profile') {
+            if (visibleCandleViewport.kind === 'empty') inputCandles = [];
+            else if (visibleCandleViewport.kind === 'range') {
+              inputCandles = timedCandles.slice(
+                visibleCandleViewport.from,
+                visibleCandleViewport.to + 1,
+              );
+            }
+          }
+          const geometry = computeIndicatorGeometry(descriptor, inputCandles, setting.parameters);
+          models.push({ descriptor, model: buildIndicatorRenderModel(descriptor, geometry) });
+        }
+      });
+      return { models, error: null as string | null };
+    } catch (error) {
+      return {
+        models: [],
+        error: `Indicators unavailable: ${error instanceof Error ? error.message : 'invalid data'}`,
+      };
+    }
+  }, [candles, indicatorSettings, l2, subPaneBoundary.error, visibleCandleViewport]);
 
   const overlays = useMemo<OverlaySeries[]>(
-    () =>
-      timed('ChartView.overlays', () => {
-        const colors = overlayPalette();
-        const result: OverlaySeries[] = [];
-        if (indicatorSettings.smaEnabled) {
-          result.push({
-            id: 'sma',
-            color: colors.sma,
-            values: engine.sma(closes, indicatorSettings.smaPeriod),
-          });
-        }
-        if (indicatorSettings.emaEnabled) {
-          result.push({
-            id: 'ema',
-            color: colors.ema,
-            values: engine.ema(closes, indicatorSettings.emaPeriod),
-          });
-        }
-        if (indicatorSettings.vwapEnabled) {
-          result.push({ id: 'vwap', color: colors.vwap, values: engine.vwap(candles) });
-        }
-        if (indicatorSettings.bollingerEnabled) {
-          const bands = engine.bollingerBands(
-            candles,
-            indicatorSettings.bollingerPeriod,
-            indicatorSettings.bollingerMultiplier,
-          );
-          result.push({
-            id: 'bollingerUpper',
-            color: colors.bollingerUpper,
-            values: bands.upper,
-          });
-          result.push({
-            id: 'bollingerMiddle',
-            color: colors.bollingerMiddle,
-            values: bands.middle,
-          });
-          result.push({
-            id: 'bollingerLower',
-            color: colors.bollingerLower,
-            values: bands.lower,
-          });
-        }
-        return result;
-      }),
-    [candles, closes, indicatorSettings],
+    () => indicatorModels.models.flatMap(({ model }) => model.overlays),
+    [indicatorModels],
+  );
+  const indicatorFills = useMemo(
+    () => indicatorModels.models.flatMap(({ model }) => model.fills),
+    [indicatorModels],
+  );
+  const indicatorProfileRows = useMemo(
+    () => indicatorModels.models.flatMap(({ model }) => model.profileRows),
+    [indicatorModels],
   );
 
   const twcModel = useMemo(
@@ -188,127 +221,60 @@ export function ChartView({
     [candles, twcSettings, interval],
   );
 
+  const usrComputation = useMemo(
+    () =>
+      timed('ChartView.ultimateSupportResistance', () =>
+        computeUsr(candles, usrSettings, {
+          chartIntervalSeconds: isTickInterval(interval) ? null : intervalSeconds(interval),
+          continuousSession: isContinuousMarketSymbol(symbol),
+          now: Math.floor(Date.now() / 1_000),
+          lastCandleIsOpen: isTickInterval(interval) ? false : undefined,
+        }),
+      ),
+    [candles, usrSettings, interval, symbol],
+  );
+
+  const scriptModel = useMemo(
+    () => mergeScriptRenderModels([twcModel, usrComputation?.renderModel ?? null]),
+    [twcModel, usrComputation],
+  );
+
   const globalWarningText =
-    optionsAnalytics.enabled && optionsAnalyticsState.errorMessage
+    indicatorModels.error ??
+    (optionsAnalytics.enabled && optionsAnalyticsState.errorMessage
       ? `Options analytics unavailable: ${optionsAnalyticsState.errorMessage}`
-      : (twcModel?.banner?.text ?? null);
+      : (usrComputation?.diagnostics.warnings[0] ?? scriptModel?.banner?.text ?? null));
 
   useEffect(() => {
     onOptionsAnalyticsWarning?.(globalWarningText);
   }, [onOptionsAnalyticsWarning, globalWarningText]);
 
-  // TWC line series ride the price scale like regular overlays (gap-aware).
-  const twcLineOverlays = useMemo<OverlaySeries[]>(
+  // Stateful-script line series ride the price scale like regular overlays (gap-aware).
+  const scriptLineOverlays = useMemo<OverlaySeries[]>(
     () =>
-      (twcModel?.lines ?? []).map((line) => ({
-        id: `twc-${line.id}`,
+      (scriptModel?.lines ?? []).map((line) => ({
+        id: `script-${line.id}`,
         color: line.color,
         values: line.values,
         lineWidth: line.lineWidth,
         gaps: true,
       })),
-    [twcModel],
+    [scriptModel],
   );
 
-  const rsiSeries = useMemo<PaneSeries[] | null>(
-    () =>
-      timed('ChartView.rsiSeries', () => {
-        if (!indicatorSettings.rsiEnabled) return null;
-        return [
-          {
-            id: 'rsi',
-            kind: 'line' as const,
-            color: panePalette().rsi,
-            values: engine.rsi(candles, indicatorSettings.rsiPeriod),
-          },
-        ];
-      }),
-    [candles, indicatorSettings.rsiEnabled, indicatorSettings.rsiPeriod],
+  const subpaneModels = indicatorModels.models.filter(
+    ({ descriptor }) =>
+      descriptor.pane === 'subpane' && subPaneBoundary.visibleIds.has(descriptor.id),
   );
-
-  // Sub-panes are capped (MAX_SUB_PANES); only panes inside the cap render.
-  const visiblePanes = useMemo<Set<SubPaneKey>>(
-    () => new Set(enabledSubPanes(indicatorSettings)),
-    [indicatorSettings],
-  );
-
-  const macdSeries = useMemo<PaneSeries[] | null>(
-    () =>
-      timed('ChartView.macdSeries', () => {
-        if (!indicatorSettings.macdEnabled) return null;
-        const values = engine.macd(
-          candles,
-          indicatorSettings.macdFastPeriod,
-          indicatorSettings.macdSlowPeriod,
-          indicatorSettings.macdSignalPeriod,
-        );
-        const colors = panePalette();
-        return [
-          {
-            id: 'macdHistogram',
-            kind: 'histogram' as const,
-            positiveColor: colors.macdPositive,
-            negativeColor: colors.macdNegative,
-            values: values.histogram,
-          },
-          { id: 'macd', kind: 'line' as const, color: colors.macd, values: values.macdLine },
-          {
-            id: 'macdSignal',
-            kind: 'line' as const,
-            color: colors.macdSignal,
-            values: values.signalLine,
-          },
-        ];
-      }),
-    [
-      candles,
-      indicatorSettings.macdEnabled,
-      indicatorSettings.macdFastPeriod,
-      indicatorSettings.macdSlowPeriod,
-      indicatorSettings.macdSignalPeriod,
-    ],
-  );
-
-  const stochSeries = useMemo<PaneSeries[] | null>(
-    () =>
-      timed('ChartView.stochSeries', () => {
-        if (!indicatorSettings.stochEnabled) return null;
-        const values = engine.stochastic(
-          candles,
-          indicatorSettings.stochKPeriod,
-          indicatorSettings.stochKSmooth,
-          indicatorSettings.stochDPeriod,
-        );
-        const colors = panePalette();
-        return [
-          { id: 'stochK', kind: 'line' as const, color: colors.stochK, values: values.k },
-          { id: 'stochD', kind: 'line' as const, color: colors.stochD, values: values.d },
-        ];
-      }),
-    [
-      candles,
-      indicatorSettings.stochEnabled,
-      indicatorSettings.stochKPeriod,
-      indicatorSettings.stochKSmooth,
-      indicatorSettings.stochDPeriod,
-    ],
-  );
-
-  const atrSeries = useMemo<PaneSeries[] | null>(
-    () =>
-      timed('ChartView.atrSeries', () => {
-        if (!indicatorSettings.atrEnabled) return null;
-        return [
-          {
-            id: 'atr',
-            kind: 'line' as const,
-            color: panePalette().atr,
-            values: engine.atr(candles, indicatorSettings.atrPeriod),
-          },
-        ];
-      }),
-    [candles, indicatorSettings.atrEnabled, indicatorSettings.atrPeriod],
-  );
+  const unavailableL2 = l2.kind === 'unavailable' ? l2 : null;
+  const unavailableL2Panes = unavailableL2
+    ? INDICATOR_REGISTRY.indicators.filter(
+        (descriptor) =>
+          descriptor.pane === 'subpane' &&
+          descriptor.requiresL2 &&
+          subPaneBoundary.visibleIds.has(descriptor.id),
+      )
+    : [];
 
   // Interval hotkeys (1/5/3/⇧H/⇧D); ignored while typing in a field.
   useEffect(() => {
@@ -455,13 +421,18 @@ export function ChartView({
           >
             <CandleChart
               candles={candles}
-              overlays={twcLineOverlays.length > 0 ? [...overlays, ...twcLineOverlays] : overlays}
+              overlays={
+                scriptLineOverlays.length > 0 ? [...overlays, ...scriptLineOverlays] : overlays
+              }
+              indicatorFills={indicatorFills}
+              indicatorProfileRows={indicatorProfileRows}
               symbol={symbol}
               interval={interval}
-              showVolume={indicatorSettings.volumeEnabled}
+              showVolume={chartDisplay.volumeEnabled}
+              volumeWeightedCandleWidth={chartDisplay.volumeWeightedCandleWidth}
               drawingsStore={drawingsStore}
-              candleColors={twcModel?.candleColors ?? null}
-              twcModel={twcModel}
+              candleColors={scriptModel?.candleColors ?? null}
+              scriptModel={scriptModel}
               optionsAnalyticsSnapshot={optionsAnalyticsSnapshot}
               optionsAnalyticsSettings={optionsAnalytics.enabled ? optionsAnalytics : null}
               optionsAnalyticsRetained={optionsAnalyticsState.retained}
@@ -470,6 +441,7 @@ export function ChartView({
               chartTrading={chartTrading}
               revealPrice={revealPrice}
               onVisiblePriceRange={onVisiblePriceRange}
+              onVisibleCandleViewport={onVisibleCandleViewport}
             />
             {isLoading && candles.length === 0 && (
               <div className="chart-skeleton" aria-hidden="true">
@@ -541,66 +513,72 @@ export function ChartView({
         </div>
       </div>
 
-      {rsiSeries && visiblePanes.has('rsiEnabled') ? (
+      {subpaneModels.map(({ descriptor, model }) => {
+        const presentation = indicatorPanePresentation(descriptor);
+        return (
+          <PaneCard
+            key={descriptor.id}
+            title={indicatorTitle(
+              descriptor,
+              indicatorSettings.indicators[descriptor.id].parameters,
+            )}
+            readouts={paneReadouts(
+              model.paneSeries,
+              Object.fromEntries(
+                descriptor.geometry.series.map((series) => [
+                  `${descriptor.id}:${series.id}`,
+                  series.label,
+                ]),
+              ),
+            )}
+          >
+            <IndicatorPane
+              height={72}
+              candles={candles}
+              series={model.paneSeries}
+              guideLines={presentation.guideLines}
+              yRange={presentation.yRange}
+            />
+          </PaneCard>
+        );
+      })}
+      {unavailableL2Panes.map((descriptor) => (
         <PaneCard
-          title={`RSI (${indicatorSettings.rsiPeriod})`}
-          readouts={paneReadouts(rsiSeries, { rsi: '' })}
+          key={descriptor.id}
+          title={indicatorTitle(descriptor, indicatorSettings.indicators[descriptor.id].parameters)}
+          readouts={[]}
         >
-          <IndicatorPane
-            height={68}
-            candles={candles}
-            series={rsiSeries}
-            guideLines={[30, 70]}
-            yRange={[0, 100]}
-          />
+          <div
+            role="status"
+            style={{
+              height: 72,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: '0 12px',
+              color: 'var(--label-secondary)',
+              fontFamily: 'var(--font-mono)',
+              fontSize: 'var(--fs-caption2)',
+              textAlign: 'center',
+            }}
+          >
+            No L2 data — {unavailableL2?.isStale ? 'stale: ' : ''}
+            {unavailableL2?.reason}
+          </div>
         </PaneCard>
-      ) : null}
-      {macdSeries && visiblePanes.has('macdEnabled') ? (
-        <PaneCard
-          title={`MACD (${indicatorSettings.macdFastPeriod}, ${indicatorSettings.macdSlowPeriod}, ${indicatorSettings.macdSignalPeriod})`}
-          readouts={paneReadouts(macdSeries, {
-            macd: 'MACD',
-            macdSignal: 'Sig',
-            macdHistogram: 'Hist',
-          })}
-        >
-          <IndicatorPane height={72} candles={candles} series={macdSeries} />
-        </PaneCard>
-      ) : null}
-      {stochSeries && visiblePanes.has('stochEnabled') ? (
-        <PaneCard
-          title={`Stoch (${indicatorSettings.stochKPeriod}, ${indicatorSettings.stochKSmooth}, ${indicatorSettings.stochDPeriod})`}
-          readouts={paneReadouts(stochSeries, { stochK: '%K', stochD: '%D' })}
-        >
-          <IndicatorPane
-            height={68}
-            candles={candles}
-            series={stochSeries}
-            guideLines={[20, 80]}
-            yRange={[0, 100]}
-          />
-        </PaneCard>
-      ) : null}
-      {atrSeries && visiblePanes.has('atrEnabled') ? (
-        <PaneCard
-          title={`ATR (${indicatorSettings.atrPeriod})`}
-          readouts={paneReadouts(atrSeries, { atr: '' })}
-        >
-          <IndicatorPane height={68} candles={candles} series={atrSeries} />
-        </PaneCard>
-      ) : null}
+      ))}
     </section>
   );
 }
 
 /** Live value readouts for a pane card: last non-null of each labeled series,
- *  in label order. Histogram series get their sign color (green/red). */
+ *  in label order. Histogram series use their canonical semantic color. */
 function paneReadouts(series: PaneSeries[], labels: Record<string, string>): PaneReadout[] {
   const readouts: PaneReadout[] = [];
   for (const [id, label] of Object.entries(labels)) {
     const spec = series.find((candidate) => candidate.id === id);
     if (!spec) continue;
-    const value = engine.lastValue(spec.values);
+    const value = lastValue(spec.values);
     if (value === null) continue;
     const color =
       spec.kind === 'histogram'
@@ -609,4 +587,14 @@ function paneReadouts(series: PaneSeries[], labels: Record<string, string>): Pan
     readouts.push({ label, value: value.toFixed(2), color });
   }
   return readouts;
+}
+
+function indicatorTitle(
+  descriptor: IndicatorDescriptor,
+  parameters: Record<string, number>,
+): string {
+  const values = Object.values(parameters);
+  return values.length === 0
+    ? descriptor.displayName
+    : `${descriptor.displayName} (${values.join(', ')})`;
 }

@@ -22,6 +22,7 @@ struct IndicatorSettingsView: View {
     @ObservedObject var chartTrading: ChartTradingCoordinator
     /// Closes this popup and raises the TWC script's own settings screen.
     let onOpenTwcSettings: () -> Void
+    let onOpenUsrSettings: () -> Void
     /// Closes the popup. The dropdown has no `dismiss` environment of its own:
     /// it is not presented by SwiftUI, it is drawn by `HudMenuLayer`.
     let onDismiss: () -> Void
@@ -36,7 +37,17 @@ struct IndicatorSettingsView: View {
     private static let maxHeight: CGFloat = 440
     private static let rowHeight: CGFloat = 38
 
-    private var settings: IndicatorSettings { chart.indicatorSettings }
+    private var settings: IndicatorSettingsState { chart.indicatorSettings }
+    private var catalog: IndicatorControlCatalog {
+        IndicatorControlCatalog(
+            registry: chart.indicatorRegistry,
+            hasL2Data: chart.hasFreshL2Data
+        )
+    }
+    private var usesDefaultIndicators: Bool {
+        settings == chart.defaultIndicatorSettings
+            && chart.chartDisplayPreferences == .default
+    }
     private var optionsAnalyticsSettings: OptionsAnalyticsSettings {
         chart.optionsAnalyticsSettings
     }
@@ -87,11 +98,13 @@ struct IndicatorSettingsView: View {
             Spacer(minLength: 0)
             Button("Reset") {
                 Haptics.impact(.light)
-                chart.indicatorSettings = .default
+                chart.resetIndicatorSettings()
+                chart.setVolumeEnabled(ChartDisplayPreferences.default.volumeEnabled)
+                chart.setVolumeWeightedCandleWidth(ChartDisplayPreferences.default.volumeWeightedCandleWidth)
             }
             .font(.caption.weight(.semibold))
             .foregroundStyle(Color.appAccent)
-            .disabled(settings == .default)
+            .disabled(usesDefaultIndicators)
             Button {
                 onDismiss()
             } label: {
@@ -154,6 +167,31 @@ struct IndicatorSettingsView: View {
 
     /// A parameter row, indented under the switch that reveals it.
     private func stepperRow(
+        descriptor: IndicatorParameterDescriptor,
+        value: Binding<Double>
+    ) -> some View {
+        let step = descriptor.kind == .integer ? 1.0 : 0.1
+        let formatted = descriptor.kind == .integer
+            ? String(format: "%.0f", value.wrappedValue)
+            : String(format: "%.1f", value.wrappedValue)
+        return Stepper(
+            value: value,
+            in: descriptor.minimum...descriptor.maximum,
+            step: step
+        ) {
+            Text("\(descriptor.label): \(formatted)")
+                .font(.subheadline.monospacedDigit())
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        }
+        .padding(.leading, AppSpacing.md + AppSpacing.lg)
+        .padding(.trailing, AppSpacing.md)
+        .frame(minHeight: Self.rowHeight)
+        .accessibilityLabel(descriptor.label)
+        .accessibilityValue(formatted)
+    }
+
+    private func stepperRow(
         _ title: String,
         value: Binding<Int>,
         in range: ClosedRange<Int>,
@@ -188,119 +226,108 @@ struct IndicatorSettingsView: View {
     private var priceOverlays: some View {
         Group {
             sectionHeader("Price Overlays")
-            toggleRow(
-                "SMA",
-                swatch: ChartStyle.overlayColor(for: "sma"),
-                isOn: $chart.indicatorSettings.smaEnabled
-            )
-            if settings.smaEnabled {
-                stepperRow(
-                    "Period: \(settings.smaPeriod)",
-                    value: $chart.indicatorSettings.smaPeriod,
-                    in: IndicatorSettings.maPeriodRange,
-                    accessibilityLabel: "SMA period"
-                )
+            ForEach(catalog.overlays) { control in
+                indicatorControl(control)
             }
-
             toggleRow(
-                "EMA",
-                swatch: ChartStyle.overlayColor(for: "ema"),
-                isOn: $chart.indicatorSettings.emaEnabled
-            )
-            if settings.emaEnabled {
-                stepperRow(
-                    "Period: \(settings.emaPeriod)",
-                    value: $chart.indicatorSettings.emaPeriod,
-                    in: IndicatorSettings.maPeriodRange,
-                    accessibilityLabel: "EMA period"
+                "Volume",
+                isOn: Binding(
+                    get: { chart.chartDisplayPreferences.volumeEnabled },
+                    set: { chart.setVolumeEnabled($0) }
                 )
-            }
-
-            toggleRow(
-                "VWAP",
-                swatch: ChartStyle.overlayColor(for: "vwap"),
-                isOn: $chart.indicatorSettings.vwapEnabled
             )
-            toggleRow("Volume", isOn: $chart.indicatorSettings.volumeEnabled)
             toggleRow(
-                "Bollinger Bands",
-                isOn: $chart.indicatorSettings.bollingerEnabled
-            )
-            if settings.bollingerEnabled {
-                stepperRow(
-                    "Period: \(settings.bollingerPeriod)",
-                    value: $chart.indicatorSettings.bollingerPeriod,
-                    in: IndicatorSettings.bollingerPeriodRange,
-                    accessibilityLabel: "Bollinger Bands period"
+                "Volume-Weighted Width",
+                isOn: Binding(
+                    get: { chart.chartDisplayPreferences.volumeWeightedCandleWidth },
+                    set: { chart.setVolumeWeightedCandleWidth($0) }
                 )
-                // Unitless sigma multiplier — Format.price is for prices/P&L.
-                // NOTE: belongs in DesignSystem as `Format.multiplier`; the
-                // foundation is frozen for this pass.
-                Stepper(
-                    value: $chart.indicatorSettings.bollingerMultiplier,
-                    in: IndicatorSettings.bollingerMultiplierRange,
-                    step: 0.5
-                ) {
-                    Text("Width: \(String(format: "%.1f", settings.bollingerMultiplier))σ")
-                        .font(.subheadline.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-                .padding(.leading, AppSpacing.md + AppSpacing.lg)
-                .padding(.trailing, AppSpacing.md)
-                .frame(minHeight: Self.rowHeight)
-                .accessibilityLabel("Bollinger Bands width")
-                .accessibilityValue("\(String(format: "%.1f", settings.bollingerMultiplier)) sigma")
-            }
+            )
         }
     }
 
     private var subPanes: some View {
         Group {
             sectionHeader("Sub-Panes")
-            toggleRow("RSI", isOn: $chart.indicatorSettings.rsiEnabled)
-            if settings.rsiEnabled {
-                stepperRow(
-                    "Period: \(settings.rsiPeriod)",
-                    value: $chart.indicatorSettings.rsiPeriod,
-                    in: IndicatorSettings.oscillatorPeriodRange,
-                    accessibilityLabel: "RSI period"
-                )
+            ForEach(catalog.subPanes) { control in
+                indicatorControl(control)
             }
+            if let message = chart.indicatorErrorMessage {
+                note(message, tint: .appWarning)
+            } else {
+                note("Settings save automatically.")
+            }
+        }
+    }
 
-            toggleRow("MACD", isOn: $chart.indicatorSettings.macdEnabled)
-            toggleRow("Stochastic", isOn: $chart.indicatorSettings.stochEnabled)
-            if settings.stochEnabled {
-                stepperRow(
-                    "%K Period: \(settings.stochKPeriod)",
-                    value: $chart.indicatorSettings.stochKPeriod,
-                    in: IndicatorSettings.stochKPeriodRange,
-                    accessibilityLabel: "Stochastic %K period"
-                )
-                stepperRow(
-                    "%K Smoothing: \(settings.stochKSmooth)",
-                    value: $chart.indicatorSettings.stochKSmooth,
-                    in: IndicatorSettings.stochSmoothRange,
-                    accessibilityLabel: "Stochastic %K smoothing"
-                )
-                stepperRow(
-                    "%D Period: \(settings.stochDPeriod)",
-                    value: $chart.indicatorSettings.stochDPeriod,
-                    in: IndicatorSettings.stochSmoothRange,
-                    accessibilityLabel: "Stochastic %D period"
-                )
-            }
+    @ViewBuilder
+    private func indicatorControl(_ control: IndicatorControlItem) -> some View {
+        let isEnabled = settings.indicators[control.id]?.enabled ?? false
+        let firstToken = control.descriptor.geometry.series.first?.styleToken
+        toggleRow(
+            control.displayName,
+            swatch: firstToken.map(ChartStyle.indicatorSwiftUIColor),
+            isOn: Binding(
+                get: { chart.indicatorSettings.indicators[control.id]?.enabled ?? false },
+                set: { chart.setIndicatorEnabled(id: control.id, enabled: $0) }
+            )
+        )
+        .disabled(!IndicatorTogglePolicy.canChange(
+            availability: control.availability,
+            isEnabled: isEnabled
+        ))
 
-            toggleRow("ATR", isOn: $chart.indicatorSettings.atrEnabled)
-            if settings.atrEnabled {
-                stepperRow(
-                    "Period: \(settings.atrPeriod)",
-                    value: $chart.indicatorSettings.atrPeriod,
-                    in: IndicatorSettings.oscillatorPeriodRange,
-                    accessibilityLabel: "ATR period"
-                )
+        if control.availability == .noL2Data {
+            note(chart.l2UnavailableReason)
+        } else if isEnabled {
+            ForEach(control.parameters.values.sorted { $0.id < $1.id }, id: \.id) { parameter in
+                parameterControl(parameter, indicatorId: control.id)
             }
-            note("MACD uses standard 12 / 26 / 9 parameters. Settings save automatically.")
+        }
+    }
+
+    @ViewBuilder
+    private func parameterControl(
+        _ descriptor: IndicatorParameterDescriptor,
+        indicatorId: String
+    ) -> some View {
+        let binding = Binding<Double>(
+            get: {
+                chart.indicatorSettings.indicators[indicatorId]?.parameters[descriptor.id]
+                    ?? descriptor.default
+            },
+            set: { chart.setIndicatorParameter(id: indicatorId, parameterId: descriptor.id, value: $0) }
+        )
+        if descriptor.kind == .timestamp {
+            let sessionAnchor = binding.wrappedValue == 0 && descriptor.zeroMeansSessionAnchor == true
+            VStack(alignment: .leading, spacing: AppSpacing.xs) {
+                DatePicker(
+                    descriptor.label,
+                    selection: Binding(
+                        get: {
+                            sessionAnchor
+                                ? Date()
+                                : Date(timeIntervalSince1970: binding.wrappedValue / 1_000)
+                        },
+                        set: { binding.wrappedValue = ($0.timeIntervalSince1970 * 1_000).rounded() }
+                    ),
+                    displayedComponents: [.date, .hourAndMinute]
+                )
+                .font(.subheadline)
+                if descriptor.zeroMeansSessionAnchor == true {
+                    Button(sessionAnchor ? "Using current session" : "Use current session") {
+                        binding.wrappedValue = 0
+                    }
+                    .font(.caption)
+                    .foregroundStyle(Color.appAccent)
+                    .disabled(sessionAnchor)
+                }
+            }
+            .padding(.leading, AppSpacing.md + AppSpacing.lg)
+            .padding(.trailing, AppSpacing.md)
+            .padding(.vertical, AppSpacing.xs)
+        } else {
+            stepperRow(descriptor: descriptor, value: binding)
         }
     }
 
@@ -320,6 +347,21 @@ struct IndicatorSettingsView: View {
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("TWC Heatmap V5 settings")
+                )
+            )
+            toggleRow(
+                "Ultimate Support & Resistance",
+                isOn: $chart.usrSettings.enabled,
+                accessory: AnyView(
+                    Button {
+                        onOpenUsrSettings()
+                    } label: {
+                        Image(systemName: "gearshape")
+                            .font(.caption)
+                            .foregroundStyle(Color.appAccent)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Ultimate Support and Resistance settings")
                 )
             )
 

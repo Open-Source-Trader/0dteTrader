@@ -1,5 +1,14 @@
-import type { IndicatorSettings } from '../../features/chart/indicatorSettings';
-import { DEFAULT_INDICATOR_SETTINGS } from '../../features/chart/indicatorSettings';
+import type {
+  ChartDisplayPreferences,
+  IndicatorId,
+  IndicatorSetting,
+  IndicatorSettingsState,
+} from '@0dtetrader/shared-types';
+import {
+  DEFAULT_CHART_DISPLAY,
+  DEFAULT_INDICATOR_SETTINGS_STATE,
+  validateIndicatorSettingsState,
+} from '../../features/chart/indicatorRegistry';
 import type { OptionsAnalyticsSettings } from '../../features/chart/optionsAnalytics/optionsAnalyticsSettings';
 import {
   decodeOptionsAnalyticsSettings,
@@ -12,15 +21,27 @@ import {
 } from '../../features/chart/chartTradingSettings';
 import type { TwcHeatmapSettings } from '../../features/chart/twc/twcSettings';
 import { DEFAULT_TWC_SETTINGS } from '../../features/chart/twc/twcSettings';
+import type { UsrSettings } from '../../features/chart/ultimateSupportResistance/usrSettings';
+import {
+  decodeUsrSettings,
+  DEFAULT_USR_SETTINGS,
+} from '../../features/chart/ultimateSupportResistance/usrSettings';
 
 export type TradeLayout = 'fullscreen' | 'split';
+
+/** 'termStructure': strike x expiration, latest snapshot per expiration.
+ *  'timeSeries': strike x timestamp, one expiration over its capture history. */
+export type GexHeatmapViewMode = 'termStructure' | 'timeSeries';
 
 /** localStorage-backed app settings (SettingsStore.swift analog). */
 export class SettingsStore {
   private static keys = {
     layoutMode: 'settings.layoutMode',
-    indicatorSettings: 'settings.indicatorSettings',
+    legacyIndicatorSettings: 'settings.indicatorSettings',
+    indicatorSettings: 'settings.indicatorSettings.v1',
+    chartDisplay: 'settings.chartDisplay.v1',
     twcSettings: 'settings.twcSettings',
+    usrSettings: 'settings.ultimateSupportResistance.v1',
     optionsAnalytics: 'settings.optionsAnalytics.v1',
     chartTrading: 'settings.chartTrading.v1',
     riskDisclaimerAccepted: 'settings.riskDisclaimerAccepted',
@@ -29,9 +50,9 @@ export class SettingsStore {
     tradingLocked: 'settings.tradingLocked',
     bypassOrderConfirmation: 'settings.bypassOrderConfirmation',
     keyboardShortcutsEnabled: 'settings.keyboardShortcutsEnabled',
-    autoOtmOffset: 'settings.autoOtmOffset',
     toastsEnabled: 'settings.toastsEnabled',
     systemNotificationsEnabled: 'settings.systemNotificationsEnabled',
+    gexHeatmapView: 'settings.gexHeatmapView',
   };
 
   get layoutMode(): TradeLayout {
@@ -43,18 +64,210 @@ export class SettingsStore {
     localStorage.setItem(SettingsStore.keys.layoutMode, value);
   }
 
-  get indicatorSettings(): IndicatorSettings {
+  /** Term structure is the default: it matches the reference implementation
+   *  this feature was modeled on. */
+  get gexHeatmapView(): GexHeatmapViewMode {
+    const stored = localStorage.getItem(SettingsStore.keys.gexHeatmapView);
+    return stored === 'timeSeries' ? 'timeSeries' : 'termStructure';
+  }
+
+  set gexHeatmapView(value: GexHeatmapViewMode) {
+    localStorage.setItem(SettingsStore.keys.gexHeatmapView, value);
+  }
+
+  get indicatorSettings(): IndicatorSettingsState {
+    this.ensureIndicatorMigration();
     const raw = localStorage.getItem(SettingsStore.keys.indicatorSettings);
-    if (!raw) return DEFAULT_INDICATOR_SETTINGS;
+    if (!raw) return structuredClone(DEFAULT_INDICATOR_SETTINGS_STATE);
     try {
-      return { ...DEFAULT_INDICATOR_SETTINGS, ...(JSON.parse(raw) as Partial<IndicatorSettings>) };
+      return validateIndicatorSettingsState(JSON.parse(raw), DEFAULT_INDICATOR_SETTINGS_STATE)
+        .value;
     } catch {
-      return DEFAULT_INDICATOR_SETTINGS;
+      return structuredClone(DEFAULT_INDICATOR_SETTINGS_STATE);
     }
   }
 
-  set indicatorSettings(value: IndicatorSettings) {
-    localStorage.setItem(SettingsStore.keys.indicatorSettings, JSON.stringify(value));
+  set indicatorSettings(value: IndicatorSettingsState) {
+    const result = validateIndicatorSettingsState(value, DEFAULT_INDICATOR_SETTINGS_STATE);
+    if (!result.ok) throw new Error(result.error);
+    localStorage.setItem(SettingsStore.keys.indicatorSettings, JSON.stringify(result.value));
+  }
+
+  get chartDisplay(): ChartDisplayPreferences {
+    this.ensureIndicatorMigration();
+    return this.readChartDisplay();
+  }
+
+  set chartDisplay(value: ChartDisplayPreferences) {
+    if (typeof value.volumeEnabled !== 'boolean') throw new Error('Volume display is invalid.');
+    if (typeof value.volumeWeightedCandleWidth !== 'boolean') {
+      throw new Error('Volume-weighted candle width display is invalid.');
+    }
+    localStorage.setItem(SettingsStore.keys.chartDisplay, JSON.stringify(value));
+  }
+
+  private readChartDisplay(): ChartDisplayPreferences {
+    const raw = localStorage.getItem(SettingsStore.keys.chartDisplay);
+    if (!raw) return { ...DEFAULT_CHART_DISPLAY };
+    try {
+      const value = JSON.parse(raw) as Record<string, unknown>;
+      if (typeof value.volumeEnabled !== 'boolean') return { ...DEFAULT_CHART_DISPLAY };
+      return {
+        volumeEnabled: value.volumeEnabled,
+        volumeWeightedCandleWidth:
+          typeof value.volumeWeightedCandleWidth === 'boolean'
+            ? value.volumeWeightedCandleWidth
+            : DEFAULT_CHART_DISPLAY.volumeWeightedCandleWidth,
+      };
+    } catch {
+      return { ...DEFAULT_CHART_DISPLAY };
+    }
+  }
+
+  private ensureIndicatorMigration(): void {
+    const current = localStorage.getItem(SettingsStore.keys.indicatorSettings);
+    const legacyRaw = localStorage.getItem(SettingsStore.keys.legacyIndicatorSettings);
+    if (current) {
+      try {
+        const validCurrent = validateIndicatorSettingsState(
+          JSON.parse(current),
+          DEFAULT_INDICATOR_SETTINGS_STATE,
+        ).ok;
+        if (validCurrent) {
+          let displayValid = false;
+          try {
+            const displayRaw = localStorage.getItem(SettingsStore.keys.chartDisplay);
+            if (displayRaw) {
+              const display = JSON.parse(displayRaw) as Record<string, unknown>;
+              displayValid = typeof display.volumeEnabled === 'boolean';
+            }
+          } catch {
+            displayValid = false;
+          }
+          if (!displayValid) {
+            try {
+              localStorage.setItem(
+                SettingsStore.keys.chartDisplay,
+                JSON.stringify(DEFAULT_CHART_DISPLAY),
+              );
+              const repaired = JSON.parse(
+                localStorage.getItem(SettingsStore.keys.chartDisplay) ?? 'null',
+              ) as Record<string, unknown> | null;
+              if (repaired?.volumeEnabled !== DEFAULT_CHART_DISPLAY.volumeEnabled) return;
+            } catch {
+              // Preserve both the valid keyed record and legacy residue for a later retry.
+              return;
+            }
+          }
+          if (legacyRaw) localStorage.removeItem(SettingsStore.keys.legacyIndicatorSettings);
+          return;
+        }
+      } catch {
+        // A corrupt current record may still be recoverable from the legacy record.
+      }
+    }
+    if (!legacyRaw) return;
+    let legacy: Record<string, unknown>;
+    try {
+      const parsed: unknown = JSON.parse(legacyRaw);
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return;
+      legacy = parsed as Record<string, unknown>;
+    } catch {
+      return;
+    }
+    const recognized = new Set([
+      'smaEnabled',
+      'smaPeriod',
+      'emaEnabled',
+      'emaPeriod',
+      'vwapEnabled',
+      'rsiEnabled',
+      'rsiPeriod',
+      'macdEnabled',
+      'macdFastPeriod',
+      'macdSlowPeriod',
+      'macdSignalPeriod',
+      'bollingerEnabled',
+      'bollingerPeriod',
+      'bollingerMultiplier',
+      'stochEnabled',
+      'stochKPeriod',
+      'stochKSmooth',
+      'stochDPeriod',
+      'atrEnabled',
+      'atrPeriod',
+      'volumeEnabled',
+    ]);
+    if (!Object.keys(legacy).some((key) => recognized.has(key))) return;
+
+    const candidate = structuredClone(DEFAULT_INDICATOR_SETTINGS_STATE);
+    const bool = (key: string, fallback: boolean): boolean | unknown => legacy[key] ?? fallback;
+    const num = (key: string, fallback: number): number | unknown => legacy[key] ?? fallback;
+    const set = (
+      id: IndicatorId,
+      enabledKey: string | null,
+      parameterMap: Record<string, string>,
+    ) => {
+      const defaults = candidate.indicators[id];
+      candidate.indicators[id] = {
+        enabled: (enabledKey ? bool(enabledKey, defaults.enabled) : defaults.enabled) as boolean,
+        parameters: Object.fromEntries(
+          Object.entries(defaults.parameters).map(([parameterId, fallback]) => [
+            parameterId,
+            parameterMap[parameterId] ? num(parameterMap[parameterId], fallback) : fallback,
+          ]),
+        ) as Record<string, number>,
+      } as IndicatorSetting;
+    };
+    set('sma', 'smaEnabled', { period: 'smaPeriod' });
+    set('ema', 'emaEnabled', { period: 'emaPeriod' });
+    set('anchored_vwap', 'vwapEnabled', {});
+    set('rsi', 'rsiEnabled', { period: 'rsiPeriod' });
+    set('macd', 'macdEnabled', {
+      fastPeriod: 'macdFastPeriod',
+      slowPeriod: 'macdSlowPeriod',
+      signalPeriod: 'macdSignalPeriod',
+    });
+    set('bollinger', 'bollingerEnabled', {
+      period: 'bollingerPeriod',
+      multiplier: 'bollingerMultiplier',
+    });
+    set('stochastic', 'stochEnabled', {
+      kPeriod: 'stochKPeriod',
+      kSmooth: 'stochKSmooth',
+      dPeriod: 'stochDPeriod',
+    });
+    set('atr', 'atrEnabled', { period: 'atrPeriod' });
+    const validated = validateIndicatorSettingsState(candidate, DEFAULT_INDICATOR_SETTINGS_STATE);
+    const volumeEnabled = bool('volumeEnabled', DEFAULT_CHART_DISPLAY.volumeEnabled);
+    if (!validated.ok || typeof volumeEnabled !== 'boolean') return;
+    const chartDisplay = { volumeEnabled };
+
+    const previousSettings = localStorage.getItem(SettingsStore.keys.indicatorSettings);
+    const previousDisplay = localStorage.getItem(SettingsStore.keys.chartDisplay);
+    try {
+      localStorage.setItem(SettingsStore.keys.indicatorSettings, JSON.stringify(validated.value));
+      localStorage.setItem(SettingsStore.keys.chartDisplay, JSON.stringify(chartDisplay));
+      const rereadSettings = localStorage.getItem(SettingsStore.keys.indicatorSettings);
+      const rereadDisplay = localStorage.getItem(SettingsStore.keys.chartDisplay);
+      if (
+        !rereadSettings ||
+        !validateIndicatorSettingsState(
+          JSON.parse(rereadSettings),
+          DEFAULT_INDICATOR_SETTINGS_STATE,
+        ).ok ||
+        !rereadDisplay ||
+        (JSON.parse(rereadDisplay) as { volumeEnabled?: unknown }).volumeEnabled !== volumeEnabled
+      ) {
+        throw new Error('Indicator settings migration verification failed.');
+      }
+      localStorage.removeItem(SettingsStore.keys.legacyIndicatorSettings);
+    } catch {
+      if (previousSettings === null) localStorage.removeItem(SettingsStore.keys.indicatorSettings);
+      else localStorage.setItem(SettingsStore.keys.indicatorSettings, previousSettings);
+      if (previousDisplay === null) localStorage.removeItem(SettingsStore.keys.chartDisplay);
+      else localStorage.setItem(SettingsStore.keys.chartDisplay, previousDisplay);
+    }
   }
 
   get twcSettings(): TwcHeatmapSettings {
@@ -69,6 +282,20 @@ export class SettingsStore {
 
   set twcSettings(value: TwcHeatmapSettings) {
     localStorage.setItem(SettingsStore.keys.twcSettings, JSON.stringify(value));
+  }
+
+  get usrSettings(): UsrSettings {
+    const raw = localStorage.getItem(SettingsStore.keys.usrSettings);
+    if (!raw) return { ...DEFAULT_USR_SETTINGS };
+    try {
+      return decodeUsrSettings(JSON.parse(raw));
+    } catch {
+      return { ...DEFAULT_USR_SETTINGS };
+    }
+  }
+
+  set usrSettings(value: UsrSettings) {
+    localStorage.setItem(SettingsStore.keys.usrSettings, JSON.stringify(decodeUsrSettings(value)));
   }
 
   get optionsAnalytics(): OptionsAnalyticsSettings {
@@ -173,20 +400,6 @@ export class SettingsStore {
 
   set systemNotificationsEnabled(value: boolean) {
     localStorage.setItem(SettingsStore.keys.systemNotificationsEnabled, String(value));
-  }
-
-  /** AUTO selection: strikes out of the money from the ATM anchor (0 = ATM
-   *  itself; the ticket's default is +1). Clamped to 0–10 on read so a stale
-   *  or hand-edited value cannot arm an order the server rejects. */
-  get autoOtmOffset(): number {
-    const raw = localStorage.getItem(SettingsStore.keys.autoOtmOffset);
-    const parsed = raw === null ? Number.NaN : Number(raw);
-    if (!Number.isInteger(parsed)) return 1;
-    return Math.min(10, Math.max(0, parsed));
-  }
-
-  set autoOtmOffset(value: number) {
-    localStorage.setItem(SettingsStore.keys.autoOtmOffset, String(value));
   }
 
   get lastSymbol(): string | null {

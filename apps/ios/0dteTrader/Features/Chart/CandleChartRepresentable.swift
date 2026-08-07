@@ -9,13 +9,16 @@ struct CandleChartRepresentable: UIViewRepresentable {
     let candles: [Candle]
     let overlays: [IndicatorSeries]
     let overlayColors: [String: UIColor]
+    let indicatorFillPlans: [IndicatorLiveRenderPlan]
+    let indicatorProfileRows: [PriceProfileRow]
     var visibleCount: Double = ChartMetrics.visibleCandles
     var showVolume: Bool = false
+    /// TradingView-style volume-weighted candle body width; wick stays fixed.
+    var volumeWeightedCandleWidth: Bool = false
     var intervalSeconds: TimeInterval = 60
     var drawingsModel: ChartDrawingsModel?
-    /// TWC Heatmap render model: candle repaints, extra line series, and the
-    /// read-only geometry overlay (nil when the script indicator is off).
-    var twcModel: TwcRenderModel?
+    /// Merged stateful-script model: candle repaints, line series, and geometry.
+    var scriptModel: ScriptRenderModel?
     /// Current options structure snapshot for the right-edge profile.
     var optionsAnalyticsSnapshot: OptionsAnalyticsSnapshotDTO?
     var optionsAnalyticsSettings: OptionsAnalyticsSettings = .default
@@ -128,6 +131,8 @@ struct CandleChartRepresentable: UIViewRepresentable {
     final class ContainerView: UIView {
         let chart = PostDrawChartView()
         let twcOverlay = TwcOverlayView()
+        let indicatorFillOverlay = IndicatorFillOverlayView()
+        let indicatorProfileOverlay = IndicatorPriceProfileOverlayView()
         let optionsAnalyticsOverlay = OptionsAnalyticsOverlayView()
         let overlay = DrawingOverlayView()
         /// Topmost: an order line must win the touch over a drawing, because
@@ -138,19 +143,27 @@ struct CandleChartRepresentable: UIViewRepresentable {
 
         override init(frame: CGRect) {
             super.init(frame: frame)
+            // Fill geometry sits below candles and line data so its translucent
+            // color never mutes the live price marks it is explaining.
+            addSubview(indicatorFillOverlay)
             addSubview(chart)
             // Read-only geometry overlays below the interactive drawing overlay.
             addSubview(twcOverlay)
+            addSubview(indicatorProfileOverlay)
             addSubview(optionsAnalyticsOverlay)
             addSubview(overlay)
             addSubview(orderLineOverlay)
+            indicatorFillOverlay.chart = chart
             twcOverlay.chart = chart
+            indicatorProfileOverlay.chart = chart
             optionsAnalyticsOverlay.chart = chart
             overlay.chart = chart
             orderLineOverlay.chart = chart
             chart.onPostDraw = { [weak self] in
                 guard let self else { return }
+                self.indicatorFillOverlay.setNeedsDisplay()
                 self.twcOverlay.setNeedsDisplay()
+                self.indicatorProfileOverlay.setNeedsDisplay()
                 self.optionsAnalyticsOverlay.setNeedsDisplay()
                 self.overlay.setNeedsDisplay()
                 self.orderLineOverlay.setNeedsDisplay()
@@ -208,7 +221,9 @@ struct CandleChartRepresentable: UIViewRepresentable {
         override func layoutSubviews() {
             super.layoutSubviews()
             chart.frame = bounds
+            indicatorFillOverlay.frame = bounds
             twcOverlay.frame = bounds
+            indicatorProfileOverlay.frame = bounds
             optionsAnalyticsOverlay.frame = bounds
             overlay.frame = bounds
             orderLineOverlay.frame = bounds
@@ -290,8 +305,10 @@ extension CandleChartRepresentable {
         chart.autoScaleMinMaxEnabled = true
 
         let redrawOverlays: () -> Void = { [weak container] in
+            container?.indicatorFillOverlay.setNeedsDisplay()
             container?.overlay.setNeedsDisplay()
             container?.twcOverlay.setNeedsDisplay()
+            container?.indicatorProfileOverlay.setNeedsDisplay()
             container?.optionsAnalyticsOverlay.setNeedsDisplay()
             container?.orderLineOverlay.setNeedsDisplay()
         }
@@ -360,8 +377,10 @@ extension CandleChartRepresentable {
         container.overlay.firstTime = candles.first?.time.timeIntervalSince1970 ?? 0
         container.overlay.intervalSeconds = intervalSeconds
         container.overlay.candles = candles
-        container.twcOverlay.model = twcModel
+        container.twcOverlay.model = scriptModel
         container.twcOverlay.candles = candles
+        container.indicatorFillOverlay.plans = indicatorFillPlans
+        container.indicatorProfileOverlay.rows = indicatorProfileRows
         container.optionsAnalyticsOverlay.snapshot = optionsAnalyticsSnapshot
         container.optionsAnalyticsOverlay.settings = optionsAnalyticsSettings
         container.orderLineOverlay.model = chartOrdersModel
@@ -386,7 +405,9 @@ extension CandleChartRepresentable {
             chart.data = nil
             chart.notifyDataSetChanged()
             chart.accessibilityValue = nil
+            container.indicatorFillOverlay.setNeedsDisplay()
             container.overlay.setNeedsDisplay()
+            container.indicatorProfileOverlay.setNeedsDisplay()
             container.optionsAnalyticsOverlay.setNeedsDisplay()
             container.orderLineOverlay.setNeedsDisplay()
             return
@@ -415,7 +436,7 @@ extension CandleChartRepresentable {
             )
         }
         let candleSet = CandleChartDataSet(entries: candleEntries, label: "Price")
-        if let regimeColors = twcModel?.candleColors {
+        if let regimeColors = scriptModel?.candleColors {
             // TWC regime candles: per-bar colors override the up/down palette.
             // DGCharts falls back to `colors[index]` when the increasing/
             // decreasing colors are nil; hidden (nil) bars keep the default.
@@ -473,26 +494,36 @@ extension CandleChartRepresentable {
             chart.rightAxis.axisMaximum = max(maxVolume, 1) * ChartMetrics.volumeHeightRatio
         }
 
-        let lineSets: [LineChartDataSet] = overlays.compactMap { series in
-            let entries: [ChartDataEntry] = series.values.enumerated().compactMap { index, value in
-                guard let value, index < candles.count else { return nil }
-                return ChartDataEntry(x: Double(index), y: value)
+        var lineSets: [LineChartDataSet] = []
+        for series in overlays {
+            var runEntries: [ChartDataEntry] = []
+            func flushRun() {
+                guard !runEntries.isEmpty else { return }
+                let set = LineChartDataSet(entries: runEntries, label: series.name)
+                set.mode = .linear
+                set.lineWidth = ChartMetrics.overlayLineWidth
+                set.drawCirclesEnabled = false
+                set.drawValuesEnabled = false
+                set.setColor(overlayColors[series.id] ?? .systemOrange)
+                set.axisDependency = .left
+                lineSets.append(set)
+                runEntries = []
             }
-            guard !entries.isEmpty else { return nil }
-            let set = LineChartDataSet(entries: entries, label: series.name)
-            set.mode = .linear
-            set.lineWidth = ChartMetrics.overlayLineWidth
-            set.drawCirclesEnabled = false
-            set.drawValuesEnabled = false
-            set.setColor(overlayColors[series.id] ?? .systemOrange)
-            set.axisDependency = .left
-            return set
+            for (index, value) in series.values.enumerated() {
+                guard index < candles.count else { break }
+                if let value {
+                    runEntries.append(ChartDataEntry(x: Double(index), y: value))
+                } else {
+                    flushRun()
+                }
+            }
+            flushRun()
         }
         // TWC line series: split each line's contiguous non-nil runs into
         // separate datasets so gaps break the line (Pine linebr) instead of
         // bridging across them.
         var twcLineSets: [LineChartDataSet] = []
-        for line in twcModel?.lines ?? [] {
+        for line in scriptModel?.lines ?? [] {
             var runEntries: [ChartDataEntry] = []
             func flushRun() {
                 guard runEntries.count >= 1 else {
@@ -535,7 +566,27 @@ extension CandleChartRepresentable {
         chart.xAxis.axisMinimum = -0.5
         chart.xAxis.axisMaximum = Double(candles.count - 1) + 12
         chart.notifyDataSetChanged()
+
+        // `chart.data = data` above rebuilds `subRenderers` from scratch with
+        // a fresh stock CandleStickChartRenderer (CombinedChartView.data's
+        // setter calls createRenderers() on every assignment), so the swap
+        // has to be reinstalled after every update rather than once at
+        // makeUIView — a renderer installed there would be silently replaced
+        // on the very next SwiftUI update.
+        if let combinedRenderer = chart.renderer as? CombinedChartRenderer, volumeWeightedCandleWidth {
+            if let index = combinedRenderer.subRenderers.firstIndex(where: { $0 is CandleStickChartRenderer }) {
+                let custom = VolumeWeightedCandleStickChartRenderer(
+                    dataProvider: chart,
+                    animator: chart.chartAnimator,
+                    viewPortHandler: chart.viewPortHandler
+                )
+                custom.volumes = candles.map { Double($0.volume) }
+                combinedRenderer.subRenderers[index] = custom
+            }
+        }
+        container.indicatorFillOverlay.setNeedsDisplay()
         container.overlay.setNeedsDisplay()
+        container.indicatorProfileOverlay.setNeedsDisplay()
         // Candle changes shift the price↔pixel transform, so repaint the rail.
         container.optionsAnalyticsOverlay.setNeedsDisplay()
 

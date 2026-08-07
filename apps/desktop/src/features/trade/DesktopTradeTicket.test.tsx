@@ -88,7 +88,7 @@ afterAll(() => {
 
 describe('DesktopTradeTicket right rail order', () => {
   it('renders option chain, then expiration/AUTO/CALL-PUT, then ticket and execution controls', () => {
-    const markup = ticketMarkup();
+    const markup = ticketMarkup(makeStores({ isAutoMode: true }));
 
     expect(markup.indexOf('chain-table')).toBeLessThan(markup.indexOf('desktop-ticket-config-row'));
     expect(markup.indexOf('desktop-ticket-config-row')).toBeLessThan(
@@ -102,6 +102,9 @@ describe('DesktopTradeTicket right rail order', () => {
     );
     expect((markup.match(/0DTE \/ Expiry|2026-07-29 · 0DTE/g) ?? []).length).toBe(1);
     expect((markup.match(/aria-label="Auto OTM selection"/g) ?? []).length).toBe(1);
+    expect(markup).toContain('aria-label="Auto selection strategy"');
+    expect(markup).toContain('>Scored<');
+    expect(markup).toContain('>Classic +1<');
     expect((markup.match(/Select call contract/g) ?? []).length).toBe(1);
     expect((markup.match(/Select put contract/g) ?? []).length).toBe(1);
     expect(markup).not.toContain('≈');

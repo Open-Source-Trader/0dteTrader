@@ -16,37 +16,32 @@ extension UIColor {
 
 /// Chart-layer shared constants.
 enum ChartStyle {
-    /// Fixed colors for price overlays, shared by the chart lines and the
-    /// indicator-settings legend swatches so they never drift.
-    static let overlayColors: [String: UIColor] = [
-        "sma": UIColor(red: 0.231, green: 0.620, blue: 1.0, alpha: 1), // #3B9EFF
-        "ema": UIColor(red: 0.392, green: 0.824, blue: 1.0, alpha: 1), // #64D2FF
-        "vwap": UIColor(red: 0.694, green: 0.298, blue: 0.941, alpha: 1), // #B14CF0
-        "bollingerUpper": UIColor(red: 0.290, green: 0.435, blue: 0.647, alpha: 1), // #4A6FA5
-        "bollingerMiddle": UIColor(red: 0.251, green: 0.796, blue: 0.878, alpha: 1), // #40CBE0
-        "bollingerLower": UIColor(red: 0.290, green: 0.435, blue: 0.647, alpha: 1), // #4A6FA5
+    private static let indicatorPalette: [UIColor] = [
+        UIColor(red: 0.231, green: 0.620, blue: 1.0, alpha: 1),
+        UIColor(red: 1.0, green: 0.624, blue: 0.039, alpha: 1),
+        UIColor(red: 0.251, green: 0.796, blue: 0.878, alpha: 1),
+        UIColor(red: 1.0, green: 0.773, blue: 0.239, alpha: 1),
+        UIColor(red: 0.694, green: 0.298, blue: 0.941, alpha: 1),
+        UIColor(red: 0.337, green: 0.835, blue: 0.514, alpha: 1),
+        UIColor(red: 1.0, green: 0.400, blue: 0.400, alpha: 1),
     ]
 
-    /// Sub-pane series colors, shared with the pane renderables so the
-    /// legend swatches and lines never drift. Values mirror the desktop
-    /// `--chart-*` tokens (RSI amber, MACD blue/orange).
-    static let paneColors: [String: UIColor] = [
-        "rsi": UIColor(red: 1.0, green: 0.773, blue: 0.239, alpha: 1), // #FFC53D
-        "macd": UIColor(red: 0.231, green: 0.620, blue: 1.0, alpha: 1), // #3B9EFF
-        "macdSignal": UIColor(red: 1.0, green: 0.624, blue: 0.039, alpha: 1), // #FF9F0A
-        "stochK": UIColor(red: 0.231, green: 0.620, blue: 1.0, alpha: 1), // #3B9EFF
-        "stochD": UIColor(red: 1.0, green: 0.624, blue: 0.039, alpha: 1), // #FF9F0A
-        "atr": UIColor(red: 0.251, green: 0.796, blue: 0.878, alpha: 1), // #40CBE0
-    ]
-
-    /// SwiftUI twin of an overlay color (settings-sheet legend swatches).
-    static func overlayColor(for id: String) -> Color {
-        Color(uiColor: overlayColors[id] ?? .systemOrange)
+    static func indicatorColor(for styleToken: String) -> UIColor {
+        if styleToken.hasSuffix(".bullish") || styleToken.hasSuffix(".plus_di") {
+            return .chartUp
+        }
+        if styleToken.hasSuffix(".bearish") || styleToken.hasSuffix(".minus_di") {
+            return .chartDown
+        }
+        var checksum = 0
+        for scalar in styleToken.unicodeScalars {
+            checksum = (checksum &* 31 &+ Int(scalar.value)) & 0x7FFF_FFFF
+        }
+        return indicatorPalette[checksum % indicatorPalette.count]
     }
 
-    /// SwiftUI twin of a sub-pane color.
-    static func paneColor(for id: String) -> Color {
-        Color(uiColor: paneColors[id] ?? .systemOrange)
+    static func indicatorSwiftUIColor(for styleToken: String) -> Color {
+        Color(uiColor: indicatorColor(for: styleToken))
     }
 }
 

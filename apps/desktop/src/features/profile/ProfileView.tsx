@@ -1,5 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { BrokerProvider, CredentialProvider, TradingMode } from '@0dtetrader/shared-types';
+import type {
+  BrokerProvider,
+  CredentialProvider,
+  DiscordNotificationSettings,
+  LegalAcceptanceStatus,
+  LegalDocument,
+  LegalDocumentSlug,
+  TradingMode,
+} from '@0dtetrader/shared-types';
 import { useContainer } from '../../app/container';
 import { useStore } from '../../core/observable';
 import { AlertDialog } from '../../design/components/AlertDialog';
@@ -10,6 +18,7 @@ import { Sheet } from '../../design/components/Sheet';
 import { Spinner } from '../../design/components/Spinner';
 import { Toggle } from '../../design/components/Toggle';
 import { CheckCircleFillIcon, WarningFillIcon } from '../../design/icons';
+import { LegalMarkdown } from '../legal/LegalMarkdown';
 import { ProfileStore } from './ProfileStore';
 import { ProfileStoreProvider } from './ProfileStoreContext';
 import { useProfileStore } from './useProfileStore';
@@ -17,11 +26,14 @@ import { AlpacaCredentialsForm } from './AlpacaCredentialsForm';
 import { SnapTradeCredentialsForm } from './SnapTradeCredentialsForm';
 import { TradierCredentialsForm } from './TradierCredentialsForm';
 import { WebullCredentialsForm } from './WebullCredentialsForm';
+import { AutoScoringSettings } from './AutoScoringSettings';
+import { IvAlertSettings } from './IvAlertSettings';
 import './profile.css';
 
 interface ProfileViewProps {
   onLogout: () => Promise<void>;
   onDismiss: () => void;
+  onAutoScoringPreferencesSaved?: () => void | Promise<void>;
   /** Desktop grid: centered floating panel instead of an iOS bottom sheet. */
   dense?: boolean;
   /** Render just the settings content, no NavBar/Sheet chrome — used when
@@ -102,6 +114,293 @@ function AccountSection() {
       <button className="grouped-row button-row" onClick={() => void store.load()}>
         Retry
       </button>
+    </>
+  );
+}
+
+function DiscordAndLegalSection({ onAccountDeleted }: { onAccountDeleted: () => void }) {
+  const container = useContainer();
+  const store = useProfileStore();
+  const profile = useStore(store);
+  const [discord, setDiscord] = useState<DiscordNotificationSettings | null>(null);
+  const [webhookUrl, setWebhookUrl] = useState('');
+  const [legal, setLegal] = useState<LegalAcceptanceStatus | null>(null);
+  const [document, setDocument] = useState<LegalDocument | null>(null);
+  const [deleteEmail, setDeleteEmail] = useState('');
+  const [message, setMessage] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [discordLoadFailed, setDiscordLoadFailed] = useState(false);
+  const [legalLoadFailed, setLegalLoadFailed] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    void container.apiClient
+      .discordSettings()
+      .then((value) => {
+        if (cancelled) return;
+        setDiscord(value);
+        setDiscordLoadFailed(false);
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        setDiscordLoadFailed(true);
+        setMessage(error instanceof Error ? error.message : String(error));
+      });
+    void container.apiClient
+      .legalStatus()
+      .then((value) => {
+        if (cancelled) return;
+        setLegal(value);
+        setLegalLoadFailed(false);
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        setLegalLoadFailed(true);
+        setMessage(error instanceof Error ? error.message : String(error));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [container]);
+
+  const reloadDiscord = async () => {
+    setBusy(true);
+    setMessage(null);
+    try {
+      setDiscord(await container.apiClient.discordSettings());
+      setDiscordLoadFailed(false);
+    } catch (error) {
+      setDiscordLoadFailed(true);
+      setMessage(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const reloadLegalStatus = async () => {
+    setBusy(true);
+    setMessage(null);
+    try {
+      setLegal(await container.apiClient.legalStatus());
+      setLegalLoadFailed(false);
+    } catch (error) {
+      setLegalLoadFailed(true);
+      setMessage(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const openDocument = async (slug: LegalDocumentSlug) => {
+    setBusy(true);
+    setMessage(null);
+    setDocument(null);
+    try {
+      setDocument(await container.apiClient.legalDocument(slug));
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <>
+      <div className="grouped-section">
+        <div className="section-header">Discord</div>
+        <div className="section-card">
+          {discordLoadFailed ? (
+            <button
+              className="grouped-row button-row"
+              disabled={busy}
+              onClick={() => void reloadDiscord()}
+            >
+              Retry Loading Discord Settings
+            </button>
+          ) : null}
+          <label className="grouped-row">
+            <span>Webhook URL</span>
+            <input
+              type="password"
+              value={webhookUrl}
+              placeholder={discord?.maskedWebhookUrl ?? 'https://discord.com/api/webhooks/...'}
+              onChange={(event) => setWebhookUrl(event.target.value)}
+            />
+          </label>
+          <div className="grouped-row">
+            <span>Post filled orders</span>
+            <span style={{ marginLeft: 'auto' }}>
+              <Toggle
+                on={discord?.enabled ?? false}
+                onChange={(enabled) => setDiscord((current) => current && { ...current, enabled })}
+              />
+            </span>
+          </div>
+          <div className="grouped-row">
+            <span>Include realized P/L</span>
+            <span style={{ marginLeft: 'auto' }}>
+              <Toggle
+                on={discord?.includePnl ?? false}
+                onChange={(includePnl) =>
+                  setDiscord((current) => current && { ...current, includePnl })
+                }
+              />
+            </span>
+          </div>
+          <button
+            className="grouped-row button-row"
+            disabled={!discord || busy}
+            onClick={() => {
+              if (!discord) return;
+              setBusy(true);
+              void container.apiClient
+                .updateDiscordSettings({
+                  ...(webhookUrl.trim() ? { webhookUrl: webhookUrl.trim() } : {}),
+                  enabled: discord.enabled,
+                  includePnl: discord.includePnl,
+                })
+                .then((value) => {
+                  setDiscord(value);
+                  setWebhookUrl('');
+                  setMessage('Discord settings saved.');
+                })
+                .catch((error) =>
+                  setMessage(error instanceof Error ? error.message : String(error)),
+                )
+                .finally(() => setBusy(false));
+            }}
+          >
+            Save Discord Settings
+          </button>
+          <button
+            className="grouped-row button-row"
+            disabled={!discord?.configured || busy}
+            onClick={() => {
+              setBusy(true);
+              void container.apiClient
+                .testDiscord()
+                .then(() => setMessage('Test notification sent.'))
+                .catch((error) =>
+                  setMessage(error instanceof Error ? error.message : String(error)),
+                )
+                .finally(() => setBusy(false));
+            }}
+          >
+            Send Test Notification
+          </button>
+        </div>
+      </div>
+
+      <div className="grouped-section">
+        <div className="section-header">About & Legal</div>
+        <div className="section-card">
+          <div className="grouped-row">
+            <span>Version</span>
+            <span className="row-value">
+              {__APP_VERSION__} ({__BUILD_IDENTIFIER__.slice(0, 12)})
+            </span>
+          </div>
+          {legal?.documents.map((item) => (
+            <div className="grouped-row" key={item.slug}>
+              <button
+                className="inline-button"
+                disabled={busy}
+                onClick={() => void openDocument(item.slug)}
+              >
+                {item.title}
+              </button>
+              {item.requiresAcceptance &&
+                (item.accepted ? (
+                  <span className="row-value positive">Accepted</span>
+                ) : (
+                  <button
+                    className="inline-button row-value"
+                    disabled={busy}
+                    onClick={() => void openDocument(item.slug)}
+                  >
+                    Review & accept
+                  </button>
+                ))}
+            </div>
+          ))}
+          {legalLoadFailed ? (
+            <button
+              className="grouped-row button-row"
+              disabled={busy}
+              onClick={() => void reloadLegalStatus()}
+            >
+              Retry Loading Legal Documents
+            </button>
+          ) : null}
+          {document ? (
+            <div className="grouped-row legal-document" role="region">
+              <div>
+                <strong>{document.title}</strong>
+                <LegalMarkdown markdown={document.markdown} style={{ marginTop: 8 }} />
+                {document.requiresAcceptance &&
+                !legal?.documents.find((item) => item.slug === document.slug)?.accepted ? (
+                  <button
+                    className="inline-button"
+                    disabled={busy}
+                    onClick={() => {
+                      setBusy(true);
+                      setMessage(null);
+                      void container.apiClient
+                        .acceptLegal(document.slug as 'terms' | 'risk', document.version)
+                        .then((value) => {
+                          setLegal(value);
+                          setMessage(`${document.title} accepted.`);
+                        })
+                        .catch((error) =>
+                          setMessage(error instanceof Error ? error.message : String(error)),
+                        )
+                        .finally(() => setBusy(false));
+                    }}
+                  >
+                    Accept {document.title}
+                  </button>
+                ) : null}
+                <button className="inline-button" onClick={() => setDocument(null)}>
+                  Close
+                </button>
+              </div>
+            </div>
+          ) : null}
+        </div>
+      </div>
+
+      <div className="grouped-section">
+        <div className="section-header">Delete Account</div>
+        <div className="section-card">
+          <label className="grouped-row">
+            <span>Confirm email</span>
+            <input
+              type="email"
+              value={deleteEmail}
+              placeholder={profile.me?.email ?? 'you@example.com'}
+              onChange={(event) => setDeleteEmail(event.target.value)}
+            />
+          </label>
+          <button
+            className="grouped-row destructive"
+            disabled={busy || deleteEmail.trim() === ''}
+            onClick={() => {
+              if (!window.confirm('Permanently delete this account and all stored data?')) return;
+              setBusy(true);
+              void container.apiClient
+                .deleteAccount(deleteEmail)
+                .then(onAccountDeleted)
+                .catch((error) =>
+                  setMessage(error instanceof Error ? error.message : String(error)),
+                )
+                .finally(() => setBusy(false));
+            }}
+          >
+            Permanently Delete Account
+          </button>
+        </div>
+        {message ? <div className="section-footer">{message}</div> : null}
+      </div>
     </>
   );
 }
@@ -676,6 +975,7 @@ function ProviderCredentials({
 function ProfileViewContent({
   onLogout,
   onDismiss,
+  onAutoScoringPreferencesSaved,
   dense = false,
   bodyOnly = false,
 }: ProfileViewProps) {
@@ -691,7 +991,6 @@ function ProfileViewContent({
   const [shortcutsEnabled, setShortcutsEnabled] = useState(
     () => container.settingsStore.keyboardShortcutsEnabled,
   );
-  const [autoOtmOffset, setAutoOtmOffset] = useState(() => container.settingsStore.autoOtmOffset);
   const [toastsEnabled, setToastsEnabled] = useState(() => container.settingsStore.toastsEnabled);
   const [systemNotificationsEnabled, setSystemNotificationsEnabled] = useState(
     () => container.settingsStore.systemNotificationsEnabled,
@@ -710,12 +1009,6 @@ function ProfileViewContent({
   const handleSystemNotificationsChange = (on: boolean) => {
     setSystemNotificationsEnabled(on);
     container.settingsStore.systemNotificationsEnabled = on;
-  };
-
-  const handleAutoOtmOffsetChange = (value: string) => {
-    const offset = Number(value);
-    setAutoOtmOffset(offset);
-    container.settingsStore.autoOtmOffset = offset;
   };
 
   const handleShortcutsChange = (on: boolean) => {
@@ -782,31 +1075,6 @@ function ProfileViewContent({
           </div>
         </div>
 
-        {/* AUTO selection: strikes OTM from the ATM anchor. */}
-        <div className="grouped-section">
-          <div className="section-header">AUTO selection</div>
-          <div className="section-card">
-            <div className="grouped-row">
-              <SegmentedControl
-                options={[
-                  { value: '0', label: 'ATM' },
-                  { value: '1', label: '+1' },
-                  { value: '2', label: '+2' },
-                  { value: '3', label: '+3' },
-                  { value: '4', label: '+4' },
-                  { value: '5', label: '+5' },
-                ]}
-                value={String(autoOtmOffset)}
-                onChange={handleAutoOtmOffsetChange}
-              />
-            </div>
-          </div>
-          <div className="section-footer">
-            How far AUTO picks from the at-the-money strike: +N OTM from ATM, or ATM itself. Applies
-            to new orders on this device.
-          </div>
-        </div>
-
         {/* Notifications */}
         <div className="grouped-section">
           <div className="section-header">Notifications</div>
@@ -834,6 +1102,12 @@ function ProfileViewContent({
           </div>
         </div>
 
+        <AutoScoringSettings
+          apiClient={container.apiClient}
+          onSaved={onAutoScoringPreferencesSaved}
+        />
+        <IvAlertSettings socket={container.quoteSocket} />
+
         {/* Desktop-grid-only: hotkeys have no meaning on the phone layout. */}
         <div className="grouped-section">
           <div className="section-header">Desktop</div>
@@ -853,6 +1127,11 @@ function ProfileViewContent({
 
         {/* Security section intentionally omitted: Face ID / AppLockManager is
               iOS-only (ProfileView.swift securitySection). */}
+        <DiscordAndLegalSection
+          onAccountDeleted={() => {
+            void onLogout().then(onDismiss);
+          }}
+        />
         {/* Session */}
         <div className="grouped-section">
           <div className="section-card">
@@ -948,7 +1227,13 @@ function ProfileViewContent({
   );
 }
 
-export function ProfileView({ onLogout, onDismiss, dense, bodyOnly }: ProfileViewProps) {
+export function ProfileView({
+  onLogout,
+  onDismiss,
+  onAutoScoringPreferencesSaved,
+  dense,
+  bodyOnly,
+}: ProfileViewProps) {
   const container = useContainer();
   const store = useMemo(() => new ProfileStore(container.apiClient), [container]);
   return (
@@ -956,6 +1241,7 @@ export function ProfileView({ onLogout, onDismiss, dense, bodyOnly }: ProfileVie
       <ProfileViewContent
         onLogout={onLogout}
         onDismiss={onDismiss}
+        onAutoScoringPreferencesSaved={onAutoScoringPreferencesSaved}
         dense={dense}
         bodyOnly={bodyOnly}
       />

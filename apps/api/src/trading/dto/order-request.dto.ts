@@ -1,6 +1,8 @@
 import { Type } from 'class-transformer';
 import {
   IsDateString,
+  Equals,
+  IsBoolean,
   IsIn,
   IsInt,
   IsNumber,
@@ -56,8 +58,157 @@ function IsValidLimitPrice(options?: ValidationOptions) {
   };
 }
 
+function IsValidSelectionShape(options?: ValidationOptions) {
+  return function (object: object, propertyName: string): void {
+    registerDecorator({
+      name: 'isValidSelectionShape',
+      target: object.constructor,
+      propertyName,
+      options,
+      validator: {
+        validate(_value: unknown, args: ValidationArguments): boolean {
+          const selection = args.object as OrderSelectionDto;
+          const hasLegacyOffset = 'otmOffset' in selection;
+          if (selection.mode === 'auto_scored') {
+            return (
+              !hasLegacyOffset &&
+              selection.autoScoring !== undefined &&
+              selection.strike === undefined &&
+              selection.classicFallbackAcknowledged === undefined
+            );
+          }
+          if (selection.mode === 'explicit') {
+            return (
+              !hasLegacyOffset &&
+              selection.strike !== undefined &&
+              selection.autoScoring === undefined &&
+              selection.classicFallbackAcknowledged === undefined
+            );
+          }
+          return (
+            !hasLegacyOffset &&
+            selection.mode === 'auto_otm' &&
+            selection.autoScoring === undefined &&
+            selection.strike === undefined
+          );
+        },
+        defaultMessage(): string {
+          return 'selection fields do not match mode; autoScoring is required only for auto_scored and strike only for explicit';
+        },
+      },
+    });
+  };
+}
+
+function HasPositiveWeightTotal(options?: ValidationOptions) {
+  return function (object: object, propertyName: string): void {
+    registerDecorator({
+      name: 'hasPositiveWeightTotal',
+      target: object.constructor,
+      propertyName,
+      options,
+      validator: {
+        validate(_value: unknown, args: ValidationArguments): boolean {
+          const weights = args.object as AutoScoringWeightsDto;
+          return (
+            weights.delta + weights.spread + weights.openInterest + weights.gamma + weights.iv > 0
+          );
+        },
+        defaultMessage(): string {
+          return 'Auto scoring weights must have a positive total';
+        },
+      },
+    });
+  };
+}
+
+export class AutoScoringWeightsDto {
+  @IsNumber({ allowNaN: false, allowInfinity: false })
+  @Min(0)
+  @Max(1)
+  delta!: number;
+
+  @IsNumber({ allowNaN: false, allowInfinity: false })
+  @Min(0)
+  @Max(1)
+  spread!: number;
+
+  @IsNumber({ allowNaN: false, allowInfinity: false })
+  @Min(0)
+  @Max(1)
+  openInterest!: number;
+
+  @IsNumber({ allowNaN: false, allowInfinity: false })
+  @Min(0)
+  @Max(1)
+  gamma!: number;
+
+  @IsNumber({ allowNaN: false, allowInfinity: false })
+  @Min(0)
+  @Max(1)
+  @HasPositiveWeightTotal()
+  iv!: number;
+}
+
+export class AutoScoringPreferencesDto {
+  @Equals(1)
+  schemaVersion!: 1;
+
+  @IsIn(['conservative', 'aggressive', 'custom'])
+  preset!: 'conservative' | 'aggressive' | 'custom';
+
+  @IsNumber({ allowNaN: false, allowInfinity: false })
+  @Min(0.01)
+  @Max(0.99)
+  targetAbsDelta!: number;
+
+  @IsInt()
+  @Min(0)
+  @Max(20)
+  strikeRungs!: number;
+
+  @IsNumber({ allowNaN: false, allowInfinity: false })
+  @Min(0)
+  @Max(10_000)
+  maxSpreadBps!: number;
+
+  @IsNumber({ allowNaN: false, allowInfinity: false })
+  @Min(Number.MIN_VALUE)
+  @Max(1_000_000)
+  maxPremiumDollars!: number;
+
+  @IsInt()
+  @Min(0)
+  @Max(1_000_000_000)
+  minOpenInterest!: number;
+
+  @IsIn(['seek', 'avoid'])
+  gammaMode!: 'seek' | 'avoid';
+
+  @ValidateNested()
+  @Type(() => AutoScoringWeightsDto)
+  weights!: AutoScoringWeightsDto;
+}
+
+export class AutoScoringSelectionDto {
+  @IsString()
+  @Matches(/^[A-Z0-9.]{6,32}$/)
+  selectedSymbol!: string;
+
+  @ValidateNested()
+  @Type(() => AutoScoringPreferencesDto)
+  preferences!: AutoScoringPreferencesDto;
+
+  @Equals(true, { message: 'scored confirmation must be explicitly accepted' })
+  scoredConfirmationAccepted!: true;
+
+  @IsDateString()
+  rankedAt!: string;
+}
+
 export class OrderSelectionDto {
-  @IsIn(['auto_otm', 'explicit'])
+  @IsIn(['auto_otm', 'auto_scored', 'explicit'])
+  @IsValidSelectionShape()
   mode!: SelectionMode;
 
   @IsOptional()
@@ -74,12 +225,14 @@ export class OrderSelectionDto {
   @IsNumber()
   strike?: number;
 
-  /** auto_otm only: strikes OTM from the ATM strike; 0 = ATM; omitted = 1. */
   @IsOptional()
-  @IsInt()
-  @Min(0)
-  @Max(10)
-  otmOffset?: number;
+  @IsBoolean()
+  classicFallbackAcknowledged?: boolean;
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => AutoScoringSelectionDto)
+  autoScoring?: AutoScoringSelectionDto;
 }
 
 export class OrderRequestDto {

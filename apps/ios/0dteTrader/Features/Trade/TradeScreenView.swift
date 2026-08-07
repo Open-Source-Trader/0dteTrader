@@ -15,6 +15,7 @@ struct TradeScreenView: View {
     @StateObject private var profileViewModel: ProfileViewModel
     @StateObject private var chartOrdersModel: ChartOrdersModel
     @StateObject private var chartTrading: ChartTradingCoordinator
+    @ObservedObject private var quoteSocket: QuoteSocketClient
 
     /// The screen's one anchored-popup slot. Owned here because every chip
     /// that opens one — the ticker and interval on the chart, the expiration
@@ -29,8 +30,10 @@ struct TradeScreenView: View {
     /// stack, so the gear closes the popup and raises this instead — the same
     /// arrangement the desktop already used.
     @State private var showTwcSettings = false
+    @State private var showUsrSettings = false
     @State private var showProfile = false
     @State private var showHistory = false
+    @State private var showGexHeatmap = false
     @State private var showAIAnalysis = false
     // 'nil' until /v1/me answers; the server value wins (desktop parity).
     @State private var tradingMode: TradingMode?
@@ -50,6 +53,7 @@ struct TradeScreenView: View {
     init(container: AppContainer, onLogout: @escaping () async -> Void) {
         self.container = container
         self.onLogout = onLogout
+        _quoteSocket = ObservedObject(wrappedValue: container.quoteSocket)
         _chartViewModel = StateObject(wrappedValue: container.makeChartViewModel())
         _chainViewModel = StateObject(wrappedValue: container.makeOptionsChainViewModel())
         _tradeViewModel = StateObject(wrappedValue: container.makeTradeViewModel())
@@ -73,6 +77,14 @@ struct TradeScreenView: View {
                         if needsProviderConfig {
                             providerConfigBanner
                         }
+                        if let alert = quoteSocket.latestIVAlert {
+                            IVAlertBanner(
+                                alert: alert,
+                                onDismiss: { quoteSocket.dismissLatestIVAlert() }
+                            )
+                            .transition(reduceMotion ? .opacity : .move(edge: .top).combined(with: .opacity))
+                            .zIndex(1)
+                        }
                         if let toast = tradeViewModel.toast {
                             ToastView(toast: toast, onDismiss: { tradeViewModel.dismissCurrentToast() })
                                                 .transition(reduceMotion ? .opacity : .move(edge: .top).combined(with: .opacity))
@@ -82,6 +94,7 @@ struct TradeScreenView: View {
                     .padding(.top, AppSpacing.sm)
                 }
                 .animation(AppMotion.standard, value: tradeViewModel.toast)
+                .animation(AppMotion.standard, value: quoteSocket.latestIVAlert)
                 // The wordmark, the profile button and the history button all
                 // live in the chart header now, so there is nothing left for a
                 // navigation bar to carry — hidden rather than emptied, or it
@@ -150,6 +163,16 @@ struct TradeScreenView: View {
             // with a field carries its own.
             .dismissKeyboardOnInteraction()
         }
+        .sheet(isPresented: $showUsrSettings) {
+            NavigationStack {
+                UsrSettingsView(settings: $chartViewModel.usrSettings)
+                    .toolbar {
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Button("Done") { showUsrSettings = false }
+                        }
+                    }
+            }
+        }
         .sheet(isPresented: $showProfile, onDismiss: {
             Task { await refreshTradingContext() }
         }) {
@@ -158,6 +181,19 @@ struct TradeScreenView: View {
         }
         .sheet(isPresented: $showHistory) {
             HistoryView(apiClient: container.apiClient)
+        }
+        .sheet(isPresented: $showGexHeatmap) {
+            GexHeatmapView(
+                symbol: chartViewModel.symbol,
+                spotPrice: chartViewModel.quote?.last ?? 0,
+                bid: chartViewModel.quote?.bid,
+                ask: chartViewModel.quote?.ask,
+                expirations: chainViewModel.expirations,
+                selectedExpiration: chainViewModel.selectedExpiration,
+                chartInterval: chartViewModel.interval,
+                apiClient: container.apiClient,
+                settingsStore: container.settingsStore
+            )
         }
         .sheet(isPresented: $showAIAnalysis) {
             #if canImport(FoundationModels)
@@ -225,7 +261,6 @@ struct TradeScreenView: View {
             tradeViewModel.optionContractResolver = { symbol in
                 chainViewModel.chain?.contracts.first { $0.symbol == symbol }
             }
-            tradeViewModel.isSocketConnected = { container.quoteSocket.connectionState == .connected }
             // CURR mode filters the chain's menus to held contracts.
             chainViewModel.positionsProvider = { tradeViewModel.positions }
             tradeViewModel.toastPolicy = { settingsStore.toastsEnabled }
@@ -242,15 +277,17 @@ struct TradeScreenView: View {
             chartTrading.onFlattenConfirmed = { position in
                 Task { await tradeViewModel.flatten(position) }
             }
-            // Per-message delivery: an OCO fire pushes two updates back-to-back
-            // and both must land — see QuoteSocketClient.onChartOrder.
-            // Pushes that landed while the socket was down are gone; re-read on
-            // the way back rather than drawing a bracket that already fired.
+            // Per-message delivery: rapid updates must not coalesce in a
+            // single @Published slot. Re-read after replay catch-up as a cheap
+            // consistency check; refresh calls coalesce with these callbacks.
             container.quoteSocket.onReconnected = { [weak chartOrdersModel, weak tradeViewModel] in
                 Task {
                     await chartOrdersModel?.load()
                     await tradeViewModel?.refreshTradingData()
                 }
+            }
+            container.quoteSocket.onOrderUpdate = { [weak tradeViewModel] update in
+                tradeViewModel?.handleOrderUpdate(update)
             }
             container.quoteSocket.onChartOrder = { [weak chartOrdersModel, weak tradeViewModel] order in
                 chartOrdersModel?.applyServerUpdate(order)
@@ -283,11 +320,6 @@ struct TradeScreenView: View {
             // the symbol, which covers a strike change, an expiration change
             // and AUTO repicking alike.
             tradeViewModel.clearCustomLimitPrice()
-        }
-        .onChange(of: container.quoteSocket.lastOrderUpdate) { _, update in
-            if let update {
-                tradeViewModel.handleOrderUpdate(update)
-            }
         }
         .onChange(of: chartViewModel.alertNotice) { _, notice in
             if let notice {
@@ -350,7 +382,7 @@ struct TradeScreenView: View {
     private static let chartMinHeight: CGFloat = 180
 
     private var paneCount: Int {
-        chartViewModel.indicatorSettings.enabledSubPaneCount
+        chartViewModel.subPanePresentations.count
     }
 
     @ViewBuilder
@@ -504,12 +536,17 @@ struct TradeScreenView: View {
                             dismiss()
                             showTwcSettings = true
                         },
+                        onOpenUsrSettings: {
+                            dismiss()
+                            showUsrSettings = true
+                        },
                         onDismiss: dismiss
                     )
                 )
             },
             onShowProfile: { showProfile = true },
             onShowHistory: { showHistory = true },
+            onShowGexHeatmap: { showGexHeatmap = true },
             tradingMode: tradingMode,
             onToggleMode: { showModeConfirmation = true },
             chartOrders: chartOrdersModel,

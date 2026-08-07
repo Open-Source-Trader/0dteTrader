@@ -1,5 +1,8 @@
 import type {
   AccountSummary,
+  AutoScoringPreferenceRecord,
+  AutoScoringPreferenceUpdate,
+  AutoScoringResult,
   AuthTokens,
   BrokerCredentialsInput,
   BrokerCredentialsSaved,
@@ -10,6 +13,8 @@ import type {
   ChartOrder,
   ChartOrderDraft,
   ChartOrderPatch,
+  GexHeatmapSnapshot,
+  GexTermStructureSnapshot,
   Me,
   OptionsChain,
   OrderPreview,
@@ -24,6 +29,11 @@ import type {
   WebullCredentialsSaved,
   WebullAccount,
   WebullSessionRefreshed,
+  DiscordNotificationSettings,
+  DiscordNotificationSettingsUpdate,
+  LegalAcceptanceStatus,
+  LegalDocument,
+  LegalDocumentSlug,
 } from '@0dtetrader/shared-types';
 import {
   DesktopSnapTradeAuthorizeResponse,
@@ -249,6 +259,86 @@ export class ApiClient {
     }).then((value) => validateOptionsAnalyticsSnapshot(value, normalizedSymbol, expiration));
   }
 
+  gexHeatmap(
+    symbol: string,
+    options: {
+      expiration?: string;
+      strikeRangeAboveSpot?: number;
+      strikeRangeBelowSpot?: number;
+      historyWindowMinutes?: number;
+      bucketMinutes?: number;
+      signal?: AbortSignal;
+    } = {},
+  ): Promise<GexHeatmapSnapshot> {
+    const query: Record<string, string> = { symbol: symbol.toUpperCase().trim() };
+    if (options.expiration) query.expiration = options.expiration;
+    if (options.strikeRangeAboveSpot !== undefined) {
+      query.strikeRangeAboveSpot = String(options.strikeRangeAboveSpot);
+    }
+    if (options.strikeRangeBelowSpot !== undefined) {
+      query.strikeRangeBelowSpot = String(options.strikeRangeBelowSpot);
+    }
+    if (options.historyWindowMinutes !== undefined) {
+      query.historyWindowMinutes = String(options.historyWindowMinutes);
+    }
+    if (options.bucketMinutes !== undefined) {
+      query.bucketMinutes = String(options.bucketMinutes);
+    }
+    return this.request({
+      method: 'GET',
+      path: 'v1/market/options-analytics/gex-heatmap',
+      query,
+      signal: options.signal,
+    });
+  }
+
+  gexTermStructure(
+    symbol: string,
+    options: {
+      expiration?: string;
+      strikeRangeAboveSpot?: number;
+      strikeRangeBelowSpot?: number;
+      maxSnapshotAgeMinutes?: number;
+      signal?: AbortSignal;
+    } = {},
+  ): Promise<GexTermStructureSnapshot> {
+    const query: Record<string, string> = { symbol: symbol.toUpperCase().trim() };
+    if (options.expiration) query.expiration = options.expiration;
+    if (options.strikeRangeAboveSpot !== undefined) {
+      query.strikeRangeAboveSpot = String(options.strikeRangeAboveSpot);
+    }
+    if (options.strikeRangeBelowSpot !== undefined) {
+      query.strikeRangeBelowSpot = String(options.strikeRangeBelowSpot);
+    }
+    if (options.maxSnapshotAgeMinutes !== undefined) {
+      query.maxSnapshotAgeMinutes = String(options.maxSnapshotAgeMinutes);
+    }
+    return this.request({
+      method: 'GET',
+      path: 'v1/market/options-analytics/gex-term-structure',
+      query,
+      signal: options.signal,
+    });
+  }
+
+  rankAutoContracts(input: {
+    underlying: string;
+    expiration: string;
+    optionType: 'call' | 'put';
+  }): Promise<AutoScoringResult> {
+    return this.request({ method: 'POST', path: 'v1/auto-scoring/rank', body: input });
+  }
+
+  autoScoringPreferences(): Promise<AutoScoringPreferenceRecord> {
+    return this.request({ method: 'GET', path: 'v1/auto-scoring/preferences' });
+  }
+
+  updateAutoScoringPreferences(
+    input: AutoScoringPreferenceUpdate,
+  ): Promise<AutoScoringPreferenceRecord> {
+    return this.request({ method: 'PUT', path: 'v1/auto-scoring/preferences', body: input });
+  }
+
   previewOrder(order: OrderRequest): Promise<OrderPreview> {
     return this.request({ method: 'POST', path: 'v1/orders/preview', body: order });
   }
@@ -276,6 +366,40 @@ export class ApiClient {
 
   orderHistory(): Promise<TradeHistory> {
     return this.request({ method: 'GET', path: 'v1/orders/history' });
+  }
+
+  discordSettings(): Promise<DiscordNotificationSettings> {
+    return this.request({ method: 'GET', path: 'v1/notifications/discord' });
+  }
+
+  updateDiscordSettings(
+    input: DiscordNotificationSettingsUpdate,
+  ): Promise<DiscordNotificationSettings> {
+    return this.request({ method: 'PUT', path: 'v1/notifications/discord', body: input });
+  }
+
+  testDiscord(): Promise<void> {
+    return this.requestVoid({ method: 'POST', path: 'v1/notifications/discord/test' });
+  }
+
+  legalStatus(): Promise<LegalAcceptanceStatus> {
+    return this.request({ method: 'GET', path: 'v1/me/legal' });
+  }
+
+  legalDocument(slug: LegalDocumentSlug): Promise<LegalDocument> {
+    return this.request({ method: 'GET', path: `v1/legal/${slug}`, requiresAuth: false });
+  }
+
+  acceptLegal(document: 'terms' | 'risk', version: string): Promise<LegalAcceptanceStatus> {
+    return this.request({
+      method: 'POST',
+      path: 'v1/me/legal/accept',
+      body: { document, version },
+    });
+  }
+
+  deleteAccount(confirmEmail: string): Promise<void> {
+    return this.requestVoid({ method: 'DELETE', path: 'v1/me', body: { confirmEmail } });
   }
 
   /** Broker-reported equity/daily P&L; null when the broker exposes none

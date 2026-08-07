@@ -11,6 +11,7 @@ interface FloatingAxesProps {
   series: ISeriesApi<'Candlestick'>;
   candles: ChartCandle[];
   interval: ChartInterval;
+  onVerticalScaleChange: () => void;
 }
 
 const PRICE_TICKS = 6;
@@ -41,7 +42,13 @@ const AXIS_DRAG_WIDTH = 44;
  * black shadow the quote readout uses, which is what lets a digit sit on a
  * wick without a plate behind it.
  */
-export function FloatingAxes({ chart, series, candles, interval }: FloatingAxesProps) {
+export function FloatingAxes({
+  chart,
+  series,
+  candles,
+  interval,
+  onVerticalScaleChange,
+}: FloatingAxesProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const scheduleRef = useRef<() => void>(() => {});
   const candlesRef = useRef(candles);
@@ -168,6 +175,13 @@ export function FloatingAxes({ chart, series, candles, interval }: FloatingAxesP
     const canvas = canvasRef.current;
     const containerEl = canvas?.parentElement;
     if (!canvas || !containerEl) return;
+    let activeDragCleanup: (() => void) | null = null;
+
+    const stopActiveDrag = () => {
+      const cleanup = activeDragCleanup;
+      activeDragCleanup = null;
+      cleanup?.();
+    };
 
     const onPointerDown = (event: PointerEvent) => {
       const rect = canvas.getBoundingClientRect();
@@ -185,6 +199,7 @@ export function FloatingAxes({ chart, series, candles, interval }: FloatingAxesP
       // reaching the chart's own canvas (native panning) or DrawingLayer's
       // capture listener, both descendants of this container.
       event.stopPropagation();
+      stopActiveDrag();
       claimPointer(event);
       priceScale.setAutoScale(false);
 
@@ -198,13 +213,20 @@ export function FloatingAxes({ chart, series, candles, interval }: FloatingAxesP
         const factor = Math.pow(2, dy / startHeight);
         const newHalfSpan = halfSpan * factor;
         priceScale.setVisibleRange({ from: mid - newHalfSpan, to: mid + newHalfSpan });
+        scheduleRef.current();
+        onVerticalScaleChange();
       };
-      const onUp = () => {
+      const onEnd = () => stopActiveDrag();
+      activeDragCleanup = () => {
         window.removeEventListener('pointermove', onMove);
-        window.removeEventListener('pointerup', onUp);
+        window.removeEventListener('pointerup', onEnd);
+        window.removeEventListener('pointercancel', onEnd);
+        window.removeEventListener('blur', onEnd);
       };
       window.addEventListener('pointermove', onMove);
-      window.addEventListener('pointerup', onUp);
+      window.addEventListener('pointerup', onEnd);
+      window.addEventListener('pointercancel', onEnd);
+      window.addEventListener('blur', onEnd);
     };
 
     const onPointerMove = (event: PointerEvent) => {
@@ -220,11 +242,12 @@ export function FloatingAxes({ chart, series, candles, interval }: FloatingAxesP
     containerEl.addEventListener('pointerdown', onPointerDown, true);
     containerEl.addEventListener('pointermove', onPointerMove);
     return () => {
+      stopActiveDrag();
       containerEl.removeEventListener('pointerdown', onPointerDown, true);
       containerEl.removeEventListener('pointermove', onPointerMove);
       containerEl.style.cursor = '';
     };
-  }, [chart]);
+  }, [chart, onVerticalScaleChange]);
 
   return (
     <canvas

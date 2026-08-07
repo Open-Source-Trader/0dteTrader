@@ -6,6 +6,7 @@ import {
   toOrderResult,
   toPosition,
   toQuote,
+  toOptionContract,
 } from './webull-mappers';
 
 describe('mapOrderStatus', () => {
@@ -77,6 +78,24 @@ describe('toQuote / toCandle', () => {
       '4h': 'M240',
       '1d': 'D',
     });
+  });
+});
+
+describe('toOptionContract', () => {
+  it('carries the provider timestamp and never fabricates a missing timestamp', () => {
+    expect(
+      toOptionContract('SPY260805C00500000', 'SPY', '2026-08-05', 500, 'call', {
+        bid: '2',
+        ask: '2.1',
+        last_trade_time: '2026-08-05T15:00:00Z',
+      }).quoteTimestamp,
+    ).toBe('2026-08-05T15:00:00.000Z');
+    expect(
+      toOptionContract('SPY260805C00500000', 'SPY', '2026-08-05', 500, 'call', {
+        bid: '2',
+        ask: '2.1',
+      }).quoteTimestamp,
+    ).toBeUndefined();
   });
 });
 

@@ -3,8 +3,8 @@ import type { AuthStore } from './AuthStore';
 const DISCLAIMER_PARAGRAPHS = [
   'Trading securities and options involves substantial risk of loss and is not suitable for every investor. You may lose all of your invested capital.',
   'Options on their expiration date ("0DTE") are especially volatile: prices can move violently in minutes, liquidity can disappear, and positions can expire worthless the same day.',
-  '0dteTrader is an order-entry tool only. It does not provide investment advice, recommendations, or analysis, and nothing in the app should be interpreted as such. Order routing, contract selection, and pricing are validated by the backend, but market conditions, connectivity, or broker outages may prevent or delay execution.',
-  'By tapping "I Understand and Accept" you acknowledge these risks and agree that you are solely responsible for every order submitted through this app.',
+  '0dteTrader provides order-entry and optional informational analysis tools. AI-generated and market analysis can be wrong, incomplete, or outdated and is not personalized investment advice or an order instruction. Market conditions, connectivity, or broker outages may prevent or delay execution.',
+  'Continuing acknowledges this first-launch warning. After signing in, you must review and accept the current server-hosted Terms and Options Risk Disclosure before arming or placing trades. You remain responsible for every order submitted through your account.',
 ];
 
 // Reuses the shared toast-in keyframes (base.css) for a staggered entrance;
@@ -15,7 +15,8 @@ const ENTRANCE = 'toast-in 250ms cubic-bezier(0.32, 0.72, 0, 1) both';
 const SCROLL_FADE =
   'linear-gradient(to bottom, transparent 0, #000 24px, #000 calc(100% - 24px), transparent 100%)';
 
-/** First-launch risk disclosure; must accept before any other screen. */
+/** Preliminary first-launch warning. Versioned legal acceptance happens
+ * server-side after authentication. */
 export function RiskDisclaimerView({ store }: { store: AuthStore }) {
   return (
     <div
@@ -82,7 +83,7 @@ export function RiskDisclaimerView({ store }: { store: AuthStore }) {
         style={{ marginBottom: 'var(--space-2)', animation: ENTRANCE, animationDelay: '120ms' }}
         onClick={() => store.acceptDisclaimer()}
       >
-        I Understand and Accept
+        Acknowledge and Continue
       </button>
     </div>
   );

@@ -100,7 +100,7 @@ private extension AIAnalysisModelsTests {
                     high: 500.40 + Double(index) * 0.05,
                     low: 499.80 + Double(index) * 0.05,
                     close: 500.20 + Double(index) * 0.05,
-                    volume: 100_000 + index * 250
+                    volume: Double(100_000 + index * 250)
                 )
             )
         }

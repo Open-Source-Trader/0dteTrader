@@ -145,7 +145,7 @@ struct Candle: Equatable, Sendable {
     var high: Double
     var low: Double
     var close: Double
-    var volume: Int
+    var volume: Double
 }
 
 extension Candle {
@@ -156,7 +156,7 @@ extension Candle {
             high: dto.high,
             low: dto.low,
             close: dto.close,
-            volume: dto.volume
+            volume: Double(dto.volume)
         )
     }
 }

@@ -242,29 +242,8 @@ final class DTODecodingTests: XCTestCase {
         XCTAssertEqual(selection["expiration"] as? String, "2026-07-17")
         // Nil fields must be omitted, not null (server validates explicit-only fields).
         XCTAssertNil(selection["strike"])
-        // Omitted otmOffset means the server default (+1), not null.
+        // Classic is fixed to exactly one strike OTM and exposes no offset.
         XCTAssertNil(selection["otmOffset"])
-    }
-
-    func testOrderRequest_encodesOtmOffsetWhenSet() throws {
-        let request = OrderRequestDTO(
-            underlying: "SPY",
-            assetClass: "option",
-            side: "buy",
-            quantity: 1,
-            orderType: "mid",
-            selection: OrderSelectionDTO(
-                mode: "auto_otm",
-                optionType: "put",
-                expiration: nil,
-                strike: nil,
-                otmOffset: 2
-            )
-        )
-        let data = try JSONEncoder().encode(request)
-        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
-        let selection = try XCTUnwrap(object["selection"] as? [String: Any])
-        XCTAssertEqual(selection["otmOffset"] as? Int, 2)
     }
 
     // MARK: - WebSocket messages
@@ -279,6 +258,203 @@ final class DTODecodingTests: XCTestCase {
         {"type":"quote","data":{"symbol":"SPY","bid":1,"ask":2,"last":1.5,"bidSize":1,"askSize":1,"volume":1,"timestamp":"2026-07-17T14:30:00Z"}}
         """)
         XCTAssertEqual(message.data.symbol, "SPY")
+    }
+
+    func testSocketL2Snapshot_decodesExactContract() throws {
+        let message = try decode(SocketL2SnapshotMessage.self, """
+        {"type":"l2Snapshot","data":{"snapshot":{"symbol":"SPY","provider":"webull","capability":"nasdaq_totalview_non_display","freshness":"fresh","timestamp":"2026-08-05T14:30:00Z","receivedAt":"2026-08-05T14:30:00.100Z","depth":2,"bids":[{"price":501.11,"size":12},{"price":501.10,"size":20}],"asks":[{"price":501.12,"size":8},{"price":501.13,"size":18}]},"indicators":{"spreadAbs":0.01,"spreadBps":0.2,"spreadPercentile":0.4,"topBookImbalance":0.2,"tickPressure":0.1,"depthImbalance":0.15,"cumulativePressure":0.05,"touchDepletion":null}}}
+        """)
+        XCTAssertEqual(message.data.snapshot.depth, 2)
+        XCTAssertEqual(message.data.snapshot.receivedAt, "2026-08-05T14:30:00.100Z")
+        XCTAssertEqual(message.data.indicators.spreadAbs, 0.01)
+        XCTAssertNil(message.data.indicators.touchDepletion)
+    }
+
+    func testSocketL2Snapshot_requiresCanonicalReceiptTimestamp() {
+        XCTAssertThrowsError(try decode(SocketL2SnapshotMessage.self, """
+        {"type":"l2Snapshot","data":{"snapshot":{"symbol":"SPY","provider":"webull","capability":"nasdaq_totalview_non_display","freshness":"fresh","timestamp":"2026-08-05T14:30:00Z","depth":1,"bids":[{"price":501.11,"size":12}],"asks":[{"price":501.12,"size":8}]},"indicators":{"spreadAbs":0.01,"spreadBps":0.2,"spreadPercentile":50,"topBookImbalance":0.2,"tickPressure":0.1,"depthImbalance":0.15,"cumulativePressure":0.05,"touchDepletion":null}}}
+        """))
+    }
+
+    func testSocketL2Status_requiresFreshAvailableState() throws {
+        let available = try decode(SocketL2StatusMessage.self, """
+        {"type":"l2Status","data":{"availability":"available","symbol":"SPY","provider":"webull","capability":"nasdaq_totalview_non_display","freshness":"fresh"}}
+        """)
+        XCTAssertTrue(available.data.isAvailable)
+        XCTAssertThrowsError(try decode(SocketL2StatusMessage.self, """
+        {"type":"l2Status","data":{"availability":"available","symbol":"SPY","provider":"webull","capability":"nasdaq_totalview_non_display","freshness":"stale"}}
+        """))
+    }
+
+    func testSocketIVAlertAndConfiguration_decodeExactContract() throws {
+        let alert = try decode(SocketIVAlertMessage.self, """
+        {"type":"ivAlert","data":{"symbol":"SPX","direction":"expansion","currentIv":0.24,"baselineIv":0.20,"zScore":3.1,"timestamp":"2026-08-05T14:30:00Z"}}
+        """)
+        XCTAssertEqual(alert.data.symbol, .SPX)
+        XCTAssertEqual(alert.data.zScore, 3.1)
+
+        let state = try decode(SocketIVAlertConfigurationMessage.self, """
+        {"type":"ivAlertConfiguration","data":{"enabled":true,"symbols":["SPX","NDX"],"lookbackMinutes":30,"thresholdK":3,"consecutiveBreaches":2,"warmupMinutes":15,"warmupSamples":10,"cooldownMinutes":15,"schemaVersion":1,"updatedAt":"2026-08-05T14:30:00Z"}}
+        """)
+        XCTAssertEqual(state.data.schemaVersion, 1)
+        XCTAssertEqual(state.data.symbols, [.SPX, .NDX])
+    }
+
+    func testDisconnectClearsUserScopedIVState() async {
+        let client = await MainActor.run {
+            QuoteSocketClient(
+                streamURL: URL(string: "wss://iv.test/v1/stream")!,
+                tokenProvider: { "token" }
+            )
+        }
+        await client.processPayloadForTesting(Data("""
+        {"type":"ivAlert","data":{"symbol":"SPX","direction":"expansion","currentIv":0.24,"baselineIv":0.20,"zScore":3.1,"timestamp":"2026-08-05T14:30:00Z"}}
+        """.utf8))
+        await client.processPayloadForTesting(Data("""
+        {"type":"ivAlertConfiguration","data":{"enabled":true,"symbols":["SPX"],"lookbackMinutes":30,"thresholdK":3,"consecutiveBreaches":2,"warmupMinutes":15,"warmupSamples":10,"cooldownMinutes":15,"schemaVersion":1,"updatedAt":"2026-08-05T14:30:00Z"}}
+        """.utf8))
+
+        await MainActor.run {
+            XCTAssertNotNil(client.latestIVAlert)
+            XCTAssertNotNil(client.ivAlertConfiguration)
+            client.disconnect()
+            XCTAssertNil(client.latestIVAlert)
+            XCTAssertNil(client.ivAlertConfiguration)
+        }
+    }
+
+    func testSocketL2AndIVOutboundMessages_encodeExactContract() throws {
+        let l2 = try JSONSerialization.jsonObject(
+            with: JSONEncoder().encode(SocketL2SubscribeMessage(symbol: "SPY", levels: 50))
+        ) as? [String: Any]
+        XCTAssertEqual(l2?["type"] as? String, "l2Subscribe")
+        XCTAssertEqual(l2?["symbol"] as? String, "SPY")
+        XCTAssertEqual(l2?["levels"] as? Int, 50)
+
+        let configuration = IVAlertConfigurationDTO(
+            enabled: true,
+            symbols: [.SPX],
+            lookbackMinutes: 30,
+            thresholdK: 3,
+            consecutiveBreaches: 2,
+            warmupMinutes: 15,
+            warmupSamples: 10,
+            cooldownMinutes: 15
+        )
+        let iv = try JSONSerialization.jsonObject(
+            with: JSONEncoder().encode(SocketIVAlertConfigureMessage(data: configuration))
+        ) as? [String: Any]
+        XCTAssertEqual(iv?["type"] as? String, "ivAlertConfigure")
+        XCTAssertNotNil(iv?["data"] as? [String: Any])
+    }
+
+    func testSocketDecoder_rejectsOversizeAndInvalidBook() async {
+        let oversize = Data(repeating: 0x20, count: QuoteSocketClient.maxSocketPayloadBytes + 1)
+        let oversizeResult = await QuoteSocketClient.decodePayloadForTesting(oversize)
+        XCTAssertNil(oversizeResult)
+
+        let invalid = Data("""
+        {"type":"l2Snapshot","data":{"snapshot":{"symbol":"SPY","provider":"webull","capability":"nasdaq_totalview_non_display","freshness":"fresh","timestamp":"2026-08-05T14:30:00Z","receivedAt":"2026-08-05T14:30:00.100Z","depth":1,"bids":[{"price":501.13,"size":12}],"asks":[{"price":501.12,"size":8}]},"indicators":{"spreadAbs":-0.01,"spreadBps":-0.2,"spreadPercentile":0.4,"topBookImbalance":0.2,"tickPressure":0.1,"depthImbalance":0.15,"cumulativePressure":0.05,"touchDepletion":null}}}
+        """.utf8)
+        let invalidResult = await QuoteSocketClient.decodePayloadForTesting(invalid)
+        XCTAssertNil(invalidResult)
+
+        let invalidReceipt = Data("""
+        {"type":"l2Snapshot","data":{"snapshot":{"symbol":"SPY","provider":"webull","capability":"nasdaq_totalview_non_display","freshness":"fresh","timestamp":"2026-08-05T14:30:00Z","receivedAt":"not-a-date","depth":1,"bids":[{"price":501.11,"size":12}],"asks":[{"price":501.12,"size":8}]},"indicators":{"spreadAbs":0.01,"spreadBps":0.2,"spreadPercentile":50,"topBookImbalance":0.2,"tickPressure":0.1,"depthImbalance":0.15,"cumulativePressure":0.05,"touchDepletion":null}}}
+        """.utf8)
+        let invalidReceiptResult = await QuoteSocketClient.decodePayloadForTesting(invalidReceipt)
+        XCTAssertNil(invalidReceiptResult)
+
+        let mismatchedSpread = Data("""
+        {"type":"l2Snapshot","data":{"snapshot":{"symbol":"SPY","provider":"webull","capability":"nasdaq_totalview_non_display","freshness":"fresh","timestamp":"2026-08-05T14:30:00Z","receivedAt":"2026-08-05T14:30:00.100Z","depth":1,"bids":[{"price":501.11,"size":12}],"asks":[{"price":501.12,"size":8}]},"indicators":{"spreadAbs":1,"spreadBps":0.2,"spreadPercentile":50,"topBookImbalance":0.2,"tickPressure":0.1,"depthImbalance":0.15,"cumulativePressure":0.05,"touchDepletion":null}}}
+        """.utf8)
+        let mismatchedSpreadResult = await QuoteSocketClient.decodePayloadForTesting(mismatchedSpread)
+        XCTAssertNil(mismatchedSpreadResult)
+
+        let invalidAlert = Data("""
+        {"type":"ivAlert","data":{"symbol":"SPX","direction":"expansion","currentIv":-0.24,"baselineIv":0.20,"zScore":3.1,"timestamp":"not-a-date"}}
+        """.utf8)
+        let invalidAlertResult = await QuoteSocketClient.decodePayloadForTesting(invalidAlert)
+        XCTAssertNil(invalidAlertResult)
+    }
+
+    func testL2SubscriptionsFailClosedAndEnforceFiftySymbolLimit() async {
+        await MainActor.run {
+            let disabled = QuoteSocketClient(
+                streamURL: URL(string: "wss://l2.test/v1/stream")!,
+                l2CapabilityEnabled: false,
+                tokenProvider: { "token" }
+            )
+            XCTAssertFalse(disabled.subscribeL2(symbol: "SPY", levels: 50))
+            XCTAssertEqual(disabled.l2Statuses["SPY"]?.unavailableMessage, "L2 capability is disabled on this device.")
+
+            let enabled = QuoteSocketClient(
+                streamURL: URL(string: "wss://l2.test/v1/stream")!,
+                l2CapabilityEnabled: true,
+                tokenProvider: { "token" }
+            )
+            for index in 0..<QuoteSocketClient.maxL2Subscriptions {
+                XCTAssertTrue(enabled.subscribeL2(symbol: "S\(index)", levels: 50))
+            }
+            XCTAssertFalse(enabled.subscribeL2(symbol: "OVER", levels: 50))
+            XCTAssertEqual(
+                enabled.l2Statuses["OVER"]?.unavailableMessage,
+                "The 50-symbol L2 subscription limit has been reached."
+            )
+        }
+    }
+
+    func testL2UnavailableStatusCancelsPendingFreshnessDeadline() async throws {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let receivedAt = Date()
+        let sourceTimestamp = receivedAt.addingTimeInterval(-4.8)
+        let snapshot = Data("""
+        {"type":"l2Snapshot","data":{"snapshot":{"symbol":"SPY","provider":"webull","capability":"nasdaq_totalview_non_display","freshness":"fresh","timestamp":"\(formatter.string(from: sourceTimestamp))","receivedAt":"\(formatter.string(from: receivedAt))","depth":1,"bids":[{"price":501.11,"size":12}],"asks":[{"price":501.12,"size":8}]},"indicators":{"spreadAbs":0.01,"spreadBps":0.2,"spreadPercentile":50,"topBookImbalance":0.2,"tickPressure":0.1,"depthImbalance":0.15,"cumulativePressure":0.05,"touchDepletion":null}}}
+        """.utf8)
+        let unavailable = Data("""
+        {"type":"l2Status","data":{"availability":"unavailable","symbol":"SPY","provider":"webull","capability":"nasdaq_totalview_non_display","freshness":"stale","reason":"entitlement_missing","message":"L2 entitlement is unavailable.","retryable":false}}
+        """.utf8)
+        let client = await MainActor.run {
+            let client = QuoteSocketClient(
+                streamURL: URL(string: "wss://l2.test/v1/stream")!,
+                l2CapabilityEnabled: true,
+                tokenProvider: { "token" }
+            )
+            XCTAssertTrue(client.subscribeL2(symbol: "SPY", levels: 1))
+            return client
+        }
+
+        await client.processPayloadForTesting(snapshot)
+        await client.processPayloadForTesting(unavailable)
+
+        let (message, taskCount) = await MainActor.run {
+            (client.l2Statuses["SPY"]?.unavailableMessage, client.l2FreshnessTaskCountForTesting)
+        }
+        XCTAssertEqual(message, "L2 entitlement is unavailable.")
+        XCTAssertEqual(taskCount, 0)
+    }
+
+    func testL2FiftyLevelPayloadDecodeBenchmark() async {
+        let bids = (0..<50).map { index in
+            "{\"price\":\(500 - Double(index) * 0.01),\"size\":\(index)}"
+        }.joined(separator: ",")
+        let asks = (0..<50).map { index in
+            "{\"price\":\(500.01 + Double(index) * 0.01),\"size\":\(index)}"
+        }.joined(separator: ",")
+        let data = Data("""
+        {"type":"l2Snapshot","data":{"snapshot":{"symbol":"SPY","provider":"webull","capability":"nasdaq_totalview_non_display","freshness":"fresh","timestamp":"2026-08-05T14:30:00Z","receivedAt":"2026-08-05T14:30:00.100Z","depth":50,"bids":[\(bids)],"asks":[\(asks)]},"indicators":{"spreadAbs":0.01,"spreadBps":0.2,"spreadPercentile":75,"topBookImbalance":0.2,"tickPressure":0.1,"depthImbalance":0.15,"cumulativePressure":0.05,"touchDepletion":null}}}
+        """.utf8)
+        XCTAssertLessThanOrEqual(data.count, QuoteSocketClient.maxSocketPayloadBytes)
+        let iterations = 2_000
+        var decodedCount = 0
+        let started = Date()
+        for _ in 0..<iterations {
+            decodedCount += await QuoteSocketClient.decodePayloadForTesting(data) == nil ? 0 : 1
+        }
+        let averageDecodeSeconds = Date().timeIntervalSince(started) / Double(iterations)
+        XCTAssertEqual(decodedCount, iterations)
+        XCTAssertLessThan(averageDecodeSeconds, 0.001)
     }
 
     func testSocketOrderUpdateMessage_decodes() throws {

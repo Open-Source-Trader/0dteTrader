@@ -9,6 +9,7 @@ import { Spinner } from '../../design/components/Spinner';
 import { Format } from '../../design/format';
 import { ClockIcon } from '../../design/icons';
 import { orderStatusHistoryLabel, orderTypeDisplayName } from '../../core/models/domain';
+import { tradeHistoryKey } from './tradeHistoryKey';
 
 function statusColor(status: TradeHistoryEntry['status']): string {
   switch (status) {
@@ -206,7 +207,7 @@ export function HistoryView({
             ) : (
               history.entries.map((entry: TradeHistoryEntry, index: number) => (
                 <div
-                  key={entry.orderId}
+                  key={tradeHistoryKey(entry, index)}
                   style={{
                     display: 'flex',
                     flexDirection: 'column',

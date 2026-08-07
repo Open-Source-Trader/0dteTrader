@@ -1,4 +1,11 @@
-import type { Candle, ChartInterval, TickInterval, Quote } from '@0dtetrader/shared-types';
+import type {
+  Candle,
+  ChartInterval,
+  FreshOrderBookSnapshot,
+  OrderBookIndicators,
+  Quote,
+  TickInterval,
+} from '@0dtetrader/shared-types';
 import type { ApiClient } from '../../core/api/ApiClient';
 import { errorMessage } from '../../core/api/ApiError';
 import type { QuoteSocket } from '../../core/api/QuoteSocket';
@@ -11,10 +18,21 @@ import {
   type StoredTickState,
   type TickAccumulatorState,
 } from '../../core/storage/tickStorage';
-import type { IndicatorSettings } from './indicatorSettings';
-import { capSubPanes } from './indicatorSettings';
+import type { ChartDisplayPreferences, IndicatorSettingsState } from '@0dtetrader/shared-types';
+import {
+  DEFAULT_CHART_DISPLAY,
+  DEFAULT_INDICATOR_SETTINGS_STATE,
+  validateIndicatorSettingsState,
+} from './indicatorRegistry';
 import type { OptionsAnalyticsSettings } from './optionsAnalytics/optionsAnalyticsSettings';
 import type { TwcHeatmapSettings } from './twc/twcSettings';
+import type { UsrSettings } from './ultimateSupportResistance/usrSettings';
+import { validateUsrSettings } from './ultimateSupportResistance/usrSettings';
+import {
+  UNINITIALIZED_VISIBLE_CANDLE_VIEWPORT,
+  type VisibleCandleViewport,
+} from './candleViewport';
+import { validateEnabledIndicatorGeometries } from './indicatorRuntimeValidation';
 
 export const CHART_INTERVALS: ChartInterval[] = [
   '1m',
@@ -127,10 +145,20 @@ export interface ChartStoreState {
   errorMessage: string | null;
   /** Quote socket is not connected: displayed prices may be frozen. */
   isStale: boolean;
+  /** Independent depth state. Unavailable is explicit and never represented by zero values. */
+  l2:
+    | {
+        kind: 'available';
+        snapshot: FreshOrderBookSnapshot;
+        indicators: OrderBookIndicators;
+      }
+    | { kind: 'unavailable'; reason: string; isStale: boolean };
   /** Tick intervals only: quotes accumulated toward the next candle. */
   tickProgress: { count: number; size: number } | null;
-  indicatorSettings: IndicatorSettings;
+  indicatorSettings: IndicatorSettingsState;
+  chartDisplay: ChartDisplayPreferences;
   twcSettings: TwcHeatmapSettings;
+  usrSettings: UsrSettings;
   optionsAnalytics: OptionsAnalyticsSettings;
   /** Price the chart is asked to keep in view ("Show on chart"); null = none.
    *  CandleChart's autoscale merges it into the range while it is set. */
@@ -138,6 +166,8 @@ export interface ChartStoreState {
   /** Visible price domain as last painted, reported by CandleChart; null until
    *  the first paint (or when the chart cannot read one). */
   visiblePriceRange: { min: number; max: number } | null;
+  /** Initialization/empty/range state for candles intersecting the viewport. */
+  visibleCandleViewport: VisibleCandleViewport;
 }
 
 /**
@@ -154,7 +184,9 @@ export function chartChromeSlice(state: ChartStoreState) {
     symbol: state.symbol,
     errorMessage: state.errorMessage,
     indicatorSettings: state.indicatorSettings,
+    chartDisplay: state.chartDisplay,
     twcSettings: state.twcSettings,
+    usrSettings: state.usrSettings,
     optionsAnalytics: state.optionsAnalytics,
     visiblePriceRange: state.visiblePriceRange,
   };
@@ -212,12 +244,15 @@ export class ChartStore extends Store<ChartStoreState> {
     private readonly socket: QuoteSocket,
     private readonly settingsStore: SettingsStore,
   ) {
-    // Persisted settings from before the sub-pane cap may exceed it; clamp
-    // and write back so the stored state matches what's on screen.
-    const indicatorSettings = capSubPanes(settingsStore.indicatorSettings);
-    if (indicatorSettings !== settingsStore.indicatorSettings) {
-      settingsStore.indicatorSettings = indicatorSettings;
-    }
+    const indicatorSettings = validateIndicatorSettingsState(
+      settingsStore.indicatorSettings,
+      DEFAULT_INDICATOR_SETTINGS_STATE,
+    ).value;
+    const storedDisplay = settingsStore.chartDisplay;
+    const chartDisplay =
+      storedDisplay && typeof storedDisplay.volumeEnabled === 'boolean'
+        ? storedDisplay
+        : DEFAULT_CHART_DISPLAY;
     super({
       symbol: settingsStore.lastSymbol ?? 'SPY',
       interval: '1m',
@@ -226,25 +261,58 @@ export class ChartStore extends Store<ChartStoreState> {
       isLoading: false,
       errorMessage: null,
       isStale: socket.getState().connectionState !== 'connected',
+      l2: {
+        kind: 'unavailable',
+        reason: socket.l2CapabilityEnabled
+          ? 'Waiting for Level 2 data'
+          : 'Level 2 capability is disabled',
+        isStale: false,
+      },
       tickProgress: null,
       indicatorSettings,
+      chartDisplay,
       twcSettings: settingsStore.twcSettings,
+      usrSettings: settingsStore.usrSettings,
       optionsAnalytics: settingsStore.optionsAnalytics,
       revealPrice: null,
       visiblePriceRange: null,
+      visibleCandleViewport: UNINITIALIZED_VISIBLE_CANDLE_VIEWPORT,
     });
     socket.onQuote((quote) => this.handleLiveQuote(quote));
+    socket.onL2Update?.((update) => {
+      const symbol = this.getState().symbol;
+      const updateSymbol =
+        update.kind === 'available' ? update.snapshot.symbol : update.status.symbol;
+      if (updateSymbol !== symbol) return;
+      if (update.kind === 'available') {
+        this.set({ l2: update });
+      } else {
+        this.set({
+          l2: {
+            kind: 'unavailable',
+            reason: update.status.message,
+            isStale: update.status.freshness === 'stale' || update.status.reason === 'stale',
+          },
+        });
+      }
+    });
     // Mirror the socket's connection state so the header can flag frozen
     // prices (reconnect + re-subscribe are owned by QuoteSocket itself).
     socket.subscribe(() => {
       const stale = socket.getState().connectionState !== 'connected';
       if (stale !== this.getState().isStale) this.set({ isStale: stale });
+      if (stale && socket.l2CapabilityEnabled) {
+        this.set({
+          l2: { kind: 'unavailable', reason: 'Level 2 stream disconnected', isStale: true },
+        });
+      }
     });
   }
 
   /** Initial load + subscription. Called when the trade screen appears. */
   async start(): Promise<void> {
     this.socket.subscribeSymbols([this.getState().symbol]);
+    this.socket.subscribeL2?.(this.getState().symbol, 50);
     await this.loadCandles();
   }
 
@@ -304,6 +372,7 @@ export class ChartStore extends Store<ChartStoreState> {
     const { symbol } = this.getState();
     if (!normalized || normalized === symbol) return;
     this.socket.unsubscribeSymbols([symbol]);
+    this.socket.unsubscribeL2?.(symbol);
     this.settingsStore.lastSymbol = normalized;
     this.tickAccumulator = null;
     this.cancelPendingCandlePatch();
@@ -316,27 +385,61 @@ export class ChartStore extends Store<ChartStoreState> {
       tickProgress: null,
       revealPrice: null,
       visiblePriceRange: null,
+      visibleCandleViewport: UNINITIALIZED_VISIBLE_CANDLE_VIEWPORT,
+      l2: {
+        kind: 'unavailable',
+        reason: this.socket.l2CapabilityEnabled
+          ? 'Waiting for Level 2 data'
+          : 'Level 2 capability is disabled',
+        isStale: false,
+      },
     });
     this.socket.subscribeSymbols([normalized]);
+    this.socket.subscribeL2?.(normalized, 50);
     void this.loadCandles();
   }
 
   selectInterval(newInterval: ChartInterval): void {
     if (newInterval === this.getState().interval) return;
     this.tickAccumulator = null;
-    this.set({ interval: newInterval });
+    this.set({
+      interval: newInterval,
+      visibleCandleViewport: UNINITIALIZED_VISIBLE_CANDLE_VIEWPORT,
+    });
     void this.loadCandles();
   }
 
-  setIndicatorSettings(settings: IndicatorSettings): void {
-    const capped = capSubPanes(settings);
-    this.settingsStore.indicatorSettings = capped;
-    this.set({ indicatorSettings: capped });
+  setIndicatorSettings(settings: IndicatorSettingsState): void {
+    const result = validateIndicatorSettingsState(settings, this.getState().indicatorSettings);
+    if (!result.ok) return;
+    const candles = this.getState().candles.map((candle) => ({
+      ...candle,
+      timestamp: candle.time * 1000,
+    }));
+    if (!validateEnabledIndicatorGeometries(result.value, candles).ok) return;
+    this.settingsStore.indicatorSettings = result.value;
+    this.set({ indicatorSettings: result.value });
+  }
+
+  setChartDisplay(chartDisplay: ChartDisplayPreferences): void {
+    if (typeof chartDisplay.volumeEnabled !== 'boolean') return;
+    this.settingsStore.chartDisplay = chartDisplay;
+    this.set({ chartDisplay });
   }
 
   setTwcSettings(settings: TwcHeatmapSettings): void {
     this.settingsStore.twcSettings = settings;
     this.set({ twcSettings: settings });
+  }
+
+  setUsrSettings(candidate: UsrSettings): void {
+    try {
+      const settings = validateUsrSettings(candidate);
+      this.settingsStore.usrSettings = settings;
+      this.set({ usrSettings: settings });
+    } catch {
+      // Reject malformed persisted/UI state without destabilizing live charting.
+    }
   }
 
   setOptionsAnalytics(settings: OptionsAnalyticsSettings): void {
@@ -387,6 +490,17 @@ export class ChartStore extends Store<ChartStoreState> {
   private emitCandleClose(closeTime: number): void {
     const { symbol, interval } = this.getState();
     this.candleCloseListeners.forEach((listener) => listener({ symbol, interval, closeTime }));
+  }
+
+  setVisibleCandleViewport(viewport: VisibleCandleViewport): void {
+    const current = this.getState().visibleCandleViewport;
+    if (current.kind !== viewport.kind) {
+      this.set({ visibleCandleViewport: viewport });
+      return;
+    }
+    if (current.kind !== 'range' || viewport.kind !== 'range') return;
+    if (current.from === viewport.from && current.to === viewport.to) return;
+    this.set({ visibleCandleViewport: viewport });
   }
 
   // MARK: - Live updates

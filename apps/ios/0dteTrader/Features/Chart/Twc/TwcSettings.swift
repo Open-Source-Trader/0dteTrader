@@ -1,7 +1,7 @@
 import Foundation
 
 /// Settings for the "TWC Heatmap V5" script indicator (twcSettings.ts port,
-/// 1:1). Flat struct so `decodeIfPresent` migration mirrors IndicatorSettings;
+/// 1:1). Flat struct so `decodeIfPresent` migration mirrors the legacy settings;
 /// the settings screen groups fields into sections matching the Pine input
 /// groups. Defaults mirror TWC_Heat_Map_Indicator.pine.
 struct TwcHeatmapSettings: Codable, Equatable, Sendable {

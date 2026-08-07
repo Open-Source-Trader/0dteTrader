@@ -10,6 +10,55 @@ function tokenColor(name: string, fallback: string): string {
   return value || fallback;
 }
 
+const INDICATOR_FALLBACKS: Record<string, string> = {
+  'indicator.sma.value': '#3b9eff',
+  'indicator.ema.value': '#64d2ff',
+  'indicator.rsi.value': '#ffc53d',
+  'indicator.macd.value': '#3b9eff',
+  'indicator.macd.signal': '#ff9f0a',
+  'indicator.macd.histogram': '#9aa9bc',
+  'indicator.bollinger.upper': '#7f96b8',
+  'indicator.bollinger.middle': '#40cbe0',
+  'indicator.bollinger.lower': '#b14cf0',
+  'indicator.stochastic.k': '#f5c542',
+  'indicator.stochastic.d': '#40cbe0',
+  'indicator.atr.value': '#b14cf0',
+  'indicator.anchored_vwap.value': '#b14cf0',
+  'indicator.supertrend.bullish': '#22e06a',
+  'indicator.supertrend.bearish': '#ff3b4e',
+  'indicator.keltner.upper': '#9f8cff',
+  'indicator.keltner.middle': '#40cbe0',
+  'indicator.keltner.lower': '#3b9eff',
+  'indicator.vpvr.row': '#8cb4eb',
+  'indicator.vpvr.value_area': '#3b9eff',
+  'indicator.adx_dmi.adx': '#ffc53d',
+  'indicator.adx_dmi.plus_di': '#22e06a',
+  'indicator.adx_dmi.minus_di': '#ff3b4e',
+  'indicator.obv.value': '#64d2ff',
+  'indicator.cci.value': '#ff70c8',
+  'indicator.williams_r.value': '#ff9f0a',
+  'indicator.ichimoku.conversion': '#64d2ff',
+  'indicator.ichimoku.base': '#ff9f0a',
+  'indicator.ichimoku.span_a': '#22e06a',
+  'indicator.ichimoku.span_b': '#ff3b4e',
+  'indicator.ichimoku.lagging': '#b14cf0',
+  'indicator.spread.absolute': '#64d2ff',
+  'indicator.spread.bps': '#ffc53d',
+  'indicator.spread.percentile': '#ff70c8',
+  'indicator.top_book_imbalance.value': '#40cbe0',
+  'indicator.tick_pressure.value': '#ffc53d',
+  'indicator.depth_imbalance.value': '#9f8cff',
+  'indicator.cumulative_pressure.value': '#64d2ff',
+  'indicator.touch_depletion.value': '#ff70c8',
+};
+
+/** Resolves a canonical registry style token through the desktop theme. */
+export function indicatorStyleColor(styleToken: string): string {
+  const fallback = INDICATOR_FALLBACKS[styleToken] ?? '#8cb4eb';
+  if (typeof document === 'undefined' || typeof getComputedStyle === 'undefined') return fallback;
+  return tokenColor(`--${styleToken.replaceAll('.', '-').replaceAll('_', '-')}`, fallback);
+}
+
 /** Chrome/surface colors for the candle chart, sub-panes, and drawing canvas. */
 export interface ChartPalette {
   candleUp: string;
@@ -32,83 +81,33 @@ export interface ChartPalette {
   orderLimit: string;
 }
 
-/** Overlay line colors on the main chart (ChartView.overlayColors analog). */
-export interface OverlayPalette {
-  sma: string;
-  ema: string;
-  vwap: string;
-  bollingerUpper: string;
-  bollingerMiddle: string;
-  bollingerLower: string;
-}
+let cached: ChartPalette | null = null;
 
-/** Sub-pane series colors (RSI / MACD / Stochastic / ATR). */
-export interface PanePalette {
-  rsi: string;
-  macd: string;
-  macdSignal: string;
-  macdPositive: string;
-  macdNegative: string;
-  stochK: string;
-  stochD: string;
-  atr: string;
-}
-
-let cached: { chart: ChartPalette; overlay: OverlayPalette; pane: PanePalette } | null = null;
-
-function resolve(): { chart: ChartPalette; overlay: OverlayPalette; pane: PanePalette } {
+function resolve(): ChartPalette {
   if (!cached) {
     cached = {
-      chart: {
-        candleUp: tokenColor('--chart-candle-up', '#22e06a'),
-        candleDown: tokenColor('--chart-candle-down', '#ff3b4e'),
-        axisLabel: tokenColor('--chart-axis-label', 'rgba(140, 180, 235, 0.7)'),
-        grid: tokenColor('--chart-grid', 'rgba(46, 143, 255, 0.1)'),
-        border: tokenColor('--hud-stroke-dim', 'rgba(46, 143, 255, 0.35)'),
-        crosshair: tokenColor('--chart-crosshair', 'rgba(111, 180, 255, 0.4)'),
-        volumeUp: tokenColor('--chart-volume-up', 'rgba(34, 224, 106, 0.45)'),
-        volumeDown: tokenColor('--chart-volume-down', 'rgba(255, 59, 78, 0.45)'),
-        guide: tokenColor('--chart-guide', 'rgba(90, 130, 190, 0.6)'),
-        accent: tokenColor('--app-accent', '#3b9eff'),
-        alert: tokenColor('--warning-orange', '#ffc53d'),
-        tagText: tokenColor('--app-background', '#050a14'),
-        rectFill: tokenColor('--chart-rect-fill', 'rgba(59, 158, 255, 0.12)'),
-        handleFill: tokenColor('--label-primary', '#eaf2ff'),
-        pnlPositive: tokenColor('--pnl-positive', '#22e06a'),
-        pnlNegative: tokenColor('--pnl-negative', '#ff3b4e'),
-        orderLimit: tokenColor('--app-accent', '#3b9eff'),
-      },
-      overlay: {
-        sma: tokenColor('--chart-sma', '#3b9eff'),
-        ema: tokenColor('--chart-ema', '#64d2ff'),
-        vwap: tokenColor('--chart-vwap', '#b14cf0'),
-        bollingerUpper: tokenColor('--chart-bb-outer', '#4a6fa5'),
-        bollingerMiddle: tokenColor('--chart-bb-middle', '#40cbe0'),
-        bollingerLower: tokenColor('--chart-bb-outer', '#4a6fa5'),
-      },
-      pane: {
-        rsi: tokenColor('--chart-rsi', '#ffc53d'),
-        macd: tokenColor('--chart-macd', '#3b9eff'),
-        macdSignal: tokenColor('--chart-macd-signal', '#ff9f0a'),
-        macdPositive: tokenColor('--pnl-positive', '#22e06a'),
-        macdNegative: tokenColor('--pnl-negative', '#ff3b4e'),
-        stochK: tokenColor('--chart-macd', '#3b9eff'),
-        stochD: tokenColor('--chart-macd-signal', '#ff9f0a'),
-        atr: tokenColor('--chart-bb-middle', '#40cbe0'),
-      },
+      candleUp: tokenColor('--chart-candle-up', '#22e06a'),
+      candleDown: tokenColor('--chart-candle-down', '#ff3b4e'),
+      axisLabel: tokenColor('--chart-axis-label', 'rgba(140, 180, 235, 0.7)'),
+      grid: tokenColor('--chart-grid', 'rgba(46, 143, 255, 0.1)'),
+      border: tokenColor('--hud-stroke-dim', 'rgba(46, 143, 255, 0.35)'),
+      crosshair: tokenColor('--chart-crosshair', 'rgba(111, 180, 255, 0.4)'),
+      volumeUp: tokenColor('--chart-volume-up', 'rgba(34, 224, 106, 0.45)'),
+      volumeDown: tokenColor('--chart-volume-down', 'rgba(255, 59, 78, 0.45)'),
+      guide: tokenColor('--chart-guide', 'rgba(90, 130, 190, 0.6)'),
+      accent: tokenColor('--app-accent', '#3b9eff'),
+      alert: tokenColor('--warning-orange', '#ffc53d'),
+      tagText: tokenColor('--app-background', '#050a14'),
+      rectFill: tokenColor('--chart-rect-fill', 'rgba(59, 158, 255, 0.12)'),
+      handleFill: tokenColor('--label-primary', '#eaf2ff'),
+      pnlPositive: tokenColor('--pnl-positive', '#22e06a'),
+      pnlNegative: tokenColor('--pnl-negative', '#ff3b4e'),
+      orderLimit: tokenColor('--app-accent', '#3b9eff'),
     };
   }
   return cached;
 }
 
 export function chartPalette(): ChartPalette {
-  return resolve().chart;
-}
-
-export function overlayPalette(): OverlayPalette {
-  return resolve().overlay;
-}
-
-export function panePalette(): PanePalette {
-  return resolve().pane;
+  return resolve();
 }

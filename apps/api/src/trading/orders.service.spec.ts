@@ -49,10 +49,54 @@ describe('OrdersService', () => {
     orders.onModuleDestroy();
   });
 
-  /** The cumulative fill curve recorded for one order, in curve order. */
-  const cumulativesFor = (orderId: string): number[] =>
-    prisma.tradeOrderExecutions
-      .filter((e) => e.orderId === orderId)
+  const rowFor = (orderId: string, userId = USER) =>
+    prisma.tradeOrders.find(
+      (row) =>
+        row.userId === userId && (row.clientOrderId === orderId || row.brokerOrderId === orderId),
+    );
+
+  const executionsFor = (orderId: string, userId = USER) => {
+    const internalId = rowFor(orderId, userId)?.id;
+    return internalId
+      ? prisma.tradeOrderExecutions.filter((execution) => execution.orderId === internalId)
+      : [];
+  };
+
+  const createLegacyFill = async (
+    externalId: string,
+    side: 'buy' | 'sell',
+    filledPrice: number,
+    underlyingPrice: number | null = null,
+  ) => {
+    const placedAt = new Date(`2026-08-05T14:${side === 'buy' ? '00' : '01'}:00Z`);
+    return prisma.tradeOrder.create({
+      data: {
+        userId: USER,
+        provider: 'legacy',
+        environment: 'live',
+        accountId: 'legacy',
+        brokerOrderId: externalId,
+        clientOrderId: externalId,
+        contractSymbol: OCC,
+        assetClass: 'option',
+        side,
+        quantity: 1,
+        filledQuantity: 1,
+        orderType: 'market',
+        limitPrice: null,
+        filledPrice,
+        filledAt: placedAt,
+        executedQuantity: 1,
+        underlyingPrice,
+        status: 'filled',
+        placedAt,
+      },
+    });
+  };
+
+  /** The cumulative fill curve recorded for one external order, in curve order. */
+  const cumulativesFor = (orderId: string, userId = USER): number[] =>
+    executionsFor(orderId, userId)
       .map((e) => e.cumulative)
       .sort((a: number, b: number) => a - b);
 
@@ -84,6 +128,17 @@ describe('OrdersService', () => {
     expect(history.entries[0].realizedPnl).toBe(100); // (1.50-1.00) × 2 × 100
     expect(history.entries[1].realizedPnl).toBeNull(); // opening fill
     expect(history.totalRealizedPnl).toBe(100);
+  });
+
+  it('does not fabricate P/L by pairing unscoped legacy fills from unknown accounts', async () => {
+    await createLegacyFill('legacy-buy', 'buy', 1);
+    await createLegacyFill('legacy-sell', 'sell', 3);
+
+    const history = await orders.history(USER);
+
+    expect(history.entries).toHaveLength(2);
+    expect(history.entries.every((entry) => entry.realizedPnl === null)).toBe(true);
+    expect(history.totalRealizedPnl).toBe(0);
   });
 
   it('handles partial closes with average cost', async () => {
@@ -198,6 +253,28 @@ describe('OrdersService', () => {
     expect(history.totalRealizedPnl).toBe(0);
   });
 
+  it('keeps realized P/L and anchors independent across brokerage accounts', async () => {
+    await orders.record(
+      USER,
+      fill({ orderId: 'ACCOUNT-A-BUY', side: 'buy', filledPrice: 1 }),
+      'live',
+      { provider: 'snaptrade', accountId: 'account-a', brokerOrderId: 'ACCOUNT-A-BUY' },
+    );
+    await orders.record(
+      USER,
+      fill({ orderId: 'ACCOUNT-B-SELL', side: 'sell', filledPrice: 2 }),
+      'live',
+      { provider: 'snaptrade', accountId: 'account-b', brokerOrderId: 'ACCOUNT-B-SELL' },
+    );
+
+    const history = await orders.history(USER);
+    expect(history.totalRealizedPnl).toBe(0);
+    expect(history.entries.every((entry) => entry.realizedPnl === null)).toBe(true);
+    // Both accounts hold the same contract in opposite directions and the
+    // Position wire type has no account id. Refuse an ambiguous chart anchor.
+    expect((await orders.positionAnchors(USER, [OCC])).has(OCC)).toBe(false);
+  });
+
   describe('recordUnderlyingPrice', () => {
     /**
      * The broker's status poll starts before the placement path gets control,
@@ -213,7 +290,7 @@ describe('OrdersService', () => {
       // Placement path stamps the anchor, still holding the submitted result.
       await orders.recordUnderlyingPrice(USER, submitted, 600);
 
-      const row = prisma.tradeOrders.find((o) => o.id === submitted.orderId);
+      const row = rowFor(submitted.orderId);
       expect(row.status).toBe('filled');
       expect(row.filledPrice).toBe(1.42);
       expect(row.underlyingPrice).toBe(600);
@@ -224,7 +301,7 @@ describe('OrdersService', () => {
 
       await orders.recordUnderlyingPrice(USER, order, 600);
 
-      const row = prisma.tradeOrders.find((o) => o.id === order.orderId);
+      const row = rowFor(order.orderId);
       expect(row.underlyingPrice).toBe(600);
       expect(row.status).toBe('filled');
     });
@@ -235,13 +312,315 @@ describe('OrdersService', () => {
 
       await orders.record(USER, { ...order, status: 'filled', filledPrice: 1.1 });
 
-      const row = prisma.tradeOrders.find((o) => o.id === order.orderId);
+      const row = rowFor(order.orderId);
       expect(row.underlyingPrice).toBe(600);
       expect(row.filledPrice).toBe(1.1);
     });
   });
 
+  describe('SnapTrade one-sided identity reconciliation', () => {
+    const placedAt = new Date('2026-08-05T14:30:00Z');
+
+    const auditPlacement = async (clientOrderId: string, timestamp = placedAt) => {
+      await prisma.orderAudit.create({
+        data: {
+          userId: USER,
+          idempotencyKey: clientOrderId,
+          request: { action: 'place' },
+          response: { orderId: clientOrderId, timestamp: timestamp.toISOString() },
+          status: 'submitted',
+          createdAt: timestamp,
+        },
+      });
+    };
+
+    it('joins an audited client-only option placement to a broker-only webhook', async () => {
+      await auditPlacement('client-option');
+      const placement = fill({
+        orderId: 'client-option',
+        status: 'submitted',
+        filledPrice: undefined,
+        timestamp: placedAt.toISOString(),
+      });
+      await orders.recordUnderlyingPrice(USER, placement, 603.25, 'live', {
+        provider: 'snaptrade',
+        accountId: 'account-a',
+        clientOrderId: 'client-option',
+      });
+
+      await orders.record(
+        USER,
+        {
+          ...placement,
+          orderId: 'broker-option',
+          status: 'filled',
+          filledQuantity: 1,
+          filledPrice: 1.4,
+        },
+        'live',
+        {
+          provider: 'snaptrade',
+          accountId: 'account-a',
+          brokerOrderId: 'broker-option',
+        },
+      );
+
+      expect(prisma.tradeOrders).toHaveLength(1);
+      expect(prisma.tradeOrders[0]).toMatchObject({
+        brokerOrderId: 'broker-option',
+        clientOrderId: 'client-option',
+        underlyingPrice: 603.25,
+        status: 'filled',
+        executedQuantity: 1,
+      });
+      expect(prisma.tradeOrderExecutions).toHaveLength(1);
+      expect(prisma.tradeOrderExecutions[0].orderId).toBe(prisma.tradeOrders[0].id);
+    });
+
+    it('converges concurrent client-only placement and broker-only webhook rows', async () => {
+      await auditPlacement('client-race');
+      const placement = fill({
+        orderId: 'client-race',
+        status: 'submitted',
+        filledPrice: undefined,
+        timestamp: placedAt.toISOString(),
+      });
+      const webhook = {
+        ...placement,
+        orderId: 'broker-race',
+        status: 'filled' as const,
+        filledQuantity: 1,
+        filledPrice: 1.5,
+      };
+
+      await Promise.all([
+        orders.record(USER, placement, 'live', {
+          provider: 'snaptrade',
+          accountId: 'account-a',
+          clientOrderId: 'client-race',
+        }),
+        orders.record(USER, webhook, 'live', {
+          provider: 'snaptrade',
+          accountId: 'account-a',
+          brokerOrderId: 'broker-race',
+        }),
+      ]);
+
+      expect(prisma.tradeOrders).toHaveLength(1);
+      expect(prisma.tradeOrders[0]).toMatchObject({
+        brokerOrderId: 'broker-race',
+        clientOrderId: 'client-race',
+        status: 'filled',
+        executedQuantity: 1,
+      });
+      expect(prisma.tradeOrderExecutions).toHaveLength(1);
+      expect(prisma.tradeOrderExecutions[0].orderId).toBe(prisma.tradeOrders[0].id);
+    });
+
+    it.each(['event', 'push', 'discord'] as const)(
+      'preserves a broker UUID already referenced by a durable %s key when aliases join',
+      async (consumer) => {
+        await auditPlacement('client-terminal-first');
+        const placement = fill({
+          orderId: 'client-terminal-first',
+          status: 'submitted',
+          filledPrice: undefined,
+          timestamp: placedAt.toISOString(),
+        });
+        const webhook = {
+          ...placement,
+          orderId: 'broker-terminal-first',
+          status: 'filled' as const,
+          filledQuantity: 1,
+          filledPrice: 1.6,
+        };
+
+        await orders.record(USER, webhook, 'live', {
+          provider: 'snaptrade',
+          accountId: 'account-a',
+          brokerOrderId: 'broker-terminal-first',
+        });
+        const publishedId = prisma.tradeOrders[0].id as string;
+        if (consumer === 'event') {
+          await prisma.userEvent.create({
+            data: {
+              userId: USER,
+              sequence: 1,
+              dedupeKey: `order:${publishedId}:filled:1:1.6:`,
+              type: 'orderUpdate',
+              payload: webhook,
+            },
+          });
+        } else if (consumer === 'push') {
+          await prisma.pushDelivery.create({
+            data: {
+              userId: USER,
+              key: `order:${publishedId}:filled`,
+              deviceToken: 'a'.repeat(64),
+              environment: 'live',
+              title: 'Order filled',
+              body: 'Filled',
+            },
+          });
+        } else {
+          await prisma.discordDelivery.create({
+            data: {
+              userId: USER,
+              key: `order:internal:${publishedId}:filled`,
+              status: 'delivered',
+            },
+          });
+        }
+
+        await orders.record(USER, placement, 'live', {
+          provider: 'snaptrade',
+          accountId: 'account-a',
+          clientOrderId: 'client-terminal-first',
+        });
+        await orders.record(USER, webhook, 'live', {
+          provider: 'snaptrade',
+          accountId: 'account-a',
+          brokerOrderId: 'broker-terminal-first',
+        });
+
+        expect(prisma.tradeOrders).toHaveLength(1);
+        expect(prisma.tradeOrders[0]).toMatchObject({
+          id: publishedId,
+          brokerOrderId: 'broker-terminal-first',
+          clientOrderId: 'client-terminal-first',
+          executedQuantity: 1,
+        });
+        expect(prisma.tradeOrderExecutions).toHaveLength(1);
+        expect(
+          [
+            ...prisma.userEvents.map((row) => row.dedupeKey),
+            ...prisma.pushDeliveries.map((row) => row.key),
+            ...prisma.discordDeliveries.map((row) => row.key),
+          ].some((key) => key.includes(publishedId)),
+        ).toBe(true);
+      },
+    );
+
+    it('does not alias a similar broker order outside the narrow placement window', async () => {
+      await auditPlacement('client-narrow');
+      const placement = fill({
+        orderId: 'client-narrow',
+        status: 'submitted',
+        filledPrice: undefined,
+        timestamp: placedAt.toISOString(),
+      });
+      await orders.record(USER, placement, 'live', {
+        provider: 'snaptrade',
+        accountId: 'account-a',
+        clientOrderId: 'client-narrow',
+      });
+
+      await orders.record(
+        USER,
+        {
+          ...placement,
+          orderId: 'broker-later',
+          timestamp: new Date(placedAt.getTime() + 31_000).toISOString(),
+        },
+        'live',
+        {
+          provider: 'snaptrade',
+          accountId: 'account-a',
+          brokerOrderId: 'broker-later',
+        },
+      );
+
+      expect(prisma.tradeOrders).toHaveLength(2);
+    });
+
+    it('does not alias a same-time order at a different limit price', async () => {
+      await auditPlacement('client-limit');
+      const placement = fill({
+        orderId: 'client-limit',
+        status: 'submitted',
+        orderType: 'mid',
+        limitPrice: 1.25,
+        filledPrice: undefined,
+        timestamp: placedAt.toISOString(),
+      });
+      await orders.record(USER, placement, 'live', {
+        provider: 'snaptrade',
+        accountId: 'account-a',
+        clientOrderId: 'client-limit',
+      });
+
+      await orders.record(
+        USER,
+        { ...placement, orderId: 'broker-other-limit', limitPrice: 1.3 },
+        'live',
+        {
+          provider: 'snaptrade',
+          accountId: 'account-a',
+          brokerOrderId: 'broker-other-limit',
+        },
+      );
+
+      expect(prisma.tradeOrders).toHaveLength(2);
+    });
+
+    it('never stamps an order with the same external id in another account', async () => {
+      const shared = fill({
+        orderId: 'account-shared',
+        status: 'submitted',
+        filledPrice: undefined,
+        timestamp: placedAt.toISOString(),
+      });
+      await orders.record(USER, shared, 'live', {
+        provider: 'snaptrade',
+        accountId: 'account-b',
+        brokerOrderId: 'account-shared',
+      });
+
+      await orders.recordUnderlyingPrice(USER, shared, 601, 'live', {
+        provider: 'snaptrade',
+        accountId: 'account-a',
+        brokerOrderId: 'account-shared',
+      });
+
+      const accountA = prisma.tradeOrders.find((row) => row.accountId === 'account-a');
+      const accountB = prisma.tradeOrders.find((row) => row.accountId === 'account-b');
+      expect(accountA?.underlyingPrice).toBe(601);
+      expect(accountB?.underlyingPrice).toBeNull();
+    });
+
+    it('returns unique internal history identities when accounts reuse a broker id', async () => {
+      const accountAOrder = fill({ orderId: 'shared-history-id' });
+      const accountBOrder = fill({ orderId: 'shared-history-id' });
+      await orders.record(USER, accountAOrder, 'live', {
+        provider: 'snaptrade',
+        accountId: 'account-a',
+        brokerOrderId: 'shared-history-id',
+      });
+      await orders.record(USER, accountBOrder, 'live', {
+        provider: 'snaptrade',
+        accountId: 'account-b',
+        brokerOrderId: 'shared-history-id',
+      });
+
+      const history = await orders.history(USER);
+
+      expect(history.entries.map((entry) => entry.orderId)).toEqual([
+        'shared-history-id',
+        'shared-history-id',
+      ]);
+      expect(new Set(history.entries.map((entry) => entry.internalOrderId)).size).toBe(2);
+    });
+  });
+
   describe('positionAnchors (chart entry line)', () => {
+    it('never attaches an unscoped legacy entry to the currently selected account', async () => {
+      await createLegacyFill('legacy-anchor', 'buy', 1, 612.34);
+
+      const anchors = await orders.positionAnchors(USER, [OCC]);
+
+      expect(anchors.has(OCC)).toBe(false);
+    });
+
     it('averages the underlying price over the fills that opened the position', async () => {
       await orders.recordUnderlyingPrice(
         USER,
@@ -469,7 +848,7 @@ describe('OrdersService', () => {
         filledAt: t2.toISOString(),
       });
 
-      expect(prisma.tradeOrders.find((o) => o.id === order.orderId).filledAt).toEqual(t1);
+      expect(rowFor(order.orderId).filledAt).toEqual(t1);
       const anchor = (await orders.positionAnchors(USER, [OCC])).get(OCC);
       expect(anchor?.openedAt).toEqual(t1);
     });
@@ -517,7 +896,7 @@ describe('OrdersService', () => {
       await orders.record(USER, opening);
       // A row persisted before the filledAt column (and the executions
       // table) existed carries neither.
-      prisma.tradeOrders.find((o) => o.id === opening.orderId).filledAt = null;
+      rowFor(opening.orderId).filledAt = null;
       prisma.tradeOrderExecutions.length = 0;
 
       const anchor = (await orders.positionAnchors(USER, [OCC])).get(OCC);
@@ -825,7 +1204,7 @@ describe('OrdersService', () => {
         }),
       );
 
-      const row = prisma.tradeOrders.find((o) => o.id === 'STALE');
+      const row = rowFor('STALE');
       expect(row.filledQuantity).toBe(3);
       expect(row.filledPrice).toBe(1.2);
       expect(row.executedQuantity).toBe(3);
@@ -1051,12 +1430,12 @@ describe('OrdersService', () => {
 
       // Nothing at all was recorded — signed-but-malformed data must not
       // create a row it could later poison.
-      expect(prisma.tradeOrders.find((o) => o.id === 'BADQ')).toBeUndefined();
-      expect(prisma.tradeOrderExecutions.filter((e) => e.orderId === 'BADQ')).toHaveLength(0);
+      expect(rowFor('BADQ')).toBeUndefined();
+      expect(executionsFor('BADQ')).toHaveLength(0);
 
       // A later well-formed report records normally.
       await orders.record(USER, fill({ orderId: 'BADQ', quantity: 2, filledPrice: 1.0 }));
-      expect(prisma.tradeOrders.find((o) => o.id === 'BADQ').executedQuantity).toBe(2);
+      expect(rowFor('BADQ').executedQuantity).toBe(2);
     });
 
     it.each([
@@ -1066,8 +1445,8 @@ describe('OrdersService', () => {
     ])('quarantines an event whose filled quantity is %s', async (_label, filledQuantity) => {
       await orders.record(USER, fill({ orderId: 'BADF', quantity: 3, filledQuantity }));
 
-      expect(prisma.tradeOrders.find((o) => o.id === 'BADF')).toBeUndefined();
-      expect(prisma.tradeOrderExecutions.filter((e) => e.orderId === 'BADF')).toHaveLength(0);
+      expect(rowFor('BADF')).toBeUndefined();
+      expect(executionsFor('BADF')).toHaveLength(0);
     });
 
     it.each([
@@ -1079,8 +1458,8 @@ describe('OrdersService', () => {
       // the shared cap keep a quantity like this out of notional arithmetic.
       await orders.record(USER, fill({ orderId: 'HUGE', quantity, filledQuantity: undefined }));
 
-      expect(prisma.tradeOrders.find((o) => o.id === 'HUGE')).toBeUndefined();
-      expect(prisma.tradeOrderExecutions.filter((e) => e.orderId === 'HUGE')).toHaveLength(0);
+      expect(rowFor('HUGE')).toBeUndefined();
+      expect(executionsFor('HUGE')).toHaveLength(0);
     });
 
     it('accepts the exact shared cap', async () => {
@@ -1089,7 +1468,7 @@ describe('OrdersService', () => {
         fill({ orderId: 'ATCAP', quantity: 1000, filledQuantity: 1000, filledPrice: 1.0 }),
       );
 
-      expect(prisma.tradeOrders.find((o) => o.id === 'ATCAP').executedQuantity).toBe(1000);
+      expect(rowFor('ATCAP').executedQuantity).toBe(1000);
     });
 
     it('refuses an absurd fill price but keeps the terminal status', async () => {
@@ -1101,17 +1480,17 @@ describe('OrdersService', () => {
         fill({ orderId: 'PRICEY', quantity: 1, filledQuantity: 1, filledPrice: 1e308 }),
       );
 
-      const row = prisma.tradeOrders.find((o) => o.id === 'PRICEY');
+      const row = rowFor('PRICEY');
       expect(row.status).toBe('filled');
       expect(row.executedQuantity).toBe(0);
-      expect(prisma.tradeOrderExecutions.filter((e) => e.orderId === 'PRICEY')).toHaveLength(0);
+      expect(executionsFor('PRICEY')).toHaveLength(0);
 
       // A plausible boundary-adjacent price books normally.
       await orders.record(
         USER,
         fill({ orderId: 'PRICEY', quantity: 1, filledQuantity: 1, filledPrice: 99_999 }),
       );
-      expect(prisma.tradeOrders.find((o) => o.id === 'PRICEY').executedQuantity).toBe(1);
+      expect(rowFor('PRICEY').executedQuantity).toBe(1);
     });
 
     it('quarantines an overfill — cumulative above the order’s own size', async () => {
@@ -1120,15 +1499,15 @@ describe('OrdersService', () => {
         fill({ orderId: 'OVER', quantity: 3, filledQuantity: 5, filledPrice: 1.0 }),
       );
 
-      expect(prisma.tradeOrders.find((o) => o.id === 'OVER')).toBeUndefined();
-      expect(prisma.tradeOrderExecutions.filter((e) => e.orderId === 'OVER')).toHaveLength(0);
+      expect(rowFor('OVER')).toBeUndefined();
+      expect(executionsFor('OVER')).toHaveLength(0);
 
       // The repaired report is not blocked by the quarantined one.
       await orders.record(
         USER,
         fill({ orderId: 'OVER', quantity: 3, filledQuantity: 3, filledPrice: 1.0 }),
       );
-      expect(prisma.tradeOrders.find((o) => o.id === 'OVER').executedQuantity).toBe(3);
+      expect(rowFor('OVER').executedQuantity).toBe(3);
     });
 
     it.each([
@@ -1139,8 +1518,8 @@ describe('OrdersService', () => {
 
       // Nothing is recorded and no authority is claimed, so the junk price
       // can never reach the average-cost book.
-      expect(prisma.tradeOrderExecutions.filter((e) => e.orderId === 'JUNK')).toHaveLength(0);
-      expect(prisma.tradeOrders.find((o) => o.id === 'JUNK').executedQuantity).toBe(0);
+      expect(executionsFor('JUNK')).toHaveLength(0);
+      expect(rowFor('JUNK').executedQuantity).toBe(0);
       expect((await orders.positionAnchors(USER, [OCC])).size).toBe(0);
 
       // A later valid report of the same order still records normally.
@@ -1265,10 +1644,10 @@ describe('OrdersService', () => {
       });
       await orders.record(USER, filled);
 
-      const row = prisma.tradeOrders.find((o) => o.id === 'REGRESS');
+      const row = rowFor('REGRESS');
       expect(row.status).toBe('filled');
       expect(row.executedQuantity).toBe(1);
-      expect(prisma.tradeOrderExecutions.filter((e) => e.orderId === 'REGRESS')).toHaveLength(1);
+      expect(executionsFor('REGRESS')).toHaveLength(1);
       const anchor = (await orders.positionAnchors(USER, [OCC])).get(OCC);
       expect(anchor?.quantity).toBe(1);
     });
@@ -1293,9 +1672,9 @@ describe('OrdersService', () => {
       });
       await orders.record(USER, filled);
 
-      const row = prisma.tradeOrders.find((o) => o.id === 'CXL');
+      const row = rowFor('CXL');
       expect(row.status).toBe('filled');
-      expect(prisma.tradeOrderExecutions.filter((e) => e.orderId === 'CXL')).toHaveLength(1);
+      expect(executionsFor('CXL')).toHaveLength(1);
     });
 
     it('clamps replay to the watermark, so a historical duplicate execution cannot double the book', async () => {
@@ -1343,10 +1722,11 @@ describe('OrdersService', () => {
         filledAt: t(20).toISOString(),
       };
       await orders.record(USER, partial);
+      const lostInternalId = rowFor('LOST').id;
       const create = prisma.tradeOrderExecution.create;
       let failing = true;
       prisma.tradeOrderExecution.create = async (args: any) => {
-        if (failing && args.data.orderId === 'LOST' && args.data.cumulative === 2) {
+        if (failing && args.data.orderId === lostInternalId && args.data.cumulative === 2) {
           throw new Error('connection reset');
         }
         return create(args);
@@ -1387,7 +1767,7 @@ describe('OrdersService', () => {
         USER,
         fill({ ...base, status: 'partially_filled', filledQuantity: 1, filledPrice: 1.0 }),
       );
-      const old = prisma.tradeOrderExecutions.find((e) => e.orderId === 'MIX');
+      const old = executionsFor('MIX')[0];
       Object.assign(old, { avgPrice: null, quantity: 1, price: 1.0 });
       await orders.record(
         USER,
@@ -1441,7 +1821,7 @@ describe('OrdersService', () => {
         createdAt: new Date(),
       });
 
-      expect(prisma.tradeOrders.find((o) => o.id === 'DUPCUM').executedQuantity).toBe(1);
+      expect(rowFor('DUPCUM').executedQuantity).toBe(1);
       expect((await orders.positionAnchors(USER, [OCC])).get(OCC)?.quantity).toBe(1);
     });
 
@@ -1511,10 +1891,10 @@ describe('OrdersService', () => {
       // cumulative — never 1 + 3 = 4.
       await Promise.all([orders.record(USER, partial), orders2.record(USER, full)]);
 
-      const row = prisma.tradeOrders.find((o) => o.id === 'MULTI');
+      const row = rowFor('MULTI');
       expect(row.status).toBe('filled');
       expect(row.executedQuantity).toBe(3);
-      const recorded = prisma.tradeOrderExecutions.filter((e) => e.orderId === 'MULTI');
+      const recorded = executionsFor('MULTI');
       expect(new Set(recorded.map((e) => e.cumulative)).size).toBe(recorded.length);
       // What the observations mean is the same under every interleaving: the
       // broker's cumulative, booked once.
@@ -1549,7 +1929,7 @@ describe('OrdersService', () => {
       });
       await orders.record(USER, partial);
 
-      const row = prisma.tradeOrders.find((o) => o.id === 'LATE');
+      const row = rowFor('LATE');
       expect(row.executedQuantity).toBe(3);
       expect(row.filledQuantity).toBe(3);
       expect(row.filledPrice).toBe(1.2);
@@ -1568,11 +1948,11 @@ describe('OrdersService', () => {
         filledAt: t(10).toISOString(),
       });
       await orders.record(USER, filled);
-      prisma.tradeOrders.find((o) => o.id === 'BELT').executedQuantity = 0;
+      rowFor('BELT').executedQuantity = 0;
 
       await orders2.record(USER, filled);
 
-      const recorded = prisma.tradeOrderExecutions.filter((e) => e.orderId === 'BELT');
+      const recorded = executionsFor('BELT');
       expect(recorded).toHaveLength(1);
       const anchor = (await orders.positionAnchors(USER, [OCC])).get(OCC);
       expect(anchor?.quantity).toBe(2);
@@ -1583,7 +1963,7 @@ describe('OrdersService', () => {
     const t = (s: number) => new Date(1_753_000_000_000 + s * 1000);
     const USER_B = 'user-2';
 
-    it("refuses another user's event on a colliding id — status, fill state and executions", async () => {
+    it("stores each user's event independently when broker order ids collide", async () => {
       // Broker order ids are unique only within a brokerage account. User A
       // owns the row; user B's broker happens to reuse the same id.
       await orders.record(
@@ -1611,7 +1991,7 @@ describe('OrdersService', () => {
         side: 'sell',
       });
 
-      const row = prisma.tradeOrders.find((o) => o.id === 'SHARED');
+      const row = rowFor('SHARED');
       expect(row.userId).toBe(USER);
       expect(row.status).toBe('partially_filled');
       expect(row.filledPrice).toBe(1.0);
@@ -1623,9 +2003,20 @@ describe('OrdersService', () => {
       const anchorA = (await orders.positionAnchors(USER, [OCC])).get(OCC);
       expect(anchorA?.quantity).toBe(1);
       expect((await orders.history(USER)).totalRealizedPnl).toBe(0);
+      const rowB = prisma.tradeOrders.find((order) => order.userId === USER_B);
+      expect(rowB).toMatchObject({
+        brokerOrderId: null,
+        clientOrderId: 'SHARED',
+        status: 'filled',
+        filledPrice: 9.9,
+        executedQuantity: 2,
+      });
+      expect(
+        prisma.tradeOrderExecutions.filter((execution) => execution.orderId === rowB.id),
+      ).toHaveLength(1);
     });
 
-    it("refuses another user's underlying price on a colliding id", async () => {
+    it("keeps each user's underlying price on its own internal order row", async () => {
       await orders.recordUnderlyingPrice(
         USER,
         fill({ orderId: 'SHARED2', quantity: 1, filledPrice: 1.0 }),
@@ -1637,11 +2028,14 @@ describe('OrdersService', () => {
         999,
       );
 
-      const row = prisma.tradeOrders.find((o) => o.id === 'SHARED2');
+      const row = rowFor('SHARED2');
       expect(row.userId).toBe(USER);
       expect(row.underlyingPrice).toBe(600);
       const anchor = (await orders.positionAnchors(USER, [OCC])).get(OCC);
       expect(anchor?.underlyingEntryEstimate).toBe(600);
+      expect(prisma.tradeOrders.find((order) => order.userId === USER_B)?.underlyingPrice).toBe(
+        999,
+      );
     });
   });
 
@@ -1701,6 +2095,113 @@ describe('OrdersService broker reconciliation', () => {
     const history = await orders.history(USER);
 
     expect(history.entries).toHaveLength(1);
+  });
+
+  it('persists broker reconciliation under the account scope captured for that query', async () => {
+    const prisma = new InMemoryPrismaService();
+    const user = await prisma.user.create({
+      data: {
+        email: 'snap-reconcile@example.com',
+        passwordHash: 'x',
+        tradingProvider: 'snaptrade',
+      },
+    });
+    await prisma.brokerConnection.upsert({
+      where: {
+        userId_provider_environment: {
+          userId: user.id,
+          provider: 'snaptrade',
+          environment: 'live',
+        },
+      },
+      create: {
+        userId: user.id,
+        provider: 'snaptrade',
+        environment: 'live',
+        connectionId: 'connection-a',
+        accountIds: ['account-a', 'account-b'],
+        selectedAccountId: 'account-a',
+        status: 'active',
+      },
+      update: {},
+    });
+    const brokerOnly = fill({ orderId: 'snap-broker-order' });
+    const recentOrders = jest.fn(async () => [brokerOnly]);
+    const scopedGateway = fakeGateway(recentOrders);
+    scopedGateway.executionScope = jest.fn(async () => ({
+      provider: 'snaptrade' as const,
+      environment: 'live' as const,
+      accountId: 'account-b',
+    }));
+    const orders = new OrdersService(
+      prisma as unknown as ConstructorParameters<typeof OrdersService>[0],
+      new OrderEventsService(),
+      scopedGateway,
+    );
+
+    await orders.history(user.id);
+
+    expect(prisma.tradeOrders).toHaveLength(1);
+    expect(prisma.tradeOrders[0]).toMatchObject({
+      provider: 'snaptrade',
+      environment: 'live',
+      accountId: 'account-b',
+      brokerOrderId: brokerOnly.orderId,
+    });
+    expect(recentOrders).toHaveBeenCalledWith(
+      user.id,
+      expect.any(Date),
+      expect.objectContaining({ accountId: 'account-b' }),
+    );
+  });
+
+  it("does not let another account's newer row advance the current account cursor", async () => {
+    const prisma = new InMemoryPrismaService();
+    const user = await prisma.user.create({
+      data: {
+        email: 'scoped-reconcile-cursor@example.com',
+        passwordHash: 'x',
+        tradingProvider: 'snaptrade',
+      },
+    });
+    const t1 = new Date(Date.now() - 3 * 60 * 60_000);
+    const t2 = new Date(Date.now() - 2 * 60 * 60_000);
+    const t3 = new Date(Date.now() - 1 * 60 * 60_000);
+    const accountBKnown = fill({ orderId: 'account-b-t1', timestamp: t1.toISOString() });
+    const accountBMissing = fill({ orderId: 'account-b-t2', timestamp: t2.toISOString() });
+    const accountANewer = fill({ orderId: 'account-a-t3', timestamp: t3.toISOString() });
+    const recentOrders = jest.fn(async () => [accountBMissing]);
+    const scopedGateway = fakeGateway(recentOrders);
+    scopedGateway.executionScope = jest.fn(async () => ({
+      provider: 'snaptrade' as const,
+      environment: 'live' as const,
+      accountId: 'account-b',
+    }));
+    const orders = new OrdersService(
+      prisma as unknown as ConstructorParameters<typeof OrdersService>[0],
+      new OrderEventsService(),
+      scopedGateway,
+    );
+    await orders.record(user.id, accountBKnown, 'live', {
+      provider: 'snaptrade',
+      accountId: 'account-b',
+      brokerOrderId: accountBKnown.orderId,
+    });
+    await orders.record(user.id, accountANewer, 'live', {
+      provider: 'snaptrade',
+      accountId: 'account-a',
+      brokerOrderId: accountANewer.orderId,
+    });
+
+    await orders.history(user.id);
+
+    expect(recentOrders).toHaveBeenCalledWith(user.id, t1, expect.any(Object));
+    expect(prisma.tradeOrders).toContainEqual(
+      expect.objectContaining({
+        accountId: 'account-b',
+        brokerOrderId: accountBMissing.orderId,
+      }),
+    );
   });
 
   it('is a no-op when the gateway does not support getRecentOrders', async () => {

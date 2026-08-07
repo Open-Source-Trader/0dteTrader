@@ -3,19 +3,20 @@ import XCTest
 
 @MainActor
 final class TradeViewModelArmTests: XCTestCase {
-    private func makeViewModels(autoOtmOffset: Int = 1) -> (TradeViewModel, OptionsChainViewModel) {
+    private func makeViewModels() -> (TradeViewModel, OptionsChainViewModel) {
         let baseURL = URL(string: "http://localhost:0")!
         let sessionStore = SessionStore(keychainStore: KeychainStore(service: "test.arm"), baseURL: baseURL)
         let apiClient = APIClient(baseURL: baseURL, sessionStore: sessionStore)
         return (
             TradeViewModel(apiClient: apiClient),
-            OptionsChainViewModel(apiClient: apiClient, autoOtmOffset: { autoOtmOffset })
+            OptionsChainViewModel(apiClient: apiClient)
         )
     }
 
     func testArm_autoOTM_encodesServerSideSelection() {
         let (tradeViewModel, chainViewModel) = makeViewModels()
         chainViewModel.isAutoMode = true
+        chainViewModel.autoSelectionStrategy = .classic
 
         tradeViewModel.arm(side: .buy, underlying: "SPY", chainViewModel: chainViewModel)
 
@@ -25,28 +26,106 @@ final class TradeViewModelArmTests: XCTestCase {
         XCTAssertEqual(request?.selection.mode, "auto_otm")
         XCTAssertEqual(request?.selection.optionType, "call")
         XCTAssertNil(request?.selection.strike)
-        // The default offset is omitted so older servers see the old shape.
-        XCTAssertNil(request?.selection.otmOffset)
+        XCTAssertEqual(request?.selection.mode, "auto_otm")
+        XCTAssertEqual(tradeViewModel.armedTicket?.summary.contains("Classic +1 OTM"), true)
     }
 
-    func testArm_autoCarriesConfiguredOtmOffset() {
-        let (tradeViewModel, chainViewModel) = makeViewModels(autoOtmOffset: 2)
-        chainViewModel.isAutoMode = true
+    func testArm_scoredAutoCarriesWinnerPreferencesAndAlwaysShowsConfirmation() {
+        let (tradeViewModel, chainViewModel) = makeViewModels()
+        let candidate = scoredCandidate()
+        let result = scoredResult(candidate: candidate)
+        chainViewModel.setAutoScoringForTesting(result: result)
+
+        tradeViewModel.arm(
+            side: .buy,
+            underlying: "SPY",
+            chainViewModel: chainViewModel,
+            bypass: true
+        )
+
+        let selection = tradeViewModel.armedTicket?.request.selection
+        XCTAssertEqual(selection?.mode, "auto_scored")
+        XCTAssertEqual(selection?.autoScoring?.selectedSymbol, candidate.symbol)
+        XCTAssertEqual(selection?.autoScoring?.preferences, .conservative)
+        XCTAssertEqual(selection?.autoScoring?.scoredConfirmationAccepted, true)
+        XCTAssertNotNil(tradeViewModel.armedTicket, "global bypass must not skip scored confirmation")
+    }
+
+    func testArm_scoredAutoRefusesOldWinnerWhileFreshRankingLoads() {
+        let (tradeViewModel, chainViewModel) = makeViewModels()
+        chainViewModel.setAutoScoringForTesting(result: scoredResult(candidate: scoredCandidate()))
+        chainViewModel.setAutoScoringLoadingForTesting(true)
 
         tradeViewModel.arm(side: .buy, underlying: "SPY", chainViewModel: chainViewModel)
 
-        XCTAssertEqual(tradeViewModel.armedTicket?.request.selection.otmOffset, 2)
-        XCTAssertEqual(tradeViewModel.armedTicket?.summary.contains("+2 OTM"), true)
+        XCTAssertNil(tradeViewModel.armedTicket)
+        XCTAssertEqual(tradeViewModel.toast?.message, "Scored Auto is still loading.")
     }
 
-    func testArm_autoOffsetZero_sendsZeroAndSaysATM() {
-        let (tradeViewModel, chainViewModel) = makeViewModels(autoOtmOffset: 0)
-        chainViewModel.isAutoMode = true
+    func testArm_noPassRequiresAcknowledgedClassicFallback() {
+        let (tradeViewModel, chainViewModel) = makeViewModels()
+        chainViewModel.setAutoScoringForTesting(result: AutoScoringResult(
+            rankings: [],
+            exclusions: [],
+            selectedSymbol: nil,
+            noPass: true,
+            requiresConfirmation: true,
+            rankedAt: "2026-08-05T15:00:04.000Z"
+        ))
 
         tradeViewModel.arm(side: .buy, underlying: "SPY", chainViewModel: chainViewModel)
+        XCTAssertNil(tradeViewModel.armedTicket)
 
-        XCTAssertEqual(tradeViewModel.armedTicket?.request.selection.otmOffset, 0)
-        XCTAssertEqual(tradeViewModel.armedTicket?.summary.contains("AUTO ATM"), true)
+        chainViewModel.acknowledgeClassicFallback()
+        tradeViewModel.arm(side: .buy, underlying: "SPY", chainViewModel: chainViewModel)
+        XCTAssertEqual(tradeViewModel.armedTicket?.request.selection.mode, "auto_otm")
+        XCTAssertEqual(
+            tradeViewModel.armedTicket?.request.selection.classicFallbackAcknowledged,
+            true
+        )
+    }
+
+    private func scoredCandidate() -> AutoScoringCandidate {
+        AutoScoringCandidate(
+            symbol: "SPY260805C00500000",
+            underlying: "SPY",
+            expiration: "2026-08-05",
+            optionType: .call,
+            strike: 500,
+            bid: 2,
+            ask: 2.05,
+            delta: 0.25,
+            gamma: 0.01,
+            impliedVolatility: 0.2,
+            openInterest: 200,
+            quoteProvider: .webull,
+            quoteTimestamp: "2026-08-05T15:00:00.000Z",
+            analyticsTimestamp: "2026-08-05T14:59:30.000Z"
+        )
+    }
+
+    private func scoredResult(candidate: AutoScoringCandidate) -> AutoScoringResult {
+        AutoScoringResult(
+            rankings: [AutoScoringRanking(
+                rank: 1,
+                candidate: candidate,
+                score: 1,
+                rationale: AutoScoringRationale(
+                    summary: "Best executable fit.",
+                    mid: 2.025,
+                    spreadBps: 246.9,
+                    premiumDollars: 202.5,
+                    atmDistance: 0,
+                    normalized: AutoScoringContributions(delta: 1, spread: 1, openInterest: 1, gamma: 1, iv: 1),
+                    weighted: AutoScoringContributions(delta: 0.3, spread: 0.25, openInterest: 0.2, gamma: 0.1, iv: 0.15)
+                )
+            )],
+            exclusions: [],
+            selectedSymbol: candidate.symbol,
+            noPass: false,
+            requiresConfirmation: true,
+            rankedAt: "2026-08-05T15:00:04.000Z"
+        )
     }
 
     // MARK: - Selling into an open position
@@ -62,9 +141,9 @@ final class TradeViewModelArmTests: XCTestCase {
         last: 1.01
     )
 
-    private func position(_ quantity: Int, symbol: String = contract.symbol) -> Position {
+    private func position(_ quantity: Int, symbol: String? = nil) -> Position {
         Position(
-            symbol: symbol,
+            symbol: symbol ?? Self.contract.symbol,
             assetClass: .option,
             quantity: quantity,
             avgPrice: 1,
@@ -83,8 +162,9 @@ final class TradeViewModelArmTests: XCTestCase {
     private func selectContract(
         _ tradeViewModel: TradeViewModel,
         _ chainViewModel: OptionsChainViewModel,
-        contracts: [OptionContract] = [TradeViewModelArmTests.contract]
+        contracts requestedContracts: [OptionContract]? = nil
     ) {
+        let contracts = requestedContracts ?? [Self.contract]
         chainViewModel.optionType = .call
         chainViewModel.setChainForTesting(
             OptionsChain(
@@ -287,7 +367,7 @@ final class TradeViewModelArmTests: XCTestCase {
     private func enableCurr(
         _ tradeViewModel: TradeViewModel,
         _ chainViewModel: OptionsChainViewModel,
-        contracts: [OptionContract] = [TradeViewModelArmTests.contract],
+        contracts: [OptionContract]? = nil,
         positions: [Position]
     ) {
         selectContract(tradeViewModel, chainViewModel, contracts: contracts)
@@ -553,10 +633,10 @@ final class TradeViewModelArmTests: XCTestCase {
     }
 }
 
+// swiftlint:disable static_over_final_class
 /// Serves canned responses and records the order placement the bypass path
 /// fires from its detached task; the expectation its handler fulfills is what
 /// deadline-bounds the wait on that task. Mirrors the refresh tests' protocol.
-// swiftlint:disable static_over_final_class
 private final class BypassRecordingURLProtocol: URLProtocol, @unchecked Sendable {
     typealias Handler = (URLRequest) -> String
     nonisolated(unsafe) static var handler: Handler?

@@ -469,4 +469,72 @@ describe('OptionsAnalyticsService exact cache', () => {
     await service.getSnapshotResult('SPY', EXPIRATION_A, 'user-1');
     expect(userProvider.calls.chain).toBe(3);
   });
+
+  it('defaults past a same-day expiration that has already settled, to the next future one', async () => {
+    // 21:00 UTC = 5pm ET, after the standard 4pm ET PM close — today's 0DTE
+    // has settled, but Tradier still lists it (it doesn't drop settled
+    // expirations from the listing).
+    const afterClose = new Date('2026-07-20T21:00:00.000Z');
+    jest.setSystemTime(afterClose);
+    const provider = {
+      calls: { expirations: 0, quote: 0, chain: 0 },
+      async getExpirations() {
+        this.calls.expirations += 1;
+        return ['2026-07-20', EXPIRATION_A, EXPIRATION_B];
+      },
+      async getQuote() {
+        this.calls.quote += 1;
+        return {
+          symbol: 'SPY',
+          spot: 100,
+          quoteAsOf: afterClose.toISOString(),
+          feedMode: 'realtime' as const,
+          completedSessionDate: '2026-07-20',
+        };
+      },
+      async getChain(_symbol: string, expiration: string) {
+        this.calls.chain += 1;
+        const value = chain(expiration);
+        value.contracts.forEach((contract) => {
+          contract.quoteAsOf = '2026-07-20T20:14:30.000Z'; // options close ~4:15pm ET
+        });
+        return value;
+      },
+    };
+    const service = new OptionsAnalyticsService(config(), provider as never);
+
+    const result = await service.getSnapshotResult('SPY');
+
+    expect(result.snapshot.scope.expiration).toBe(EXPIRATION_A);
+    expect(provider.calls.chain).toBe(1);
+  });
+
+  it('still defaults to today when today has not yet settled', async () => {
+    // NOW (14:00 UTC = 10am ET) is well before the 4pm ET close.
+    const provider = {
+      calls: { expirations: 0, quote: 0, chain: 0 },
+      async getExpirations() {
+        this.calls.expirations += 1;
+        return ['2026-07-20', EXPIRATION_A, EXPIRATION_B];
+      },
+      async getQuote() {
+        this.calls.quote += 1;
+        return {
+          symbol: 'SPY',
+          spot: 100,
+          quoteAsOf: NOW.toISOString(),
+          feedMode: 'realtime' as const,
+        };
+      },
+      async getChain(_symbol: string, expiration: string) {
+        this.calls.chain += 1;
+        return chain(expiration);
+      },
+    };
+    const service = new OptionsAnalyticsService(config(), provider as never);
+
+    const result = await service.getSnapshotResult('SPY');
+
+    expect(result.snapshot.scope.expiration).toBe('2026-07-20');
+  });
 });

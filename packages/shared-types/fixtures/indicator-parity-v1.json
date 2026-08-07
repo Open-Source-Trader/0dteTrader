@@ -1,0 +1,415 @@
+{
+  "schemaVersion": 1,
+  "tolerance": 0.000001,
+  "candleSets": {
+    "rising": [
+      { "timestamp": 1704205800000, "open": 10, "high": 12, "low": 9, "close": 11, "volume": 100 },
+      { "timestamp": 1704205860000, "open": 11, "high": 13, "low": 10, "close": 12, "volume": 200 },
+      { "timestamp": 1704205920000, "open": 12, "high": 14, "low": 11, "close": 13, "volume": 300 },
+      { "timestamp": 1704205980000, "open": 13, "high": 15, "low": 12, "close": 14, "volume": 400 }
+    ],
+    "risingSix": [
+      { "timestamp": 1704205800000, "open": 10, "high": 12, "low": 9, "close": 11, "volume": 100 },
+      { "timestamp": 1704205860000, "open": 11, "high": 13, "low": 10, "close": 12, "volume": 200 },
+      { "timestamp": 1704205920000, "open": 12, "high": 14, "low": 11, "close": 13, "volume": 300 },
+      { "timestamp": 1704205980000, "open": 13, "high": 15, "low": 12, "close": 14, "volume": 400 },
+      { "timestamp": 1704206040000, "open": 14, "high": 16, "low": 13, "close": 15, "volume": 500 },
+      { "timestamp": 1704206100000, "open": 15, "high": 17, "low": 14, "close": 16, "volume": 600 }
+    ],
+    "zeroVolume": [
+      { "timestamp": 1704205800000, "open": 10, "high": 12, "low": 9, "close": 11, "volume": 0 },
+      { "timestamp": 1704205860000, "open": 11, "high": 13, "low": 10, "close": 12, "volume": 0 }
+    ],
+    "flat": [
+      { "timestamp": 1704205800000, "open": 10, "high": 10, "low": 10, "close": 10, "volume": 100 },
+      { "timestamp": 1704205860000, "open": 10, "high": 10, "low": 10, "close": 10, "volume": 200 },
+      { "timestamp": 1704205920000, "open": 10, "high": 10, "low": 10, "close": 10, "volume": 300 }
+    ],
+    "downEqual": [
+      { "timestamp": 1704205800000, "open": 11, "high": 12, "low": 10, "close": 11, "volume": 100 },
+      { "timestamp": 1704205860000, "open": 11, "high": 11, "low": 9, "close": 10, "volume": 200 },
+      { "timestamp": 1704205920000, "open": 10, "high": 11, "low": 9, "close": 10, "volume": 300 },
+      { "timestamp": 1704205980000, "open": 10, "high": 13, "low": 10, "close": 12, "volume": 400 }
+    ],
+    "supertrendFlip": [
+      { "timestamp": 1704205800000, "open": 10, "high": 12, "low": 8, "close": 11, "volume": 100 },
+      { "timestamp": 1704205860000, "open": 11, "high": 12, "low": 4, "close": 5, "volume": 200 },
+      { "timestamp": 1704205920000, "open": 5, "high": 16, "low": 5, "close": 15, "volume": 300 }
+    ]
+  },
+  "indicatorCases": [
+    {
+      "id": "sma-rising",
+      "indicatorId": "sma",
+      "candleSetId": "rising",
+      "parameters": { "period": 2 },
+      "expected": { "kind": "line", "series": { "value": [null, 11.5, 12.5, 13.5] } }
+    },
+    {
+      "id": "ema-rising",
+      "indicatorId": "ema",
+      "candleSetId": "rising",
+      "parameters": { "period": 2 },
+      "expected": { "kind": "line", "series": { "value": [null, 11.5, 12.5, 13.5] } }
+    },
+    {
+      "id": "rsi-rising",
+      "indicatorId": "rsi",
+      "candleSetId": "rising",
+      "parameters": { "period": 2 },
+      "expected": { "kind": "line", "series": { "value": [null, null, 100, 100] } }
+    },
+    {
+      "id": "macd-rising",
+      "indicatorId": "macd",
+      "candleSetId": "rising",
+      "parameters": { "fastPeriod": 1, "slowPeriod": 2, "signalPeriod": 1 },
+      "expected": {
+        "kind": "multi_line",
+        "series": {
+          "macd": [null, 0.5, 0.5, 0.5],
+          "signal": [null, 0.5, 0.5, 0.5],
+          "histogram": [null, 0, 0, 0]
+        }
+      }
+    },
+    {
+      "id": "bollinger-rising",
+      "indicatorId": "bollinger",
+      "candleSetId": "rising",
+      "parameters": { "period": 2, "multiplier": 1 },
+      "expected": {
+        "kind": "band",
+        "series": {
+          "upper": [null, 12, 13, 14],
+          "middle": [null, 11.5, 12.5, 13.5],
+          "lower": [null, 11, 12, 13]
+        }
+      }
+    },
+    {
+      "id": "stochastic-rising",
+      "indicatorId": "stochastic",
+      "candleSetId": "rising",
+      "parameters": { "kPeriod": 2, "kSmooth": 1, "dPeriod": 1 },
+      "expected": {
+        "kind": "multi_line",
+        "series": { "k": [null, 75, 75, 75], "d": [null, 75, 75, 75] }
+      }
+    },
+    {
+      "id": "atr-rising",
+      "indicatorId": "atr",
+      "candleSetId": "rising",
+      "parameters": { "period": 2 },
+      "expected": { "kind": "line", "series": { "value": [null, 3, 3, 3] } }
+    },
+    {
+      "id": "anchored-vwap-rising",
+      "indicatorId": "anchored_vwap",
+      "candleSetId": "rising",
+      "parameters": { "anchorTimestamp": 0 },
+      "expected": {
+        "kind": "line",
+        "series": { "value": [10.666666666666666, 11.333333333333334, 12, 12.666666666666666] }
+      }
+    },
+    {
+      "id": "anchored-vwap-user-anchor",
+      "indicatorId": "anchored_vwap",
+      "candleSetId": "rising",
+      "parameters": { "anchorTimestamp": 1704205920000 },
+      "expected": {
+        "kind": "line",
+        "series": { "value": [null, null, 12.666666666666666, 13.238095238095237] }
+      }
+    },
+    {
+      "id": "anchored-vwap-zero-volume",
+      "indicatorId": "anchored_vwap",
+      "candleSetId": "zeroVolume",
+      "parameters": { "anchorTimestamp": 0 },
+      "expected": { "kind": "line", "series": { "value": [null, null] } }
+    },
+    {
+      "id": "supertrend-rising",
+      "indicatorId": "supertrend",
+      "candleSetId": "rising",
+      "parameters": { "atrPeriod": 1, "multiplier": 1 },
+      "expected": {
+        "kind": "segmented_line",
+        "series": { "bullish": [7.5, 8.5, 9.5, 10.5], "bearish": [null, null, null, null] }
+      }
+    },
+    {
+      "id": "supertrend-direction-flips",
+      "indicatorId": "supertrend",
+      "candleSetId": "supertrendFlip",
+      "parameters": { "atrPeriod": 1, "multiplier": 1 },
+      "expected": {
+        "kind": "segmented_line",
+        "series": { "bullish": [6, null, -0.5], "bearish": [null, 14, null] }
+      }
+    },
+    {
+      "id": "keltner-rising",
+      "indicatorId": "keltner",
+      "candleSetId": "rising",
+      "parameters": { "emaPeriod": 2, "atrPeriod": 2, "multiplier": 1 },
+      "expected": {
+        "kind": "band",
+        "series": {
+          "upper": [null, 14.5, 15.5, 16.5],
+          "middle": [null, 11.5, 12.5, 13.5],
+          "lower": [null, 8.5, 9.5, 10.5]
+        }
+      }
+    },
+    {
+      "id": "vpvr-rising",
+      "indicatorId": "vpvr",
+      "candleSetId": "rising",
+      "parameters": { "rowCount": 4, "valueAreaPercent": 70 },
+      "expected": {
+        "kind": "price_profile",
+        "rows": [
+          { "low": 9, "high": 10.5, "volume": 0, "inValueArea": false },
+          { "low": 10.5, "high": 12, "volume": 300, "inValueArea": true },
+          { "low": 12, "high": 13.5, "volume": 300, "inValueArea": false },
+          { "low": 13.5, "high": 15, "volume": 400, "inValueArea": true }
+        ]
+      }
+    },
+    {
+      "id": "vpvr-equal-range",
+      "indicatorId": "vpvr",
+      "candleSetId": "flat",
+      "parameters": { "rowCount": 4, "valueAreaPercent": 70 },
+      "expected": {
+        "kind": "price_profile",
+        "rows": [{ "low": 10, "high": 10, "volume": 600, "inValueArea": true }]
+      }
+    },
+    {
+      "id": "adx-dmi-rising",
+      "indicatorId": "adx_dmi",
+      "candleSetId": "rising",
+      "parameters": { "period": 1 },
+      "expected": {
+        "kind": "multi_line",
+        "series": {
+          "adx": [null, 100, 100, 100],
+          "plusDi": [null, 33.333333333333336, 33.333333333333336, 33.333333333333336],
+          "minusDi": [null, 0, 0, 0]
+        }
+      }
+    },
+    {
+      "id": "adx-dmi-warmup",
+      "indicatorId": "adx_dmi",
+      "candleSetId": "rising",
+      "parameters": { "period": 2 },
+      "expected": {
+        "kind": "multi_line",
+        "series": {
+          "adx": [null, null, null, 100],
+          "plusDi": [null, null, 33.333333333333336, 33.333333333333336],
+          "minusDi": [null, null, 0, 0]
+        }
+      }
+    },
+    {
+      "id": "obv-rising",
+      "indicatorId": "obv",
+      "candleSetId": "rising",
+      "parameters": {},
+      "expected": { "kind": "line", "series": { "value": [0, 200, 500, 900] } }
+    },
+    {
+      "id": "obv-down-and-equal",
+      "indicatorId": "obv",
+      "candleSetId": "downEqual",
+      "parameters": {},
+      "expected": { "kind": "line", "series": { "value": [0, -200, -200, 200] } }
+    },
+    {
+      "id": "cci-rising",
+      "indicatorId": "cci",
+      "candleSetId": "rising",
+      "parameters": { "period": 2 },
+      "expected": {
+        "kind": "line",
+        "series": { "value": [null, 66.66666666666667, 66.66666666666667, 66.66666666666667] }
+      }
+    },
+    {
+      "id": "cci-zero-deviation",
+      "indicatorId": "cci",
+      "candleSetId": "flat",
+      "parameters": { "period": 2 },
+      "expected": { "kind": "line", "series": { "value": [null, 0, 0] } }
+    },
+    {
+      "id": "williams-r-rising",
+      "indicatorId": "williams_r",
+      "candleSetId": "rising",
+      "parameters": { "period": 2 },
+      "expected": { "kind": "line", "series": { "value": [null, -25, -25, -25] } }
+    },
+    {
+      "id": "williams-r-zero-range",
+      "indicatorId": "williams_r",
+      "candleSetId": "flat",
+      "parameters": { "period": 2 },
+      "expected": { "kind": "line", "series": { "value": [null, -50, -50] } }
+    },
+    {
+      "id": "ichimoku-rising",
+      "indicatorId": "ichimoku",
+      "candleSetId": "rising",
+      "parameters": { "conversionPeriod": 1, "basePeriod": 1, "spanBPeriod": 1, "displacement": 1 },
+      "expected": {
+        "kind": "cloud",
+        "series": {
+          "conversion": [10.5, 11.5, 12.5, 13.5],
+          "base": [10.5, 11.5, 12.5, 13.5],
+          "spanA": [null, 10.5, 11.5, 12.5],
+          "spanB": [null, 10.5, 11.5, 12.5],
+          "lagging": [12, 13, 14, null]
+        }
+      }
+    },
+    {
+      "id": "ichimoku-warmup-displacement",
+      "indicatorId": "ichimoku",
+      "candleSetId": "risingSix",
+      "parameters": { "conversionPeriod": 2, "basePeriod": 3, "spanBPeriod": 4, "displacement": 2 },
+      "expected": {
+        "kind": "cloud",
+        "series": {
+          "conversion": [null, 11, 12, 13, 14, 15],
+          "base": [null, null, 11.5, 12.5, 13.5, 14.5],
+          "spanA": [null, null, null, null, 11.75, 12.75],
+          "spanB": [null, null, null, null, null, 12],
+          "lagging": [13, 14, 15, 16, null, null]
+        }
+      }
+    }
+  ],
+  "l2Cases": [
+    {
+      "id": "balanced-book",
+      "levels": 2,
+      "book": {
+        "bids": [
+          { "price": 100, "size": 10 },
+          { "price": 99, "size": 20 }
+        ],
+        "asks": [
+          { "price": 102, "size": 10 },
+          { "price": 103, "size": 20 }
+        ]
+      },
+      "priorSpreads": [1, 2, 3],
+      "midHistory": [100, 101, 101, 100],
+      "priorDepthHistory": [
+        { "bidSize": 20, "askSize": 20 },
+        { "bidSize": 30, "askSize": 20 },
+        { "bidSize": 25, "askSize": 30 }
+      ],
+      "previousTouch": { "bid": { "price": 100, "size": 12 }, "ask": { "price": 102, "size": 14 } },
+      "expected": {
+        "available": true,
+        "spreadAbs": 2,
+        "spreadBps": 198.01980198019803,
+        "spreadPercentile": 50,
+        "topBookImbalance": 0,
+        "tickPressure": 0,
+        "depthImbalance": 0,
+        "cumulativePressure": 0,
+        "touchDepletion": 0.3333333333333333
+      }
+    },
+    {
+      "id": "cumulative-buy-pressure",
+      "levels": 2,
+      "book": {
+        "bids": [
+          { "price": 100, "size": 10 },
+          { "price": 99, "size": 20 }
+        ],
+        "asks": [
+          { "price": 102, "size": 10 },
+          { "price": 103, "size": 20 }
+        ]
+      },
+      "priorDepthHistory": [{ "bidSize": 20, "askSize": 30 }],
+      "expected": { "available": true, "cumulativePressure": 1 }
+    },
+    {
+      "id": "crossed-book",
+      "levels": 1,
+      "book": { "bids": [{ "price": 103, "size": 10 }], "asks": [{ "price": 102, "size": 10 }] },
+      "expected": { "available": false, "reason": "invalid_book" }
+    },
+    {
+      "id": "empty-side",
+      "levels": 1,
+      "book": { "bids": [], "asks": [{ "price": 102, "size": 10 }] },
+      "expected": { "available": false, "reason": "invalid_book" }
+    },
+    {
+      "id": "partial-depth",
+      "levels": 5,
+      "book": {
+        "bids": [{ "price": 100, "size": 30 }],
+        "asks": [
+          { "price": 101, "size": 10 },
+          { "price": 102, "size": 20 }
+        ]
+      },
+      "expected": { "available": true, "effectiveLevels": 2, "depthImbalance": 0 }
+    }
+  ],
+  "atmIvCases": [
+    {
+      "id": "exact-paired-strike",
+      "spot": 6000,
+      "strikes": [{ "strike": 6000, "callIv": 0.2, "putIv": 0.22 }],
+      "expectedAtmIv": 0.21
+    },
+    {
+      "id": "interpolated-paired-strikes",
+      "spot": 6005,
+      "strikes": [
+        { "strike": 6000, "callIv": 0.2, "putIv": 0.22 },
+        { "strike": 6010, "callIv": 0.24, "putIv": 0.26 }
+      ],
+      "expectedAtmIv": 0.23
+    },
+    {
+      "id": "unsorted-paired-strikes",
+      "spot": 6005,
+      "strikes": [
+        { "strike": 6010, "callIv": 0.24, "putIv": 0.26 },
+        { "strike": 6000, "callIv": 0.2, "putIv": 0.22 }
+      ],
+      "expectedAtmIv": 0.23
+    },
+    {
+      "id": "missing-leg",
+      "spot": 6000,
+      "strikes": [{ "strike": 6000, "callIv": 0.2, "putIv": null }],
+      "expectedAtmIv": null
+    },
+    {
+      "id": "no-bracket",
+      "spot": 5990,
+      "strikes": [
+        { "strike": 6000, "callIv": 0.2, "putIv": 0.22 },
+        { "strike": 6010, "callIv": 0.24, "putIv": 0.26 }
+      ],
+      "expectedAtmIv": null
+    }
+  ]
+}

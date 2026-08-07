@@ -32,6 +32,18 @@ function isoFrom(value: unknown): string {
   return new Date().toISOString();
 }
 
+function optionalIsoFrom(value: unknown): string | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    const date = new Date(value > 1e12 ? value : value * 1000);
+    return Number.isFinite(date.getTime()) ? date.toISOString() : undefined;
+  }
+  if (typeof value === 'string') {
+    const parsed = Date.parse(value);
+    if (Number.isFinite(parsed)) return new Date(parsed).toISOString();
+  }
+  return undefined;
+}
+
 // ---------------------------------------------------------------------------
 // Market data
 // ---------------------------------------------------------------------------
@@ -114,6 +126,7 @@ export function toOptionContract(
     bid: num(snap.bid),
     ask: num(snap.ask),
     last: num(snap.price ?? snap.last),
+    quoteTimestamp: optionalIsoFrom(snap.last_trade_time ?? snap.timestamp),
   };
 }
 

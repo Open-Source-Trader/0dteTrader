@@ -1,4 +1,4 @@
-import type { AuthTokens } from '@0dtetrader/shared-types';
+import type { AuthTokens, LegalDocument } from '@0dtetrader/shared-types';
 import type { ApiClient } from '../../core/api/ApiClient';
 import { errorMessage } from '../../core/api/ApiError';
 import type { QuoteSocket } from '../../core/api/QuoteSocket';
@@ -11,6 +11,7 @@ export type AuthState =
   | 'disclaimer'
   | 'serverSetup'
   | 'unauthenticated'
+  | 'legal'
   | 'authenticated'
   | 'startupRecovery';
 
@@ -24,6 +25,7 @@ interface AuthStoreState {
   isLoading: boolean;
   errorMessage: string | null;
   startupRecovery: StartupRecoveryState | null;
+  legalDocuments: LegalDocument[];
 }
 
 /**
@@ -37,7 +39,13 @@ export class AuthStore extends Store<AuthStoreState> {
     private readonly settingsStore: SettingsStore,
     private readonly socket: QuoteSocket,
   ) {
-    super({ state: 'checking', isLoading: false, errorMessage: null, startupRecovery: null });
+    super({
+      state: 'checking',
+      isLoading: false,
+      errorMessage: null,
+      startupRecovery: null,
+      legalDocuments: [],
+    });
     sessionStore.onUnauthenticated(() => this.handleSessionExpired());
   }
 
@@ -75,7 +83,25 @@ export class AuthStore extends Store<AuthStoreState> {
   async logout(): Promise<void> {
     this.socket.disconnect();
     await this.sessionStore.signOut();
-    this.set({ state: 'unauthenticated', startupRecovery: null });
+    this.set({ state: 'unauthenticated', startupRecovery: null, legalDocuments: [] });
+  }
+
+  async acceptRequiredLegal(): Promise<void> {
+    if (this.getState().isLoading) return;
+    this.set({ isLoading: true, errorMessage: null });
+    try {
+      for (const document of this.getState().legalDocuments.filter(
+        (candidate) => candidate.requiresAcceptance,
+      )) {
+        if (document.slug !== 'terms' && document.slug !== 'risk') continue;
+        await this.apiClient.acceptLegal(document.slug, document.version);
+      }
+      await this.completeAuthenticatedSession();
+    } catch (error) {
+      this.set({ errorMessage: errorMessage(error) });
+    } finally {
+      this.set({ isLoading: false });
+    }
   }
 
   clearError(): void {
@@ -106,7 +132,7 @@ export class AuthStore extends Store<AuthStoreState> {
     try {
       const tokens = await action();
       this.sessionStore.signIn(tokens);
-      this.becomeAuthenticated();
+      await this.completeAuthenticatedSession();
     } catch (error) {
       this.set({ errorMessage: errorMessage(error) });
     } finally {
@@ -116,12 +142,39 @@ export class AuthStore extends Store<AuthStoreState> {
 
   private becomeAuthenticated(): void {
     this.socket.connect();
-    this.set({ state: 'authenticated', startupRecovery: null });
+    this.set({ state: 'authenticated', startupRecovery: null, legalDocuments: [] });
+  }
+
+  private async completeAuthenticatedSession(): Promise<void> {
+    try {
+      const status = await this.apiClient.legalStatus();
+      const missing = status.documents.filter(
+        (document) => document.requiresAcceptance && !document.accepted,
+      );
+      if (missing.length === 0) {
+        this.becomeAuthenticated();
+        return;
+      }
+      const documents = await Promise.all(
+        missing.map((document) => this.apiClient.legalDocument(document.slug)),
+      );
+      this.socket.disconnect();
+      this.set({ state: 'legal', legalDocuments: documents, startupRecovery: null });
+    } catch (error) {
+      this.socket.disconnect();
+      this.set({
+        state: 'startupRecovery',
+        startupRecovery: {
+          title: 'Cannot verify required disclosures',
+          message: errorMessage(error),
+        },
+      });
+    }
   }
 
   private handleRestoreResult(result: RestoreSessionResult): void {
     if (result.status === 'authenticated') {
-      this.becomeAuthenticated();
+      void this.completeAuthenticatedSession();
       return;
     }
     if (result.status === 'no-session') {

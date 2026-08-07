@@ -6,7 +6,7 @@ import {
   type OptionsAnalyticsStrikeLeg,
 } from '@0dtetrader/shared-types';
 
-export const OPTIONS_ANALYTICS_CALCULATION_VERSION = 'options-analytics-v1';
+export const OPTIONS_ANALYTICS_CALCULATION_VERSION = 'options-analytics-v2';
 
 const MS_PER_YEAR = 365 * 24 * 60 * 60 * 1_000;
 const SQRT_TWO_PI = Math.sqrt(2 * Math.PI);
@@ -103,6 +103,44 @@ function normalCdf(value: number): number {
 
 function allFinite(values: number[]): boolean {
   return values.every(Number.isFinite);
+}
+
+interface AtmIvStrike {
+  strike: number;
+  call?: { impliedVolatility: number | null } | null;
+  put?: { impliedVolatility: number | null } | null;
+}
+
+/** Paired call/put IV at spot: exact match or nearest-strike linear interpolation only. */
+export function atmIvAtSpot(rows: readonly AtmIvStrike[], spot: number): number | null {
+  if (!Number.isFinite(spot) || spot <= 0) return null;
+  const pairs = rows
+    .flatMap((row) => {
+      const callIv = row.call?.impliedVolatility;
+      const putIv = row.put?.impliedVolatility;
+      if (
+        !Number.isFinite(row.strike) ||
+        row.strike <= 0 ||
+        typeof callIv !== 'number' ||
+        !Number.isFinite(callIv) ||
+        callIv <= 0 ||
+        typeof putIv !== 'number' ||
+        !Number.isFinite(putIv) ||
+        putIv <= 0
+      ) {
+        return [];
+      }
+      return [{ strike: row.strike, iv: (callIv + putIv) / 2 }];
+    })
+    .sort((left, right) => left.strike - right.strike);
+  const exact = pairs.find((pair) => pair.strike === spot);
+  if (exact) return Number.isFinite(exact.iv) ? exact.iv : null;
+  const lower = [...pairs].reverse().find((pair) => pair.strike < spot);
+  const upper = pairs.find((pair) => pair.strike > spot);
+  if (!lower || !upper || upper.strike <= lower.strike) return null;
+  const weight = (spot - lower.strike) / (upper.strike - lower.strike);
+  const interpolated = lower.iv + weight * (upper.iv - lower.iv);
+  return Number.isFinite(interpolated) ? interpolated : null;
 }
 
 /** One Black-Scholes-forward kernel used by IV, current Greeks, and scenarios. */
@@ -697,10 +735,11 @@ export function computeOptionsAnalyticsSnapshot(
     const difference = Math.abs(left.strike - forward) - Math.abs(right.strike - forward);
     return difference || left.strike - right.strike;
   })[0];
+  const interpolatedAtmIv = atmIvAtSpot(strikes, input.spot);
   const impliedRange =
-    atmRow?.call && atmRow.put
+    atmRow?.call && atmRow.put && interpolatedAtmIv !== null
       ? (() => {
-          const atmIv = (atmRow.call.impliedVolatility! + atmRow.put.impliedVolatility!) / 2;
+          const atmIv = interpolatedAtmIv;
           const totalVariance = atmIv * atmIv * timeYears;
           const rootVariance = Math.sqrt(totalVariance);
           const sourcePair = byStrike.get(atmRow.strike)!;

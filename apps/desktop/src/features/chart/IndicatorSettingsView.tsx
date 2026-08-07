@@ -1,574 +1,200 @@
-import { useState } from 'react';
+import type { ChartDisplayPreferences, IndicatorSettingsState } from '@0dtetrader/shared-types';
 import { DesktopSheet } from '../../design/components/DesktopSheet';
 import { NavBar } from '../../design/components/NavBar';
 import { Sheet } from '../../design/components/Sheet';
 import { Stepper } from '../../design/components/Stepper';
 import { Toggle } from '../../design/components/Toggle';
-import { Format } from '../../design/format';
-import { ChevronDownIcon } from '../../design/icons';
-import type { IndicatorSettings } from './indicatorSettings';
-import { DEFAULT_INDICATOR_SETTINGS, enabledSubPanes, MAX_SUB_PANES } from './indicatorSettings';
-import type { ChartTradingSettings } from './chartTradingSettings';
-import { CHART_TRADING_QUANTITY_MAX, CHART_TRADING_QUANTITY_MIN } from './chartTradingSettings';
-import type { OptionsAnalyticsSettings } from './optionsAnalytics/optionsAnalyticsSettings';
+import {
+  CHART_TRADING_QUANTITY_MAX,
+  CHART_TRADING_QUANTITY_MIN,
+  type ChartTradingSettings,
+} from './chartTradingSettings';
+import { IndicatorRegistrySettings } from './IndicatorRegistrySettings';
+import {
+  DEFAULT_OPTIONS_ANALYTICS_SETTINGS,
+  type OptionsAnalyticsSettings,
+} from './optionsAnalytics/optionsAnalyticsSettings';
 import { TwcSettingsBody } from './TwcSettingsView';
 import type { TwcHeatmapSettings } from './twc/twcSettings';
+import { DEFAULT_CHART_DISPLAY, DEFAULT_INDICATOR_SETTINGS_STATE } from './indicatorRegistry';
+import { UsrSettingsBody } from './UsrSettingsView';
+import type { UsrSettings } from './ultimateSupportResistance/usrSettings';
 
-interface IndicatorSettingsViewProps {
-  settings: IndicatorSettings;
-  onChange: (settings: IndicatorSettings) => void;
+export interface IndicatorSettingsViewProps {
+  settings: IndicatorSettingsState;
+  chartDisplay: ChartDisplayPreferences;
+  onChange: (settings: IndicatorSettingsState) => void;
+  onChangeChartDisplay: (preferences: ChartDisplayPreferences) => void;
   onDismiss: () => void;
   twcEnabled: boolean;
   onToggleTwc: (on: boolean) => void;
   twcSettings: TwcHeatmapSettings;
   onChangeTwcSettings: (settings: TwcHeatmapSettings) => void;
+  usrSettings: UsrSettings;
+  onChangeUsrSettings: (settings: UsrSettings) => void;
   optionsAnalytics: OptionsAnalyticsSettings;
   chartTrading: ChartTradingSettings;
   onChangeChartTrading: (settings: ChartTradingSettings) => void;
   onChangeOptionsAnalytics: (settings: OptionsAnalyticsSettings) => void;
-  /** Desktop grid: centered floating panel instead of an iOS bottom sheet. */
   dense?: boolean;
 }
 
-/** Series-color cue mapping a settings row to its chart line. */
-function SeriesDot({ color }: { color: string }) {
+export function IndicatorSettingsBody(
+  props: Omit<IndicatorSettingsViewProps, 'onDismiss' | 'dense'>,
+) {
+  const patchOptions = (patch: Partial<OptionsAnalyticsSettings>) =>
+    props.onChangeOptionsAnalytics({ ...props.optionsAnalytics, ...patch });
+  const patchChartTrading = (patch: Partial<ChartTradingSettings>) =>
+    props.onChangeChartTrading({ ...props.chartTrading, ...patch });
   return (
-    <span
-      aria-hidden="true"
-      style={{
-        display: 'inline-block',
-        width: 8,
-        height: 8,
-        borderRadius: '50%',
-        marginRight: 8,
-        background: color,
-      }}
-    />
-  );
-}
-
-interface IndicatorSettingsBodyProps {
-  settings: IndicatorSettings;
-  onChange: (settings: IndicatorSettings) => void;
-  twcEnabled: boolean;
-  onToggleTwc: (on: boolean) => void;
-  twcSettings: TwcHeatmapSettings;
-  onChangeTwcSettings: (settings: TwcHeatmapSettings) => void;
-  optionsAnalytics: OptionsAnalyticsSettings;
-  chartTrading: ChartTradingSettings;
-  onChangeChartTrading: (settings: ChartTradingSettings) => void;
-  onChangeOptionsAnalytics: (settings: OptionsAnalyticsSettings) => void;
-}
-
-/** Just the row content — reused standalone (compact Sheet) and as the
- *  "Indicators" tab inside the unified desktop settings window. */
-export function IndicatorSettingsBody({
-  settings,
-  onChange,
-  twcEnabled,
-  onToggleTwc,
-  twcSettings,
-  onChangeTwcSettings,
-  optionsAnalytics,
-  chartTrading,
-  onChangeChartTrading,
-  onChangeOptionsAnalytics,
-}: IndicatorSettingsBodyProps) {
-  const [twcExpanded, setTwcExpanded] = useState(false);
-  const patch = (partial: Partial<IndicatorSettings>) => onChange({ ...settings, ...partial });
-  const patchOptionsAnalytics = (partial: Partial<OptionsAnalyticsSettings>) =>
-    onChangeOptionsAnalytics({ ...optionsAnalytics, ...partial });
-  const patchChartTrading = (partial: Partial<ChartTradingSettings>) =>
-    onChangeChartTrading({ ...chartTrading, ...partial });
-
-  // Sub-panes are capped: at the cap, toggles for the remaining panes are
-  // disabled until one is turned off.
-  const paneCapReached = enabledSubPanes(settings).length >= MAX_SUB_PANES;
-  const paneToggleDisabled = (enabled: boolean) => !enabled && paneCapReached;
-
-  return (
-    <div className="grouped-list hide-scrollbar">
-      <div className="grouped-section">
-        <div className="section-header">Price Overlays</div>
-        <div className="section-card">
-          <div className="grouped-row">
-            <span>
-              <SeriesDot color="var(--chart-sma)" />
-              SMA
-            </span>
-            <span className="row-value">
-              <Toggle on={settings.smaEnabled} onChange={(on) => patch({ smaEnabled: on })} />
-            </span>
-          </div>
-          {settings.smaEnabled ? (
-            <div className="grouped-row param-row">
-              <span>Period: {settings.smaPeriod}</span>
-              <span className="row-value">
-                <Stepper
-                  value={settings.smaPeriod}
-                  min={2}
-                  max={200}
-                  onChange={(value) => patch({ smaPeriod: value })}
-                />
-              </span>
-            </div>
-          ) : null}
-
-          <div className="grouped-row">
-            <span>
-              <SeriesDot color="var(--chart-ema)" />
-              EMA
-            </span>
-            <span className="row-value">
-              <Toggle on={settings.emaEnabled} onChange={(on) => patch({ emaEnabled: on })} />
-            </span>
-          </div>
-          {settings.emaEnabled ? (
-            <div className="grouped-row param-row">
-              <span>Period: {settings.emaPeriod}</span>
-              <span className="row-value">
-                <Stepper
-                  value={settings.emaPeriod}
-                  min={2}
-                  max={200}
-                  onChange={(value) => patch({ emaPeriod: value })}
-                />
-              </span>
-            </div>
-          ) : null}
-
-          <div className="grouped-row">
-            <span>
-              <SeriesDot color="var(--chart-vwap)" />
-              VWAP
-            </span>
-            <span className="row-value">
-              <Toggle on={settings.vwapEnabled} onChange={(on) => patch({ vwapEnabled: on })} />
-            </span>
-          </div>
-
-          <div className="grouped-row">
-            <span>Volume</span>
-            <span className="row-value">
-              <Toggle on={settings.volumeEnabled} onChange={(on) => patch({ volumeEnabled: on })} />
-            </span>
-          </div>
-
-          <div className="grouped-row">
-            <span>
-              <SeriesDot color="var(--chart-bb-middle)" />
-              Bollinger Bands
-            </span>
-            <span className="row-value">
-              <Toggle
-                on={settings.bollingerEnabled}
-                onChange={(on) => patch({ bollingerEnabled: on })}
-              />
-            </span>
-          </div>
-          {settings.bollingerEnabled ? (
-            <>
-              <div className="grouped-row param-row">
-                <span>Period: {settings.bollingerPeriod}</span>
-                <span className="row-value">
-                  <Stepper
-                    value={settings.bollingerPeriod}
-                    min={5}
-                    max={100}
-                    onChange={(value) => patch({ bollingerPeriod: value })}
-                  />
-                </span>
-              </div>
-              <div className="grouped-row param-row">
-                <span>Width: {Format.price(settings.bollingerMultiplier, 1)}σ</span>
-                <span className="row-value">
-                  <Stepper
-                    value={settings.bollingerMultiplier}
-                    min={0.5}
-                    max={4}
-                    step={0.5}
-                    onChange={(value) => patch({ bollingerMultiplier: value })}
-                  />
-                </span>
-              </div>
-            </>
-          ) : null}
+    <div className="indicator-settings-body">
+      <IndicatorRegistrySettings
+        settings={props.settings}
+        chartDisplay={props.chartDisplay}
+        onChange={props.onChange}
+        onChangeChartDisplay={props.onChangeChartDisplay}
+      />
+      <section className="grouped-section">
+        <h3>Scripts</h3>
+        <div className="settings-field settings-field--row">
+          <span>TradingView Concepts</span>
+          <Toggle on={props.twcEnabled} onChange={props.onToggleTwc} />
         </div>
-      </div>
-
-      <div className="grouped-section">
-        <div className="section-header">Sub-Panes (max {MAX_SUB_PANES})</div>
-        <div className="section-card">
-          <div className="grouped-row">
-            <span>
-              <SeriesDot color="var(--chart-rsi)" />
-              RSI
-            </span>
-            <span className="row-value">
-              <Toggle
-                on={settings.rsiEnabled}
-                onChange={(on) => patch({ rsiEnabled: on })}
-                disabled={paneToggleDisabled(settings.rsiEnabled)}
-              />
-            </span>
-          </div>
-          {settings.rsiEnabled ? (
-            <div className="grouped-row param-row">
-              <span>Period: {settings.rsiPeriod}</span>
-              <span className="row-value">
-                <Stepper
-                  value={settings.rsiPeriod}
-                  min={2}
-                  max={50}
-                  onChange={(value) => patch({ rsiPeriod: value })}
-                />
-              </span>
-            </div>
-          ) : null}
-
-          <div className="grouped-row">
-            <span>
-              <SeriesDot color="var(--chart-macd)" />
-              MACD
-            </span>
-            <span className="row-value">
-              <Toggle
-                on={settings.macdEnabled}
-                onChange={(on) => patch({ macdEnabled: on })}
-                disabled={paneToggleDisabled(settings.macdEnabled)}
-              />
-            </span>
-          </div>
-          {settings.macdEnabled ? (
-            <>
-              <div className="grouped-row param-row">
-                <span>Fast Period: {settings.macdFastPeriod}</span>
-                <span className="row-value">
-                  <Stepper
-                    value={settings.macdFastPeriod}
-                    min={2}
-                    max={50}
-                    onChange={(value) => patch({ macdFastPeriod: value })}
-                  />
-                </span>
-              </div>
-              <div className="grouped-row param-row">
-                <span>Slow Period: {settings.macdSlowPeriod}</span>
-                <span className="row-value">
-                  <Stepper
-                    value={settings.macdSlowPeriod}
-                    min={2}
-                    max={200}
-                    onChange={(value) => patch({ macdSlowPeriod: value })}
-                  />
-                </span>
-              </div>
-              <div className="grouped-row param-row">
-                <span>Signal Period: {settings.macdSignalPeriod}</span>
-                <span className="row-value">
-                  <Stepper
-                    value={settings.macdSignalPeriod}
-                    min={2}
-                    max={50}
-                    onChange={(value) => patch({ macdSignalPeriod: value })}
-                  />
-                </span>
-              </div>
-            </>
-          ) : null}
-
-          <div className="grouped-row">
-            <span>
-              <SeriesDot color="var(--chart-sma)" />
-              Stochastic
-            </span>
-            <span className="row-value">
-              <Toggle
-                on={settings.stochEnabled}
-                onChange={(on) => patch({ stochEnabled: on })}
-                disabled={paneToggleDisabled(settings.stochEnabled)}
-              />
-            </span>
-          </div>
-          {settings.stochEnabled ? (
-            <>
-              <div className="grouped-row param-row">
-                <span>%K Period: {settings.stochKPeriod}</span>
-                <span className="row-value">
-                  <Stepper
-                    value={settings.stochKPeriod}
-                    min={5}
-                    max={50}
-                    onChange={(value) => patch({ stochKPeriod: value })}
-                  />
-                </span>
-              </div>
-              <div className="grouped-row param-row">
-                <span>%K Smoothing: {settings.stochKSmooth}</span>
-                <span className="row-value">
-                  <Stepper
-                    value={settings.stochKSmooth}
-                    min={1}
-                    max={10}
-                    onChange={(value) => patch({ stochKSmooth: value })}
-                  />
-                </span>
-              </div>
-              <div className="grouped-row param-row">
-                <span>%D Period: {settings.stochDPeriod}</span>
-                <span className="row-value">
-                  <Stepper
-                    value={settings.stochDPeriod}
-                    min={1}
-                    max={10}
-                    onChange={(value) => patch({ stochDPeriod: value })}
-                  />
-                </span>
-              </div>
-            </>
-          ) : null}
-
-          <div className="grouped-row">
-            <span>
-              <SeriesDot color="var(--chart-ema)" />
-              ATR
-            </span>
-            <span className="row-value">
-              <Toggle
-                on={settings.atrEnabled}
-                onChange={(on) => patch({ atrEnabled: on })}
-                disabled={paneToggleDisabled(settings.atrEnabled)}
-              />
-            </span>
-          </div>
-          {settings.atrEnabled ? (
-            <div className="grouped-row param-row">
-              <span>Period: {settings.atrPeriod}</span>
-              <span className="row-value">
-                <Stepper
-                  value={settings.atrPeriod}
-                  min={2}
-                  max={50}
-                  onChange={(value) => patch({ atrPeriod: value })}
-                />
-              </span>
-            </div>
-          ) : null}
-        </div>
-        {paneCapReached ? (
-          <div className="section-footer">Two sub-panes max — turn one off to enable another.</div>
+        {props.twcEnabled ? (
+          <TwcSettingsBody settings={props.twcSettings} onChange={props.onChangeTwcSettings} />
         ) : null}
-      </div>
-
-      <div className="grouped-section">
-        <div className="section-header">Scripts</div>
-        <div className="section-card">
-          <div className="grouped-row">
-            <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <SeriesDot color="var(--chart-vwap)" />
-              TWC Heatmap V5
-              <button
-                className="icon-button"
-                aria-label={
-                  twcExpanded ? 'Hide TWC Heatmap V5 settings' : 'TWC Heatmap V5 settings'
-                }
-                aria-expanded={twcExpanded}
-                onClick={() => setTwcExpanded((expanded) => !expanded)}
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  padding: 4,
-                  transform: twcExpanded ? 'rotate(180deg)' : undefined,
-                }}
-              >
-                <ChevronDownIcon size={14} />
-              </button>
-            </span>
-            <span className="row-value">
-              <Toggle on={twcEnabled} onChange={onToggleTwc} />
-            </span>
-          </div>
-          {twcExpanded ? (
-            <div className="indicator-nested-settings">
-              <TwcSettingsBody settings={twcSettings} onChange={onChangeTwcSettings} />
-            </div>
-          ) : null}
-
-          <div className="grouped-row">
-            <span>
-              <SeriesDot color="var(--hud-amber)" />
-              Options Structure
-            </span>
-            <span className="row-value">
-              <Toggle
-                on={optionsAnalytics.enabled}
-                onChange={(on) => patchOptionsAnalytics({ enabled: on })}
-              />
-            </span>
-          </div>
-          {optionsAnalytics.enabled ? (
-            <>
-              <div className="grouped-row param-row">
-                <span>Implied 68% Range</span>
-                <span className="row-value">
-                  <Toggle
-                    on={optionsAnalytics.showImpliedRange}
-                    onChange={(on) => patchOptionsAnalytics({ showImpliedRange: on })}
-                  />
-                </span>
-              </div>
-              <div className="grouped-row param-row">
-                <span>Gamma Profile</span>
-                <span className="row-value">
-                  <Toggle
-                    on={optionsAnalytics.showGammaProfile}
-                    onChange={(on) => patchOptionsAnalytics({ showGammaProfile: on })}
-                  />
-                </span>
-              </div>
-              <div className="grouped-row param-row">
-                <span>Marked OI Value</span>
-                <span className="row-value">
-                  <Toggle
-                    on={optionsAnalytics.showMarkedOi}
-                    onChange={(on) => patchOptionsAnalytics({ showMarkedOi: on })}
-                  />
-                </span>
-              </div>
-              <div className="grouped-row param-row">
-                <span>Liquidity (Spread / Round Trip)</span>
-                <span className="row-value">
-                  <Toggle
-                    on={optionsAnalytics.showLiquidity}
-                    onChange={(on) => patchOptionsAnalytics({ showLiquidity: on })}
-                  />
-                </span>
-              </div>
-              <div className="grouped-row param-row">
-                <span>Dealer Gamma Flip Proxy</span>
-                <span className="row-value">
-                  <Toggle
-                    on={optionsAnalytics.showDealerProxy}
-                    onChange={(on) => patchOptionsAnalytics({ showDealerProxy: on })}
-                  />
-                </span>
-              </div>
-              <div className="grouped-row param-row">
-                <span>Profile Strikes: {optionsAnalytics.profileStrikeCount}</span>
-                <span className="row-value">
-                  <Stepper
-                    value={optionsAnalytics.profileStrikeCount}
-                    min={3}
-                    max={20}
-                    onChange={(value) => patchOptionsAnalytics({ profileStrikeCount: value })}
-                  />
-                </span>
-              </div>
-              <div className="grouped-row param-row">
-                <span>Refresh: {optionsAnalytics.refreshSeconds}s</span>
-                <span className="row-value">
-                  <Stepper
-                    value={optionsAnalytics.refreshSeconds}
-                    min={15}
-                    max={120}
-                    step={15}
-                    onChange={(value) => patchOptionsAnalytics({ refreshSeconds: value })}
-                  />
-                </span>
-              </div>
-              <div className="grouped-row">
-                <span>Diagnostics &amp; Quality Warnings</span>
-                <span className="row-value">
-                  <Toggle
-                    on={optionsAnalytics.showDiagnostics}
-                    onChange={(on) => patchOptionsAnalytics({ showDiagnostics: on })}
-                  />
-                </span>
-              </div>
-            </>
-          ) : null}
+        <div className="settings-field settings-field--row">
+          <span>Ultimate Support &amp; Resistance</span>
+          <Toggle
+            on={props.usrSettings.enabled}
+            onChange={(enabled) => props.onChangeUsrSettings({ ...props.usrSettings, enabled })}
+          />
         </div>
-      </div>
-
-      <div className="grouped-section">
-        <div className="section-header">Chart Trading</div>
-        <div className="section-card">
-          <div className="grouped-row">
-            <span>
-              <SeriesDot color="var(--app-accent)" />
-              Order Lines
-            </span>
-            <span className="row-value">
-              <Toggle
-                on={chartTrading.enabled}
-                onChange={(on) => patchChartTrading({ enabled: on })}
-              />
-            </span>
-          </div>
-          {chartTrading.enabled ? (
-            <>
-              <div className="grouped-row param-row">
-                <span>Bracket from Entry Line</span>
-                <span className="row-value">
-                  <Toggle
-                    on={chartTrading.bracketDrag}
-                    onChange={(on) => patchChartTrading({ bracketDrag: on })}
-                  />
-                </span>
-              </div>
-              <div className="grouped-row param-row">
-                <span>Default Quantity: {chartTrading.defaultQuantity}</span>
-                <span className="row-value">
-                  <Stepper
-                    value={chartTrading.defaultQuantity}
-                    min={CHART_TRADING_QUANTITY_MIN}
-                    max={CHART_TRADING_QUANTITY_MAX}
-                    onChange={(value) => patchChartTrading({ defaultQuantity: value })}
-                  />
-                </span>
-              </div>
-              <div className="grouped-row param-row">
-                <span className="row-note">
-                  Order lines are watched by 0dteTrader, not resting at the broker. A crossed level
-                  fires a mid or market order — flip MID/MKT on the line itself.
-                </span>
-              </div>
-            </>
-          ) : null}
+        {props.usrSettings.enabled ? (
+          <UsrSettingsBody settings={props.usrSettings} onChange={props.onChangeUsrSettings} />
+        ) : null}
+      </section>
+      <section className="grouped-section">
+        <h3>Options Structure</h3>
+        <OptionToggle
+          label="Enabled"
+          value={props.optionsAnalytics.enabled}
+          onChange={(enabled) => patchOptions({ enabled })}
+        />
+        <OptionToggle
+          label="Implied 68% Range"
+          value={props.optionsAnalytics.showImpliedRange}
+          onChange={(showImpliedRange) => patchOptions({ showImpliedRange })}
+        />
+        <OptionToggle
+          label="Gamma Profile"
+          value={props.optionsAnalytics.showGammaProfile}
+          onChange={(showGammaProfile) => patchOptions({ showGammaProfile })}
+        />
+        <OptionToggle
+          label="Marked OI Value"
+          value={props.optionsAnalytics.showMarkedOi}
+          onChange={(showMarkedOi) => patchOptions({ showMarkedOi })}
+        />
+        <OptionToggle
+          label="Liquidity (Spread / Round Trip)"
+          value={props.optionsAnalytics.showLiquidity}
+          onChange={(showLiquidity) => patchOptions({ showLiquidity })}
+        />
+        <OptionToggle
+          label="Dealer Gamma Flip Proxy"
+          value={props.optionsAnalytics.showDealerProxy}
+          onChange={(showDealerProxy) => patchOptions({ showDealerProxy })}
+        />
+        <div className="settings-field settings-field--row">
+          <span>Profile Strikes: {props.optionsAnalytics.profileStrikeCount}</span>
+          <Stepper
+            value={props.optionsAnalytics.profileStrikeCount}
+            min={3}
+            max={20}
+            ariaLabel="Profile strikes"
+            onChange={(profileStrikeCount) => patchOptions({ profileStrikeCount })}
+          />
         </div>
-      </div>
-
-      <div className="grouped-section">
-        <div className="section-card">
-          <button
-            className="grouped-row button-row"
-            onClick={() => onChange(DEFAULT_INDICATOR_SETTINGS)}
-          >
-            Reset to Defaults
-          </button>
+        <div className="settings-field settings-field--row">
+          <span>Refresh: {props.optionsAnalytics.refreshSeconds}s</span>
+          <Stepper
+            value={props.optionsAnalytics.refreshSeconds}
+            min={15}
+            max={120}
+            step={15}
+            ariaLabel="Refresh interval"
+            onChange={(refreshSeconds) => patchOptions({ refreshSeconds })}
+          />
         </div>
-      </div>
+        <OptionToggle
+          label="Diagnostics & Quality Warnings"
+          value={props.optionsAnalytics.showDiagnostics}
+          onChange={(showDiagnostics) => patchOptions({ showDiagnostics })}
+        />
+      </section>
+      <section className="grouped-section">
+        <h3>Chart Trading</h3>
+        <OptionToggle
+          label="Enabled"
+          value={props.chartTrading.enabled}
+          onChange={(enabled) => patchChartTrading({ enabled })}
+        />
+        <OptionToggle
+          label="Bracket from Entry Line"
+          value={props.chartTrading.bracketDrag}
+          onChange={(bracketDrag) => patchChartTrading({ bracketDrag })}
+        />
+        <div className="settings-field settings-field--row">
+          <span>Default Quantity: {props.chartTrading.defaultQuantity}</span>
+          <Stepper
+            value={props.chartTrading.defaultQuantity}
+            min={CHART_TRADING_QUANTITY_MIN}
+            max={CHART_TRADING_QUANTITY_MAX}
+            ariaLabel="Default quantity"
+            onChange={(defaultQuantity) => patchChartTrading({ defaultQuantity })}
+          />
+        </div>
+      </section>
+      <section className="grouped-section">
+        <button
+          className="grouped-row button-row"
+          onClick={() => {
+            props.onChange(DEFAULT_INDICATOR_SETTINGS_STATE);
+            props.onChangeChartDisplay(DEFAULT_CHART_DISPLAY);
+          }}
+        >
+          Reset Indicators
+        </button>
+        <button
+          className="grouped-row button-row"
+          onClick={() => props.onChangeOptionsAnalytics(DEFAULT_OPTIONS_ANALYTICS_SETTINGS)}
+        >
+          Reset Options
+        </button>
+      </section>
     </div>
   );
 }
 
-/** Indicator toggles and parameters; changes apply and persist immediately.
- *  Compact/phone layout only — desktop grid uses IndicatorSettingsDesktop
- *  (tree nav + form fields) as a tab inside DesktopSettingsPanel instead. */
-export function IndicatorSettingsView({
-  settings,
+function OptionToggle({
+  label,
+  value,
   onChange,
-  onDismiss,
-  twcEnabled,
-  onToggleTwc,
-  twcSettings,
-  onChangeTwcSettings,
-  optionsAnalytics,
-  chartTrading,
-  onChangeChartTrading,
-  onChangeOptionsAnalytics,
-  dense = false,
-}: IndicatorSettingsViewProps) {
+}: {
+  label: string;
+  value: boolean;
+  onChange: (value: boolean) => void;
+}) {
+  return (
+    <div className="settings-field settings-field--row">
+      <span>{label}</span>
+      <Toggle on={value} onChange={onChange} />
+    </div>
+  );
+}
+
+export function IndicatorSettingsView({ dense = false, ...props }: IndicatorSettingsViewProps) {
   const body = (
     <div
       style={{
@@ -582,33 +208,20 @@ export function IndicatorSettingsView({
       <NavBar
         title="Indicators"
         trailing={
-          <button className="navbar-text-button" onClick={onDismiss}>
+          <button className="navbar-text-button" onClick={props.onDismiss}>
             Done
           </button>
         }
       />
       <div className="sheet-body hide-scrollbar">
-        <IndicatorSettingsBody
-          settings={settings}
-          onChange={onChange}
-          twcEnabled={twcEnabled}
-          onToggleTwc={onToggleTwc}
-          twcSettings={twcSettings}
-          onChangeTwcSettings={onChangeTwcSettings}
-          optionsAnalytics={optionsAnalytics}
-          chartTrading={chartTrading}
-          onChangeChartTrading={onChangeChartTrading}
-          onChangeOptionsAnalytics={onChangeOptionsAnalytics}
-        />
+        <IndicatorSettingsBody {...props} />
       </div>
     </div>
   );
-
-  if (dense) {
-    return <DesktopSheet onDismiss={onDismiss}>{body}</DesktopSheet>;
-  }
-  return (
-    <Sheet detent="large" onDismiss={onDismiss}>
+  return dense ? (
+    <DesktopSheet onDismiss={props.onDismiss}>{body}</DesktopSheet>
+  ) : (
+    <Sheet detent="large" onDismiss={props.onDismiss}>
       {body}
     </Sheet>
   );

@@ -251,6 +251,76 @@ struct APIClient: @unchecked Sendable {
         }
     }
 
+    func gexHeatmap(
+        symbol: String,
+        expiration: String? = nil,
+        strikeRangeAboveSpot: Int? = nil,
+        strikeRangeBelowSpot: Int? = nil,
+        historyWindowMinutes: Int? = nil,
+        bucketMinutes: Int? = nil,
+        to: Date? = nil
+    ) async throws -> GexHeatmapSnapshotDTO {
+        var query = [URLQueryItem(name: "symbol", value: symbol)]
+        if let expiration { query.append(URLQueryItem(name: "expiration", value: expiration)) }
+        if let strikeRangeAboveSpot {
+            query.append(URLQueryItem(name: "strikeRangeAboveSpot", value: String(strikeRangeAboveSpot)))
+        }
+        if let strikeRangeBelowSpot {
+            query.append(URLQueryItem(name: "strikeRangeBelowSpot", value: String(strikeRangeBelowSpot)))
+        }
+        if let historyWindowMinutes {
+            query.append(URLQueryItem(name: "historyWindowMinutes", value: String(historyWindowMinutes)))
+        }
+        if let bucketMinutes {
+            query.append(URLQueryItem(name: "bucketMinutes", value: String(bucketMinutes)))
+        }
+        if let to {
+            query.append(URLQueryItem(name: "to", value: ISO8601DateFormatter().string(from: to)))
+        }
+        return try await request(
+            Endpoint(method: .get, path: "v1/market/options-analytics/gex-heatmap", query: query)
+        )
+    }
+
+    func gexTermStructure(
+        symbol: String,
+        expiration: String? = nil,
+        strikeRangeAboveSpot: Int? = nil,
+        strikeRangeBelowSpot: Int? = nil,
+        maxSnapshotAgeMinutes: Int? = nil
+    ) async throws -> GexTermStructureSnapshotDTO {
+        var query = [URLQueryItem(name: "symbol", value: symbol)]
+        if let expiration { query.append(URLQueryItem(name: "expiration", value: expiration)) }
+        if let strikeRangeAboveSpot {
+            query.append(URLQueryItem(name: "strikeRangeAboveSpot", value: String(strikeRangeAboveSpot)))
+        }
+        if let strikeRangeBelowSpot {
+            query.append(URLQueryItem(name: "strikeRangeBelowSpot", value: String(strikeRangeBelowSpot)))
+        }
+        if let maxSnapshotAgeMinutes {
+            query.append(URLQueryItem(name: "maxSnapshotAgeMinutes", value: String(maxSnapshotAgeMinutes)))
+        }
+        return try await request(
+            Endpoint(method: .get, path: "v1/market/options-analytics/gex-term-structure", query: query)
+        )
+    }
+
+    func autoScoringPreferences() async throws -> AutoScoringPreferenceRecord {
+        try await request(Endpoint(method: .get, path: "v1/auto-scoring/preferences"))
+    }
+
+    func updateAutoScoringPreferences(
+        _ update: AutoScoringPreferenceUpdate
+    ) async throws -> AutoScoringPreferenceRecord {
+        let endpoint = Endpoint(method: .put, path: "v1/auto-scoring/preferences")
+        return try await request(endpoint, body: encode(update))
+    }
+
+    func rankAutoContracts(_ rankRequest: AutoScoringRankRequest) async throws -> AutoScoringResult {
+        let endpoint = Endpoint(method: .post, path: "v1/auto-scoring/rank")
+        return try await request(endpoint, body: encode(rankRequest))
+    }
+
     func orderHistory() async throws -> TradeHistoryDTO {
         try await request(Endpoint(method: .get, path: "v1/orders/history"))
     }
@@ -293,6 +363,50 @@ struct APIClient: @unchecked Sendable {
     /// Removes a previously registered token (204).
     func unregisterDevice(token: String) async throws {
         try await requestVoid(Endpoint(method: .delete, path: "v1/notifications/devices/\(token)"))
+    }
+
+    func discordSettings() async throws -> DiscordNotificationSettingsDTO {
+        try await request(Endpoint(method: .get, path: "v1/notifications/discord"))
+    }
+
+    func updateDiscordSettings(
+        _ input: DiscordNotificationSettingsUpdateDTO
+    ) async throws -> DiscordNotificationSettingsDTO {
+        try await request(
+            Endpoint(method: .put, path: "v1/notifications/discord"),
+            body: encode(input)
+        )
+    }
+
+    func testDiscord() async throws {
+        try await requestVoid(Endpoint(method: .post, path: "v1/notifications/discord/test"))
+    }
+
+    func legalStatus() async throws -> LegalAcceptanceStatusDTO {
+        try await request(Endpoint(method: .get, path: "v1/me/legal"))
+    }
+
+    func legalDocument(_ slug: LegalDocumentSlug) async throws -> LegalDocumentDTO {
+        try await request(
+            Endpoint(method: .get, path: "v1/legal/\(slug.rawValue)", requiresAuth: false)
+        )
+    }
+
+    func acceptLegal(
+        document: LegalDocumentSlug,
+        version: String
+    ) async throws -> LegalAcceptanceStatusDTO {
+        try await request(
+            Endpoint(method: .post, path: "v1/me/legal/accept"),
+            body: encode(LegalAcceptanceRequestDTO(document: document.rawValue, version: version))
+        )
+    }
+
+    func deleteAccount(confirmEmail: String) async throws {
+        try await requestVoid(
+            Endpoint(method: .delete, path: "v1/me"),
+            body: encode(DeleteAccountRequestDTO(confirmEmail: confirmEmail))
+        )
     }
 
     // MARK: - Chart trading

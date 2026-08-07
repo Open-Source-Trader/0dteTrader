@@ -1,12 +1,12 @@
 import { useEffect, useRef } from 'react';
 import type { IChartApi, ISeriesApi, Logical } from 'lightweight-charts';
 import type { ChartCandle } from './ChartStore';
-import type { TwcRenderModel, TwcSegment } from './twc/twcTypes';
+import type { ScriptRenderModel, ScriptSegment } from './scriptOverlayTypes';
 
 interface TwcOverlayProps {
   chart: IChartApi;
   series: ISeriesApi<'Candlestick'>;
-  model: TwcRenderModel | null;
+  model: ScriptRenderModel | null;
   /** Candle data version: live updates shift price→y geometry, so repaint. */
   candles: ChartCandle[];
 }
@@ -14,9 +14,9 @@ interface TwcOverlayProps {
 const MARKER_PAD = 6;
 
 /**
- * Read-only canvas overlay for the TWC Heatmap render model: fib level lines,
- * Gann fans/frames, profit-target bands, labels, signal markers and area
- * fills. Same event-driven repaint pattern as DrawingLayer, but with no
+ * Read-only canvas overlay for shared stateful-script geometry: line segments,
+ * bands, labels, signal markers and area fills. It uses the same event-driven
+ * repaint pattern as DrawingLayer, but has no
  * pointer interaction; bar indices map straight to logical coordinates
  * (indices past the last bar project into the future).
  */
@@ -37,7 +37,7 @@ export function TwcOverlay({ chart, series, model, candles }: TwcOverlayProps) {
       chart.timeScale().logicalToCoordinate(barIndex as Logical);
     const yAt = (price: number): number | null => series.priceToCoordinate(price);
 
-    const applyStyle = (ctx: CanvasRenderingContext2D, segment: TwcSegment): void => {
+    const applyStyle = (ctx: CanvasRenderingContext2D, segment: ScriptSegment): void => {
       ctx.strokeStyle = segment.color;
       ctx.lineWidth = segment.width;
       let dash: number[] = [];
@@ -87,7 +87,7 @@ export function TwcOverlay({ chart, series, model, candles }: TwcOverlayProps) {
           const top = fill.top[i];
           const bottom = fill.bottom[i];
           const color = fill.colors[i];
-          if (top === null || bottom === null || color === null) {
+          if (top == null || bottom == null || color == null) {
             flush();
             continue;
           }
@@ -120,8 +120,11 @@ export function TwcOverlay({ chart, series, model, candles }: TwcOverlayProps) {
         ctx.fillRect(rx, ry, rw, rh);
         if (band.borderColor) {
           ctx.strokeStyle = band.borderColor;
-          ctx.lineWidth = 1;
-          ctx.setLineDash([]);
+          ctx.lineWidth = band.borderWidth ?? 1;
+          let dash: number[] = [];
+          if (band.borderStyle === 'dashed') dash = [5, 4];
+          if (band.borderStyle === 'dotted') dash = [2, 3];
+          ctx.setLineDash(dash);
           ctx.strokeRect(rx, ry, rw, rh);
         }
       }
@@ -212,7 +215,7 @@ export function TwcOverlay({ chart, series, model, candles }: TwcOverlayProps) {
           }
           ctx.closePath();
           ctx.fill();
-          ctx.fillStyle = '#FFFFFF';
+          ctx.fillStyle = marker.textColor ?? '#FFFFFF';
           ctx.fillText(text, x - textWidth / 2, pillY + h / 2 + 3.5);
           ctx.fillStyle = marker.color;
         }

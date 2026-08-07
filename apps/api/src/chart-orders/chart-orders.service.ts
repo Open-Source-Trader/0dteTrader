@@ -1,6 +1,7 @@
+import { createHash, randomUUID } from 'node:crypto';
 import { Inject, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import type { ChartOrder as ChartOrderRow } from '@prisma/client';
+import { Prisma, type BracketGroup, type ChartOrder as ChartOrderRow } from '@prisma/client';
 import {
   ChartOrder,
   ChartOrderKind,
@@ -12,10 +13,14 @@ import {
   TradingMode,
   chartOrderCrossed,
 } from '@0dtetrader/shared-types';
-import { BROKER_GATEWAY, BrokerGateway } from '../broker/broker-gateway.interface';
+import {
+  BROKER_GATEWAY,
+  BrokerExecutionScope,
+  BrokerGateway,
+} from '../broker/broker-gateway.interface';
 import { findExplicitOption, pickExpiration } from '../broker/contract-resolution';
 import { optionSettlementAt } from '../broker/expiration-calendar';
-import { ApiException, errors } from '../common/api-exception';
+import { ApiException, errors, isUniqueViolation } from '../common/api-exception';
 import { BrokerError } from '../common/broker-error';
 import { PrismaService } from '../prisma/prisma.service';
 import { OrderRequestDto } from '../trading/dto/order-request.dto';
@@ -49,6 +54,41 @@ const TERMINAL_RETENTION_MS = 60 * 60_000;
  * sweep would cancel the bracket a beat before the position appears.
  */
 const ORPHAN_GRACE_MS = 60_000;
+const GROUP_FIRE_LEASE_MS = 30_000;
+const PENDING_AUDIT_TTL_MS = 2 * 60_000;
+const retirementMarker = (fireLegId: string): string => `Reserved by bracket fire ${fireLegId}`;
+const PENDING_SCOPE_PREFIX = '__chart_order_execution_scope__:';
+
+function executionScopeValue(value: unknown): BrokerExecutionScope | undefined {
+  if (!value || Array.isArray(value) || typeof value !== 'object') return undefined;
+  const candidate = value as Record<string, unknown>;
+  if (
+    !['webull', 'alpaca', 'snaptrade'].includes(String(candidate['provider'])) ||
+    !['live', 'practice'].includes(String(candidate['environment'])) ||
+    typeof candidate['accountId'] !== 'string' ||
+    candidate['accountId'].length === 0
+  ) {
+    return undefined;
+  }
+  return candidate as unknown as BrokerExecutionScope;
+}
+
+function pendingScopeMarker(scope: BrokerExecutionScope): string {
+  return `${PENDING_SCOPE_PREFIX}${JSON.stringify(scope)}`;
+}
+
+function scopeFromPendingMarker(value: string | null): BrokerExecutionScope | undefined {
+  if (!value?.startsWith(PENDING_SCOPE_PREFIX)) return undefined;
+  try {
+    return executionScopeValue(JSON.parse(value.slice(PENDING_SCOPE_PREFIX.length)));
+  } catch {
+    return undefined;
+  }
+}
+
+class BracketFireClaimLost extends Error {}
+class BracketFinishClaimLost extends Error {}
+class BracketNoSendClaimLost extends Error {}
 
 export function toChartOrder(row: ChartOrderRow): ChartOrder {
   return {
@@ -70,7 +110,10 @@ export function toChartOrder(row: ChartOrderRow): ChartOrder {
     expiresAt: row.expiresAt.toISOString(),
     triggeredAt: row.triggeredAt?.toISOString() ?? null,
     brokerOrderId: row.brokerOrderId,
-    lastError: row.lastError,
+    // The exact broker scope is persisted before an ungrouped placement so a
+    // crash before its audit claim can still recover safely. It is internal
+    // coordination metadata, not a user-facing error or account-id disclosure.
+    lastError: scopeFromPendingMarker(row.lastError) ? null : row.lastError,
   };
 }
 
@@ -83,6 +126,8 @@ export function toChartOrder(row: ChartOrderRow): ChartOrder {
  */
 @Injectable()
 export class ChartOrdersService {
+  private readonly fireOwnerId = randomUUID();
+
   constructor(
     private readonly prisma: PrismaService,
     @Inject(BROKER_GATEWAY) private readonly gateway: BrokerGateway,
@@ -116,6 +161,12 @@ export class ChartOrdersService {
   }
 
   async create(userId: string, dto: CreateChartOrderDto): Promise<ChartOrder> {
+    if (dto.kind === 'limit' && dto.ocoGroupId) {
+      throw errors.validation(
+        'Standalone limit lines cannot join a protective target/stop bracket',
+      );
+    }
+    await this.trading.assertCanArm(userId);
     const { environment, tradingDisabled } = await this.userContext(userId);
     if (tradingDisabled) {
       throw errors.forbidden(
@@ -140,10 +191,18 @@ export class ChartOrdersService {
     }
 
     const armPrice = await this.armPriceFor(userId, dto.underlying, dto.triggerPrice);
-    if (dto.ocoGroupId) await this.assertGroupJoinable(userId, dto.ocoGroupId, dto.kind);
-
-    const row = await this.prisma.chartOrder.create({
-      data: {
+    // Protective target/stop lines must always carry an immutable broker and
+    // account scope. Older clients may omit the group id for a one-leg stop;
+    // give it a server-owned group rather than leaving an unattended close to
+    // follow whichever broker account the user selects later.
+    const requestedGroupId =
+      dto.ocoGroupId ?? (dto.kind === 'target' || dto.kind === 'stop' ? randomUUID() : null);
+    const scope = requestedGroupId
+      ? await this.executionScopeFor(userId, environment as TradingMode)
+      : null;
+    let row: ChartOrderRow;
+    try {
+      const orderData = (ocoGroupId: string | null) => ({
         userId,
         environment,
         underlying: dto.underlying.toUpperCase(),
@@ -157,12 +216,78 @@ export class ChartOrdersService {
         expiration: contract.expiration,
         strike: contract.strike,
         contractSymbol: contract.symbol,
-        ocoGroupId: dto.ocoGroupId ?? null,
+        ocoGroupId,
         status: 'working',
         expiresAt,
-      },
-    });
-    return toChartOrder(row);
+      });
+      row = requestedGroupId
+        ? await this.prisma.$transaction(async (database) => {
+            const groupId = await this.ensureBracketGroup(
+              userId,
+              scope!,
+              dto,
+              contract.symbol,
+              requestedGroupId,
+              database,
+            );
+            const existing = await database.chartOrder.findFirst({
+              where: { ocoGroupId: groupId, kind: dto.kind },
+            });
+            if (existing) {
+              if (existing.status !== 'failed' && existing.status !== 'cancelled') {
+                throw errors.conflict(
+                  'OCO_GROUP_DUPLICATE_KIND',
+                  `That bracket already has a ${dto.kind} — move it instead of adding another`,
+                );
+              }
+              // The unique key is intentionally permanent. Re-arm the same
+              // durable leg instead of trying to insert a second row, and
+              // clear every field from its previous firing generation so the
+              // stable chart-order id/idempotency key is safe to reuse.
+              const reactivated = await database.chartOrder.updateMany({
+                where: {
+                  id: existing.id,
+                  userId,
+                  ocoGroupId: groupId,
+                  status: { in: ['failed', 'cancelled'] },
+                },
+                data: {
+                  ...orderData(groupId),
+                  triggeredAt: null,
+                  brokerOrderId: null,
+                  lastError: null,
+                },
+              });
+              if (reactivated.count !== 1) {
+                throw errors.conflict(
+                  'OCO_GROUP_DUPLICATE_KIND',
+                  `That bracket's ${dto.kind} changed while it was being re-armed`,
+                );
+              }
+              return (await database.chartOrder.findUnique({ where: { id: existing.id } }))!;
+            }
+            return database.chartOrder.create({ data: orderData(groupId) });
+          })
+        : await this.prisma.chartOrder.create({ data: orderData(null) });
+    } catch (error) {
+      if (isUniqueViolation(error) && requestedGroupId) {
+        throw errors.conflict(
+          'OCO_GROUP_DUPLICATE_KIND',
+          `That bracket already has a ${dto.kind} — move it instead of adding another`,
+        );
+      }
+      throw error;
+    }
+    // Group membership and insertion share the same advisory lock as firing,
+    // so no phantom leg can commit behind a group claim. Do not perform a
+    // second group-status check after the transaction: a watcher may
+    // legitimately claim the newly committed leg in that interval. Returning
+    // that committed state is truthful and, critically, never reports a
+    // conflict after a close may already be live at the broker.
+    const committed = row.ocoGroupId ? ((await this.byId(row.id)) ?? row) : row;
+    const created = toChartOrder(committed);
+    this.events.emit(userId, created);
+    return created;
   }
 
   /**
@@ -190,14 +315,64 @@ export class ChartOrdersService {
       data.triggerPrice = dto.triggerPrice;
       data.armPrice = await this.armPriceFor(userId, existing.underlying, dto.triggerPrice);
     }
-    if (dto.quantity !== undefined) data.quantity = dto.quantity;
-    if (dto.orderType !== undefined) data.orderType = dto.orderType;
+    if (dto.orderType !== undefined && dto.orderType !== existing.orderType) {
+      data.orderType = dto.orderType;
+    }
+    if (dto.quantity !== undefined && dto.quantity !== existing.quantity) {
+      if (existing.ocoGroupId) {
+        const resizedGroup = await this.prisma.$transaction(async (database) => {
+          const group = await database.bracketGroup.findUnique({
+            where: { id: existing.ocoGroupId! },
+          });
+          if (!group || group.userId !== userId) {
+            throw errors.notFound('CHART_ORDER_NOT_FOUND', 'No such bracket group');
+          }
+          await this.lockBracketScope(database, group);
+          const resized = await database.bracketGroup.updateMany({
+            where: { id: existing.ocoGroupId!, userId, status: 'working' },
+            data: { protectedQuantity: dto.quantity },
+          });
+          if (resized.count === 0) {
+            throw errors.conflict('OCO_GROUP_CLOSED', 'That bracket is already firing');
+          }
+          await database.chartOrder.updateMany({
+            where: { ocoGroupId: existing.ocoGroupId!, userId, status: 'working' },
+            data: { quantity: dto.quantity },
+          });
+          const updated = await database.chartOrder.updateMany({
+            where: { id, userId, status: 'working' },
+            data,
+          });
+          if (updated.count !== 1) {
+            throw errors.conflict(
+              'CHART_ORDER_NOT_WORKING',
+              'This order just fired and can no longer be changed',
+            );
+          }
+          const legs = await database.chartOrder.findMany({
+            where: { ocoGroupId: existing.ocoGroupId!, userId, status: 'working' },
+          });
+          return {
+            order: toChartOrder(
+              (await database.chartOrder.findUnique({ where: { id } })) as ChartOrderRow,
+            ),
+            legIds: legs.map((leg) => leg.id),
+          };
+        });
+        await this.emitByIds(userId, resizedGroup.legIds);
+        return resizedGroup.order;
+      } else {
+        data.quantity = dto.quantity;
+      }
+    }
 
     // A patch that changes nothing must not write. `updatedAt` is load-bearing:
     // the watcher reads it to decide whether a line is newer than its last
     // observed price, and bumping it silently resets that line's crossing test
     // back to `armPrice`. An empty (or no-op) PATCH is a read, so answer it.
-    if (Object.keys(data).length === 0) return toChartOrder(existing);
+    if (Object.keys(data).length === 0) {
+      return toChartOrder(existing);
+    }
 
     // Re-check the status in the write itself: the watcher may have claimed the
     // line between the read above and here.
@@ -211,22 +386,60 @@ export class ChartOrdersService {
         'This order just fired and can no longer be changed',
       );
     }
-    return toChartOrder(await this.findOwned(userId, id));
+    const result = toChartOrder(await this.findOwned(userId, id));
+    this.events.emit(userId, result);
+    return result;
   }
 
   /** Cancels a working line. Nothing was ever sent to the broker. */
   async cancel(userId: string, id: string): Promise<void> {
-    await this.findOwned(userId, id);
-    const cancelled = await this.prisma.chartOrder.updateMany({
-      where: { id, userId, status: 'working' },
-      data: { status: 'cancelled' },
-    });
-    if (cancelled.count === 0) {
-      throw errors.conflict(
-        'CHART_ORDER_NOT_WORKING',
-        'This order already fired and cannot be cancelled here',
-      );
+    const existing = await this.findOwned(userId, id);
+    if (existing.ocoGroupId) {
+      await this.prisma.$transaction(async (database) => {
+        const group = await database.bracketGroup.findUnique({
+          where: { id: existing.ocoGroupId! },
+        });
+        if (!group || group.userId !== userId) {
+          throw errors.notFound('CHART_ORDER_NOT_FOUND', 'No such chart order');
+        }
+        await this.lockBracketScope(database, group);
+        const lockedGroup = await database.bracketGroup.findUnique({ where: { id: group.id } });
+        if (!lockedGroup || lockedGroup.status !== 'working') {
+          throw errors.conflict(
+            'CHART_ORDER_NOT_WORKING',
+            'This bracket already started firing and cannot be cancelled here',
+          );
+        }
+        const cancelled = await database.chartOrder.updateMany({
+          where: {
+            id,
+            userId,
+            ocoGroupId: group.id,
+            status: 'working',
+          },
+          data: { status: 'cancelled', lastError: null },
+        });
+        if (cancelled.count !== 1) {
+          throw errors.conflict(
+            'CHART_ORDER_NOT_WORKING',
+            'This order already fired and cannot be cancelled here',
+          );
+        }
+        await this.closeWorkingGroupIfEmpty(database, lockedGroup, 'All bracket legs cancelled');
+      });
+    } else {
+      const cancelled = await this.prisma.chartOrder.updateMany({
+        where: { id, userId, status: 'working' },
+        data: { status: 'cancelled' },
+      });
+      if (cancelled.count === 0) {
+        throw errors.conflict(
+          'CHART_ORDER_NOT_WORKING',
+          'This order already fired and cannot be cancelled here',
+        );
+      }
     }
+    await this.emitByIds(userId, [id]);
   }
 
   // -------------------------------------------------------------------------
@@ -264,10 +477,18 @@ export class ChartOrdersService {
    * Atomically claims a line for firing. Returns false when someone else got
    * there first, which is what keeps a slow tick from double-submitting.
    */
-  async claimForFire(id: string, now: Date): Promise<boolean> {
+  async claimForFire(
+    id: string,
+    now: Date,
+    expectedScope?: BrokerExecutionScope,
+  ): Promise<boolean> {
     const claimed = await this.prisma.chartOrder.updateMany({
       where: { id, status: 'working' },
-      data: { status: 'triggered', triggeredAt: now, lastError: null },
+      data: {
+        status: 'pending_fire',
+        triggeredAt: now,
+        lastError: expectedScope ? pendingScopeMarker(expectedScope) : null,
+      },
     });
     return claimed.count === 1;
   }
@@ -339,6 +560,18 @@ export class ChartOrdersService {
     const claim = await this.claimForFireWithSiblings(row, now);
     if (!claim.won) {
       // Lost the claim: whatever the winner did is the truth.
+      if (!row.ocoGroupId) return toChartOrder((await this.byId(row.id)) ?? row);
+      // The group claim and sibling retirement are two guarded statements.
+      // A simultaneous losing request can observe the tiny interval between
+      // them; yielding briefly prevents us from returning a phantom `working`
+      // leg while the winning transaction path is already retiring it.
+      for (let attempt = 0; attempt < 10; attempt += 1) {
+        const current = await this.byId(row.id);
+        if (!current || current.status !== 'working') return toChartOrder(current ?? row);
+        const group = await this.prisma.bracketGroup.findUnique({ where: { id: row.ocoGroupId } });
+        if (!group || group.status !== 'pending_fire') return toChartOrder(current);
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
       return toChartOrder((await this.byId(row.id)) ?? row);
     }
     // Tell the clients the moment the siblings are retired, not after the
@@ -355,31 +588,56 @@ export class ChartOrdersService {
     // a mismatch un-claims the line, leaving it armed for the mode it belongs
     // to, exactly as the watcher treats it.
     const { environment } = await this.userContext(row.userId);
-    if (row.environment !== environment) {
-      const unclaimed = toChartOrder(
+    let scopeMatches = row.environment === environment;
+    if (scopeMatches && claim.expectedScope) {
+      try {
+        const current = await this.executionScopeFor(row.userId, row.environment as TradingMode);
+        scopeMatches =
+          current.provider === claim.expectedScope.provider &&
+          current.environment === claim.expectedScope.environment &&
+          current.accountId === claim.expectedScope.accountId;
+      } catch {
+        scopeMatches = false;
+      }
+    }
+    if (!scopeMatches) {
+      if (row.ocoGroupId) {
+        const unclaimed = await this.settleGroupedNoSend(
+          row,
+          claim.retired,
+          'working',
+          null,
+          'Bracket fire was unclaimed before broker placement',
+        );
+        return toChartOrder(unclaimed ?? (await this.byId(row.id)) ?? row);
+      }
+      return toChartOrder(
         await this.prisma.chartOrder.update({
           where: { id: row.id },
-          data: { status: 'working', triggeredAt: null },
+          data: { status: 'working', triggeredAt: null, lastError: null },
         }),
       );
-      // Nothing reached the broker, so the bracket must survive intact.
-      await this.restoreRetired(row.userId, claim.retired);
-      return unclaimed;
     }
 
     // A settled contract cannot be traded; retire the line instead of letting
     // a client fire it in the window before the watcher's expiry sweep.
     if (row.expiresAt.getTime() <= now.getTime()) {
+      if (row.ocoGroupId) {
+        const expired = await this.settleGroupedNoSend(
+          row,
+          claim.retired,
+          'expired',
+          null,
+          'All bracket legs expired before broker placement',
+        );
+        return toChartOrder(expired ?? (await this.byId(row.id)) ?? row);
+      }
       const expired = toChartOrder(
         await this.prisma.chartOrder.update({
           where: { id: row.id },
-          data: { status: 'expired' },
+          data: { status: 'expired', lastError: null },
         }),
       );
-      // Again nothing was sent: re-arm the siblings rather than reporting them
-      // `cancelled`, which reads as "the other leg filled". Each one retires on
-      // its own `expiresAt` via the watcher's expiry sweep.
-      await this.restoreRetired(row.userId, claim.retired);
       this.events.emit(row.userId, expired);
       return expired;
     }
@@ -392,7 +650,10 @@ export class ChartOrdersService {
       underlying: fresh.underlying,
       assetClass: 'option',
       side: fresh.side as OrderSide,
-      quantity: fresh.quantity,
+      // A resize claims protectedQuantity before touching the individual
+      // legs. If a fire lands in that narrow middle window, the group value is
+      // authoritative and prevents the stale leg snapshot from over-closing.
+      quantity: claim.protectedQuantity ?? fresh.quantity,
       // `ChartOrderType`, not `OrderType`: a line can only ever be MID or MKT,
       // and the fire path is exactly where a widened union must not leak — this
       // request is built with nobody present and no price to type.
@@ -418,25 +679,56 @@ export class ChartOrdersService {
         request,
         idempotencyKeyFor(row.id),
         row.environment as TradingMode,
+        fresh.kind === 'target' || fresh.kind === 'stop',
+        claim.expectedScope,
       );
     } catch (err) {
-      // The other caller's submission for this same line is still in flight.
-      // The claim is already correct — let their result stand.
-      if (err instanceof ApiException && err.code === 'ORDER_IN_FLIGHT') {
-        // Their submission stands, so the retirement stands with it.
+      // The broker may have accepted an order whose acknowledgement was lost,
+      // or another caller may still hold this same durable key. Preserve the
+      // group reservation and retired sibling until recovery can prove the
+      // outcome; re-arming here could submit the opposite leg as a second close.
+      if (this.isUncertainFireError(err)) {
+        const message = err instanceof Error ? err.message : String(err);
+        await this.prisma.chartOrder
+          .updateMany({
+            where: { id: row.id, status: 'pending_fire' },
+            data: { lastError: message.slice(0, 500) },
+          })
+          .catch(() => undefined);
+        if (row.ocoGroupId) {
+          await this.prisma.bracketGroup
+            .updateMany({
+              where: {
+                id: row.ocoGroupId,
+                status: 'pending_fire',
+                fireLegId: row.id,
+              },
+              data: {
+                leaseExpiresAt: new Date(Date.now() + GROUP_FIRE_LEASE_MS),
+                lastError: message.slice(0, 500),
+              },
+            })
+            .catch(() => undefined);
+        }
         return toChartOrder((await this.byId(row.id)) ?? row);
       }
       const message = err instanceof Error ? err.message : String(err);
+      if (row.ocoGroupId) {
+        const failed = await this.settleGroupedNoSend(
+          row,
+          claim.retired,
+          'failed',
+          message.slice(0, 500),
+          'Bracket fire was rejected before broker acceptance',
+        );
+        return toChartOrder(failed ?? (await this.byId(row.id)) ?? row);
+      }
       const failed = toChartOrder(
         await this.prisma.chartOrder.update({
           where: { id: row.id },
           data: { status: 'failed', lastError: message.slice(0, 500) },
         }),
       );
-      // Nothing reached the broker, so the bracket should survive intact —
-      // re-arm the siblings this claim retired rather than leaving the position
-      // with neither a target nor a stop.
-      await this.restoreRetired(row.userId, claim.retired);
       this.events.emit(row.userId, failed);
       return failed;
     }
@@ -446,17 +738,53 @@ export class ChartOrdersService {
     // locally with no server call, so the user would lose chart-side tracking
     // of a live order — and its OCO sibling would stay armed to close the
     // position a second time.
+    if (row.ocoGroupId) {
+      try {
+        if (await this.finishRecoveredGroup(row.ocoGroupId, fresh, placed)) {
+          return toChartOrder((await this.byId(row.id)) ?? fresh);
+        }
+      } catch {
+        // Keep the durable pending claim below. The completed order audit lets
+        // the recovery worker finalize it without placing a second order.
+      }
+
+      const message = 'Broker accepted the order; awaiting durable bracket finalization';
+      await this.prisma.chartOrder
+        .updateMany({
+          where: { id: row.id, ocoGroupId: row.ocoGroupId, status: 'pending_fire' },
+          data: { lastError: message },
+        })
+        .catch(() => undefined);
+      await this.prisma.bracketGroup
+        .updateMany({
+          where: {
+            id: row.ocoGroupId,
+            fireLegId: row.id,
+            status: 'pending_fire',
+            leaseOwnerId: this.fireOwnerId,
+          },
+          data: {
+            leaseExpiresAt: new Date(Date.now() + GROUP_FIRE_LEASE_MS),
+            lastError: message,
+          },
+        })
+        .catch(() => undefined);
+      const pending = toChartOrder((await this.byId(row.id)) ?? fresh);
+      this.events.emit(row.userId, pending);
+      return pending;
+    }
+
     let updated: ChartOrder;
     try {
       updated = toChartOrder(
         await this.prisma.chartOrder.update({
           where: { id: row.id },
-          data: { brokerOrderId: placed.orderId },
+          data: { status: 'triggered', brokerOrderId: placed.orderId, lastError: null },
         }),
       );
     } catch {
-      // The row is already `triggered` from the claim; only the broker id is
-      // missing. Report the true state from what we know in memory.
+      // Ungrouped limits have no second close leg to reserve. Report the known
+      // broker acceptance even if recording its id has to be repaired later.
       updated = {
         ...toChartOrder(row),
         status: 'triggered',
@@ -485,86 +813,226 @@ export class ChartOrdersService {
   private async claimForFireWithSiblings(
     row: ChartOrderRow,
     now: Date,
-  ): Promise<{ won: boolean; retired: string[] }> {
+  ): Promise<{
+    won: boolean;
+    retired: string[];
+    protectedQuantity?: number;
+    expectedScope?: BrokerExecutionScope;
+  }> {
     if (!row.ocoGroupId) {
-      return { won: await this.claimForFire(row.id, now), retired: [] };
-    }
-    // Scope every query in this claim to the owner and environment as well as
-    // the group: a group id is client-supplied, and nothing should be able to
-    // reach across accounts or across live/practice even if one leaks.
-    const group = {
-      ocoGroupId: row.ocoGroupId,
-      userId: row.userId,
-      environment: row.environment,
-    };
-    // The stamp is minted here, not taken from `now`: the watcher passes one
-    // `now` to every fire in a tick, and the stamp has to identify THIS claim.
-    const claimedAt = new Date();
-
-    const claimed = await this.prisma.chartOrder.updateMany({
-      where: { ...group, status: 'working' },
-      data: { status: 'triggered', triggeredAt: claimedAt, lastError: null },
-    });
-    if (claimed.count === 0) return { won: false, retired: [] };
-
-    // `status: triggered` + `triggeredAt: now` is this claim's token: together
-    // they name exactly the rows this call took, and no concurrent caller can
-    // share it (they matched nothing). Both halves are needed — a leg this
-    // group already *failed* keeps its old `triggeredAt`, so matching on the
-    // timestamp alone could reach across generations and retire it.
-    const token = { ...group, status: 'triggered', triggeredAt: claimedAt };
-    const self = await this.byId(row.id);
-    if (self?.status !== 'triggered' || self.triggeredAt?.getTime() !== claimedAt.getTime()) {
-      // Our own leg was not in the group's working set — it was cancelled or
-      // already fired. Put back what we took instead of retiring a sibling that
-      // is still legitimately armed.
-      await this.prisma.chartOrder.updateMany({
-        where: token,
-        data: { status: 'working', triggeredAt: null },
-      });
-      return { won: false, retired: [] };
-    }
-
-    try {
-      const siblings = await this.prisma.chartOrder.findMany({
-        where: { ...token, NOT: { id: row.id } },
-      });
-      if (siblings.length > 0) {
-        await this.prisma.chartOrder.updateMany({
-          where: { ...token, NOT: { id: row.id } },
-          data: { status: 'cancelled', triggeredAt: null },
-        });
+      let expectedScope: BrokerExecutionScope;
+      try {
+        expectedScope = await this.executionScopeFor(row.userId, row.environment as TradingMode);
+      } catch {
+        return { won: false, retired: [] };
       }
-      return { won: true, retired: siblings.map((sibling) => sibling.id) };
-    } catch {
-      // Retirement is what makes the claim safe, so a claim we cannot complete
-      // must be given back. Leaving the group half-claimed would strand every
-      // leg out of `working` with nothing sent and no path back: `update`,
-      // `cancel`, the expiry sweep and the orphan sweep all require `working`.
-      await this.prisma.chartOrder.updateMany({
-        where: token,
-        data: { status: 'working', triggeredAt: null },
+      return {
+        won: await this.claimForFire(row.id, now, expectedScope),
+        retired: [],
+        expectedScope,
+      };
+    }
+    try {
+      return await this.prisma.$transaction(async (database) => {
+        const existingGroup = await database.bracketGroup.findUnique({
+          where: { id: row.ocoGroupId! },
+        });
+        if (
+          !existingGroup ||
+          existingGroup.userId !== row.userId ||
+          existingGroup.environment !== row.environment ||
+          !['webull', 'alpaca', 'snaptrade'].includes(existingGroup.provider)
+        ) {
+          return { won: false, retired: [] };
+        }
+        await this.lockBracketScope(database, existingGroup);
+        const expectedScope: BrokerExecutionScope = {
+          provider: existingGroup.provider as BrokerExecutionScope['provider'],
+          environment: existingGroup.environment as TradingMode,
+          accountId: existingGroup.accountId,
+        };
+        if (
+          await this.hasUnresolvedCloseReservation(
+            database,
+            expectedScope,
+            row.userId,
+            existingGroup.contractSymbol,
+            existingGroup.closeSide,
+            existingGroup.id,
+          )
+        ) {
+          return { won: false, retired: [] };
+        }
+        const groupClaim = await database.bracketGroup.updateMany({
+          where: {
+            id: row.ocoGroupId!,
+            userId: row.userId,
+            environment: row.environment,
+            status: 'working',
+          },
+          data: {
+            status: 'pending_fire',
+            fireLegId: row.id,
+            leaseOwnerId: this.fireOwnerId,
+            leaseExpiresAt: new Date(now.getTime() + GROUP_FIRE_LEASE_MS),
+            lastError: null,
+          },
+        });
+        if (groupClaim.count !== 1) return { won: false, retired: [] };
+        const claimedGroup = await database.bracketGroup.findUnique({
+          where: { id: row.ocoGroupId! },
+        });
+
+        // Scope every query in this claim to the owner and environment as well
+        // as the group: ids are client-supplied and may never cross tenants.
+        const group = {
+          ocoGroupId: row.ocoGroupId,
+          userId: row.userId,
+          environment: row.environment,
+        };
+        const selfClaim = await database.chartOrder.updateMany({
+          where: { id: row.id, ...group, status: 'working' },
+          data: { status: 'pending_fire', triggeredAt: now, lastError: null },
+        });
+        if (selfClaim.count !== 1) throw new BracketFireClaimLost();
+
+        const siblings = await database.chartOrder.findMany({
+          where: { ...group, status: 'working', NOT: { id: row.id } },
+        });
+        if (siblings.length > 0) {
+          await database.chartOrder.updateMany({
+            where: { ...group, status: 'working', NOT: { id: row.id } },
+            data: {
+              status: 'cancelled',
+              triggeredAt: null,
+              lastError: retirementMarker(row.id),
+            },
+          });
+        }
+        return {
+          won: true,
+          retired: siblings.map((sibling) => sibling.id),
+          protectedQuantity: claimedGroup?.protectedQuantity,
+          expectedScope,
+        };
       });
+    } catch (error) {
+      if (error instanceof BracketFireClaimLost) return { won: false, retired: [] };
+      // The transaction rolled every claim write back. Treat an unavailable
+      // retirement write as a lost claim: nothing reached the broker and the
+      // still-working line remains eligible for a later healthy tick.
       return { won: false, retired: [] };
     }
   }
 
-  /**
-   * Re-arms siblings a claim retired, after the fire turned out to send nothing.
-   *
-   * The invariant every early return in `fire()` shares: the group claim retires
-   * the siblings *before* the broker call, so any path that does not reach the
-   * broker — refused, wrong environment, settled contract — owes them back. A
-   * leg left `cancelled` without a fill reads to the user (and to the client's
-   * OCO logic) as "the other leg filled", and silently unbrackets the position.
-   */
-  private async restoreRetired(userId: string, ids: string[]): Promise<void> {
-    if (ids.length === 0) return;
-    await this.prisma.chartOrder.updateMany({
-      where: { id: { in: ids }, status: 'cancelled' },
-      data: { status: 'working' },
-    });
-    await this.emitByIds(userId, ids);
+  private isUncertainFireError(error: unknown): boolean {
+    return (
+      error instanceof ApiException &&
+      [
+        'ORDER_IN_FLIGHT',
+        'ORDER_PLACEMENT_UNCERTAIN',
+        'ORDER_RECOVERY_AMBIGUOUS',
+        'ORDER_RECOVERY_UNAVAILABLE',
+      ].includes(error.code)
+    );
+  }
+
+  /** Atomically unwinds a grouped claim when broker placement provably did not
+   * happen. The fire leg, its system-retired siblings, and the group lease are
+   * one database fact: a crash must leave either the durable pending claim for
+   * recovery or the fully restored bracket, never a half-restored close path. */
+  private async settleGroupedNoSend(
+    row: ChartOrderRow,
+    retiredIds: string[],
+    legStatus: 'working' | 'failed' | 'expired',
+    lastError: string | null,
+    emptyGroupReason: string,
+  ): Promise<ChartOrderRow | null> {
+    const uniqueRetiredIds = [...new Set(retiredIds)];
+    let result: { updated: ChartOrderRow; restoredIds: string[] };
+    try {
+      result = await this.prisma.$transaction(async (database) => {
+        const group = row.ocoGroupId
+          ? await database.bracketGroup.findUnique({ where: { id: row.ocoGroupId } })
+          : null;
+        if (!group || group.userId !== row.userId) throw new BracketNoSendClaimLost();
+        await this.lockBracketScope(database, group);
+
+        const restorable =
+          uniqueRetiredIds.length === 0
+            ? []
+            : await database.chartOrder.findMany({
+                where: {
+                  id: { in: uniqueRetiredIds },
+                  userId: row.userId,
+                  ocoGroupId: group.id,
+                  status: 'cancelled',
+                  lastError: retirementMarker(row.id),
+                },
+              });
+        if (restorable.length !== uniqueRetiredIds.length) {
+          throw new BracketNoSendClaimLost();
+        }
+
+        const leg = await database.chartOrder.updateMany({
+          where: {
+            id: row.id,
+            userId: row.userId,
+            ocoGroupId: group.id,
+            status: { in: ['pending_fire', 'triggered'] },
+          },
+          data: {
+            status: legStatus,
+            lastError,
+            ...(legStatus === 'working' ? { triggeredAt: null } : {}),
+          },
+        });
+        if (leg.count !== 1) throw new BracketNoSendClaimLost();
+
+        if (restorable.length > 0) {
+          const restored = await database.chartOrder.updateMany({
+            where: {
+              id: { in: restorable.map((sibling) => sibling.id) },
+              userId: row.userId,
+              ocoGroupId: group.id,
+              status: 'cancelled',
+              lastError: retirementMarker(row.id),
+            },
+            data: { status: 'working', triggeredAt: null, lastError: null },
+          });
+          if (restored.count !== restorable.length) throw new BracketNoSendClaimLost();
+        }
+
+        const released = await database.bracketGroup.updateMany({
+          where: {
+            id: group.id,
+            userId: row.userId,
+            status: 'pending_fire',
+            fireLegId: row.id,
+            leaseOwnerId: this.fireOwnerId,
+          },
+          data: {
+            status: 'working',
+            fireLegId: null,
+            leaseOwnerId: null,
+            leaseExpiresAt: null,
+            lastError,
+          },
+        });
+        if (released.count !== 1) throw new BracketNoSendClaimLost();
+        await this.closeWorkingGroupIfEmpty(database, group, emptyGroupReason);
+
+        const updated = await database.chartOrder.findUnique({ where: { id: row.id } });
+        if (!updated) throw new BracketNoSendClaimLost();
+        return { updated, restoredIds: restorable.map((sibling) => sibling.id) };
+      });
+    } catch (error) {
+      if (error instanceof BracketNoSendClaimLost) return null;
+      throw error;
+    }
+    await this.emitByIds(row.userId, result.restoredIds);
+    this.events.emit(row.userId, toChartOrder(result.updated));
+    return result.updated;
   }
 
   private async emitByIds(userId: string, ids: string[]): Promise<void> {
@@ -574,13 +1042,438 @@ export class ChartOrdersService {
     }
   }
 
+  /** Recovers bracket claims whose worker died around broker placement. The
+   * order audit is the durable answer: completed audits finalize the group;
+   * stale/missing claims replay the broker-idempotent placement. */
+  async recoverPendingBrackets(now: Date): Promise<number> {
+    let recovered = await this.recoverPendingUngrouped(now);
+    const groups = await this.prisma.bracketGroup.findMany({
+      where: { status: 'pending_fire', leaseExpiresAt: { lt: now } },
+      orderBy: { createdAt: 'asc' },
+      take: 100,
+    });
+    for (const group of groups) {
+      const claimed = await this.prisma.bracketGroup.updateMany({
+        where: { id: group.id, status: 'pending_fire', leaseExpiresAt: { lt: now } },
+        data: {
+          leaseOwnerId: this.fireOwnerId,
+          leaseExpiresAt: new Date(now.getTime() + GROUP_FIRE_LEASE_MS),
+        },
+      });
+      if (claimed.count !== 1 || !group.fireLegId) continue;
+      const prepared = await this.prepareRecoveredClaim(group.fireLegId, group.id, now);
+      if (!prepared) {
+        await this.prisma.bracketGroup.updateMany({
+          where: { id: group.id, leaseOwnerId: this.fireOwnerId },
+          data: { status: 'failed', lastError: 'Fire leg cannot be recovered safely' },
+        });
+        continue;
+      }
+      const leg = prepared.leg;
+      await this.emitByIds(leg.userId, prepared.siblingIds);
+      const key = idempotencyKeyFor(leg.id);
+      const audit = await this.prisma.orderAudit.findUnique({
+        where: { userId_idempotencyKey: { userId: leg.userId, idempotencyKey: key } },
+      });
+      if (audit && audit.status !== 'pending' && audit.response) {
+        if (
+          await this.finishRecoveredGroup(group.id, leg, audit.response as unknown as OrderResult)
+        ) {
+          recovered += 1;
+        }
+        continue;
+      }
+      if (audit && now.getTime() - audit.createdAt.getTime() < PENDING_AUDIT_TTL_MS) continue;
+      const expectedScope: BrokerExecutionScope = {
+        provider: group.provider as BrokerExecutionScope['provider'],
+        environment: group.environment as TradingMode,
+        accountId: group.accountId,
+      };
+      try {
+        const currentScope = await this.executionScopeFor(
+          leg.userId,
+          leg.environment as TradingMode,
+        );
+        if (
+          currentScope.provider !== expectedScope.provider ||
+          currentScope.environment !== expectedScope.environment ||
+          currentScope.accountId !== expectedScope.accountId
+        ) {
+          throw errors.conflict(
+            'OCO_GROUP_SCOPE_MISMATCH',
+            'Broker provider or selected account changed while this bracket was armed',
+          );
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        await this.prisma.bracketGroup.updateMany({
+          where: { id: group.id, status: 'pending_fire', leaseOwnerId: this.fireOwnerId },
+          data: {
+            leaseExpiresAt: new Date(now.getTime() + GROUP_FIRE_LEASE_MS),
+            lastError: message.slice(0, 500),
+          },
+        });
+        continue;
+      }
+      try {
+        const placed = await this.trading.place(
+          leg.userId,
+          this.requestFor(leg, group.protectedQuantity),
+          key,
+          leg.environment as TradingMode,
+          true,
+          expectedScope,
+        );
+        if (await this.finishRecoveredGroup(group.id, leg, placed)) recovered += 1;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (this.isUncertainFireError(error)) {
+          await this.prisma.chartOrder.updateMany({
+            where: { id: leg.id, status: { in: ['pending_fire', 'triggered'] } },
+            data: { lastError: message.slice(0, 500) },
+          });
+          await this.prisma.bracketGroup.updateMany({
+            where: { id: group.id, status: 'pending_fire', leaseOwnerId: this.fireOwnerId },
+            data: {
+              leaseExpiresAt: new Date(now.getTime() + GROUP_FIRE_LEASE_MS),
+              lastError: message.slice(0, 500),
+            },
+          });
+          continue;
+        }
+        await this.settleGroupedNoSend(
+          leg,
+          prepared.siblingIds,
+          'failed',
+          message.slice(0, 500),
+          'Recovered bracket fire was rejected before broker acceptance',
+        );
+      }
+    }
+    return recovered;
+  }
+
+  /** Standalone chart lines have no BracketGroup lease, but they still need
+   * the same durable pending state as protective legs. `triggeredAt` is their
+   * recovery lease: one instance compare-and-sets the stale value, then the
+   * keyed order audit either proves acceptance or serializes the retry. */
+  private async recoverPendingUngrouped(now: Date): Promise<number> {
+    const staleBefore = new Date(now.getTime() - PENDING_AUDIT_TTL_MS);
+    const candidates = await this.prisma.chartOrder.findMany({
+      where: {
+        ocoGroupId: null,
+        status: 'pending_fire',
+        triggeredAt: { lt: staleBefore },
+      },
+      orderBy: { createdAt: 'asc' },
+      take: 100,
+    });
+    let recovered = 0;
+    for (const candidate of candidates) {
+      if (!candidate.triggeredAt) continue;
+      const claimed = await this.prisma.chartOrder.updateMany({
+        where: {
+          id: candidate.id,
+          userId: candidate.userId,
+          ocoGroupId: null,
+          status: 'pending_fire',
+          triggeredAt: candidate.triggeredAt,
+        },
+        data: { triggeredAt: now },
+      });
+      if (claimed.count !== 1) continue;
+
+      const key = idempotencyKeyFor(candidate.id);
+      let audit = await this.prisma.orderAudit.findUnique({
+        where: {
+          userId_idempotencyKey: {
+            userId: candidate.userId,
+            idempotencyKey: key,
+          },
+        },
+      });
+      const completed = this.orderResultFromAudit(audit?.status, audit?.response);
+      if (completed) {
+        if (await this.finishUngroupedFire(candidate, now, completed)) recovered += 1;
+        continue;
+      }
+
+      const expectedScope =
+        this.executionScopeFromAudit(audit?.request) ?? scopeFromPendingMarker(candidate.lastError);
+      if (!expectedScope) {
+        await this.prisma.chartOrder.updateMany({
+          where: { id: candidate.id, status: 'pending_fire', triggeredAt: now },
+          data: {
+            lastError:
+              'Placement recovery is paused because its original broker account scope is unavailable',
+          },
+        });
+        continue;
+      }
+
+      try {
+        const placed = await this.trading.place(
+          candidate.userId,
+          this.requestFor(candidate),
+          key,
+          candidate.environment as TradingMode,
+          candidate.kind === 'target' || candidate.kind === 'stop',
+          expectedScope,
+        );
+        if (await this.finishUngroupedFire(candidate, now, placed)) recovered += 1;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        audit = await this.prisma.orderAudit.findUnique({
+          where: {
+            userId_idempotencyKey: {
+              userId: candidate.userId,
+              idempotencyKey: key,
+            },
+          },
+        });
+        const accepted = this.orderResultFromAudit(audit?.status, audit?.response);
+        if (accepted) {
+          if (await this.finishUngroupedFire(candidate, now, accepted)) recovered += 1;
+          continue;
+        }
+        if (!audit) {
+          const failed = await this.prisma.chartOrder.updateMany({
+            where: { id: candidate.id, status: 'pending_fire', triggeredAt: now },
+            data: { status: 'failed', lastError: message.slice(0, 500) },
+          });
+          if (failed.count === 1) await this.emitByIds(candidate.userId, [candidate.id]);
+          continue;
+        }
+        // A pending audit means an earlier broker send may still have been
+        // accepted. Even legal/kill-switch changes and typed pre-send errors
+        // cannot disprove that older placement, so preserve the reservation.
+        await this.prisma.chartOrder.updateMany({
+          where: { id: candidate.id, status: 'pending_fire', triggeredAt: now },
+          data: { lastError: message.slice(0, 500) },
+        });
+      }
+    }
+    return recovered;
+  }
+
+  private async finishUngroupedFire(
+    row: ChartOrderRow,
+    leaseTime: Date,
+    placed: OrderResult,
+  ): Promise<boolean> {
+    const finished = await this.prisma.chartOrder.updateMany({
+      where: {
+        id: row.id,
+        userId: row.userId,
+        ocoGroupId: null,
+        status: 'pending_fire',
+        triggeredAt: leaseTime,
+      },
+      data: {
+        status: 'triggered',
+        brokerOrderId: placed.orderId,
+        lastError: null,
+      },
+    });
+    if (finished.count !== 1) return false;
+    await this.emitByIds(row.userId, [row.id]);
+    return true;
+  }
+
+  private orderResultFromAudit(
+    status: string | undefined,
+    response: Prisma.JsonValue | null | undefined,
+  ): OrderResult | null {
+    if (!status || status === 'pending' || !response || typeof response !== 'object') return null;
+    const candidate = response as unknown as Partial<OrderResult>;
+    if (typeof candidate.orderId !== 'string' || candidate.orderId.length === 0) return null;
+    return candidate as OrderResult;
+  }
+
+  private executionScopeFromAudit(
+    request: Prisma.JsonValue | null | undefined,
+  ): BrokerExecutionScope | undefined {
+    if (!request || Array.isArray(request) || typeof request !== 'object') return undefined;
+    return executionScopeValue((request as Prisma.JsonObject)['executionScope']);
+  }
+
+  /** Repairs claims produced by a worker that died between the pre-transaction
+   * group update and the leg/sibling updates deployed by older versions. No
+   * broker reconciliation or placement may start until this transaction has
+   * made the firing leg non-working and retired every sibling. */
+  private async prepareRecoveredClaim(
+    legId: string,
+    groupId: string,
+    now: Date,
+  ): Promise<{ leg: ChartOrderRow; siblingIds: string[] } | null> {
+    return this.prisma.$transaction(async (database) => {
+      let leg = await database.chartOrder.findUnique({ where: { id: legId } });
+      if (!leg || leg.ocoGroupId !== groupId) return null;
+      if (leg.status === 'working') {
+        const claimed = await database.chartOrder.updateMany({
+          where: {
+            id: leg.id,
+            ocoGroupId: groupId,
+            userId: leg.userId,
+            environment: leg.environment,
+            status: 'working',
+          },
+          data: { status: 'pending_fire', triggeredAt: now, lastError: null },
+        });
+        if (claimed.count !== 1) return null;
+        leg = await database.chartOrder.findUnique({ where: { id: legId } });
+      }
+      if (!leg || (leg.status !== 'pending_fire' && leg.status !== 'triggered')) return null;
+
+      const siblings = await database.chartOrder.findMany({
+        where: {
+          ocoGroupId: groupId,
+          userId: leg.userId,
+          environment: leg.environment,
+          NOT: { id: leg.id },
+        },
+      });
+      await database.chartOrder.updateMany({
+        where: {
+          ocoGroupId: groupId,
+          userId: leg.userId,
+          environment: leg.environment,
+          status: 'working',
+          NOT: { id: leg.id },
+        },
+        data: {
+          status: 'cancelled',
+          triggeredAt: null,
+          lastError: retirementMarker(leg.id),
+        },
+      });
+      return {
+        leg,
+        siblingIds: siblings
+          .filter(
+            (sibling) =>
+              sibling.status === 'working' ||
+              (sibling.status === 'cancelled' && sibling.lastError === retirementMarker(leg.id)),
+          )
+          .map((sibling) => sibling.id),
+      };
+    });
+  }
+
+  private requestFor(row: ChartOrderRow, protectedQuantity = row.quantity): OrderRequestDto {
+    return {
+      underlying: row.underlying,
+      assetClass: 'option',
+      side: row.side as OrderSide,
+      quantity: protectedQuantity,
+      orderType: row.orderType as ChartOrderType,
+      selection: {
+        mode: 'explicit',
+        optionType: row.optionType as OptionType,
+        expiration: row.expiration,
+        strike: row.strike,
+      },
+    };
+  }
+
+  private async finishRecoveredGroup(
+    groupId: string,
+    leg: ChartOrderRow,
+    placed: OrderResult,
+  ): Promise<boolean> {
+    try {
+      await this.prisma.$transaction(async (database) => {
+        const group = await database.bracketGroup.findUnique({ where: { id: groupId } });
+        if (!group) throw new BracketFinishClaimLost();
+        await this.lockBracketScope(database, group);
+        const updatedLeg = await database.chartOrder.updateMany({
+          where: {
+            id: leg.id,
+            userId: leg.userId,
+            ocoGroupId: groupId,
+            status: { in: ['pending_fire', 'triggered'] },
+          },
+          data: { status: 'triggered', brokerOrderId: placed.orderId },
+        });
+        if (updatedLeg.count !== 1) throw new BracketFinishClaimLost();
+        await database.chartOrder.updateMany({
+          where: {
+            ocoGroupId: groupId,
+            userId: leg.userId,
+            NOT: { id: leg.id },
+            OR: [
+              { status: 'working' },
+              { status: 'cancelled', lastError: retirementMarker(leg.id) },
+            ],
+          },
+          data: { status: 'cancelled', lastError: null },
+        });
+        const finished = await database.bracketGroup.updateMany({
+          where: {
+            id: groupId,
+            userId: leg.userId,
+            status: 'pending_fire',
+            fireLegId: leg.id,
+            leaseOwnerId: this.fireOwnerId,
+          },
+          data: {
+            status: 'fired',
+            leaseOwnerId: null,
+            leaseExpiresAt: null,
+            lastError: null,
+          },
+        });
+        if (finished.count !== 1) throw new BracketFinishClaimLost();
+      });
+    } catch (error) {
+      if (error instanceof BracketFinishClaimLost) return false;
+      throw error;
+    }
+    const updated = await this.byId(leg.id);
+    if (updated) this.events.emit(leg.userId, toChartOrder(updated));
+    return true;
+  }
+
   /** Retires working lines whose contract has settled. */
   async expireSettled(now: Date): Promise<number> {
-    const { count } = await this.prisma.chartOrder.updateMany({
+    const candidates = await this.prisma.chartOrder.findMany({
       where: { status: 'working', expiresAt: { lte: now } },
-      data: { status: 'expired' },
     });
-    return count;
+    let expired = 0;
+    for (const candidate of candidates) {
+      const changed = candidate.ocoGroupId
+        ? await this.prisma.$transaction(async (database) => {
+            const group = await database.bracketGroup.findUnique({
+              where: { id: candidate.ocoGroupId! },
+            });
+            if (!group || group.userId !== candidate.userId) return false;
+            await this.lockBracketScope(database, group);
+            const { count } = await database.chartOrder.updateMany({
+              where: {
+                id: candidate.id,
+                userId: candidate.userId,
+                ocoGroupId: group.id,
+                status: 'working',
+                expiresAt: { lte: now },
+              },
+              data: { status: 'expired' },
+            });
+            if (count !== 1) return false;
+            await this.closeWorkingGroupIfEmpty(database, group, 'All bracket legs expired');
+            return true;
+          })
+        : (
+            await this.prisma.chartOrder.updateMany({
+              where: { id: candidate.id, status: 'working', expiresAt: { lte: now } },
+              data: { status: 'expired' },
+            })
+          ).count === 1;
+      if (!changed) continue;
+      expired += 1;
+      const updated = await this.byId(candidate.id);
+      if (updated) this.events.emit(updated.userId, toChartOrder(updated));
+    }
+    return expired;
   }
 
   /**
@@ -594,9 +1487,109 @@ export class ChartOrdersService {
   async cancelOrphanedBrackets(
     userId: string,
     environment: string,
-    openContractSymbols: string[],
+    openPositions: Array<string | { symbol: string; quantity: number }>,
     now: Date = new Date(),
+    positionScope?: BrokerExecutionScope,
   ): Promise<string[]> {
+    let scope: BrokerExecutionScope;
+    try {
+      const current = await this.executionScopeFor(userId, environment as TradingMode);
+      if (
+        positionScope &&
+        (current.provider !== positionScope.provider ||
+          current.environment !== positionScope.environment ||
+          current.accountId !== positionScope.accountId)
+      ) {
+        return [];
+      }
+      scope = positionScope ?? current;
+    } catch {
+      // A sweep without a verified account scope could cancel protection that
+      // belongs to another selected brokerage account. Fail closed.
+      return [];
+    }
+    const scopedGroups = await this.prisma.bracketGroup.findMany({
+      where: {
+        userId,
+        provider: scope.provider,
+        environment: scope.environment,
+        accountId: scope.accountId,
+        status: 'working',
+      },
+    });
+    const scopedGroupIds = scopedGroups.map((group) => group.id);
+    const scopedBracketRows = {
+      OR: [{ ocoGroupId: null }, { ocoGroupId: { in: scopedGroupIds } }],
+    };
+    const quantityBySymbol = new Map<string, number | null>();
+    for (const position of openPositions) {
+      if (typeof position === 'string') quantityBySymbol.set(position, null);
+      else if (Number.isFinite(position.quantity) && position.quantity !== 0) {
+        quantityBySymbol.set(position.symbol, Math.abs(position.quantity));
+      }
+    }
+
+    // Scale every still-working sibling down before looking for orphans. The
+    // group predicate serializes this against fire: if fire claimed first the
+    // resize matches zero; if resize claimed first, fire reads the group's new
+    // protected quantity even if it catches the leg updates in flight.
+    const working = await this.prisma.chartOrder.findMany({
+      where: {
+        userId,
+        environment,
+        status: 'working',
+        kind: { in: ['target', 'stop'] },
+        ...scopedBracketRows,
+      },
+    });
+    const resizedGroups = new Set<string>();
+    for (const row of working) {
+      const held = quantityBySymbol.get(row.contractSymbol);
+      if (held === undefined || held === null || held >= row.quantity) continue;
+      if (row.ocoGroupId) {
+        if (resizedGroups.has(row.ocoGroupId)) continue;
+        const resized = await this.prisma.$transaction(async (database) => {
+          const group = await database.bracketGroup.findUnique({
+            where: { id: row.ocoGroupId! },
+          });
+          if (!group) return false;
+          await this.lockBracketScope(database, group);
+          const changed = await database.bracketGroup.updateMany({
+            where: {
+              id: row.ocoGroupId!,
+              userId,
+              provider: scope.provider,
+              environment,
+              accountId: scope.accountId,
+              status: 'working',
+              protectedQuantity: { gt: held },
+            },
+            data: { protectedQuantity: held },
+          });
+          if (changed.count !== 1) return false;
+          await database.chartOrder.updateMany({
+            where: { ocoGroupId: row.ocoGroupId!, userId, environment, status: 'working' },
+            data: { quantity: held },
+          });
+          return true;
+        });
+        if (!resized) continue;
+        resizedGroups.add(row.ocoGroupId);
+        const siblings = working.filter((candidate) => candidate.ocoGroupId === row.ocoGroupId);
+        await this.emitByIds(
+          userId,
+          siblings.map((candidate) => candidate.id),
+        );
+      } else {
+        const resized = await this.prisma.chartOrder.updateMany({
+          where: { id: row.id, userId, environment, status: 'working', quantity: { gt: held } },
+          data: { quantity: held },
+        });
+        if (resized.count === 1) await this.emitByIds(userId, [row.id]);
+      }
+    }
+
+    const openContractSymbols = [...quantityBySymbol.keys()];
     const orphans = await this.prisma.chartOrder.findMany({
       where: {
         userId,
@@ -605,6 +1598,7 @@ export class ChartOrdersService {
         kind: { in: ['target', 'stop'] },
         createdAt: { lt: new Date(now.getTime() - ORPHAN_GRACE_MS) },
         NOT: { contractSymbol: { in: openContractSymbols } },
+        ...scopedBracketRows,
       },
     });
     if (orphans.length === 0) return [];
@@ -617,17 +1611,60 @@ export class ChartOrdersService {
     // Bounded by MAX_WORKING_CHART_ORDERS per user per sweep.
     const cancelled: string[] = [];
     for (const row of orphans) {
-      const { count } = await this.prisma.chartOrder.updateMany({
-        where: { id: row.id, status: 'working' },
-        data: { status: 'cancelled' },
-      });
-      if (count === 1) cancelled.push(row.id);
+      const changed = row.ocoGroupId
+        ? await this.prisma.$transaction(async (database) => {
+            const group = await database.bracketGroup.findUnique({
+              where: { id: row.ocoGroupId! },
+            });
+            if (
+              !group ||
+              group.userId !== userId ||
+              group.provider !== scope.provider ||
+              group.environment !== scope.environment ||
+              group.accountId !== scope.accountId
+            ) {
+              return false;
+            }
+            await this.lockBracketScope(database, group);
+            const { count } = await database.chartOrder.updateMany({
+              where: {
+                id: row.id,
+                userId,
+                ocoGroupId: group.id,
+                status: 'working',
+              },
+              data: { status: 'cancelled', lastError: null },
+            });
+            if (count !== 1) return false;
+            await this.closeWorkingGroupIfEmpty(
+              database,
+              group,
+              'All bracket legs orphaned from the broker position',
+            );
+            return true;
+          })
+        : (
+            await this.prisma.chartOrder.updateMany({
+              where: { id: row.id, status: 'working' },
+              data: { status: 'cancelled' },
+            })
+          ).count === 1;
+      if (!changed) continue;
+      cancelled.push(row.id);
+      await this.emitByIds(userId, [row.id]);
     }
     return cancelled;
   }
 
   byId(id: string): Promise<ChartOrderRow | null> {
     return this.prisma.chartOrder.findUnique({ where: { id } });
+  }
+
+  /** Pins a positions reconciliation sweep to the exact broker account whose
+   * positions it will read. The sweep verifies the same scope again before it
+   * mutates any bracket, closing the account-switch window around the read. */
+  reconciliationScope(userId: string, environment: string): Promise<BrokerExecutionScope> {
+    return this.executionScopeFor(userId, environment as TradingMode);
   }
 
   // -------------------------------------------------------------------------
@@ -657,40 +1694,273 @@ export class ChartOrdersService {
     return row;
   }
 
-  /**
-   * A new leg may only join a bracket whose every existing leg is still armed.
-   *
-   * The group claim in `claimForFireWithSiblings` locks the rows that exist when
-   * it runs; under READ COMMITTED it takes no gap lock, so a leg INSERTed
-   * afterwards is a phantom it never saw. Both clients build a bracket as two
-   * separate POSTs, and this one spends a chain fetch and a quote on the way in
-   * — long enough for the first leg to fire in between. Without this check the
-   * late leg lands `working` in a group that already fired, and firing it later
-   * would close the position and then reverse it.
-   *
-   * A leg may also not join a group that already has one of its own kind — OCO
-   * cancels siblings by group membership, not by kind, so two targets sharing a
-   * group would silently retire one of them on fire instead of rejecting the
-   * duplicate up front.
-   */
-  private async assertGroupJoinable(
+  private async executionScopeFor(
     userId: string,
-    ocoGroupId: string,
-    kind: ChartOrderKind,
-  ): Promise<void> {
-    const existing = await this.prisma.chartOrder.findMany({ where: { ocoGroupId } });
-    if (existing.some((leg) => leg.userId !== userId)) {
-      throw errors.notFound('CHART_ORDER_NOT_FOUND', 'No such bracket group');
+    environment: TradingMode,
+  ): Promise<BrokerExecutionScope> {
+    if (this.gateway.executionScope) {
+      return this.gateway.executionScope(userId, environment);
     }
-    if (existing.some((leg) => leg.status !== 'working')) {
-      throw errors.conflict('OCO_GROUP_CLOSED', 'That bracket has already fired — draw a new one');
-    }
-    if (existing.some((leg) => leg.kind === kind)) {
+    // Conservative compatibility path for test/legacy gateways. Production
+    // gateways expose executionScope so Webull's discovered account id and
+    // SnapTrade's selected account are both represented exactly.
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw errors.unauthorized('USER_NOT_FOUND', 'User no longer exists');
+    const provider: BrokerExecutionScope['provider'] =
+      user.tradingProvider === 'alpaca' || user.tradingProvider === 'snaptrade'
+        ? user.tradingProvider
+        : 'webull';
+    const current: TradingMode = user.tradingMode === 'practice' ? 'practice' : 'live';
+    if (current !== environment) {
       throw errors.conflict(
-        'OCO_GROUP_DUPLICATE_KIND',
-        `That bracket already has a ${kind} — move it instead of adding another`,
+        'OCO_GROUP_SCOPE_MISMATCH',
+        `Account switched to ${current}; this bracket belongs to ${environment}`,
       );
     }
+    const connection =
+      provider === 'snaptrade'
+        ? await this.prisma.brokerConnection.findUnique({
+            where: {
+              userId_provider_environment: {
+                userId,
+                provider: 'snaptrade',
+                environment,
+              },
+            },
+          })
+        : null;
+    return {
+      provider,
+      environment,
+      accountId: connection?.selectedAccountId ?? 'default',
+    };
+  }
+
+  /** Cross-instance mutex for one position's close path. The SHA-256 input is
+   * a JSON tuple, so concatenation ambiguities cannot make unrelated accounts
+   * share or evade a lock. Postgres holds it until this transaction ends. */
+  private async lockBracketScope(
+    database: Prisma.TransactionClient,
+    group: Pick<
+      BracketGroup,
+      'userId' | 'provider' | 'environment' | 'accountId' | 'contractSymbol' | 'closeSide'
+    >,
+  ): Promise<void> {
+    const raw = database as unknown as {
+      $executeRaw?: (query: Prisma.Sql) => Promise<number>;
+    };
+    if (!raw.$executeRaw) return; // in-memory test transaction is already serial
+    const tuple = JSON.stringify([
+      group.userId,
+      group.provider,
+      group.environment,
+      group.accountId,
+      group.contractSymbol,
+      group.closeSide,
+    ]);
+    const unsigned = BigInt(`0x${createHash('sha256').update(tuple).digest('hex').slice(0, 16)}`);
+    const signed = unsigned >= 2n ** 63n ? unsigned - 2n ** 64n : unsigned;
+    await raw.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(${signed})`);
+  }
+
+  private async closeWorkingGroupIfEmpty(
+    database: Prisma.TransactionClient,
+    group: Pick<BracketGroup, 'id' | 'userId'>,
+    reason: string,
+  ): Promise<boolean> {
+    const active = await database.chartOrder.count({
+      where: {
+        ocoGroupId: group.id,
+        userId: group.userId,
+        status: { in: ['working', 'pending_fire', 'triggered'] },
+      },
+    });
+    if (active !== 0) return false;
+    const closed = await database.bracketGroup.updateMany({
+      where: { id: group.id, userId: group.userId, status: 'working' },
+      data: {
+        status: 'closed',
+        fireLegId: null,
+        leaseOwnerId: null,
+        leaseExpiresAt: null,
+        lastError: reason.slice(0, 500),
+      },
+    });
+    return closed.count === 1;
+  }
+
+  private async hasUnresolvedCloseReservation(
+    database: Prisma.TransactionClient,
+    scope: BrokerExecutionScope,
+    userId: string,
+    contractSymbol: string,
+    closeSide: string,
+    excludeGroupId?: string,
+  ): Promise<boolean> {
+    const groups = await database.bracketGroup.findMany({
+      where: {
+        userId,
+        provider: scope.provider,
+        environment: scope.environment,
+        accountId: scope.accountId,
+        contractSymbol,
+        closeSide,
+        status: { in: ['pending_fire', 'fired'] },
+      },
+    });
+    for (const group of groups) {
+      if (group.id === excludeGroupId) continue;
+      if (group.status === 'pending_fire' || !group.fireLegId) return true;
+      const leg = await database.chartOrder.findUnique({ where: { id: group.fireLegId } });
+      if (!leg?.brokerOrderId) return true;
+      const orders = await database.tradeOrder.findMany({
+        where: {
+          userId,
+          provider: scope.provider,
+          environment: scope.environment,
+          accountId: scope.accountId,
+          OR: [{ brokerOrderId: leg.brokerOrderId }, { clientOrderId: leg.brokerOrderId }],
+        },
+      });
+      // Missing persistence is conservatively in-flight. Partial fills retain
+      // the reservation; only a broker-terminal row releases it.
+      if (
+        orders.length === 0 ||
+        orders.some((order) => !['filled', 'cancelled', 'rejected'].includes(order.status))
+      ) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private async ensureBracketGroup(
+    userId: string,
+    scope: BrokerExecutionScope,
+    dto: CreateChartOrderDto,
+    contractSymbol: string,
+    groupId: string,
+    database: Prisma.TransactionClient,
+  ): Promise<string> {
+    const expected = {
+      userId,
+      provider: scope.provider,
+      environment: scope.environment,
+      accountId: scope.accountId,
+      contractSymbol,
+      closeSide: dto.side,
+    };
+    await this.lockBracketScope(database, expected);
+
+    const requested = await database.bracketGroup.findUnique({ where: { id: groupId } });
+    if (requested && requested.userId !== userId) {
+      throw errors.notFound('CHART_ORDER_NOT_FOUND', 'No such bracket group');
+    }
+    if (requested && this.bracketScopeDiffers(requested, expected)) {
+      throw errors.conflict(
+        'OCO_GROUP_SCOPE_MISMATCH',
+        'A bracket can only contain matching account, contract, side and environment legs',
+      );
+    }
+    if (requested && !['working', 'closed'].includes(requested.status)) {
+      throw errors.conflict('OCO_GROUP_CLOSED', 'That bracket has already fired — draw a new one');
+    }
+    if (
+      await this.hasUnresolvedCloseReservation(
+        database,
+        scope,
+        userId,
+        contractSymbol,
+        dto.side,
+        requested?.id,
+      )
+    ) {
+      throw errors.conflict(
+        'OCO_CLOSE_IN_FLIGHT',
+        'Another close for this position is still in flight at the broker',
+      );
+    }
+
+    // A position has one active protection group per exact brokerage scope.
+    // Returning the canonical id makes independently connected clients
+    // converge even when they generated different UUIDs.
+    const canonical = await database.bracketGroup.findFirst({
+      where: { ...expected, status: 'working' },
+      orderBy: { createdAt: 'asc' },
+    });
+    let reopened: BracketGroup | null = null;
+    if (!canonical && requested?.status === 'closed') {
+      const active = await database.chartOrder.count({
+        where: {
+          ocoGroupId: requested.id,
+          userId,
+          status: { in: ['working', 'pending_fire', 'triggered'] },
+        },
+      });
+      if (active !== 0) {
+        throw errors.conflict(
+          'OCO_GROUP_CLOSED',
+          'That bracket cannot be re-armed while an earlier close may still be active',
+        );
+      }
+      const changed = await database.bracketGroup.updateMany({
+        where: { id: requested.id, userId, status: 'closed' },
+        data: {
+          status: 'working',
+          protectedQuantity: dto.quantity,
+          fireLegId: null,
+          leaseOwnerId: null,
+          leaseExpiresAt: null,
+          lastError: null,
+        },
+      });
+      if (changed.count !== 1) {
+        throw errors.conflict('OCO_GROUP_CLOSED', 'That bracket changed while being re-armed');
+      }
+      reopened = await database.bracketGroup.findUnique({ where: { id: requested.id } });
+      if (!reopened) {
+        throw errors.conflict('OCO_GROUP_CLOSED', 'That bracket changed while being re-armed');
+      }
+    }
+    const group =
+      canonical ??
+      reopened ??
+      (await database.bracketGroup.create({
+        data: {
+          id: groupId,
+          ...expected,
+          protectedQuantity: dto.quantity,
+        },
+      }));
+    if (group.protectedQuantity !== dto.quantity) {
+      throw errors.conflict(
+        'OCO_GROUP_QUANTITY_MISMATCH',
+        'Target and stop quantities must match; resize the existing bracket first',
+      );
+    }
+    return group.id;
+  }
+
+  private bracketScopeDiffers(
+    group: Pick<
+      BracketGroup,
+      'provider' | 'environment' | 'accountId' | 'contractSymbol' | 'closeSide'
+    >,
+    expected: {
+      provider: string;
+      environment: string;
+      accountId: string;
+      contractSymbol: string;
+      closeSide: string;
+    },
+  ): boolean {
+    return (
+      group.environment !== expected.environment ||
+      group.provider !== expected.provider ||
+      group.accountId !== expected.accountId ||
+      group.contractSymbol !== expected.contractSymbol ||
+      group.closeSide !== expected.closeSide
+    );
   }
 
   /**

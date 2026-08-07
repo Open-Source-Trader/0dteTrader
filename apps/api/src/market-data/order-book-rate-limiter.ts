@@ -110,7 +110,16 @@ export class RedisRateLease implements DistributedRateLease, OnModuleDestroy {
             url,
             socket: {
               connectTimeout: this.operationTimeoutMs,
-              socketTimeout: this.operationTimeoutMs,
+              // No socketTimeout: this is a long-lived, persistent connection
+              // that sits idle between acquire() calls (callers can wait up
+              // to intervalMs, ~1s by default, between retries) — a socket
+              // idle timeout close to that gap tore the connection down
+              // mid-wait under any CI scheduling jitter, and reconnectStrategy:
+              // false meant it never came back, failing the next command with
+              // RateLimiterUnavailableError. Each command is already bounded
+              // by operationTimeoutMs at the application level (boundedOperation
+              // below), so a socket-level timeout here is redundant at best
+              // and actively wrong for a connection that's expected to idle.
               reconnectStrategy: false,
             },
           });

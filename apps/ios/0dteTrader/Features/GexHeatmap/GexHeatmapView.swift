@@ -379,9 +379,14 @@ struct GexHeatmapView: View {
 /// values were already precomputed and the cost was pure view-tree
 /// re-evaluation. `Equatable` conformance plus `.equatable()` at the call
 /// site lets SwiftUI compare inputs memberwise and skip re-invoking `body`
-/// (and therefore re-rasterizing the `.drawingGroup()` layer below) entirely
-/// when a gesture frame changes only the parent's transform, not this view's
-/// actual content.
+/// entirely when a gesture frame changes only the parent's transform, not
+/// this view's actual content.
+///
+/// Deliberately NOT using `.drawingGroup()` here: it forces an offscreen
+/// Metal render pass, and iOS Simulator's Metal path is much slower than a
+/// real device's — it made both this and the data grid measurably worse
+/// (near-unusable frame rate) rather than better when tested in Simulator.
+/// `.equatable()` alone is what actually avoids the redundant work.
 private struct GexColumnHeaderRow: View, Equatable {
     let columns: [GexHeatmapColumn]
     let cellWidth: CGFloat
@@ -399,11 +404,6 @@ private struct GexColumnHeaderRow: View, Equatable {
         .foregroundStyle(.white.opacity(0.6))
         .frame(height: gridRowHeight)
         .background(Color(white: 0.06))
-        // Rasterizes this subtree into one Metal-backed layer so the parent's
-        // per-gesture-frame .scaleEffect (applied outside this view) is a
-        // cheap GPU transform of a flattened bitmap, not a full layout/render
-        // pass over every Text in the row on every touch-move frame.
-        .drawingGroup()
     }
 }
 
@@ -424,7 +424,6 @@ private struct GexStrikeColumn: View, Equatable {
                     .background(row.isSpotRow ? Color(red: 0.23, green: 0.36, blue: 0.82) : Color(white: 0.04))
             }
         }
-        .drawingGroup()
     }
 }
 
@@ -442,7 +441,6 @@ private struct GexDataBody: View, Equatable {
                 dataRow(row)
             }
         }
-        .drawingGroup()
     }
 
     private func dataRow(_ row: RenderedGexRow) -> some View {

@@ -344,7 +344,7 @@ struct GexHeatmapView: View {
     }
 
     private var columnHeaderRow: some View {
-        LazyHStack(spacing: 0) {
+        HStack(spacing: 0) {
             ForEach(columns) { column in
                 Text(column.label)
                     .lineLimit(1)
@@ -359,7 +359,7 @@ struct GexHeatmapView: View {
     }
 
     private var strikeColumn: some View {
-        LazyVStack(spacing: 0) {
+        VStack(spacing: 0) {
             ForEach(renderedRows) { row in
                 Text(row.strikeLabel)
                     .lineLimit(1)
@@ -373,7 +373,7 @@ struct GexHeatmapView: View {
     }
 
     private var dataBody: some View {
-        LazyVStack(spacing: 0) {
+        VStack(spacing: 0) {
             ForEach(renderedRows) { row in
                 dataRow(row)
             }
@@ -382,7 +382,7 @@ struct GexHeatmapView: View {
     }
 
     private func dataRow(_ row: RenderedGexRow) -> some View {
-        LazyHStack(spacing: 0) {
+        HStack(spacing: 0) {
             ForEach(row.cells) { cell in
                 Text(cell.text)
                     .font(.system(.caption2, design: .monospaced).weight(.bold))

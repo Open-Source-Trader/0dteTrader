@@ -29,6 +29,26 @@ enum GexHeatmapAdapters {
         }
     }
 
+    /// Caps how many time-series columns a single load can produce. The
+    /// backend gap-fills every bucket in the requested window — including
+    /// buckets with no capture — so a 1-minute chart interval (bucketMinutes
+    /// = 1) against the default 60-minute window would render 60 real
+    /// columns with no virtualization underneath (the grid is a plain
+    /// VStack/HStack, not a lazy/scrolling one), which froze the sheet after
+    /// the initial load. Bounding the requested window by the bucket size
+    /// keeps the column count constant regardless of chart granularity.
+    private static let maxTimeSeriesColumns = 30
+
+    /// The API's own ceiling on `historyWindowMinutes` (24h) — matched here
+    /// so this never requests a window the backend would reject.
+    private static let maxHistoryWindowMinutes = 24 * 60
+
+    /// The history window to request for a given bucket size, small enough
+    /// that gap-filled columns stay within `maxTimeSeriesColumns`.
+    static func historyWindowMinutes(for bucketMinutes: Int) -> Int {
+        min(maxHistoryWindowMinutes, max(1, bucketMinutes) * maxTimeSeriesColumns)
+    }
+
     /// Fraction of spot price to request above/below spot when querying the
     /// GEX endpoints. An unbounded chain can be 400+ strikes wide, and
     /// rendering that many rows — times up to 60 time-series columns — made

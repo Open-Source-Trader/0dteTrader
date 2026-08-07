@@ -150,6 +150,22 @@ final class GexHeatmapAdaptersTests: XCTestCase {
         XCTAssertEqual(GexHeatmapAdapters.bucketMinutes(for: .tick(.t250)), 1)
     }
 
+    func testHistoryWindowMinutes_scalesWithBucketSizeToCapColumnCount() {
+        // Column count should stay bounded (30) regardless of chart
+        // granularity — the backend gap-fills every bucket in the window, so
+        // an unbounded window at a fine bucket size renders too many columns
+        // for the grid's non-virtualized VStack/HStack to handle smoothly.
+        XCTAssertEqual(GexHeatmapAdapters.historyWindowMinutes(for: 1), 30)
+        XCTAssertEqual(GexHeatmapAdapters.historyWindowMinutes(for: 5), 150)
+        XCTAssertEqual(GexHeatmapAdapters.historyWindowMinutes(for: 15), 450)
+    }
+
+    func testHistoryWindowMinutes_clampsToTheAPIsOwnCeiling() {
+        // bucketMinutes(for:) tops out at 60, which alone would request 1800
+        // minutes — above the API's 1440-minute (24h) maximum.
+        XCTAssertEqual(GexHeatmapAdapters.historyWindowMinutes(for: 60), 24 * 60)
+    }
+
     func testStrikeWindow_scalesWithSpotPriceRatherThanBeingFixed() {
         // A fixed dollar window would be wildly wrong at either extreme: too
         // wide for a cheap stock with $1 strikes, too narrow (or empty) for

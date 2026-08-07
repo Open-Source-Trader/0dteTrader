@@ -152,12 +152,14 @@ struct GexHeatmapView: View {
                 )
                 (columns, entries) = GexHeatmapAdapters.columnsAndEntries(fromTermStructure: snapshot)
             case .timeSeries:
+                let bucketMinutes = GexHeatmapAdapters.bucketMinutes(for: chartInterval)
                 let snapshot = try await apiClient.gexHeatmap(
                     symbol: symbol,
                     expiration: timeSeriesExpiration,
                     strikeRangeAboveSpot: window,
                     strikeRangeBelowSpot: window,
-                    bucketMinutes: GexHeatmapAdapters.bucketMinutes(for: chartInterval)
+                    historyWindowMinutes: GexHeatmapAdapters.historyWindowMinutes(for: bucketMinutes),
+                    bucketMinutes: bucketMinutes
                 )
                 (columns, entries) = GexHeatmapAdapters.columnsAndEntries(fromHeatmap: snapshot)
             }

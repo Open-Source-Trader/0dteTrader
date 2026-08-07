@@ -9,8 +9,8 @@ import {
 } from './gexHeatmapMath';
 import type { GexHeatmapEntry } from './types';
 
-function entry(strike: number, netGex: number | null, expiration = '2026-08-21'): GexHeatmapEntry {
-  return { strike, cells: [{ expiration, netGex }] };
+function entry(strike: number, netGex: number | null, columnKey = '2026-08-21'): GexHeatmapEntry {
+  return { strike, cells: [{ columnKey, netGex }] };
 }
 
 describe('formatGexValue', () => {

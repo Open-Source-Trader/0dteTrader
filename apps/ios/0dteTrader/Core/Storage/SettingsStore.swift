@@ -8,6 +8,15 @@ enum TradeLayout: String, Codable, CaseIterable, Sendable {
     case split
 }
 
+/// Desktop parity — apps/desktop/src/core/storage/SettingsStore.ts's
+/// GexHeatmapViewMode. `termStructure`: strike x expiration, latest snapshot
+/// per expiration. `timeSeries`: strike x timestamp, one expiration over its
+/// capture history.
+enum GexHeatmapViewMode: String, Codable, CaseIterable, Sendable {
+    case termStructure
+    case timeSeries
+}
+
 /// UserDefaults-backed app settings: layout choice, split fraction, indicator
 /// presets, disclaimer acceptance, last symbol, FaceID lock toggle.
 final class SettingsStore: @unchecked Sendable {
@@ -37,6 +46,7 @@ final class SettingsStore: @unchecked Sendable {
         static let toastsEnabled = "settings.toastsEnabled"
         static let pushNotificationsEnabled = "settings.pushNotificationsEnabled"
         static let pushDeviceToken = "settings.pushDeviceToken"
+        static let gexHeatmapView = "settings.gexHeatmapView"
     }
 
     private struct LegacyIndicatorSettings: Decodable {
@@ -272,6 +282,16 @@ final class SettingsStore: @unchecked Sendable {
                 .flatMap(TradeLayout.init(rawValue:)) ?? .split
         }
         set { defaults.set(newValue.rawValue, forKey: Keys.layoutMode) }
+    }
+
+    /// Term structure is the default: it matches the reference implementation
+    /// this feature was modeled on (desktop parity).
+    var gexHeatmapView: GexHeatmapViewMode {
+        get {
+            defaults.string(forKey: Keys.gexHeatmapView)
+                .flatMap(GexHeatmapViewMode.init(rawValue:)) ?? .termStructure
+        }
+        set { defaults.set(newValue.rawValue, forKey: Keys.gexHeatmapView) }
     }
 
     /// Trade panel height as a fraction of screen height, clamped so the panel

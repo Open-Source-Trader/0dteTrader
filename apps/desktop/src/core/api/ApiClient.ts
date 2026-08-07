@@ -13,6 +13,8 @@ import type {
   ChartOrder,
   ChartOrderDraft,
   ChartOrderPatch,
+  GexHeatmapSnapshot,
+  GexTermStructureSnapshot,
   Me,
   OptionsChain,
   OrderPreview,
@@ -255,6 +257,68 @@ export class ApiClient {
       query: { symbol: normalizedSymbol, expiration },
       signal,
     }).then((value) => validateOptionsAnalyticsSnapshot(value, normalizedSymbol, expiration));
+  }
+
+  gexHeatmap(
+    symbol: string,
+    options: {
+      expiration?: string;
+      strikeRangeAboveSpot?: number;
+      strikeRangeBelowSpot?: number;
+      historyWindowMinutes?: number;
+      bucketMinutes?: number;
+      signal?: AbortSignal;
+    } = {},
+  ): Promise<GexHeatmapSnapshot> {
+    const query: Record<string, string> = { symbol: symbol.toUpperCase().trim() };
+    if (options.expiration) query.expiration = options.expiration;
+    if (options.strikeRangeAboveSpot !== undefined) {
+      query.strikeRangeAboveSpot = String(options.strikeRangeAboveSpot);
+    }
+    if (options.strikeRangeBelowSpot !== undefined) {
+      query.strikeRangeBelowSpot = String(options.strikeRangeBelowSpot);
+    }
+    if (options.historyWindowMinutes !== undefined) {
+      query.historyWindowMinutes = String(options.historyWindowMinutes);
+    }
+    if (options.bucketMinutes !== undefined) {
+      query.bucketMinutes = String(options.bucketMinutes);
+    }
+    return this.request({
+      method: 'GET',
+      path: 'v1/market/options-analytics/gex-heatmap',
+      query,
+      signal: options.signal,
+    });
+  }
+
+  gexTermStructure(
+    symbol: string,
+    options: {
+      expiration?: string;
+      strikeRangeAboveSpot?: number;
+      strikeRangeBelowSpot?: number;
+      maxSnapshotAgeMinutes?: number;
+      signal?: AbortSignal;
+    } = {},
+  ): Promise<GexTermStructureSnapshot> {
+    const query: Record<string, string> = { symbol: symbol.toUpperCase().trim() };
+    if (options.expiration) query.expiration = options.expiration;
+    if (options.strikeRangeAboveSpot !== undefined) {
+      query.strikeRangeAboveSpot = String(options.strikeRangeAboveSpot);
+    }
+    if (options.strikeRangeBelowSpot !== undefined) {
+      query.strikeRangeBelowSpot = String(options.strikeRangeBelowSpot);
+    }
+    if (options.maxSnapshotAgeMinutes !== undefined) {
+      query.maxSnapshotAgeMinutes = String(options.maxSnapshotAgeMinutes);
+    }
+    return this.request({
+      method: 'GET',
+      path: 'v1/market/options-analytics/gex-term-structure',
+      query,
+      signal: options.signal,
+    });
   }
 
   rankAutoContracts(input: {

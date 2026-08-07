@@ -7,7 +7,98 @@
   border: 8px solid transparent;
   border-image: var(--hud-src-accent) 28 fill / 24px / 6px stretch;
   box-shadow: var(--shadow-overlay);
+  /* The header stays fixed and the body below scrolls on its own — the
+     panel itself no longer scrolls, or position: sticky inside the grid
+     would have nothing to stick within (its containing block never moves). */
+  overflow: hidden;
+}
+
+.gex-heatmap-modal__header {
+  flex: none;
+  display: flex;
+  align-items: baseline;
+  gap: 20px;
+  padding: 10px 14px;
+  background: #0a0a0a;
+  border-bottom: var(--border-hairline) solid rgba(255, 255, 255, 0.12);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.gex-heatmap-modal__body {
+  flex: 1;
+  min-height: 0;
   overflow: auto;
+}
+
+.gex-heatmap-modal__symbol {
+  font-size: var(--fs-body-desktop);
+  font-weight: 700;
+  color: #ffffff;
+}
+
+.gex-heatmap-modal__stat {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: var(--fs-caption-desktop);
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.gex-heatmap-modal__stat-label {
+  font-family: var(--font-sans);
+  font-size: var(--fs-caption2-desktop);
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.gex-heatmap-modal__expiration-picker {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.gex-heatmap-modal__expiration-picker select {
+  background: rgba(255, 255, 255, 0.06);
+  border: var(--border-hairline) solid rgba(255, 255, 255, 0.2);
+  color: #ffffff;
+  font-family: var(--font-mono);
+  font-size: var(--fs-caption-desktop);
+  font-weight: 600;
+  padding: 3px 6px;
+}
+
+.gex-heatmap-modal__view-toggle {
+  display: flex;
+  gap: 2px;
+  margin-left: 12px;
+  font-family: var(--font-sans);
+}
+
+.gex-heatmap-modal__view-button {
+  padding: 4px 10px;
+  background: transparent;
+  border: var(--border-hairline) solid rgba(255, 255, 255, 0.2);
+  color: rgba(255, 255, 255, 0.6);
+  font-size: var(--fs-caption2-desktop);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.gex-heatmap-modal__view-button--active {
+  background: rgba(59, 91, 219, 0.35);
+  border-color: #3b5bdb;
+  color: #ffffff;
+}
+
+.gex-heatmap-modal__unavailable {
+  padding: 48px 16px;
+  text-align: center;
+  font-family: var(--font-sans);
+  font-size: var(--fs-body-desktop);
+  color: rgba(255, 255, 255, 0.5);
 }
 
 /* GEX heatmap — dense strike x expiration matrix. Intentionally near-black
@@ -23,14 +114,8 @@
   min-width: 0;
 }
 
-.gex-heatmap__grid-scroll {
-  overflow-x: auto;
-}
-
 .gex-heatmap__grid {
-  width: 100%;
   border-collapse: collapse;
-  table-layout: fixed;
 }
 
 .gex-heatmap__col-heading {

@@ -10,6 +10,7 @@ import { OptionsAnalyticsService } from './options-analytics.service';
 import { TradierClient } from './tradier.client';
 import { TradierClientResolver } from './tradier-client.resolver';
 import { IvAlertService } from './iv-alert.service';
+import { GexHeatmapQueryService } from './gex-heatmap.query';
 
 @Module({
   imports: [CredentialsModule, EventTransportModule],
@@ -40,11 +41,13 @@ import { IvAlertService } from './iv-alert.service';
     OptionsAnalyticsService,
     IvAlertService,
     OptionsAnalyticsCaptureService,
+    GexHeatmapQueryService,
   ],
   exports: [
     OptionsAnalyticsService,
     IvAlertService,
     OptionsAnalyticsCaptureService,
+    GexHeatmapQueryService,
     TradierClient,
     TradierClientResolver,
   ],

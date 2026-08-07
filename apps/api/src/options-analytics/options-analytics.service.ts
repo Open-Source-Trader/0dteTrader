@@ -75,7 +75,7 @@ function finiteConfig(value: unknown, fallback: number): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
 }
 
-function newYorkDate(now: Date): string {
+export function newYorkDate(now: Date): string {
   return new Intl.DateTimeFormat('en-CA', {
     timeZone: 'America/New_York',
     year: 'numeric',
@@ -155,6 +155,22 @@ export class OptionsAnalyticsService {
     return this.cache.size;
   }
 
+  /** Every expiration Tradier lists for the symbol, ascending — the same
+   *  cached lookup getSnapshotResult uses internally, exposed for callers
+   *  (the GEX term-structure endpoint) that need to enumerate expirations
+   *  rather than resolve a single one. */
+  async listExpirations(symbol: string, userId?: string): Promise<string[]> {
+    const normalizedSymbol = symbol.trim().toUpperCase();
+    if (!/^[A-Z0-9.-]{1,12}$/.test(normalizedSymbol)) {
+      throw new BadRequestException({
+        code: 'VALIDATION_ERROR',
+        message: 'A valid symbol is required (for example, SPY)',
+      });
+    }
+    const { client: tradier, scope } = await this.clientFor(userId);
+    return this.getExpirations(normalizedSymbol, tradier, scope);
+  }
+
   async getSnapshotResult(
     symbol: string,
     expiration?: string,
@@ -193,7 +209,27 @@ export class OptionsAnalyticsService {
         selected = expiration;
       } else {
         const today = newYorkDate(new Date(Date.now()));
-        selected = expirations.includes(today) ? today : expirations[0];
+        // Tradier keeps a settled 0DTE in the expirations listing after its
+        // own close — it doesn't disappear just because trading on it has
+        // stopped — so "today is in the list" alone isn't enough to prefer
+        // it. Root/settlement-style aren't known yet (that requires the
+        // chain fetch below), but the standard PM/early-close time is a
+        // conservative floor: SPX's earlier AM settlement only moves this
+        // check earlier, never later, so it never keeps a truly-settled
+        // expiration in play. `expirations` is sorted ascending, so the
+        // next entry after today (if any) is the nearest future one —
+        // falling back to `expirations[0]` would just land back on today
+        // whenever it's still the earliest listed date.
+        const todayIsSettled =
+          expirations.includes(today) &&
+          optionSettlementAt(today, normalizedSymbol).getTime() <= Date.now();
+        if (expirations.includes(today) && !todayIsSettled) {
+          selected = today;
+        } else if (todayIsSettled) {
+          selected = expirations.find((exp) => exp > today) ?? '';
+        } else {
+          selected = expirations[0];
+        }
         if (!selected) {
           throw new NotFoundException({
             code: 'EXPIRATION_NOT_FOUND',

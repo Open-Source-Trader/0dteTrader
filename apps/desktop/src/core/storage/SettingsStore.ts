@@ -29,6 +29,10 @@ import {
 
 export type TradeLayout = 'fullscreen' | 'split';
 
+/** 'termStructure': strike x expiration, latest snapshot per expiration.
+ *  'timeSeries': strike x timestamp, one expiration over its capture history. */
+export type GexHeatmapViewMode = 'termStructure' | 'timeSeries';
+
 /** localStorage-backed app settings (SettingsStore.swift analog). */
 export class SettingsStore {
   private static keys = {
@@ -48,6 +52,7 @@ export class SettingsStore {
     keyboardShortcutsEnabled: 'settings.keyboardShortcutsEnabled',
     toastsEnabled: 'settings.toastsEnabled',
     systemNotificationsEnabled: 'settings.systemNotificationsEnabled',
+    gexHeatmapView: 'settings.gexHeatmapView',
   };
 
   get layoutMode(): TradeLayout {
@@ -57,6 +62,17 @@ export class SettingsStore {
 
   set layoutMode(value: TradeLayout) {
     localStorage.setItem(SettingsStore.keys.layoutMode, value);
+  }
+
+  /** Term structure is the default: it matches the reference implementation
+   *  this feature was modeled on. */
+  get gexHeatmapView(): GexHeatmapViewMode {
+    const stored = localStorage.getItem(SettingsStore.keys.gexHeatmapView);
+    return stored === 'timeSeries' ? 'timeSeries' : 'termStructure';
+  }
+
+  set gexHeatmapView(value: GexHeatmapViewMode) {
+    localStorage.setItem(SettingsStore.keys.gexHeatmapView, value);
   }
 
   get indicatorSettings(): IndicatorSettingsState {

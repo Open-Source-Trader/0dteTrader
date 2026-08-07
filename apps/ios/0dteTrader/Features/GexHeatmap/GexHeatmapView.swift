@@ -346,6 +346,35 @@ struct GexHeatmapView: View {
     }
 
     private var columnHeaderRow: some View {
+        GexColumnHeaderRow(columns: columns, cellWidth: cellWidth, gridRowHeight: gridRowHeight)
+            .scaleEffect(x: scale, y: 1, anchor: .topLeading)
+    }
+
+    private var strikeColumn: some View {
+        GexStrikeColumn(rows: renderedRows, strikeColumnWidth: strikeColumnWidth, gridRowHeight: gridRowHeight)
+            .scaleEffect(x: 1, y: scale, anchor: .topLeading)
+    }
+
+    private var dataBody: some View {
+        GexDataBody(rows: renderedRows, cellWidth: cellWidth, gridRowHeight: gridRowHeight)
+            .scaleEffect(scale, anchor: .topLeading)
+    }
+}
+
+/// Column-header row, extracted to its own `View` type so SwiftUI can treat
+/// it as a stable subtree during a pinch/drag gesture. `GexHeatmapView.body`
+/// re-evaluates every touch-move frame (its `@GestureState` changes), which
+/// previously re-diffed this row's entire `ForEach` — a real cost distinct
+/// from `RenderedGexRow`'s formatting/color precomputation, since here the
+/// values were already precomputed and the cost was pure view-tree
+/// re-evaluation. A dedicated `View` with `Equatable`-stable inputs lets
+/// SwiftUI skip re-diffing it when only the parent's transform changes.
+private struct GexColumnHeaderRow: View {
+    let columns: [GexHeatmapColumn]
+    let cellWidth: CGFloat
+    let gridRowHeight: CGFloat
+
+    var body: some View {
         HStack(spacing: 0) {
             ForEach(columns) { column in
                 Text(column.label)
@@ -357,12 +386,23 @@ struct GexHeatmapView: View {
         .foregroundStyle(.white.opacity(0.6))
         .frame(height: gridRowHeight)
         .background(Color(white: 0.06))
-        .scaleEffect(x: scale, y: 1, anchor: .topLeading)
+        // Rasterizes this subtree into one Metal-backed layer so the parent's
+        // per-gesture-frame .scaleEffect (applied outside this view) is a
+        // cheap GPU transform of a flattened bitmap, not a full layout/render
+        // pass over every Text in the row on every touch-move frame.
+        .drawingGroup()
     }
+}
 
-    private var strikeColumn: some View {
+/// Strike column, extracted for the same reason as `GexColumnHeaderRow`.
+private struct GexStrikeColumn: View {
+    let rows: [RenderedGexRow]
+    let strikeColumnWidth: CGFloat
+    let gridRowHeight: CGFloat
+
+    var body: some View {
         VStack(spacing: 0) {
-            ForEach(renderedRows) { row in
+            ForEach(rows) { row in
                 Text(row.strikeLabel)
                     .lineLimit(1)
                     .frame(width: strikeColumnWidth, height: gridRowHeight)
@@ -371,16 +411,25 @@ struct GexHeatmapView: View {
                     .background(row.isSpotRow ? Color(red: 0.23, green: 0.36, blue: 0.82) : Color(white: 0.04))
             }
         }
-        .scaleEffect(x: 1, y: scale, anchor: .topLeading)
+        .drawingGroup()
     }
+}
 
-    private var dataBody: some View {
+/// The data grid itself, extracted for the same reason as
+/// `GexColumnHeaderRow` — this is the largest subtree (rows x columns) and
+/// the most expensive one to re-diff per gesture frame.
+private struct GexDataBody: View {
+    let rows: [RenderedGexRow]
+    let cellWidth: CGFloat
+    let gridRowHeight: CGFloat
+
+    var body: some View {
         VStack(spacing: 0) {
-            ForEach(renderedRows) { row in
+            ForEach(rows) { row in
                 dataRow(row)
             }
         }
-        .scaleEffect(scale, anchor: .topLeading)
+        .drawingGroup()
     }
 
     private func dataRow(_ row: RenderedGexRow) -> some View {

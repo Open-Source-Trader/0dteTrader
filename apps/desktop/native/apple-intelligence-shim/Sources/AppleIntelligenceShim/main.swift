@@ -17,7 +17,11 @@ func writeEvent(_ event: NativeEvent) {
     outputLock.lock()
     defer { outputLock.unlock() }
     print(line)
-    fflush(stdout)
+    // fflush(nil) flushes all open C streams, avoiding a direct reference to
+    // the `stdout` global — under Swift 6 strict concurrency, `stdout` itself
+    // is flagged as shared mutable state even though access here is already
+    // serialized by outputLock.
+    fflush(nil)
 }
 
 // Production telemetry sink: metadata-only diagnostic lines to stderr

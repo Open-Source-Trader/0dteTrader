@@ -39,6 +39,10 @@ export interface IndicatorSettingsViewProps {
   dense?: boolean;
 }
 
+export const SCRIPTS_SECTION_ID = 'settings-section-scripts';
+export const OPTIONS_STRUCTURE_SECTION_ID = 'settings-section-options-structure';
+export const CHART_TRADING_SECTION_ID = 'settings-section-chart-trading';
+
 export function IndicatorSettingsBody(
   props: Omit<IndicatorSettingsViewProps, 'onDismiss' | 'dense'>,
 ) {
@@ -54,11 +58,11 @@ export function IndicatorSettingsBody(
         onChange={props.onChange}
         onChangeChartDisplay={props.onChangeChartDisplay}
       />
-      <section className="grouped-section">
-        <h3>Scripts</h3>
+      <section className="grouped-section" id={SCRIPTS_SECTION_ID}>
+        <h3 className="section-header">Scripts</h3>
         <div className="settings-field settings-field--row">
           <span>TradingView Concepts</span>
-          <Toggle on={props.twcEnabled} onChange={props.onToggleTwc} />
+          <Toggle size="compact" on={props.twcEnabled} onChange={props.onToggleTwc} />
         </div>
         {props.twcEnabled ? (
           <TwcSettingsBody settings={props.twcSettings} onChange={props.onChangeTwcSettings} />
@@ -66,6 +70,7 @@ export function IndicatorSettingsBody(
         <div className="settings-field settings-field--row">
           <span>Ultimate Support &amp; Resistance</span>
           <Toggle
+            size="compact"
             on={props.usrSettings.enabled}
             onChange={(enabled) => props.onChangeUsrSettings({ ...props.usrSettings, enabled })}
           />
@@ -74,8 +79,8 @@ export function IndicatorSettingsBody(
           <UsrSettingsBody settings={props.usrSettings} onChange={props.onChangeUsrSettings} />
         ) : null}
       </section>
-      <section className="grouped-section">
-        <h3>Options Structure</h3>
+      <section className="grouped-section" id={OPTIONS_STRUCTURE_SECTION_ID}>
+        <h3 className="section-header">Options Structure</h3>
         <OptionToggle
           label="Enabled"
           value={props.optionsAnalytics.enabled}
@@ -133,8 +138,8 @@ export function IndicatorSettingsBody(
           onChange={(showDiagnostics) => patchOptions({ showDiagnostics })}
         />
       </section>
-      <section className="grouped-section">
-        <h3>Chart Trading</h3>
+      <section className="grouped-section" id={CHART_TRADING_SECTION_ID}>
+        <h3 className="section-header">Chart Trading</h3>
         <OptionToggle
           label="Enabled"
           value={props.chartTrading.enabled}
@@ -189,7 +194,7 @@ function OptionToggle({
   return (
     <div className="settings-field settings-field--row">
       <span>{label}</span>
-      <Toggle on={value} onChange={onChange} />
+      <Toggle size="compact" on={value} onChange={onChange} />
     </div>
   );
 }

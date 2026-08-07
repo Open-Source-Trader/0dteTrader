@@ -1,6 +1,9 @@
+// @vitest-environment jsdom
 import { createElement } from 'react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import '@testing-library/jest-dom/vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { IndicatorRegistrySettings } from './IndicatorRegistrySettings';
 import {
   DEFAULT_CHART_DISPLAY,
@@ -8,9 +11,11 @@ import {
   INDICATOR_REGISTRY,
 } from './indicatorRegistry';
 
+afterEach(cleanup);
+
 describe('IndicatorRegistrySettings', () => {
-  it('enumerates every canonical descriptor and its parameters', () => {
-    const markup = renderToStaticMarkup(
+  it('enumerates every canonical descriptor, and its parameters once expanded', () => {
+    render(
       createElement(IndicatorRegistrySettings, {
         settings: DEFAULT_INDICATOR_SETTINGS_STATE,
         chartDisplay: DEFAULT_CHART_DISPLAY,
@@ -20,14 +25,20 @@ describe('IndicatorRegistrySettings', () => {
     );
 
     for (const descriptor of INDICATOR_REGISTRY.indicators) {
-      expect(markup).toContain(descriptor.displayName);
+      expect(screen.getByText(descriptor.displayName)).toBeInTheDocument();
+      const parameterCount = Object.keys(descriptor.parameters).length;
+      if (parameterCount === 0) continue;
+      const disclosure = screen.getByRole('button', { name: `Expand ${descriptor.displayName}` });
+      fireEvent.click(disclosure);
       for (const parameter of Object.values(descriptor.parameters)) {
-        expect(markup).toContain(parameter.label);
+        expect(screen.getAllByLabelText(parameter.label).length).toBeGreaterThan(0);
       }
     }
-    expect(markup).toContain('Volume');
-    expect(markup).toContain('No L2 data');
-    expect(markup).toContain(`Subpanes (max ${INDICATOR_REGISTRY.maxSubPanes})`);
+    expect(screen.getByText('Volume')).toBeInTheDocument();
+    expect(screen.getAllByText('No L2 data').length).toBeGreaterThan(0);
+    expect(
+      screen.getByText(`Subpanes (max ${INDICATOR_REGISTRY.maxSubPanes})`),
+    ).toBeInTheDocument();
   });
 
   it('gives every indicator and volume toggle an accessible name', () => {

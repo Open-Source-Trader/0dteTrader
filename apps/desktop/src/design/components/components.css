@@ -608,6 +608,25 @@
   opacity: var(--disabled-opacity);
 }
 
+/* Dense track for mouse+keyboard settings surfaces (VS Code / macOS System
+ * Settings use a small switch, not the 51x31 touch target above). */
+.toggle--compact {
+  width: 30px;
+  height: 18px;
+  border-radius: 9px;
+}
+
+.toggle--compact .knob {
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+}
+
+.toggle--compact.on .knob {
+  transform: translateX(12px);
+}
+
 /* --- Stepper (94x36 two-segment iOS control) --- */
 .stepper {
   display: flex;
@@ -2153,7 +2172,7 @@
 }
 
 .desktop-settings-body .grouped-section .section-header {
-  padding: 0 2px 4px;
+  padding: 0 2px 8px;
   font-size: var(--fs-caption2-desktop);
 }
 
@@ -2253,6 +2272,12 @@
   font-size: var(--fs-caption2-desktop);
 }
 
+.indicator-tree-empty {
+  padding: var(--space-3);
+  font-size: var(--fs-caption-desktop);
+  color: var(--label-secondary);
+}
+
 .indicator-tree-disclosure {
   display: flex;
   align-items: center;
@@ -2269,30 +2294,96 @@
   padding: var(--space-4);
 }
 
-/* No border/background here — the floating settings window already frames
-   the whole pane; a second border around every category's content read as
-   a box nested inside a box. Just a legend divider (below) separates the
-   title from its fields. */
-.settings-fieldset {
+/* All sections (registry-driven Chart Display/Price Overlays/Subpanes plus
+   Scripts/Options Structure/Chart Trading) render as one continuous scroll
+   here — the tree pane jumps to a section instead of swapping panes, so
+   they need consistent inter-section spacing as if they were still one
+   .grouped-list. Scoped to the desktop tree/detail pane only — the
+   compact/phone Sheet keeps IndicatorSettingsBody's touch-sized layout. */
+.indicator-settings-detail .indicator-settings-body {
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
-  max-width: 420px;
+  gap: var(--space-6);
+  max-width: 560px;
+  margin: 0 auto;
 }
 
-.settings-fieldset-legend {
+.indicator-settings-detail .grouped-section .section-header {
+  padding: 0 2px 10px;
+  font-size: var(--fs-caption2-desktop);
+}
+
+/* --- Indicator list rows (Price overlays / Subpanes) ---
+   One dense row per indicator with an inline compact toggle, matching a
+   VS Code settings list rather than a card-per-item mobile form. A
+   disclosure chevron expands parameters (Period, Multiplier, ...) directly
+   beneath the row in place, so the list stays a single scroll. */
+.indicator-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.indicator-row-group + .indicator-row-group {
+  border-top: var(--border-hairline) solid var(--app-border);
+}
+
+.indicator-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  padding: 6px 10px;
+}
+
+.indicator-row-disclosure {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 14px;
+  color: var(--label-secondary);
+}
+
+.indicator-row-disclosure:disabled {
+  visibility: hidden;
+}
+
+.indicator-row-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-caption-desktop);
+  color: var(--label-primary);
+}
+
+.indicator-row-badge {
+  flex: none;
+  font-size: var(--fs-caption2-desktop);
+  color: var(--label-secondary);
+}
+
+.indicator-param-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding-bottom: var(--space-2);
-  border-bottom: var(--border-hairline) solid var(--hud-stroke-dim);
-  font-size: var(--fs-subheadline-desktop);
-  font-weight: 700;
+  gap: 8px;
+  min-height: 28px;
+  padding: 2px 10px 8px calc(10px + 14px + 8px);
 }
 
-.settings-fieldset-hint {
+.indicator-param-label {
   font-size: var(--fs-caption2-desktop);
   color: var(--label-secondary);
+}
+
+.settings-error {
+  padding: var(--space-2) var(--space-3);
+  border: var(--border-hairline) solid var(--pnl-negative-text);
+  border-radius: var(--radius-card);
+  color: var(--pnl-negative-text);
+  font-size: var(--fs-caption-desktop);
 }
 
 .settings-field {

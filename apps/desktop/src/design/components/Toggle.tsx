@@ -3,14 +3,22 @@ interface ToggleProps {
   onChange: (on: boolean) => void;
   disabled?: boolean;
   ariaLabel?: string;
+  /** 'compact' is the dense desktop-density track used by keyboard+mouse
+   * settings surfaces; default is the 51x31 iOS switch used on touch. */
+  size?: 'default' | 'compact';
 }
 
-/** 51x31 iOS switch. */
-export function Toggle({ on, onChange, disabled = false, ariaLabel }: ToggleProps) {
+export function Toggle({
+  on,
+  onChange,
+  disabled = false,
+  ariaLabel,
+  size = 'default',
+}: ToggleProps) {
   return (
     <button
       type="button"
-      className={`toggle${on ? ' on' : ''}`}
+      className={`toggle${size === 'compact' ? ' toggle--compact' : ''}${on ? ' on' : ''}`}
       role="switch"
       aria-checked={on}
       aria-label={ariaLabel}

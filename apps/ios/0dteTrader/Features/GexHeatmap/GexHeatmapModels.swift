@@ -124,6 +124,63 @@ enum GexHeatmapMath {
         entries.sorted { $0.strike > $1.strike }
     }
 
+    /// The row/column index ranges intersecting a scrollable grid's viewport,
+    /// plus the pixel offset to apply to just that sliced window so it lands
+    /// in the same screen position the full, unsliced body would have
+    /// (slicing removes the leading cells that used to provide that spacing,
+    /// so the offset is reduced by exactly the width/height of what got
+    /// sliced away). Every row/column is a fixed size, so this is plain
+    /// arithmetic on the current pan/zoom — no measurement needed.
+    ///
+    /// A grid with `rowCount x columnCount` cells (up to ~2,800 for a wide
+    /// GEX time-series window) is unusably slow to scroll if every cell is
+    /// unconditionally laid out and composited every gesture frame, even
+    /// when `.clipped()` hides the offscreen ones from view — `.clipped()`
+    /// only hides drawn output, it doesn't stop SwiftUI from doing the
+    /// layout/render work. Only constructing the cells this function says
+    /// are visible (usually a few dozen) is what actually fixes that.
+    ///
+    /// `clamped` is the current committed pan offset (always <= 0 on each
+    /// axis — content moves left/up as the body scrolls right/down).
+    /// `scale` is the current zoom level. A 1-cell buffer is added on each
+    /// edge so scrolling doesn't pop content in right at the boundary.
+    static func visibleWindow(
+        clamped: CGSize,
+        viewport: CGSize,
+        scale: CGFloat,
+        cellWidth: CGFloat,
+        rowHeight: CGFloat,
+        rowCount: Int,
+        columnCount: Int
+    ) -> (rows: Range<Int>, columns: Range<Int>, originOffset: CGSize) {
+        guard rowCount > 0, columnCount > 0, scale > 0 else {
+            return (0..<0, 0..<0, .zero)
+        }
+        let scaledCellWidth = cellWidth * scale
+        let scaledRowHeight = rowHeight * scale
+
+        let firstVisibleColumn = max(0, Int((-clamped.width / scaledCellWidth).rounded(.down)) - 1)
+        let visibleColumnCount = Int((viewport.width / scaledCellWidth).rounded(.up)) + 2
+        let columnRange = clampedRange(start: firstVisibleColumn, count: visibleColumnCount, total: columnCount)
+
+        let firstVisibleRow = max(0, Int((-clamped.height / scaledRowHeight).rounded(.down)) - 1)
+        let visibleRowCount = Int((viewport.height / scaledRowHeight).rounded(.up)) + 2
+        let rowRange = clampedRange(start: firstVisibleRow, count: visibleRowCount, total: rowCount)
+
+        let originOffset = CGSize(
+            width: clamped.width + CGFloat(columnRange.lowerBound) * scaledCellWidth,
+            height: clamped.height + CGFloat(rowRange.lowerBound) * scaledRowHeight
+        )
+        return (rowRange, columnRange, originOffset)
+    }
+
+    private static func clampedRange(start: Int, count: Int, total: Int) -> Range<Int> {
+        guard total > 0 else { return 0..<0 }
+        let lower = min(start, total - 1)
+        let upper = min(lower + max(1, count), total)
+        return lower..<upper
+    }
+
     /// Builds the fully pre-sorted, pre-formatted, pre-colored render model
     /// in one pass — sort once, format once, interpolate color once. Call
     /// this when `entries`/`columns`/`spotPrice` change; never from inside a

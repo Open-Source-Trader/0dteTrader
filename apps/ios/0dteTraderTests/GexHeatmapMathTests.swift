@@ -67,6 +67,83 @@ final class GexHeatmapMathTests: XCTestCase {
         XCTAssertEqual(rows.first?.cells.last?.text, "-")
     }
 
+    func testVisibleWindow_showsOnlyTheColumnsAndRowsIntersectingTheViewportAtRest() {
+        // 100pt viewport, 92pt cells, no scroll/zoom: columns 0 and 1 are
+        // partially or fully visible, plus the 1-cell trailing buffer.
+        let window = GexHeatmapMath.visibleWindow(
+            clamped: .zero,
+            viewport: CGSize(width: 100, height: 100),
+            scale: 1,
+            cellWidth: 92,
+            rowHeight: 38,
+            rowCount: 50,
+            columnCount: 30
+        )
+
+        XCTAssertEqual(window.columns, 0..<4)
+        XCTAssertEqual(window.rows, 0..<5)
+        XCTAssertEqual(window.originOffset, .zero)
+    }
+
+    func testVisibleWindow_scrollsTheWindowAsTheGridPans() {
+        // Panned 5 columns and 10 rows to the left/up (content moved that
+        // far in the negative direction); the visible window should start
+        // around index 5/10, not index 0 — this is the core fix for the
+        // "every cell built even when scrolled far away" performance bug.
+        let scaledCellWidth: CGFloat = 92
+        let scaledRowHeight: CGFloat = 38
+        let clamped = CGSize(width: -5 * scaledCellWidth, height: -10 * scaledRowHeight)
+
+        let window = GexHeatmapMath.visibleWindow(
+            clamped: clamped,
+            viewport: CGSize(width: 200, height: 200),
+            scale: 1,
+            cellWidth: 92,
+            rowHeight: 38,
+            rowCount: 50,
+            columnCount: 30
+        )
+
+        XCTAssertEqual(window.columns.lowerBound, 4)
+        XCTAssertEqual(window.rows.lowerBound, 9)
+        // originOffset repositions the sliced window back to where the
+        // unsliced content would have been drawn.
+        XCTAssertEqual(window.originOffset.width, clamped.width + CGFloat(window.columns.lowerBound) * scaledCellWidth)
+        XCTAssertEqual(window.originOffset.height, clamped.height + CGFloat(window.rows.lowerBound) * scaledRowHeight)
+    }
+
+    func testVisibleWindow_clampsToAvailableRowsAndColumnsRatherThanOverrunning() {
+        // A tiny grid (3 rows x 2 columns) in a viewport that could fit more
+        // — the window should never claim indices beyond what exists.
+        let window = GexHeatmapMath.visibleWindow(
+            clamped: .zero,
+            viewport: CGSize(width: 1000, height: 1000),
+            scale: 1,
+            cellWidth: 92,
+            rowHeight: 38,
+            rowCount: 3,
+            columnCount: 2
+        )
+
+        XCTAssertEqual(window.columns, 0..<2)
+        XCTAssertEqual(window.rows, 0..<3)
+    }
+
+    func testVisibleWindow_emptyGridProducesAnEmptyWindow() {
+        let window = GexHeatmapMath.visibleWindow(
+            clamped: .zero,
+            viewport: CGSize(width: 100, height: 100),
+            scale: 1,
+            cellWidth: 92,
+            rowHeight: 38,
+            rowCount: 0,
+            columnCount: 0
+        )
+
+        XCTAssertEqual(window.columns, 0..<0)
+        XCTAssertEqual(window.rows, 0..<0)
+    }
+
     func testBuildRenderedRows_isDeterministic() {
         let entries = [
             GexHeatmapEntry(

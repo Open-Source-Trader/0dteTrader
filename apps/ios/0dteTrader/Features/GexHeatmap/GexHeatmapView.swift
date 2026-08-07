@@ -274,9 +274,20 @@ struct GexHeatmapView: View {
     /// column of strikes pinned to the left edge (pans vertically only), and
     /// a row of column headers pinned to the top edge (pans horizontally
     /// only), with a fixed corner cell where the two headers meet.
+    ///
+    /// Only the rows/columns actually intersecting the viewport are ever
+    /// constructed (`visibleWindow` below) — every row and column is a fixed
+    /// size, so the visible index range is plain arithmetic on the current
+    /// pan/zoom, no measurement needed. Earlier versions built the entire
+    /// strike x column matrix unconditionally (up to ~2,800 cells for a wide
+    /// time-series window) and relied on `.clipped()` to hide the offscreen
+    /// ones — `.clipped()` only hides drawn output, it doesn't stop SwiftUI
+    /// from laying out and compositing every cell on every gesture frame,
+    /// which was the real, unfixable-by-diffing-tricks cost.
     private var grid: some View {
         GeometryReader { proxy in
             let clamped = clampedOffset(proposed: offset, viewport: proxy.size)
+            let window = visibleWindow(clamped: clamped, viewport: proxy.size)
 
             ZStack(alignment: .topLeading) {
                 Color.clear
@@ -284,25 +295,50 @@ struct GexHeatmapView: View {
                     .onChange(of: proxy.size.height) { _, newValue in
                         gridViewportHeight = newValue
                     }
-                dataBody
-                    .padding(.leading, strikeColumnWidth)
-                    .padding(.top, gridRowHeight)
-                    .offset(clamped)
-                    .frame(width: proxy.size.width, height: proxy.size.height, alignment: .topLeading)
-                    .contentShape(Rectangle())
-                    .clipped()
+                GexDataBody(
+                    rows: Array(renderedRows[window.rows]).map { row in
+                        RenderedGexRow(
+                            strike: row.strike,
+                            strikeLabel: row.strikeLabel,
+                            isSpotRow: row.isSpotRow,
+                            cells: Array(row.cells[window.columns])
+                        )
+                    },
+                    cellWidth: cellWidth,
+                    gridRowHeight: gridRowHeight
+                )
+                .equatable()
+                .scaleEffect(scale, anchor: .topLeading)
+                .padding(.leading, strikeColumnWidth)
+                .padding(.top, gridRowHeight)
+                .offset(window.originOffset)
+                .frame(width: proxy.size.width, height: proxy.size.height, alignment: .topLeading)
+                .contentShape(Rectangle())
+                .clipped()
 
-                columnHeaderRow
-                    .offset(x: clamped.width)
-                    .padding(.leading, strikeColumnWidth)
-                    .frame(width: proxy.size.width, height: gridRowHeight, alignment: .topLeading)
-                    .clipped()
+                GexColumnHeaderRow(
+                    columns: Array(columns[window.columns]),
+                    cellWidth: cellWidth,
+                    gridRowHeight: gridRowHeight
+                )
+                .equatable()
+                .scaleEffect(x: scale, y: 1, anchor: .topLeading)
+                .offset(x: window.originOffset.width)
+                .padding(.leading, strikeColumnWidth)
+                .frame(width: proxy.size.width, height: gridRowHeight, alignment: .topLeading)
+                .clipped()
 
-                strikeColumn
-                    .offset(y: clamped.height)
-                    .padding(.top, gridRowHeight)
-                    .frame(width: strikeColumnWidth, height: proxy.size.height, alignment: .topLeading)
-                    .clipped()
+                GexStrikeColumn(
+                    rows: Array(renderedRows[window.rows]),
+                    strikeColumnWidth: strikeColumnWidth,
+                    gridRowHeight: gridRowHeight
+                )
+                .equatable()
+                .scaleEffect(x: 1, y: scale, anchor: .topLeading)
+                .offset(y: window.originOffset.height)
+                .padding(.top, gridRowHeight)
+                .frame(width: strikeColumnWidth, height: proxy.size.height, alignment: .topLeading)
+                .clipped()
 
                 Text("GEX")
                     .font(.caption2.weight(.semibold))
@@ -334,6 +370,21 @@ struct GexHeatmapView: View {
         }
     }
 
+    private func visibleWindow(
+        clamped: CGSize,
+        viewport: CGSize
+    ) -> (rows: Range<Int>, columns: Range<Int>, originOffset: CGSize) {
+        GexHeatmapMath.visibleWindow(
+            clamped: clamped,
+            viewport: viewport,
+            scale: scale,
+            cellWidth: cellWidth,
+            rowHeight: gridRowHeight,
+            rowCount: renderedRows.count,
+            columnCount: columns.count
+        )
+    }
+
     /// Keeps at least a sliver of the body on-screen on every edge, scaled by
     /// the current zoom level. The viewport is the body's share of the sheet
     /// (total minus the pinned header row/column).
@@ -352,23 +403,6 @@ struct GexHeatmapView: View {
         )
     }
 
-    private var columnHeaderRow: some View {
-        GexColumnHeaderRow(columns: columns, cellWidth: cellWidth, gridRowHeight: gridRowHeight)
-            .equatable()
-            .scaleEffect(x: scale, y: 1, anchor: .topLeading)
-    }
-
-    private var strikeColumn: some View {
-        GexStrikeColumn(rows: renderedRows, strikeColumnWidth: strikeColumnWidth, gridRowHeight: gridRowHeight)
-            .equatable()
-            .scaleEffect(x: 1, y: scale, anchor: .topLeading)
-    }
-
-    private var dataBody: some View {
-        GexDataBody(rows: renderedRows, cellWidth: cellWidth, gridRowHeight: gridRowHeight)
-            .equatable()
-            .scaleEffect(scale, anchor: .topLeading)
-    }
 }
 
 /// Column-header row, extracted to its own `View` type so SwiftUI can treat

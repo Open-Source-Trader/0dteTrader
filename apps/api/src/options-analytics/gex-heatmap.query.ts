@@ -56,7 +56,12 @@ export interface GexTermStructureQuery {
 export class GexHeatmapQueryService {
   constructor(private readonly prisma: PrismaService) {}
 
-  /** Strike x timestamp, one expiration over its capture history. */
+  /** Strike x timestamp, one expiration over its capture history. Columns
+   *  are gap-filled to a regular grid at `bucketMinutes` spacing across the
+   *  whole [from, to) window — a bucket with no capture still gets a column
+   *  (empty cells, `missingSpot` quality) rather than being skipped, so the
+   *  displayed spacing always matches the requested interval instead of
+   *  compressing to wherever sparse on-demand captures happened to land. */
   async getHeatmap(query: GexHeatmapQuery, now = new Date()): Promise<GexHeatmapSnapshot> {
     const allRows = await this.prisma.optionsAnalyticsSnapshotRecord.findMany({
       where: {
@@ -66,25 +71,35 @@ export class GexHeatmapQueryService {
       },
       orderBy: { bucket: 'asc' },
     });
-    const rows = downsample(allRows, query.bucketMinutes ?? 1);
+    const bucketMinutes = query.bucketMinutes ?? 1;
+    const rowByBucket = downsampleByBucket(allRows, bucketMinutes);
 
     const timestamps: string[] = [];
-    const spotSeries: number[] = [];
+    const spotSeries: (number | null)[] = [];
     const strikeSet = new Set<number>();
     const cells: GexHeatmapCell[] = [];
-    const mostRecentObservedAt =
-      rows.length > 0 ? rows[rows.length - 1].observedAt.getTime() : null;
+    const populatedBuckets = [...rowByBucket.keys()];
+    const mostRecentBucket = populatedBuckets.length > 0 ? Math.max(...populatedBuckets) : null;
 
-    for (const row of rows) {
+    for (const bucketStart of bucketStarts(query.from, query.to, bucketMinutes)) {
+      const row = rowByBucket.get(bucketStart);
+      if (!row) {
+        // No capture landed in this window — emit the column with its
+        // bucket-start time and no data, rather than omitting it, so column
+        // spacing stays regular.
+        timestamps.push(new Date(bucketStart).toISOString());
+        spotSeries.push(null);
+        continue;
+      }
       const output = row.output as unknown as OptionsAnalyticsSnapshot;
       const timestamp = output.scope.observedAt;
       timestamps.push(timestamp);
       spotSeries.push(output.scope.spot);
 
-      // Staleness is relative to "now" only for the most recent snapshot in
-      // the window — that's the one a live heatmap is trusting as current.
-      // Older cells are historical by definition, not stale.
-      const isMostRecent = row.observedAt.getTime() === mostRecentObservedAt;
+      // Staleness is relative to "now" only for the most recent populated
+      // bucket in the window — that's the one a live heatmap is trusting as
+      // current. Older cells are historical by definition, not stale.
+      const isMostRecent = bucketStart === mostRecentBucket;
       const isStale = !isMostRecent
         ? false
         : now.getTime() - row.observedAt.getTime() > STALE_THRESHOLD_MS;
@@ -204,13 +219,13 @@ function buildCell(
 }
 
 /** One representative row (the latest) per `bucketMinutes`-wide window,
- *  ascending by bucket. `bucketMinutes <= 1` returns rows unchanged. */
-function downsample(
+ *  keyed by bucket-start epoch ms. `bucketMinutes <= 1` treats every row as
+ *  its own 1-minute bucket (no merging). */
+function downsampleByBucket(
   rows: OptionsAnalyticsSnapshotRecord[],
   bucketMinutes: number,
-): OptionsAnalyticsSnapshotRecord[] {
-  if (bucketMinutes <= 1 || rows.length === 0) return rows;
-  const bucketMs = bucketMinutes * 60_000;
+): Map<number, OptionsAnalyticsSnapshotRecord> {
+  const bucketMs = Math.max(1, bucketMinutes) * 60_000;
   const representativeByBucket = new Map<number, OptionsAnalyticsSnapshotRecord>();
   for (const row of rows) {
     const bucketStart = Math.floor(row.observedAt.getTime() / bucketMs) * bucketMs;
@@ -219,8 +234,31 @@ function downsample(
       representativeByBucket.set(bucketStart, row);
     }
   }
-  return [...representativeByBucket.entries()].sort(([a], [b]) => a - b).map(([, row]) => row);
+  return representativeByBucket;
 }
+
+/** Every bucket-start epoch ms in `[from, to)` at `bucketMinutes` spacing,
+ *  ascending — the full column grid a gap-filled heatmap renders, whether or
+ *  not a capture exists for each one. Capped so a large window with a small
+ *  bucket size can't generate an unbounded number of empty columns. */
+function bucketStarts(from: Date, to: Date, bucketMinutes: number): number[] {
+  const bucketMs = Math.max(1, bucketMinutes) * 60_000;
+  // Floor, not ceiling: the bucket containing `from` itself may hold data at
+  // or after `from` (a row's own bucket start can fall before the window
+  // begins while the row's observedAt is still >= from) — using the ceiling
+  // here would skip that bucket's column and silently drop its data.
+  const firstBucket = Math.floor(from.getTime() / bucketMs) * bucketMs;
+  const starts: number[] = [];
+  for (let bucket = firstBucket; bucket < to.getTime(); bucket += bucketMs) {
+    starts.push(bucket);
+    if (starts.length >= MAX_GAP_FILLED_COLUMNS) break;
+  }
+  return starts;
+}
+
+/** Matches the endpoint's historyWindowMinutes ceiling (24h) at the finest
+ *  1-minute bucket size — the largest grid gap-filling can ever produce. */
+const MAX_GAP_FILLED_COLUMNS = 24 * 60;
 
 function withinWindow(
   strike: number,

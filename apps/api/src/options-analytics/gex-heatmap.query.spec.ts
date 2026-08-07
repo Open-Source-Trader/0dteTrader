@@ -295,8 +295,12 @@ describe('GexHeatmapQueryService', () => {
       NOW,
     );
 
-    expect(heatmap.timestamps).toHaveLength(1);
-    expect(heatmap.timestamps[0]).toBe(NOW.toISOString());
+    // The 60s window spans two 1-minute buckets; the out-of-window row's
+    // bucket is gap-filled (no data), and only the in-window row's bucket
+    // carries real cells.
+    expect(heatmap.timestamps).toHaveLength(2);
+    expect(heatmap.timestamps).toContain(NOW.toISOString());
+    expect(heatmap.cells).toHaveLength(1);
   });
 
   it('excludes strikes outside the configured window around spot', async () => {
@@ -391,6 +395,113 @@ describe('GexHeatmapQueryService', () => {
     );
 
     expect(heatmap.timestamps).toHaveLength(2);
+  });
+
+  it('gap-fills empty buckets so column spacing stays regular even with sparse captures', async () => {
+    // Only the first and last of four 5-minute buckets in the query window
+    // have a capture — on-demand 'viewed' captures don't arrive on a
+    // schedule, so real usage looks exactly like this. Bucket-aligned window
+    // boundaries (14:40:00 to 15:00:00) make the expected bucket count exact.
+    const windowStart = new Date('2026-07-20T14:40:00.000Z');
+    const windowEnd = new Date('2026-07-20T15:00:00.000Z');
+    const first = new Date('2026-07-20T14:41:00.000Z'); // bucket 14:40
+    const last = new Date('2026-07-20T14:56:00.000Z'); // bucket 14:55
+    await capture.persist(
+      result('SPY', first, 100, [strikeRow(100, leg({ gammaExposure: 111 }), leg())]),
+      'viewed',
+      first,
+    );
+    await capture.persist(
+      result('SPY', last, 100, [strikeRow(100, leg({ gammaExposure: 222 }), leg())]),
+      'viewed',
+      last,
+    );
+
+    const heatmap = await query.getHeatmap(
+      {
+        symbol: 'SPY',
+        expiration: '2026-07-20',
+        from: windowStart,
+        to: windowEnd,
+        bucketMinutes: 5,
+      },
+      NOW,
+    );
+
+    // Four buckets (14:40, 14:45, 14:50, 14:55) — not two collapsed-together
+    // columns wherever the sparse captures happened to land. A populated
+    // bucket's column shows its capture's real observedAt (not a rounded
+    // bucket-start), so gaps between columns aren't exactly 5 minutes; what
+    // matters is one column per bucket, gap-filled or not.
+    expect(heatmap.timestamps).toHaveLength(4);
+    expect(heatmap.spotSeries).toEqual([100, null, null, 100]);
+  });
+
+  it('a gap-filled bucket has a null spot and no cells, distinct from a real all-missing snapshot', async () => {
+    const only = new Date(NOW.getTime() - 10 * 60_000);
+    await capture.persist(
+      result('SPY', only, 100, [strikeRow(100, leg({ gammaExposure: 50 }), leg())]),
+      'viewed',
+      only,
+    );
+
+    const heatmap = await query.getHeatmap(
+      {
+        symbol: 'SPY',
+        expiration: '2026-07-20',
+        from: new Date(only.getTime() - 1),
+        to: NOW,
+        bucketMinutes: 5,
+      },
+      NOW,
+    );
+
+    const populatedIndex = heatmap.spotSeries.findIndex((spot) => spot !== null);
+    expect(populatedIndex).toBeGreaterThanOrEqual(0);
+    const gapIndices = heatmap.spotSeries
+      .map((spot, index) => (spot === null ? index : -1))
+      .filter((index) => index >= 0);
+    expect(gapIndices.length).toBeGreaterThan(0);
+    const gapTimestamp = heatmap.timestamps[gapIndices[0]];
+    expect(heatmap.cells.some((cell) => cell.timestamp === gapTimestamp)).toBe(false);
+  });
+
+  it('two captures landing in the same bucketMinutes window collapse into one column, not a duplicate', async () => {
+    // The exact scenario that produced a visible "16:17, 16:17" duplicate
+    // column bug: two on-demand captures a couple minutes apart — different
+    // 1-minute storage buckets (so both are actually persisted), but the
+    // same bucketMinutes=5 window. Bucket-aligned window boundaries make the
+    // expected single-column outcome exact.
+    const windowStart = new Date('2026-07-20T14:55:00.000Z');
+    const windowEnd = new Date('2026-07-20T15:00:00.000Z');
+    const first = new Date('2026-07-20T14:56:00.000Z');
+    const laterInSameBucket = new Date('2026-07-20T14:58:00.000Z');
+    await capture.persist(
+      result('SPY', first, 100, [strikeRow(100, leg({ gammaExposure: 1 }), leg())]),
+      'viewed',
+      first,
+    );
+    await capture.persist(
+      result('SPY', laterInSameBucket, 100, [strikeRow(100, leg({ gammaExposure: 2 }), leg())]),
+      'viewed',
+      laterInSameBucket,
+    );
+
+    const heatmap = await query.getHeatmap(
+      {
+        symbol: 'SPY',
+        expiration: '2026-07-20',
+        from: windowStart,
+        to: windowEnd,
+        bucketMinutes: 5,
+      },
+      NOW,
+    );
+
+    expect(heatmap.timestamps).toHaveLength(1);
+    expect(new Set(heatmap.timestamps).size).toBe(1);
+    // The later capture is the bucket's representative.
+    expect(heatmap.cells[0].callGex).toBe(2);
   });
 });
 

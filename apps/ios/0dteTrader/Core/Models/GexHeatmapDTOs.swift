@@ -23,7 +23,9 @@ struct GexHeatmapCellDTO: Decodable, Equatable, Sendable {
 struct GexHeatmapSnapshotDTO: Decodable, Equatable, Sendable {
     let underlyingSymbol: String
     let expiration: String
-    let spotSeries: [Double]
+    /// Null at a gap-filled bucket with no capture — the column still exists
+    /// for regular chart-matched spacing, but nothing was observed.
+    let spotSeries: [Double?]
     let timestamps: [String]
     let strikes: [Double]
     let cells: [GexHeatmapCellDTO]

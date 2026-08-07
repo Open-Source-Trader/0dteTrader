@@ -430,9 +430,12 @@ export type GexDataQuality =
 export interface GexHeatmapSnapshot {
   underlyingSymbol: string;
   expiration: string;
-  /** Spot price observed at each timestamp, same order as `timestamps`. */
-  spotSeries: number[];
-  /** ISO-8601 date-times, ascending. */
+  /** Spot price observed at each timestamp, same order as `timestamps`.
+   *  Null at a gap-filled bucket that has no capture — the column still
+   *  exists (for regular chart-matched spacing) but nothing was observed. */
+  spotSeries: (number | null)[];
+  /** ISO-8601 date-times, ascending — every bucket in the requested window,
+   *  including gap-filled ones with no capture. */
   timestamps: string[];
   /** Strikes present anywhere in the window, ascending. */
   strikes: number[];

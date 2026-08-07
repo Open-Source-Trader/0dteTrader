@@ -158,21 +158,6 @@ export function GexHeatmapModal({
           <span className="gex-heatmap-modal__stat-label">Ask</span>
           {ask !== null ? Format.price(ask) : '—'}
         </span>
-        {viewMode === 'timeSeries' && expirations.length > 0 ? (
-          <label className="gex-heatmap-modal__expiration-picker">
-            <span className="gex-heatmap-modal__stat-label">Expiration</span>
-            <select
-              value={timeSeriesExpiration ?? ''}
-              onChange={(event) => setTimeSeriesExpiration(event.target.value)}
-            >
-              {expirations.map((expiration) => (
-                <option key={expiration} value={expiration}>
-                  {expiration}
-                </option>
-              ))}
-            </select>
-          </label>
-        ) : null}
         <div className="gex-heatmap-modal__view-toggle" role="group" aria-label="GEX heatmap view">
           <button
             type="button"
@@ -191,6 +176,21 @@ export function GexHeatmapModal({
             Time Series
           </button>
         </div>
+        {viewMode === 'timeSeries' && expirations.length > 0 ? (
+          <label className="gex-heatmap-modal__expiration-picker">
+            <span className="gex-heatmap-modal__stat-label">Expiration</span>
+            <select
+              value={timeSeriesExpiration ?? ''}
+              onChange={(event) => setTimeSeriesExpiration(event.target.value)}
+            >
+              {expirations.map((expiration) => (
+                <option key={expiration} value={expiration}>
+                  {expiration}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
       </div>
       <div className="gex-heatmap-modal__body">{renderBody()}</div>
     </DesktopSheet>
